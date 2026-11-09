@@ -1,0 +1,120 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+@* Requirement-management additions to the inspector: attributes, test verdict and suspect links. *@
+@if (E is { } e && Ws.Model.Contains(e))
+{
+    if (e.Kind == ElementKind.Requirement)
+    {
+        <div class="section-title">Requirement attributes <span class="grow"></span></div>
+        <div class="req-attrs">
+            @foreach (var (key, label, values) in ReqFields.Standard)
+            {
+                var k = key;
+                if (values != null)
+                {
+                    <MudSelect @key="@(e.Id + k)" T="string" Label="@label" Value="@e.Get(k)" ValueChanged="v => Set(e, k, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="Ws.ReadOnly">
+                        <MudSelectItem Value="@("")">(unspecified)</MudSelectItem>
+                        @foreach (var v in values) { <MudSelectItem Value="@v">@v</MudSelectItem> }
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudTextField @key="@(e.Id + k)" T="string" Label="@label" Value="@e.Get(k)" ValueChanged="v => Set(e, k, v)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Lines="@(k == ReqFields.Rationale ? 2 : 1)" AutoGrow="@(k == ReqFields.Rationale)" MaxLines="8" ReadOnly="Ws.ReadOnly" Class="@(k == ReqFields.Rationale ? "span2" : "")" />
+                }
+            }
+        </div>
+        <div class="tg-title" style="margin-top:8px; font-size:11.5px; color:var(--text-2)">Custom attributes</div>
+        @foreach (var (name, value) in ReqFields.CustomAttributes(e).ToList())
+        {
+            var n = name;
+            <div class="d-flex align-center gap-1">
+                <span style="min-width:90px; font-size:12px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis" title="@n">@n</span>
+                <MudTextField @key="@(e.Id + "attr" + n)" T="string" Value="@value" ValueChanged="v => Set(e, ReqFields.CustomPrefix + n, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" Disabled="Ws.ReadOnly" OnClick="() => Set(e, ReqFields.CustomPrefix + n, null)" />
+            </div>
+        }
+        @if (!Ws.ReadOnly)
+        {
+            <div class="d-flex align-center gap-1">
+                <MudTextField T="string" @bind-Value="_newAttr" Placeholder="attribute" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                <MudTextField T="string" @bind-Value="_newAttrValue" Placeholder="value" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newAttr)" OnClick="() => AddAttr(e)" />
+            </div>
+        }
+    }
+
+    if (e.Kind == ElementKind.TestCase)
+    {
+        <div class="section-title">Verification <span class="grow"></span></div>
+        <MudSelect @key="@(e.Id + ReqFields.Verdict)" T="string" Label="Verdict" Value="@e.Get(ReqFields.Verdict)" ValueChanged="v => Set(e, ReqFields.Verdict, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="Ws.ReadOnly">
+            <MudSelectItem Value="@("")">(not run)</MudSelectItem>
+            @foreach (var v in ReqFields.Verdicts) { <MudSelectItem Value="@v">@v</MudSelectItem> }
+        </MudSelect>
+    }
+
+    var suspect = SuspectLinks.Of(Ws.Model, e).ToList();
+    if (suspect.Count > 0)
+    {
+        <div class="section-title suspect-title">
+            <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:14px" /> Suspect links
+            <span class="grow"></span>
+            @if (suspect.Count > 1 && !Ws.ReadOnly)
+            {
+                <span class="link" style="text-transform:none; letter-spacing:0; font-weight:500" @onclick="() => ClearAll(suspect)">Clear all</span>
+            }
+        </div>
+        @foreach (var rel in suspect)
+        {
+            var r = rel;
+            var other = ReferenceEquals(r.Source, e) ? r.Target : ReferenceEquals(r.Target, e) ? r.Source : null;
+            <div class="suspect-row">
+                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:15px; color:var(--warn)" />
+                <div style="min-width:0; flex:1">
+                    <div class="link" @onclick="() => Shell.Navigate(r)">
+                        «@(Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind))» @(other != null ? TraceabilityTable.Label(other) : $"{TraceabilityTable.Label(r.Source)} → {TraceabilityTable.Label(r.Target)}")
+                    </div>
+                    <div class="why">@SuspectLinks.Describe(r)</div>
+                </div>
+                @if (!Ws.ReadOnly)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Clear(r)">Clear</MudButton>
+                }
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    private string? _newAttr;
+    private string? _newAttrValue;
+
+    private void Set(Element e, string key, string? value)
+    {
+        try { Ws.Model.Set(e, key, value); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void AddAttr(Element e)
+    {
+        var name = _newAttr?.Trim();
+        if (string.IsNullOrEmpty(name)) return;
+        Set(e, ReqFields.CustomPrefix + name, string.IsNullOrEmpty(_newAttrValue) ? "—" : _newAttrValue);
+        _newAttr = _newAttrValue = null;
+    }
+
+    private void Clear(Relationship r)
+    {
+        try { SuspectLinks.Clear(Ws.Model, r); Ws.SetStatus("Suspect link cleared"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void ClearAll(IEnumerable<Relationship> links)
+    {
+        try { Ws.SetStatus($"Cleared {SuspectLinks.ClearAll(Ws.Model, links)} suspect links"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}

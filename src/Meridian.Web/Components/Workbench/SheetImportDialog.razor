@@ -1,0 +1,79 @@
+@using Meridian.Serialization
+
+@* Re-import preview for requirement spreadsheets: added / changed / removed rows with per-row accept checkboxes. *@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Import @FileName</MudText>
+        <MudText Typo="Typo.caption" Style="color:var(--text-3)">
+            @Diff.Count(SheetChangeKind.Added) added · @Diff.Count(SheetChangeKind.Changed) changed · @Diff.Count(SheetChangeKind.Removed) missing from the sheet · @Diff.Unchanged unchanged
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @foreach (var w in Diff.Warnings)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-1">@w</MudAlert>
+        }
+        @if (Diff.Rows.Count == 0)
+        {
+            <div class="tt-empty">The sheet matches the model — nothing to import.</div>
+        }
+        else
+        {
+            <div class="d-flex gap-2 align-center mb-2">
+                <span class="chip" @onclick="() => SetAll(true)">Accept all</span>
+                <span class="chip" @onclick="() => SetAll(false)">Accept none</span>
+                <span style="flex:1"></span>
+                <MudText Typo="Typo.caption" Style="color:var(--text-3)">New requirements go into @TargetName. Applying is one undo step.</MudText>
+            </div>
+            <div style="max-height:56vh; overflow:auto">
+                <table class="tt diff">
+                    <thead><tr><th style="width:36px"></th><th style="width:90px">Change</th><th style="width:100px">Id</th><th style="width:200px">Name</th><th>Fields</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in Diff.Rows)
+                        {
+                            var row = r;
+                            <tr class="@row.Kind.ToString().ToLowerInvariant() @(row.Accept ? "" : "off")">
+                                <td><input type="checkbox" checked="@row.Accept" @onchange="e => row.Accept = e.Value is true" /></td>
+                                <td><span class="diff-kind @row.Kind.ToString().ToLowerInvariant()">@(row.Kind == SheetChangeKind.Removed ? "delete" : row.Kind.ToString().ToLowerInvariant())</span></td>
+                                <td class="mono">@(row.Id.Length > 0 ? row.Id : "(auto)")</td>
+                                <td>@row.Name</td>
+                                <td>
+                                    @if (row.Kind == SheetChangeKind.Removed)
+                                    {
+                                        <span style="color:var(--text-3)">Not in the sheet — tick to delete it (and its links) from the model.</span>
+                                    }
+                                    @foreach (var f in row.Fields)
+                                    {
+                                        <div class="diff-field">
+                                            <span class="lbl">@f.Label</span>
+                                            @if (row.Kind == SheetChangeKind.Changed) { <span class="old">@(f.Old.Length > 0 ? f.Old : "∅")</span><span class="arrow">→</span> }
+                                            <span class="new">@(f.New.Length > 0 ? f.New : "∅")</span>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="!Diff.Rows.Any(r => r.Accept)" OnClick="() => MudDialog.Close(DialogResult.Ok(true))">
+            Apply @Diff.Rows.Count(r => r.Accept) changes
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SheetDiff Diff { get; set; } = new([], 0, []);
+    [Parameter] public string FileName { get; set; } = "";
+    [Parameter] public string TargetName { get; set; } = "";
+
+    private void SetAll(bool on)
+    {
+        foreach (var r in Diff.Rows) r.Accept = on;
+    }
+}

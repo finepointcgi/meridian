@@ -3,11 +3,16 @@
 
 <div class="d-flex align-center gap-3 px-3 py-2">
     <MudText Typo="Typo.body2" Style="color:#5a6372; flex:1">@Summary()</MudText>
+    <MudTooltip Text="@($"New requirements are numbered {RequirementIds.Prefix(Ws.Model)}001, {RequirementIds.Prefix(Ws.Model)}002…")">
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.FormatListNumbered" Disabled="Ws.ReadOnly" OnClick="() => Shell.RenumberRequirements()">Renumber</MudButton>
+    </MudTooltip>
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.GridOn" OnClick="() => Shell.ExportRequirementsXlsx()">Excel</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Difference" Disabled="Ws.ReadOnly" OnClick="() => Shell.ImportRequirementsSheet()">Re-import</MudButton>
     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">New requirement</MudButton>
 </div>
 <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="font-size:12.5px">
     <thead>
-        <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th></tr>
+        <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:110px">Priority</th><th style="width:130px">Status</th><th style="width:130px">Verification</th><th style="width:120px">Owner</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th></tr>
     </thead>
     <tbody>
         @foreach (var r in Rows())
@@ -16,10 +21,14 @@
             var leaf = !r.OwnedElements.Any(c => c.Kind == ElementKind.Requirement);
             var sat = Ws.Model.Incoming(r, ElementKind.Satisfy).Select(x => x.Source).ToList();
             var ver = Ws.Model.Incoming(r, ElementKind.Verify).Select(x => x.Source).ToList();
-            <tr @key="r.Id" style="@(ReferenceEquals(Ws.Selected, r) ? "background:#eef3fd" : "")" @onclick="() => Ws.Select(r)">
+            <tr @key="r.Id" style="@(ReferenceEquals(Ws.Selected, r) ? "background:var(--sel)" : "")" @onclick="() => Ws.Select(r)">
                 <td><MudTextField T="string" Value="@r.Get(FieldKeys.RequirementId)" ValueChanged="v => Ws.Model.Set(r, FieldKeys.RequirementId, v)" Underline="false" Margin="Margin.Dense" /></td>
                 <td style="padding-left:@(8 + depth * 14)px"><MudTextField T="string" Value="@r.Name" ValueChanged="v => Ws.Model.Set(r, FieldKeys.Name, v?.Trim())" Underline="false" Margin="Margin.Dense" /></td>
                 <td><MudTextField T="string" Value="@r.Get(FieldKeys.Text)" ValueChanged="v => Ws.Model.Set(r, FieldKeys.Text, v)" Underline="false" Margin="Margin.Dense" AutoGrow="true" Lines="1" MaxLines="5" /></td>
+                <td>@AttrSelect(r, ReqFields.Priority, ReqFields.Priorities)</td>
+                <td>@AttrSelect(r, ReqFields.Status, ReqFields.Statuses)</td>
+                <td>@AttrSelect(r, ReqFields.VerificationMethod, ReqFields.VerificationMethods)</td>
+                <td><MudTextField T="string" Value="@r.Get(ReqFields.Owner)" ValueChanged="v => Ws.Model.Set(r, ReqFields.Owner, v?.Trim())" Underline="false" Margin="Margin.Dense" Placeholder="—" /></td>
                 <td>
                     @foreach (var s in sat) { <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(s)">@s.Name</span> }
                     @if (sat.Count == 0 && leaf) { <span style="color:#c62828">not satisfied</span> }
@@ -34,6 +43,14 @@
 </MudSimpleTable>
 
 @code {
+
+    private RenderFragment AttrSelect(Element r, string key, string[] values) => __builder =>
+    {
+        <MudSelect T="string" Value="@r.Get(key)" ValueChanged="v => Ws.Model.Set(r, key, v)" Dense="true" Margin="Margin.Dense" Underline="false" Placeholder="—" Disabled="Ws.ReadOnly">
+            <MudSelectItem Value="@("")">—</MudSelectItem>
+            @foreach (var v in values) { <MudSelectItem Value="@v">@v</MudSelectItem> }
+        </MudSelect>
+    };
 
     private IEnumerable<Element> Rows()
     {

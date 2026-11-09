@@ -69,6 +69,7 @@ public partial class Workbench
             CA("Import into this project (BPMN, ArchiMate, SQL, C#)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
         };
+        list.AddRange(RequirementPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;

@@ -147,6 +147,10 @@
                         <MudDivider />
                         <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="ExportReqIf">Export ReqIF</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="ExportCsv">Export CSV</MudMenuItem>
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="ExportRequirementsXlsx">Export Excel (.xlsx)</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Difference" OnClick="ImportRequirementsSheet" Disabled="Ws.ReadOnly">Re-import Excel / CSV with preview…</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.FormatListNumbered" OnClick="RenumberRequirements" Disabled="Ws.ReadOnly">Renumber requirements…</MudMenuItem>
                     </ChildContent>
                 </MudMenu>
             </div>
@@ -155,6 +159,7 @@
             <div class="rlabel">Traceability</div>
             <div class="ritems">
                 <button class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
+                <MudTooltip Text="Traceability table: links, gaps and suspect links per requirement"><button class="rbtn @(_dockOpen && _dock == 7 ? "on" : "")" @onclick="() => ToggleDock(7)"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Trace table</span></button></MudTooltip>
                 <button class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
                 <button class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
                 <button class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
@@ -273,6 +278,7 @@
                     @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
+                    @DockTab(7, "Traceability table", Icons.Material.Outlined.FactCheck, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -288,6 +294,7 @@
                             case 4: <ImpactPanel />; break;
                             case 5: <SimulationPanel />; break;
                             case 6: <ParametricsPanel />; break;
+                            case 7: <TraceabilityPanel />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>
@@ -322,6 +329,7 @@
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
         <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
+        <InputFile id="file-req-sheet" accept=".xlsx,.csv" OnChange="OnRequirementsSheetFile" />
     </div>
 </div>
 </CascadingValue>

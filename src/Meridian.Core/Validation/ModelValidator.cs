@@ -76,6 +76,8 @@ public sealed partial class ModelValidator
         new Rule("BEH-002", "States should be reachable", m =>
             m.OfKind(ElementKind.State).Where(s => !m.Incoming(s, ElementKind.Transition).Any())
                 .Select(s => Issue(Severity.Warning, "BEH-002", $"State '{s.Name}' has no incoming transition", s))),
+
+        new Analysis.SuspectLinkRule(),
     };
 
     public IReadOnlyList<ValidationIssue> Validate(ModelRepository model) =>
