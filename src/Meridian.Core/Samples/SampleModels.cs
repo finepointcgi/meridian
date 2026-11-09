@@ -223,8 +223,34 @@ public static class SampleModels
             y += ReferenceEquals(msg.Source, msg.Target) ? 64 : 48;
         }
 
+        AddSampleViews(m);
+
         m.History.Clear();
         return m;
+    }
+
+    /// <summary>Saved tables, queries and custom validation rules (see Analysis/ModelQuery).</summary>
+    private static void AddSampleViews(ModelRepository m)
+    {
+        var views = Analysis.SavedViews.DefaultOwner(m);
+        Analysis.SavedViews.SaveTable(m, new Analysis.TableDefinition
+        {
+            Query = "kind:Block in:Structure",
+            Columns = [new("name"), new("prop:mass"), new("satisfies"), new("allocatedFrom"), new("documentation")],
+            SortKey = "name",
+        }, "Block overview", owner: views);
+        Analysis.SavedViews.SaveTable(m, new Analysis.TableDefinition
+        {
+            Query = "kind:Requirement",
+            Columns = Analysis.TableDefinition.DefaultColumns(ElementKind.Requirement),
+            SortKey = "reqId",
+        }, "Requirement status", owner: views);
+        Analysis.SavedViews.SaveQuery(m, "kind:Property where type = Real and defaultValue is empty", "Value properties without a value", owner: views);
+        Analysis.SavedViews.SaveQuery(m, "kind:Requirement where not has:in:verify", "Unverified requirements", owner: views);
+        Analysis.SavedViews.SaveRule(m, "kind:Block where maxPower < 150", "Engine power target", "warning",
+            "{name}: max power {maxPower} kW is below the 150 kW target of REQ-005", owner: views);
+        Analysis.SavedViews.SaveRule(m, "kind:Action where not has:allocate", "Unallocated actions", "info",
+            "Action '{name}' in {owner} is not allocated to a structural element", owner: views);
     }
 
     private static Element Req(ModelRepository m, Element owner, string id, string name, string text)
