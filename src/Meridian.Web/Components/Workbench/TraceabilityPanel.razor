@@ -1,0 +1,369 @@
+@using Meridian.Core.Analysis
+@using Meridian.Serialization
+@inherits WorkspaceComponent
+@inject IJSRuntime JS
+
+@{
+    var all = AllRows();
+    var rows = Sorted(TraceabilityTable.Apply(all, new TraceFilter(_notSatisfied, _notVerified, _suspect, Ws.Model.Find(_packageId), _search))).ToList();
+    var suspectCount = all.Sum(r => r.Links.Values.Sum(l => l.Count(x => x.Suspect)));
+    var packages = TraceabilityTable.CoverageByPackage(all);
+}
+<div class="tt-panel">
+    <div class="tt-toolbar">
+        <div class="seg">
+            <button class="@(_mode == Mode.Table ? "on" : "")" @onclick="() => _mode = Mode.Table"><MudIcon Icon="@Icons.Material.Outlined.TableRows" />Table</button>
+            <button class="@(_mode == Mode.Chain ? "on" : "")" @onclick="() => _mode = Mode.Chain"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" />Multi-level</button>
+            <button class="@(_mode == Mode.Orphans ? "on" : "")" @onclick="() => _mode = Mode.Orphans"><MudIcon Icon="@Icons.Material.Outlined.LinkOff" />Orphan design</button>
+        </div>
+        <div class="tt-search">
+            <MudIcon Icon="@Icons.Material.Outlined.Search" />
+            <input placeholder="Search id, text, links…" value="@_search" @oninput="e => _search = e.Value?.ToString()" />
+        </div>
+        @if (_mode == Mode.Table)
+        {
+            <span class="chip @(_notSatisfied ? "on" : "")" @onclick="() => _notSatisfied = !_notSatisfied">Not satisfied</span>
+            <span class="chip @(_notVerified ? "on" : "")" @onclick="() => _notVerified = !_notVerified">Not verified</span>
+            <span class="chip @(_suspect ? "on" : "")" @onclick="() => _suspect = !_suspect"><MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:13px; vertical-align:-2px" /> Suspect</span>
+            <select class="tt-select" value="@(_packageId ?? "")" @onchange="e => _packageId = e.Value?.ToString() is { Length: > 0 } v ? v : null" title="Package">
+                <option value="">All packages</option>
+                @foreach (var p in Ws.Model.AllElements.Where(x => x.Kind == ElementKind.Package && x.Descendants().Any(d => d.Kind == ElementKind.Requirement)).OrderBy(x => x.QualifiedName))
+                {
+                    <option value="@p.Id">@p.QualifiedName</option>
+                }
+            </select>
+        }
+        <span style="flex:1"></span>
+        <span class="tt-count">@(_mode == Mode.Table ? $"{rows.Count} of {all.Count} requirements" : "")</span>
+        @if (suspectCount > 0 && !Ws.ReadOnly)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="ClearAllSuspect">Clear @suspectCount suspect</MudButton>
+        }
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+            <ActivatorContent><MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download">Export</MudButton></ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="() => ExportXlsx(rows)">Excel workbook (.xlsx)</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="() => ExportCsv(rows)">CSV (filtered table)</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </div>
+
+    @if (packages.Count > 0 && _mode == Mode.Table)
+    {
+        <div class="tt-coverage">
+            @foreach (var p in packages)
+            {
+                var pkg = p;
+                <div class="cov @(_packageId == pkg.Package.Id ? "on" : "")" title="@($"{pkg.Package.QualifiedName}: {pkg.Satisfied}/{pkg.Total} satisfied, {pkg.Verified}/{pkg.Total} verified")"
+                     @onclick="() => _packageId = _packageId == pkg.Package.Id ? null : pkg.Package.Id">
+                    <div class="cov-name">@pkg.Package.DisplayName @if (pkg.Suspect > 0) { <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:12px; color:var(--warn)" /> }</div>
+                    <div class="cov-bar" title="Satisfied"><span class="sat" style="width:@Pct(pkg.SatisfiedRatio)"></span></div>
+                    <div class="cov-bar" title="Verified"><span class="ver" style="width:@Pct(pkg.VerifiedRatio)"></span></div>
+                    <div class="cov-num">@pkg.Satisfied/@pkg.Total sat · @pkg.Verified/@pkg.Total ver</div>
+                </div>
+            }
+        </div>
+    }
+
+    @switch (_mode)
+    {
+        case Mode.Table:
+            if (all.Count == 0)
+            {
+                <div class="tt-empty">No requirements yet.</div>
+                break;
+            }
+            <table class="tt">
+                <thead>
+                    <tr>
+                        @SortHeader("id", "Id", "width:90px")
+                        @SortHeader("text", "Requirement", "min-width:220px")
+                        @foreach (var c in TraceabilityTable.Columns) { @SortHeader(c.ToString(), TraceabilityTable.Title(c), "min-width:130px") }
+                        @SortHeader("status", "Status", "width:100px")
+                        @SortHeader("coverage", "Coverage", "width:90px")
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in rows)
+                    {
+                        var row = r;
+                        <tr @key="row.Requirement.Id" class="@(ReferenceEquals(Ws.Selected, row.Requirement) ? "sel" : "")" @onclick="() => Ws.Select(row.Requirement)">
+                            <td class="mono">@row.Id @if (row.HasSuspect) { <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:13px; color:var(--warn); vertical-align:-2px" title="Has suspect links" /> }</td>
+                            <td><div class="tt-name">@row.Name</div><div class="tt-text">@row.Text</div></td>
+                            @foreach (var c in TraceabilityTable.Columns)
+                            {
+                                var col = c;
+                                var gap = (col == TraceColumn.SatisfiedBy && row.SatisfyGap) || (col == TraceColumn.VerifiedBy && row.VerifyGap);
+                                <td class="@(gap ? "gap" : "")">
+                                    @foreach (var l in row[col])
+                                    {
+                                        var link = l;
+                                        <span class="pill tt-pill @(link.Suspect ? "suspect" : "")" title="@(link.Suspect ? SuspectLinks.Describe(link.Relationship) : link.Other.QualifiedName)"
+                                              @onclick="() => Shell.Navigate(link.Other)" @onclick:stopPropagation="true">
+                                            @if (link.Suspect)
+                                            {
+                                                <span class="sus" title="Suspect — click to clear" @onclick="() => ClearSuspect(link.Relationship)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:13px" /></span>
+                                            }
+                                            <span class="t">@TraceabilityTable.Label(link.Other)</span>
+                                            @if (col == TraceColumn.VerifiedBy && TraceabilityTable.Verdict(link.Other) is { Length: > 0 } verdict)
+                                            {
+                                                <span class="verdict @verdict">@verdict</span>
+                                            }
+                                            @if (!Ws.ReadOnly)
+                                            {
+                                                <span class="rm" title="Remove link" @onclick="() => Remove(link.Relationship)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:13px" /></span>
+                                            }
+                                        </span>
+                                    }
+                                    @if (gap && row[col].Count == 0)
+                                    {
+                                        <span class="gap-label">@(col == TraceColumn.SatisfiedBy ? "not satisfied" : "not verified")</span>
+                                    }
+                                    @if (!Ws.ReadOnly)
+                                    {
+                                        if (_edit is { } ed && ReferenceEquals(ed.Req, row.Requirement) && ed.Col == col)
+                                        {
+                                            <div class="tt-picker" @onclick:stopPropagation="true">
+                                                <MudAutocomplete T="Element" Placeholder="Link…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" AutoFocus="true"
+                                                                 SearchFunc="(q, ct) => Candidates(row.Requirement, col, q)" ToStringFunc="Describe"
+                                                                 ValueChanged="v => AddLink(row.Requirement, col, v)" ResetValueOnEmptyText="true" MaxItems="40" ShowProgressIndicator="false" />
+                                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" title="Cancel" OnClick="() => _edit = null" />
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="tt-add" title="@($"Add {TraceabilityTable.Title(col).ToLowerInvariant()} link")" @onclick="() => _edit = (row.Requirement, col)" @onclick:stopPropagation="true">+</span>
+                                        }
+                                    }
+                                </td>
+                            }
+                            <td>@if (row.Status.Length > 0) { <span class="status @row.Status">@row.Status</span> }</td>
+                            <td><span class="covg @row.Coverage.ToString().ToLowerInvariant()">@CoverageText(row)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            break;
+
+        case Mode.Chain:
+            var chains = TraceabilityTable.Chains(Ws.Model).Where(c => ChainMatches(c)).ToList();
+            <table class="tt chain">
+                <thead><tr><th>Need</th><th>Requirement</th><th>Derived / decomposed</th><th>Design</th><th>Test</th></tr></thead>
+                <tbody>
+                    @foreach (var c in chains)
+                    {
+                        var ch = c;
+                        <tr class="@(ch.Gap ? "gaprow" : "")">
+                            <td>@if (ch.Need is { } n) { <span class="link" @onclick="() => Shell.Navigate(n)">@n.DisplayName</span> }</td>
+                            <td><span class="link" @onclick="() => Shell.Navigate(ch.Requirement)">@TraceabilityTable.Label(ch.Requirement)</span></td>
+                            <td>@if (ch.Derived is { } d) { <span style="padding-left:@((ch.Depth - 1) * 14)px">↳ </span><span class="link" @onclick="() => Shell.Navigate(d)">@TraceabilityTable.Label(d)</span> }</td>
+                            <td class="@(ch.Gap && ch.Design == null ? "gap" : "")">
+                                @if (ch.Design is { } de) { <span class="link" @onclick="() => Shell.Navigate(de)">@de.DisplayName</span> }
+                                else if (ch.Gap) { <span class="gap-label">no design</span> }
+                                @if (ch.Suspect) { <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:13px; color:var(--warn); vertical-align:-2px" title="Suspect link" /> }
+                            </td>
+                            <td class="@(ch.Gap && ch.Test == null ? "gap" : "")">
+                                @if (ch.Test is { } t) { <span class="link" @onclick="() => Shell.Navigate(t)">@t.DisplayName</span> if (ch.Verdict.Length > 0) { <span class="verdict @ch.Verdict">@ch.Verdict</span> } }
+                                else if (ch.Gap) { <span class="gap-label">no test</span> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            break;
+
+        default:
+            var orphans = TraceabilityTable.OrphanDesignElements(Ws.Model)
+                .Where(o => string.IsNullOrWhiteSpace(_search) || o.QualifiedName.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+            if (orphans.Count == 0)
+            {
+                <div class="tt-empty">Every block traces to at least one requirement.</div>
+                break;
+            }
+            <table class="tt">
+                <thead><tr><th style="width:240px">Design element</th><th>Qualified name</th><th style="width:300px">Satisfies</th></tr></thead>
+                <tbody>
+                    @foreach (var o in orphans)
+                    {
+                        var el = o;
+                        <tr @key="el.Id" class="@(ReferenceEquals(Ws.Selected, el) ? "sel" : "")" @onclick="() => Ws.Select(el)">
+                            <td>@KindIcon.For(el) <span class="link" @onclick="() => Shell.Navigate(el)">@el.DisplayName</span></td>
+                            <td class="tt-text">@el.QualifiedName</td>
+                            <td class="gap" @onclick:stopPropagation="true">
+                                @if (!Ws.ReadOnly)
+                                {
+                                    <MudAutocomplete T="Element" Placeholder="Satisfies requirement…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                                     SearchFunc="(q, ct) => Requirements(q)" ToStringFunc="Describe" ValueChanged="v => Satisfy(el, v)"
+                                                     ResetValueOnEmptyText="true" MaxItems="40" ShowProgressIndicator="false" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            break;
+    }
+</div>
+
+@code {
+    private enum Mode { Table, Chain, Orphans }
+
+    private Mode _mode;
+    private bool _notSatisfied, _notVerified, _suspect;
+    private string? _packageId;
+    private string? _search;
+    private string _sort = "id";
+    private bool _desc;
+    private (Element Req, TraceColumn Col)? _edit;
+
+    private int _cachedVersion = -1;
+    private IReadOnlyList<TraceRow> _cached = [];
+
+    private IReadOnlyList<TraceRow> AllRows()
+    {
+        if (_cachedVersion != Ws.Version || _cached.Any(r => !Ws.Model.Contains(r.Requirement)))
+        {
+            _cached = TraceabilityTable.Build(Ws.Model);
+            _cachedVersion = Ws.Version;
+        }
+        return _cached;
+    }
+
+    private IEnumerable<TraceRow> Sorted(IEnumerable<TraceRow> rows)
+    {
+        IOrderedEnumerable<TraceRow> o = _sort switch
+        {
+            "text" => Order(rows, r => r.Name + " " + r.Text),
+            "status" => Order(rows, r => Array.IndexOf(ReqFields.Statuses, r.Status) is var i and >= 0 ? i.ToString("00") : "99"),
+            "coverage" => Order(rows, r => ((int)r.Coverage).ToString() + (r.IsLeaf ? "0" : "1")),
+            "id" => Order(rows, r => r.Id),
+            var c when Enum.TryParse<TraceColumn>(c, out var col) => Order(rows, r => r[col].Count.ToString("0000")),
+            _ => Order(rows, r => r.Id),
+        };
+        return o;
+    }
+
+    private IOrderedEnumerable<TraceRow> Order(IEnumerable<TraceRow> rows, Func<TraceRow, string> key) =>
+        _desc ? rows.OrderByDescending(key, NaturalComparer.Instance) : rows.OrderBy(key, NaturalComparer.Instance);
+
+    private RenderFragment SortHeader(string key, string title, string style) => __builder =>
+    {
+        <th style="@style" class="sortable @(_sort == key ? "sorted" : "")" @onclick="() => { if (_sort == key) _desc = !_desc; else { _sort = key; _desc = false; } }">
+            @title
+            @if (_sort == key) { <MudIcon Icon="@(_desc ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)" Style="font-size:12px; vertical-align:-1px" /> }
+        </th>
+    };
+
+    private static string Pct(double ratio) => (ratio * 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private static string CoverageText(TraceRow r) => r.Coverage switch
+    {
+        TraceCoverage.Full => "full",
+        TraceCoverage.Partial => r.Satisfied ? "satisfied" : "verified",
+        _ => r.IsLeaf ? "none" : "—",
+    };
+
+    private bool ChainMatches(TraceChainRow c)
+    {
+        var q = _search?.Trim() ?? "";
+        if (q.Length == 0) return true;
+        return new[] { c.Need, c.Requirement, c.Derived, c.Design, c.Test }.OfType<Element>()
+            .Any(e => TraceabilityTable.Label(e).Contains(q, StringComparison.OrdinalIgnoreCase) || e.Get(FieldKeys.Text).Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string Describe(Element? x) => x == null ? "" :
+        x.Kind == ElementKind.Requirement ? TraceabilityTable.Label(x) : $"{x.DisplayName} ({Metamodel.DisplayName(x.Kind)})";
+
+    private Task<IEnumerable<Element>> Candidates(Element req, TraceColumn col, string? q)
+    {
+        q = q?.Trim() ?? "";
+        var items = TraceabilityTable.Candidates(Ws.Model, req, col).Where(x => q.Length == 0 || Describe(x).Contains(q, StringComparison.OrdinalIgnoreCase)).Take(200).ToList();
+        return Task.FromResult<IEnumerable<Element>>(items);
+    }
+
+    private Task<IEnumerable<Element>> Requirements(string? q)
+    {
+        q = q?.Trim() ?? "";
+        var items = RequirementIds.InDocumentOrder(Ws.Model).Where(x => q.Length == 0 || Describe(x).Contains(q, StringComparison.OrdinalIgnoreCase)).Take(200).ToList();
+        return Task.FromResult<IEnumerable<Element>>(items);
+    }
+
+    private void AddLink(Element req, TraceColumn col, Element? other)
+    {
+        _edit = null;
+        if (other == null) return;
+        try
+        {
+            var r = TraceabilityTable.Link(Ws.Model, req, col, other);
+            Ws.SetStatus($"{r.Source.DisplayName} «{Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind)}» {r.Target.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Satisfy(Element design, Element? req)
+    {
+        if (req == null) return;
+        try { Ws.Model.Connect(ElementKind.Satisfy, design, req); Ws.SetStatus($"{design.DisplayName} «satisfy» {TraceabilityTable.Label(req)}"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Remove(Relationship r)
+    {
+        try { Ws.Model.Delete(r); Ws.SetStatus("Link removed"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void ClearSuspect(Relationship r)
+    {
+        try { SuspectLinks.Clear(Ws.Model, r); Ws.SetStatus("Suspect link cleared"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void ClearAllSuspect()
+    {
+        try { Ws.SetStatus($"Cleared {SuspectLinks.ClearAll(Ws.Model)} suspect links"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private string BaseName => string.Join("_", Ws.Model.Root.Name.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim() is { Length: > 0 } n ? n : "model";
+
+    private async Task Download(string name, string mime, byte[] bytes)
+    {
+        await JS.InvokeVoidAsync("meridian.download", name, mime, Convert.ToBase64String(bytes));
+        Ws.Log($"Downloaded {name}");
+        Ws.SetStatus($"Downloaded {name}");
+    }
+
+    private Task ExportXlsx(IEnumerable<TraceRow> rows) =>
+        Download(BaseName + " traceability.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", TraceabilityExport.ToXlsx(Ws.Model, rows));
+
+    private Task ExportCsv(IEnumerable<TraceRow> rows) =>
+        Download(BaseName + " traceability.csv", "text/csv", System.Text.Encoding.UTF8.GetBytes(TraceabilityExport.ToCsv(rows)));
+
+    /// <summary>Orders "REQ-2" before "REQ-10".</summary>
+    private sealed class NaturalComparer : IComparer<string>
+    {
+        public static readonly NaturalComparer Instance = new();
+        public int Compare(string? a, string? b)
+        {
+            a ??= ""; b ??= "";
+            int i = 0, j = 0;
+            while (i < a.Length && j < b.Length)
+            {
+                if (char.IsDigit(a[i]) && char.IsDigit(b[j]))
+                {
+                    var si = i; while (i < a.Length && char.IsDigit(a[i])) i++;
+                    var sj = j; while (j < b.Length && char.IsDigit(b[j])) j++;
+                    var na = a[si..i].TrimStart('0'); var nb = b[sj..j].TrimStart('0');
+                    var c = na.Length != nb.Length ? na.Length.CompareTo(nb.Length) : string.CompareOrdinal(na, nb);
+                    if (c != 0) return c;
+                    continue;
+                }
+                var d = char.ToUpperInvariant(a[i]).CompareTo(char.ToUpperInvariant(b[j]));
+                if (d != 0) return d;
+                i++; j++;
+            }
+            return (a.Length - i).CompareTo(b.Length - j);
+        }
+    }
+}

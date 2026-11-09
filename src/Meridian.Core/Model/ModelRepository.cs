@@ -407,6 +407,9 @@ public sealed class ModelRepository
         value = string.IsNullOrEmpty(value) ? null : value;
         var old = e.Fields.TryGetValue(key, out var o) ? o : null;
         if (old == value) return;
+        // Requirement name/text edits make their trace links suspect (baseline recorded in the same undo step).
+        using var suspectStep = Analysis.SuspectLinks.Watches(e, key) ? History.Transaction($"Set {key}") : null;
+        if (suspectStep != null) Analysis.SuspectLinks.Baseline(this, e);
         History.Execute(new DelegateCommand($"Set {key}",
             () => SetFieldRaw(e, key, value),
             () => SetFieldRaw(e, key, old)));
@@ -543,7 +546,7 @@ public sealed class ModelRepository
             .Select(r => r.Get(FieldKeys.RequirementId))
             .Select(id => int.TryParse(new string(id.SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray()), out var n) ? n : 0)
             .DefaultIfEmpty(0).Max();
-        return $"REQ-{max + 1:000}";
+        return Analysis.RequirementIds.Format(Analysis.RequirementIds.Prefix(this), max + 1);
     }
 
     // ------------------------------------------------------------------ diagram API
