@@ -1,0 +1,175 @@
+namespace Meridian.Core.Model;
+
+/// <summary>
+/// Every metaclass the tool understands. UML and SysML v1 concepts share one enum;
+/// <see cref="Language.Metamodel"/> holds the rules (ownership, relationship ends, notation).
+/// </summary>
+public enum ElementKind
+{
+    // Containers
+    Model,
+    Package,
+
+    // Structure (UML)
+    Class,
+    Interface,
+    DataType,
+    Enumeration,
+    EnumerationLiteral,
+    Component,
+    Property,
+    Operation,
+
+    // Structure (SysML)
+    Block,
+    InterfaceBlock,
+    ValueType,
+    ConstraintBlock,
+    Port,
+
+    // Requirements
+    Requirement,
+    TestCase,
+
+    // Use cases
+    Actor,
+    UseCase,
+
+    // Activities
+    Activity,
+    Action,
+    InitialNode,
+    ActivityFinalNode,
+    DecisionNode,
+    ForkNode,
+    Partition,
+    InputPin,
+    OutputPin,
+    ObjectNode,
+
+    // Interactions (sequence diagrams)
+    Interaction,
+    Lifeline,
+    CombinedFragment,
+
+    // State machines
+    StateMachine,
+    State,
+    InitialState,
+    FinalState,
+
+    // Annotation
+    Comment,
+
+    // Profiles
+    Profile,
+    Stereotype,
+    TagDefinition,
+
+    // BPMN (subtype field selects task / event / gateway / data …)
+    BpmnPool,
+    BpmnLane,
+    BpmnNode,
+
+    // ArchiMate (subtype field selects the ArchiMate element type)
+    ArchiElement,
+
+    // Data modeling
+    Table,
+    Column,
+
+    // General drawing (draw.io-style free shapes; subtype selects the outline)
+    Shape,
+
+    // Relationships
+    Association,
+    Composition,
+    Aggregation,
+    Generalization,
+    Realization,
+    Dependency,
+    Satisfy,
+    Verify,
+    Refine,
+    Trace,
+    DeriveReqt,
+    Copy,
+    Include,
+    Extend,
+    Transition,
+    ControlFlow,
+    ObjectFlow,
+    Allocate,
+    Connector,
+    Message,
+    Binding,
+    BpmnFlow,
+    ArchiRelation,
+    ForeignKey,
+    Line,           // plain connector between any two shapes (subtype: arrow / line / dashed …)
+
+    // Views
+    Diagram,
+}
+
+public enum DiagramType
+{
+    Class,
+    BlockDefinition,
+    InternalBlock,
+    Requirement,
+    UseCase,
+    Activity,
+    StateMachine,
+    Package,
+    Sequence,
+    Parametric,
+    Bpmn,
+    ArchiMate,
+    Database,
+    Whiteboard,
+}
+
+public static class FieldKeys
+{
+    public const string Name = "name";
+    public const string Documentation = "documentation";
+    public const string Visibility = "visibility";
+    public const string IsAbstract = "isAbstract";
+    public const string Type = "type";               // id of the typing classifier, or a primitive name
+    public const string Multiplicity = "multiplicity";
+    public const string DefaultValue = "defaultValue";
+    public const string Direction = "direction";     // ports: in / out / inout
+    public const string Signature = "signature";     // operations: "(a : Integer, b : String) : Boolean"
+    public const string RequirementId = "reqId";
+    public const string Text = "text";
+    public const string Guard = "guard";
+    public const string Effect = "effect";
+    public const string MessageSort = "messageSort"; // synchCall / asynchCall / reply
+    public const string Operator = "operator";       // combined fragments: alt / opt / loop / par / break
+    public const string Subtype = "subtype";         // BPMN / ArchiMate element and relationship subtypes
+    public const string PortKind = "portKind";       // proxy / full
+    public const string ItemFlow = "itemFlow";       // connectors: id or name of the conveyed item
+    public const string FlowDirection = "flowDirection"; // connectors: forward / reverse
+    public const string SourcePart = "sourcePart";   // connector end: part owning the source port
+    public const string TargetPart = "targetPart";
+    public const string Behavior = "behavior";       // call behavior actions: called activity id
+    public const string Represents = "represents";   // partitions: block / actor id
+    public const string Entry = "entry";
+    public const string Exit = "exit";
+    public const string DoActivity = "doActivity";
+    public const string Metaclass = "metaclass";     // stereotypes: comma separated element kinds
+    public const string TagType = "tagType";         // tag definitions: String / Integer / Real / Boolean / Enum
+    public const string TagValues = "tagValues";     // tag definitions: enumeration literals, comma separated
+    public const string Legend = "legend";           // diagrams: "true" shows an auto-generated legend
+    public const string Color = "color";             // stereotypes: header colour for elements carrying them
+    public const string SqlType = "sqlType";
+    public const string PrimaryKey = "pk";
+    public const string Nullable = "nullable";
+    public const string Unique = "unique";
+    public const string FkColumns = "fkColumns";
+    public const string RefColumns = "refColumns";
+    public const string Body = "body";               // constraints, opaque actions, comments
+    public const string Stereotypes = "stereotypes"; // comma separated
+    public const string TagPrefix = "tag:";          // tagged values: "tag:priority" = "high"
+}

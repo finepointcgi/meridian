@@ -1,0 +1,99 @@
+@using Meridian.Serialization
+@inject Workspace Ws
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Description" /><MudText Typo="Typo.h6">Generate document</MudText></div></TitleContent>
+    <DialogContent>
+        <MudSelect T="string" Label="Template" Value="_preset" ValueChanged="ApplyPreset" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var p in ReportTemplate.Presets.Keys) { <MudSelectItem Value="@p">@p</MudSelectItem> }
+        </MudSelect>
+        <MudTextField T="string" @bind-Value="_title" Label="Document title" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" @bind-Value="_author" Label="Author" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <div class="section-title" style="margin-top:14px">Sections</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr">
+            @foreach (var s in Enum.GetValues<ReportSection>())
+            {
+                var section = s;
+                <MudCheckBox T="bool" Value="_sections.Contains(section)" ValueChanged="v => Toggle(section, v)" Label="@Label(section)" Dense="true" Size="Size.Small" />
+            }
+        </div>
+        @if (_sections.Contains(ReportSection.Diagrams))
+        {
+            <MudSelect T="DiagramType" Label="Diagram types (empty = all)" MultiSelection="true" @bind-SelectedValues="_diagramTypes" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var t in Enum.GetValues<DiagramType>()) { <MudSelectItem Value="t">@Metamodel.DisplayName(t)</MudSelectItem> }
+            </MudSelect>
+        }
+        <div class="section-title" style="margin-top:14px">Format</div>
+        <MudRadioGroup T="string" @bind-Value="_format">
+            <MudRadio Value="@("docx")" Color="Color.Primary" Dense="true">Word (.docx)</MudRadio>
+            <MudRadio Value="@("pdf")" Color="Color.Primary" Dense="true">PDF</MudRadio>
+        </MudRadioGroup>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || _sections.Count == 0" OnClick="Generate">@(_busy ? "Generating…" : "Generate")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private string _preset = "System design description";
+    private string _title = "";
+    private string _author = "";
+    private string _format = "docx";
+    private bool _busy;
+    private readonly List<ReportSection> _sections = new();
+    private IEnumerable<DiagramType> _diagramTypes = [];
+
+    protected override void OnInitialized()
+    {
+        _title = $"{Ws.Model.Root.Name} — System Design Description";
+        _author = Ws.User?.DisplayName ?? "";
+        ApplyPreset(_preset);
+    }
+
+    private void ApplyPreset(string preset)
+    {
+        _preset = preset;
+        _sections.Clear();
+        _sections.AddRange(ReportTemplate.Presets[preset]);
+        _title = $"{Ws.Model.Root.Name} — {preset}";
+    }
+
+    private void Toggle(ReportSection s, bool on)
+    {
+        if (on && !_sections.Contains(s)) { _sections.Add(s); _sections.Sort(); }
+        if (!on) _sections.Remove(s);
+    }
+
+    private static string Label(ReportSection s) => s switch
+    {
+        ReportSection.TitlePage => "Title page",
+        ReportSection.Elements => "Element specifications",
+        _ => s.ToString(),
+    };
+
+    private async Task Generate()
+    {
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var template = new ReportTemplate(_title, _sections.ToList(), _diagramTypes.ToList(), null, _author);
+            var model = Ws.Model;
+            var bytes = await Task.Run(() => _format == "pdf" ? DocumentReports.Pdf(model, template) : DocumentReports.Docx(model, template));
+            var name = string.Join("_", _title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + "." + _format;
+            var mime = _format == "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            await JS.InvokeVoidAsync("meridian.download", name, mime, Convert.ToBase64String(bytes));
+            Snackbar.Add($"Generated {name}", Severity.Success);
+            MudDialog.Close();
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        {
+            Snackbar.Add($"Document generation failed: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+}

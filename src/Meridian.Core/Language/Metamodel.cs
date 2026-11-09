@@ -1,0 +1,419 @@
+using Meridian.Core.Model;
+
+namespace Meridian.Core.Language;
+
+public enum ArrowHead { None, Open, HollowTriangle, FilledDiamond, HollowDiamond, Filled, Dot, CrowsFoot, Bar }
+
+public sealed record EdgeStyle(bool Dashed, ArrowHead TargetHead, ArrowHead SourceHead, string? Keyword, bool Dotted = false);
+
+public enum NodeShape
+{
+    Rectangle, Rounded, Ellipse, StickFigure, Folder, Note, FilledCircle, BullsEye, Diamond, Bar, SmallSquare, Lifeline, Fragment,
+    Swimlane, Event, Gateway, DataObject, Pool,
+}
+
+/// <summary>A palette entry: an element or relationship kind, optionally with a subtype (BPMN, ArchiMate…).</summary>
+public sealed record PaletteItem(ElementKind Kind, string? Subtype = null, string? Label = null)
+{
+    public string Title => Label ?? (Subtype != null ? Subtypes.Display(Subtype) : Metamodel.DisplayName(Kind));
+}
+
+/// <summary>
+/// The language definition: which kinds exist, how they nest, which relationships may connect what,
+/// what each diagram's palette offers, and how each kind is drawn.
+/// </summary>
+public static class Metamodel
+{
+    private static readonly HashSet<ElementKind> Relationships = new()
+    {
+        ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization,
+        ElementKind.Realization, ElementKind.Dependency, ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine,
+        ElementKind.Trace, ElementKind.DeriveReqt, ElementKind.Copy, ElementKind.Include, ElementKind.Extend,
+        ElementKind.Transition, ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate, ElementKind.Connector,
+        ElementKind.Message, ElementKind.Binding, ElementKind.BpmnFlow, ElementKind.ArchiRelation, ElementKind.ForeignKey, ElementKind.Line,
+    };
+
+    private static readonly HashSet<ElementKind> Classifiers = new()
+    {
+        ElementKind.Class, ElementKind.Interface, ElementKind.DataType, ElementKind.Enumeration, ElementKind.Component,
+        ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock,
+        ElementKind.Actor, ElementKind.UseCase, ElementKind.Requirement, ElementKind.TestCase,
+        ElementKind.Activity, ElementKind.StateMachine, ElementKind.Interaction, ElementKind.Table, ElementKind.Stereotype,
+    };
+
+    private static readonly HashSet<ElementKind> StructuralClassifiers = new()
+    {
+        ElementKind.Class, ElementKind.Interface, ElementKind.DataType, ElementKind.Enumeration, ElementKind.Component,
+        ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Actor,
+    };
+
+    private static readonly HashSet<ElementKind> ActivityNodes = new()
+    {
+        ElementKind.Action, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
+        ElementKind.InputPin, ElementKind.OutputPin, ElementKind.ObjectNode,
+    };
+
+    private static readonly HashSet<ElementKind> Vertices = new()
+    {
+        ElementKind.State, ElementKind.InitialState, ElementKind.FinalState,
+    };
+
+    private static readonly HashSet<ElementKind> PackageMembers = new()
+    {
+        ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
+    };
+
+    /// <summary>Kinds that carry no name of their own in normal use.</summary>
+    private static readonly HashSet<ElementKind> Anonymous = new()
+    {
+        ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
+        ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment, ElementKind.CombinedFragment, ElementKind.Shape,
+    };
+
+    public static readonly IReadOnlyList<string> FragmentOperators = ["alt", "opt", "loop", "par", "break", "critical", "neg", "seq", "strict"];
+
+    public static bool IsRelationship(ElementKind k) => Relationships.Contains(k);
+    public static bool IsClassifier(ElementKind k) => Classifiers.Contains(k);
+    public static bool IsStructuralClassifier(ElementKind k) => StructuralClassifiers.Contains(k);
+    public static bool IsActivityNode(ElementKind k) => ActivityNodes.Contains(k);
+    public static bool IsVertex(ElementKind k) => Vertices.Contains(k);
+    public static bool NeedsName(ElementKind k) => !IsRelationship(k) && !Anonymous.Contains(k) && k != ElementKind.Model;
+    public static bool IsNamespace(ElementKind k) => k is ElementKind.Model or ElementKind.Package or ElementKind.Profile || IsClassifier(k) || k == ElementKind.State;
+    public static bool IsTypedFeature(ElementKind k) => k is ElementKind.Property or ElementKind.Port or ElementKind.Lifeline or ElementKind.ObjectNode or ElementKind.InputPin or ElementKind.OutputPin;
+    public static bool IsBehavior(ElementKind k) => k is ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction;
+    public static bool IsPin(ElementKind k) => k is ElementKind.InputPin or ElementKind.OutputPin;
+
+    public static IEnumerable<ElementKind> ElementKinds => Enum.GetValues<ElementKind>().Where(k => !IsRelationship(k) && k != ElementKind.Diagram);
+    public static IEnumerable<ElementKind> RelationshipKinds => Enum.GetValues<ElementKind>().Where(IsRelationship);
+
+    /// <summary>May an element of <paramref name="child"/> kind be owned by <paramref name="owner"/>?</summary>
+    public static bool CanOwn(ElementKind owner, ElementKind child)
+    {
+        if (child == ElementKind.Model) return false;
+        if (child == ElementKind.Diagram) return IsNamespace(owner);
+        if (child == ElementKind.Comment) return true;
+        if (IsRelationship(child)) return owner is ElementKind.Model or ElementKind.Package || IsClassifier(owner) || IsVertex(owner);
+
+        return owner switch
+        {
+            ElementKind.Model or ElementKind.Package =>
+                child is ElementKind.Package || IsClassifier(child) && child != ElementKind.Stereotype || PackageMembers.Contains(child),
+            ElementKind.Profile => child is ElementKind.Stereotype or ElementKind.Enumeration or ElementKind.Package,
+            ElementKind.Stereotype => child == ElementKind.TagDefinition,
+            ElementKind.Enumeration => child is ElementKind.EnumerationLiteral or ElementKind.Operation,
+            ElementKind.Interface or ElementKind.InterfaceBlock => child is ElementKind.Property or ElementKind.Operation or ElementKind.Port,
+            ElementKind.Class or ElementKind.Block or ElementKind.Component or ElementKind.ConstraintBlock or ElementKind.DataType or ElementKind.ValueType =>
+                child is ElementKind.Property or ElementKind.Operation or ElementKind.Port || IsStructuralClassifier(child) || IsBehavior(child),
+            ElementKind.Actor or ElementKind.UseCase => child is ElementKind.Property or ElementKind.Operation || IsBehavior(child),
+            ElementKind.Interaction => child is ElementKind.Lifeline or ElementKind.CombinedFragment,
+            ElementKind.Requirement => child is ElementKind.Requirement,  // requirement containment
+            ElementKind.TestCase => child is ElementKind.Activity,
+            ElementKind.Activity => IsActivityNode(child) && !IsPin(child) || child == ElementKind.Partition,
+            ElementKind.Action => IsPin(child),
+            ElementKind.StateMachine => IsVertex(child),
+            ElementKind.State => IsVertex(child),
+            ElementKind.Table => child == ElementKind.Column,
+            _ => false,
+        };
+    }
+
+    /// <summary>Checks a relationship's end kinds. Returns null when valid, otherwise a reason.</summary>
+    public static string? CheckEnds(ElementKind rel, ElementKind source, ElementKind target)
+    {
+        bool req(ElementKind k) => k == ElementKind.Requirement;
+        return rel switch
+        {
+            ElementKind.Satisfy => req(target) && !req(source) ? null : "Satisfy must go from a design element to a Requirement",
+            ElementKind.Verify => req(target) ? null : "Verify must target a Requirement",
+            ElementKind.DeriveReqt or ElementKind.Copy => req(source) && req(target) ? null : $"{rel} must connect two Requirements",
+            ElementKind.Include or ElementKind.Extend => source == ElementKind.UseCase && target == ElementKind.UseCase ? null : $"{rel} must connect two Use Cases",
+            ElementKind.Generalization => source == target && IsClassifier(source) ? null : "Generalization must connect two classifiers of the same kind",
+            ElementKind.Realization => IsClassifier(source) && target is ElementKind.Interface or ElementKind.InterfaceBlock ? null : "Realization must target an Interface",
+            ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation =>
+                IsClassifier(source) && IsClassifier(target) ? null : $"{rel} must connect two classifiers",
+            ElementKind.Transition => IsVertex(source) && IsVertex(target) && source != ElementKind.FinalState && target != ElementKind.InitialState
+                ? null : "Transition must connect states (not out of a final state, not into an initial state)",
+            ElementKind.ControlFlow or ElementKind.ObjectFlow =>
+                IsActivityNode(source) && IsActivityNode(target) && source != ElementKind.ActivityFinalNode && target != ElementKind.InitialNode
+                ? null : $"{rel} must connect activity nodes (not out of a final node, not into an initial node)",
+            ElementKind.Connector => source is ElementKind.Property or ElementKind.Port && target is ElementKind.Property or ElementKind.Port
+                ? null : "Connector must connect parts or ports",
+            ElementKind.Binding => source == ElementKind.Property && target == ElementKind.Property ? null : "Binding connectors connect value properties and constraint parameters",
+            ElementKind.Message => source == ElementKind.Lifeline && target == ElementKind.Lifeline ? null : "Message must connect two lifelines",
+            ElementKind.BpmnFlow => source is ElementKind.BpmnNode or ElementKind.BpmnPool && target is ElementKind.BpmnNode or ElementKind.BpmnPool ? null : "BPMN flows connect BPMN elements",
+            ElementKind.ArchiRelation => source == ElementKind.ArchiElement && target == ElementKind.ArchiElement ? null : "ArchiMate relationships connect ArchiMate elements",
+            ElementKind.ForeignKey => source == ElementKind.Table && target == ElementKind.Table ? null : "Foreign keys connect two tables",
+            _ => null, // Dependency, Refine, Trace, Allocate: any to any
+        };
+    }
+
+    public static IReadOnlyList<PaletteItem> PaletteItems(DiagramType t) => t switch
+    {
+        DiagramType.Bpmn =>
+        [
+            new(ElementKind.BpmnPool, Label: "Pool"), new(ElementKind.BpmnLane, Label: "Lane"),
+            new(ElementKind.BpmnNode, "startEvent"), new(ElementKind.BpmnNode, "task"), new(ElementKind.BpmnNode, "userTask"),
+            new(ElementKind.BpmnNode, "serviceTask"), new(ElementKind.BpmnNode, "subProcess"), new(ElementKind.BpmnNode, "exclusiveGateway"),
+            new(ElementKind.BpmnNode, "parallelGateway"), new(ElementKind.BpmnNode, "intermediateEvent"), new(ElementKind.BpmnNode, "timerEvent"),
+            new(ElementKind.BpmnNode, "endEvent"), new(ElementKind.BpmnNode, "dataObject"), new(ElementKind.BpmnNode, "dataStore"),
+            new(ElementKind.Comment),
+        ],
+        DiagramType.ArchiMate => Subtypes.ArchiElements.Select(s => new PaletteItem(ElementKind.ArchiElement, s)).Append(new(ElementKind.Comment)).ToList(),
+        DiagramType.Whiteboard => GeneralItems.Append(new(ElementKind.Comment, Label: "Sticky note")).ToList(),
+        _ => PaletteNodes(t).Select(k => new PaletteItem(k)).ToList(),
+    };
+
+    public static IReadOnlyList<PaletteItem> PaletteLinks(DiagramType t) => t switch
+    {
+        DiagramType.Bpmn => [new(ElementKind.BpmnFlow, "sequence"), new(ElementKind.BpmnFlow, "message"), new(ElementKind.BpmnFlow, "association")],
+        DiagramType.ArchiMate => Subtypes.ArchiRelations.Select(s => new PaletteItem(ElementKind.ArchiRelation, s)).ToList(),
+        DiagramType.Whiteboard => GeneralLinks,
+        _ => PaletteEdges(t).Select(k => new PaletteItem(k)).ToList(),
+    };
+
+    /// <summary>Free shapes offered on every diagram (the "General" section of the shapes panel).</summary>
+    public static readonly IReadOnlyList<PaletteItem> GeneralItems = Subtypes.Shapes.Select(s => new PaletteItem(ElementKind.Shape, s)).ToList();
+
+    /// <summary>Plain connectors offered on every diagram.</summary>
+    public static readonly IReadOnlyList<PaletteItem> GeneralLinks = Subtypes.Lines.Select(s => new PaletteItem(ElementKind.Line, s)).ToList();
+
+    public static IReadOnlyList<ElementKind> PaletteNodes(DiagramType t) => t switch
+    {
+        DiagramType.Class => [ElementKind.Package, ElementKind.Class, ElementKind.Interface, ElementKind.DataType, ElementKind.Enumeration, ElementKind.Component, ElementKind.Comment],
+        DiagramType.BlockDefinition => [ElementKind.Package, ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Enumeration, ElementKind.Actor, ElementKind.Comment],
+        DiagramType.InternalBlock => [ElementKind.Property, ElementKind.Port, ElementKind.Comment],
+        DiagramType.Parametric => [ElementKind.Property, ElementKind.Comment],
+        DiagramType.Requirement => [ElementKind.Requirement, ElementKind.TestCase, ElementKind.Block, ElementKind.UseCase, ElementKind.Comment],
+        DiagramType.UseCase => [ElementKind.Actor, ElementKind.UseCase, ElementKind.Block, ElementKind.Package, ElementKind.Comment],
+        DiagramType.Activity => [ElementKind.Action, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
+                                 ElementKind.Partition, ElementKind.ObjectNode, ElementKind.InputPin, ElementKind.OutputPin, ElementKind.Comment],
+        DiagramType.StateMachine => [ElementKind.State, ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment],
+        DiagramType.Package => [ElementKind.Package, ElementKind.Profile, ElementKind.Stereotype, ElementKind.Comment],
+        DiagramType.Sequence => [ElementKind.Lifeline, ElementKind.CombinedFragment, ElementKind.Comment],
+        DiagramType.Database => [ElementKind.Table, ElementKind.Comment],
+        _ => [],
+    };
+
+    public static IReadOnlyList<ElementKind> PaletteEdges(DiagramType t) => t switch
+    {
+        DiagramType.Class => [ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization, ElementKind.Realization, ElementKind.Dependency],
+        DiagramType.BlockDefinition => [ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization, ElementKind.Realization, ElementKind.Dependency, ElementKind.Allocate],
+        DiagramType.InternalBlock => [ElementKind.Connector, ElementKind.ObjectFlow, ElementKind.Allocate],
+        DiagramType.Parametric => [ElementKind.Binding],
+        DiagramType.Requirement => [ElementKind.DeriveReqt, ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.Trace, ElementKind.Copy],
+        DiagramType.UseCase => [ElementKind.Association, ElementKind.Include, ElementKind.Extend, ElementKind.Generalization],
+        DiagramType.Activity => [ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate],
+        DiagramType.StateMachine => [ElementKind.Transition],
+        DiagramType.Package => [ElementKind.Dependency, ElementKind.Generalization],
+        DiagramType.Sequence => [ElementKind.Message],
+        DiagramType.Database => [ElementKind.ForeignKey],
+        _ => [],
+    };
+
+    /// <summary>Which element kinds may own a diagram of this type ("context").</summary>
+    public static bool IsValidDiagramContext(DiagramType t, ElementKind owner) => t switch
+    {
+        DiagramType.InternalBlock or DiagramType.Parametric => owner is ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.ConstraintBlock,
+        DiagramType.Activity => owner == ElementKind.Activity,
+        DiagramType.StateMachine => owner == ElementKind.StateMachine,
+        DiagramType.Sequence => owner == ElementKind.Interaction,
+        DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard => owner is ElementKind.Model or ElementKind.Package,
+        _ => IsNamespace(owner),
+    };
+
+    public static string DiagramAbbreviation(DiagramType t) => t switch
+    {
+        DiagramType.Class => "class",
+        DiagramType.BlockDefinition => "bdd",
+        DiagramType.InternalBlock => "ibd",
+        DiagramType.Parametric => "par",
+        DiagramType.Requirement => "req",
+        DiagramType.UseCase => "uc",
+        DiagramType.Activity => "act",
+        DiagramType.StateMachine => "stm",
+        DiagramType.Package => "pkg",
+        DiagramType.Sequence => "sd",
+        DiagramType.Bpmn => "bpmn",
+        DiagramType.ArchiMate => "archi",
+        DiagramType.Database => "erd",
+        DiagramType.Whiteboard => "board",
+        _ => "diagram",
+    };
+
+    public static string DisplayName(ElementKind k) => k switch
+    {
+        ElementKind.InterfaceBlock => "Interface Block",
+        ElementKind.CombinedFragment => "Fragment",
+        ElementKind.ValueType => "Value Type",
+        ElementKind.ConstraintBlock => "Constraint Block",
+        ElementKind.TestCase => "Test Case",
+        ElementKind.UseCase => "Use Case",
+        ElementKind.InitialNode => "Initial Node",
+        ElementKind.ActivityFinalNode => "Final Node",
+        ElementKind.DecisionNode => "Decision",
+        ElementKind.ForkNode => "Fork/Join",
+        ElementKind.StateMachine => "State Machine",
+        ElementKind.InitialState => "Initial",
+        ElementKind.FinalState => "Final State",
+        ElementKind.EnumerationLiteral => "Literal",
+        ElementKind.DataType => "Data Type",
+        ElementKind.DeriveReqt => "Derive",
+        ElementKind.ControlFlow => "Control Flow",
+        ElementKind.ObjectFlow => "Object Flow",
+        ElementKind.InputPin => "Input Pin",
+        ElementKind.OutputPin => "Output Pin",
+        ElementKind.ObjectNode => "Object Node",
+        ElementKind.Partition => "Swimlane",
+        ElementKind.TagDefinition => "Tag Definition",
+        ElementKind.BpmnPool => "Pool",
+        ElementKind.BpmnLane => "Lane",
+        ElementKind.BpmnNode => "BPMN Element",
+        ElementKind.BpmnFlow => "BPMN Flow",
+        ElementKind.ArchiElement => "ArchiMate Element",
+        ElementKind.ArchiRelation => "ArchiMate Relationship",
+        ElementKind.ForeignKey => "Foreign Key",
+        ElementKind.Binding => "Binding Connector",
+        ElementKind.Line => "Line",
+        _ => k.ToString(),
+    };
+
+    public static string DisplayName(DiagramType t) => t switch
+    {
+        DiagramType.BlockDefinition => "Block Definition Diagram",
+        DiagramType.InternalBlock => "Internal Block Diagram",
+        DiagramType.Parametric => "Parametric Diagram",
+        DiagramType.UseCase => "Use Case Diagram",
+        DiagramType.StateMachine => "State Machine Diagram",
+        DiagramType.Sequence => "Sequence Diagram",
+        DiagramType.Bpmn => "BPMN Process Diagram",
+        DiagramType.ArchiMate => "ArchiMate View",
+        DiagramType.Database => "Entity-Relationship Diagram",
+        DiagramType.Whiteboard => "Whiteboard",
+        _ => $"{t} Diagram",
+    };
+
+    /// <summary>The «keyword» shown above a node's name, if any.</summary>
+    public static string? Keyword(ElementKind k) => k switch
+    {
+        ElementKind.Block => "block",
+        ElementKind.InterfaceBlock => "interfaceBlock",
+        ElementKind.ValueType => "valueType",
+        ElementKind.ConstraintBlock => "constraint",
+        ElementKind.Requirement => "requirement",
+        ElementKind.TestCase => "testCase",
+        ElementKind.Interface => "interface",
+        ElementKind.Enumeration => "enumeration",
+        ElementKind.DataType => "dataType",
+        ElementKind.Component => "component",
+        ElementKind.Activity => "activity",
+        ElementKind.StateMachine => "stateMachine",
+        ElementKind.Interaction => "interaction",
+        ElementKind.Profile => "profile",
+        ElementKind.Stereotype => "stereotype",
+        ElementKind.Table => "table",
+        ElementKind.ObjectNode => "centralBuffer",
+        _ => null,
+    };
+
+    public static NodeShape Shape(ElementKind k) => k switch
+    {
+        ElementKind.Actor => NodeShape.StickFigure,
+        ElementKind.UseCase => NodeShape.Ellipse,
+        ElementKind.Package or ElementKind.Model or ElementKind.Profile => NodeShape.Folder,
+        ElementKind.Comment => NodeShape.Note,
+        ElementKind.Action or ElementKind.State => NodeShape.Rounded,
+        ElementKind.InitialNode or ElementKind.InitialState => NodeShape.FilledCircle,
+        ElementKind.ActivityFinalNode or ElementKind.FinalState => NodeShape.BullsEye,
+        ElementKind.DecisionNode => NodeShape.Diamond,
+        ElementKind.ForkNode => NodeShape.Bar,
+        ElementKind.Port or ElementKind.InputPin or ElementKind.OutputPin => NodeShape.SmallSquare,
+        ElementKind.Lifeline => NodeShape.Lifeline,
+        ElementKind.CombinedFragment => NodeShape.Fragment,
+        ElementKind.Partition => NodeShape.Swimlane,
+        ElementKind.BpmnPool or ElementKind.BpmnLane => NodeShape.Pool,
+        _ => NodeShape.Rectangle,
+    };
+
+    public static (double W, double H) DefaultSize(ElementKind k) => Shape(k) switch
+    {
+        NodeShape.StickFigure => (60, 90),
+        NodeShape.Ellipse => (150, 70),
+        NodeShape.FilledCircle or NodeShape.BullsEye => (28, 28),
+        NodeShape.Diamond => (40, 40),
+        NodeShape.Bar => (100, 8),
+        NodeShape.SmallSquare => (16, 16),
+        NodeShape.Rounded => (130, 56),
+        NodeShape.Note => (160, 70),
+        NodeShape.Folder => (160, 100),
+        NodeShape.Lifeline => (150, 380),
+        NodeShape.Fragment => (380, 120),
+        NodeShape.Swimlane => (240, 460),
+        NodeShape.Pool when k == ElementKind.BpmnLane => (640, 140),
+        NodeShape.Pool => (700, 260),
+        _ when k == ElementKind.Requirement => (220, 120),
+        _ when k is ElementKind.Property or ElementKind.ObjectNode => (160, 60),
+        _ when k == ElementKind.ArchiElement => (150, 70),
+        _ when k == ElementKind.Table => (200, 120),
+        _ => (180, 110),
+    };
+
+    public static EdgeStyle Style(ElementKind rel) => rel switch
+    {
+        ElementKind.Association => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Composition => new(false, ArrowHead.None, ArrowHead.FilledDiamond, null),
+        ElementKind.Aggregation => new(false, ArrowHead.None, ArrowHead.HollowDiamond, null),
+        ElementKind.Generalization => new(false, ArrowHead.HollowTriangle, ArrowHead.None, null),
+        ElementKind.Realization => new(true, ArrowHead.HollowTriangle, ArrowHead.None, null),
+        ElementKind.Dependency => new(true, ArrowHead.Open, ArrowHead.None, null),
+        ElementKind.Satisfy => new(true, ArrowHead.Open, ArrowHead.None, "satisfy"),
+        ElementKind.Verify => new(true, ArrowHead.Open, ArrowHead.None, "verify"),
+        ElementKind.Refine => new(true, ArrowHead.Open, ArrowHead.None, "refine"),
+        ElementKind.Trace => new(true, ArrowHead.Open, ArrowHead.None, "trace"),
+        ElementKind.DeriveReqt => new(true, ArrowHead.Open, ArrowHead.None, "deriveReqt"),
+        ElementKind.Copy => new(true, ArrowHead.Open, ArrowHead.None, "copy"),
+        ElementKind.Include => new(true, ArrowHead.Open, ArrowHead.None, "include"),
+        ElementKind.Extend => new(true, ArrowHead.Open, ArrowHead.None, "extend"),
+        ElementKind.Allocate => new(true, ArrowHead.Open, ArrowHead.None, "allocate"),
+        ElementKind.Transition or ElementKind.ControlFlow => new(false, ArrowHead.Open, ArrowHead.None, null),
+        ElementKind.ObjectFlow => new(true, ArrowHead.Open, ArrowHead.None, null),
+        ElementKind.Connector => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Binding => new(false, ArrowHead.None, ArrowHead.None, "equal"),
+        ElementKind.Message => new(false, ArrowHead.Filled, ArrowHead.None, null),
+        ElementKind.ForeignKey => new(false, ArrowHead.Bar, ArrowHead.CrowsFoot, null),
+        _ => new(false, ArrowHead.None, ArrowHead.None, null),
+    };
+
+    /// <summary>Editable fields shown in the property inspector, per kind.</summary>
+    public static IReadOnlyList<string> EditableFields(ElementKind k)
+    {
+        var f = new List<string>();
+        if (k is not (ElementKind.Comment or ElementKind.CombinedFragment)) f.Add(FieldKeys.Name);
+        if (k is ElementKind.BpmnNode or ElementKind.ArchiElement or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.Shape or ElementKind.Line) f.Add(FieldKeys.Subtype);
+        if (IsClassifier(k) && k is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype)) f.Add(FieldKeys.IsAbstract);
+        if (IsClassifier(k) && k != ElementKind.Table || k is ElementKind.Property or ElementKind.Operation or ElementKind.Port) f.Add(FieldKeys.Visibility);
+        if (IsTypedFeature(k)) { f.Add(FieldKeys.Type); if (k != ElementKind.Lifeline) f.Add(FieldKeys.Multiplicity); }
+        if (k == ElementKind.Message) { f.Add(FieldKeys.MessageSort); f.Add(FieldKeys.Signature); }
+        if (k == ElementKind.CombinedFragment) { f.Add(FieldKeys.Operator); f.Add(FieldKeys.Guard); }
+        if (k == ElementKind.Property) f.Add(FieldKeys.DefaultValue);
+        if (k == ElementKind.Port) { f.Add(FieldKeys.Direction); f.Add(FieldKeys.PortKind); }
+        if (k == ElementKind.Connector) { f.Add(FieldKeys.ItemFlow); f.Add(FieldKeys.FlowDirection); }
+        if (k == ElementKind.Operation) f.Add(FieldKeys.Signature);
+        if (k == ElementKind.Requirement) { f.Add(FieldKeys.RequirementId); f.Add(FieldKeys.Text); }
+        if (k == ElementKind.Transition) { f.Add(FieldKeys.Guard); f.Add(FieldKeys.Effect); }
+        if (k is ElementKind.ControlFlow or ElementKind.ObjectFlow) f.Add(FieldKeys.Guard);
+        if (k == ElementKind.Action) f.Add(FieldKeys.Behavior);
+        if (k == ElementKind.Partition) f.Add(FieldKeys.Represents);
+        if (k == ElementKind.State) { f.Add(FieldKeys.Entry); f.Add(FieldKeys.DoActivity); f.Add(FieldKeys.Exit); }
+        if (k is ElementKind.ConstraintBlock or ElementKind.Action or ElementKind.Comment) f.Add(FieldKeys.Body);
+        if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation) f.Add(FieldKeys.Multiplicity);
+        if (k == ElementKind.Stereotype) { f.Add(FieldKeys.Metaclass); f.Add(FieldKeys.Color); }
+        if (k == ElementKind.TagDefinition) { f.Add(FieldKeys.TagType); f.Add(FieldKeys.TagValues); f.Add(FieldKeys.DefaultValue); }
+        if (k == ElementKind.Column) { f.Add(FieldKeys.SqlType); f.Add(FieldKeys.PrimaryKey); f.Add(FieldKeys.Nullable); f.Add(FieldKeys.Unique); f.Add(FieldKeys.DefaultValue); }
+        if (k == ElementKind.ForeignKey) { f.Add(FieldKeys.FkColumns); f.Add(FieldKeys.RefColumns); }
+        f.Add(FieldKeys.Stereotypes);
+        f.Add(FieldKeys.Documentation);
+        return f;
+    }
+
+    public static readonly IReadOnlyList<string> PrimitiveTypes = ["Boolean", "Integer", "Real", "String", "UnlimitedNatural"];
+}

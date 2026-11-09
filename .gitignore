@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+*.meridian.tmp
+App_Data/
+artifacts/
+.DS_Store
+.claude/
+# Local dev settings hold test passwords: copy appsettings.Development.example.json instead.
+src/Meridian.Web/appsettings.Development.json

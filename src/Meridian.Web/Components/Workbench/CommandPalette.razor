@@ -1,0 +1,98 @@
+@implements IDisposable
+@inject IJSRuntime JS
+
+@if (Open)
+{
+    <div class="cmdp-backdrop" @onclick="Close"></div>
+    <div class="cmdp">
+        <div class="cmdp-input">
+            <MudIcon Icon="@Icons.Material.Outlined.Search" Style="font-size:18px; color:var(--text-3)" />
+            <input @ref="_input" value="@_query" @oninput="e => { _query = e.Value?.ToString() ?? string.Empty; _index = 0; }" @onkeydown="Key" placeholder="Type a command, diagram or element…" />
+            <span class="kbd">esc</span>
+        </div>
+        <div class="cmdp-list">
+            @{ var items = Filtered().Take(60).ToList(); }
+            @for (var i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                var idx = i;
+                <div class="cmdp-item @(idx == _index ? "on" : "")" @onmouseenter="() => _index = idx" @onclick="() => Run(item)">
+                    <MudIcon Icon="@item.Icon" Style="font-size:17px; color:var(--text-3)" />
+                    <span class="title">@item.Title</span>
+                    <span class="group">@item.Group</span>
+                </div>
+            }
+            @if (items.Count == 0) { <div class="cmdp-empty">No matches</div> }
+        </div>
+    </div>
+}
+
+@code {
+    public sealed record Command(string Title, string Group, string Icon, Func<Task> Action);
+
+    [Parameter] public Func<IEnumerable<Command>> Source { get; set; } = () => [];
+
+    public bool Open { get; private set; }
+    private string _query = "";
+    private int _index;
+    private ElementReference _input;
+    private List<Command> _commands = new();
+
+    public async Task Show()
+    {
+        _commands = Source().ToList();
+        _query = "";
+        _index = 0;
+        Open = true;
+        StateHasChanged();
+        await Task.Yield();
+        await JS.InvokeVoidAsync("meridian.select", _input);
+    }
+
+    private void Close() { Open = false; }
+
+    /// <summary>Subsequence fuzzy match: "nbdd" finds "New Block Definition Diagram"; prefix and word starts rank higher.</summary>
+    private IEnumerable<Command> Filtered()
+    {
+        if (string.IsNullOrWhiteSpace(_query)) return _commands.Where(c => c.Group is "Command" or "Diagram");
+        var q = _query.Trim().ToLowerInvariant();
+        return _commands.Select(c => (c, score: Score(c.Title.ToLowerInvariant(), q))).Where(x => x.score > 0).OrderByDescending(x => x.score).ThenBy(x => x.c.Title.Length).Select(x => x.c);
+    }
+
+    private static int Score(string text, string q)
+    {
+        if (text.Contains(q)) return 1000 - text.IndexOf(q) + (text.StartsWith(q) ? 500 : 0);
+        var ti = 0; var score = 0;
+        foreach (var ch in q)
+        {
+            if (ch == ' ') continue;
+            var found = text.IndexOf(ch, ti);
+            if (found < 0) return 0;
+            score += found == 0 || text[found - 1] == ' ' ? 10 : 1;
+            ti = found + 1;
+        }
+        return score;
+    }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        var count = Filtered().Take(60).Count();
+        switch (e.Key)
+        {
+            case "ArrowDown": _index = Math.Min(count - 1, _index + 1); break;
+            case "ArrowUp": _index = Math.Max(0, _index - 1); break;
+            case "Escape": Close(); break;
+            case "Enter":
+                if (Filtered().Skip(_index).FirstOrDefault() is { } c) await Run(c);
+                break;
+        }
+    }
+
+    private async Task Run(Command c)
+    {
+        Close();
+        await c.Action();
+    }
+
+    public void Dispose() { }
+}

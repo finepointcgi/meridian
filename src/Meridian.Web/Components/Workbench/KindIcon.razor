@@ -1,0 +1,16 @@
+<span class="kicon" style="background:@(UiKinds.Accent(Kind))22; color:@UiKinds.Accent(Kind)" title="@Metamodel.DisplayName(Kind)">
+    <MudIcon Icon="@(DiagramType is { } t ? UiKinds.DiagramIcon(t) : UiKinds.Icon(Kind))" />
+</span>
+
+@code {
+    [Parameter] public ElementKind Kind { get; set; }
+    [Parameter] public DiagramType? DiagramType { get; set; }
+
+    public static RenderFragment For(Element e) => builder =>
+    {
+        builder.OpenComponent<KindIcon>(0);
+        builder.AddAttribute(1, nameof(Kind), e.Kind);
+        builder.AddAttribute(2, nameof(DiagramType), (e as Diagram)?.DiagramType);
+        builder.CloseComponent();
+    };
+}

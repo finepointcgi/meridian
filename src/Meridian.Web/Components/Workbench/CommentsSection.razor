@@ -1,0 +1,74 @@
+@using Meridian.Data
+@inherits WorkspaceComponent
+@inject IMeridianStore Db
+
+@if (Ws.Session != null && ElementId != null)
+{
+    var thread = _all.Where(c => c.ElementId == ElementId).ToList();
+    <div class="section-title">Comments @(thread.Count > 0 ? $"({thread.Count(c => !c.Resolved)})" : "") <span class="grow"></span></div>
+    @foreach (var c in thread)
+    {
+        var comment = c;
+        <div class="comment @(comment.Resolved ? "resolved" : "")">
+            <div class="d-flex align-center gap-2">
+                <span class="avatar sm" style="background:@comment.Author.Color">@MembersDialog.Initials(comment.Author)</span>
+                <span style="font-weight:600; font-size:12px">@comment.Author.DisplayName</span>
+                <span style="font-size:11px; color:var(--text-3)">@comment.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                <span style="flex:1"></span>
+                <MudTooltip Text="@(comment.Resolved ? "Reopen" : "Resolve")">
+                    <MudIconButton Size="Size.Small" Icon="@(comment.Resolved ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.CheckCircle)" OnClick="() => Resolve(comment)" />
+                </MudTooltip>
+                @if (comment.Author.Id == Ws.User?.Id)
+                {
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Remove(comment)" />
+                }
+            </div>
+            <div class="body">@comment.Body</div>
+        </div>
+    }
+    <div class="d-flex gap-1 align-start">
+        <MudTextField T="string" @bind-Value="_draft" Placeholder="Add a comment…" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" AutoGrow="true" Immediate="true" />
+        <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary" Disabled="string.IsNullOrWhiteSpace(_draft)" OnClick="Post" Class="mt-1" />
+    </div>
+}
+
+@code {
+    [Parameter] public string? ElementId { get; set; }
+    private IReadOnlyList<CommentInfo> _all = [];
+    private string? _draft;
+    private int _loadedVersion = -1;
+    private Guid? _loadedProject;
+
+    protected override async Task OnParametersSetAsync() => await Refresh();
+
+    protected override void OnWorkspaceChanged() => _ = InvokeAsync(async () => { await Refresh(); StateHasChanged(); });
+
+    private async Task Refresh()
+    {
+        if (Ws.Session is null) { _all = []; return; }
+        if (_loadedVersion == Ws.CommentsVersion && _loadedProject == Ws.Session.ProjectId) return;
+        _loadedVersion = Ws.CommentsVersion;
+        _loadedProject = Ws.Session.ProjectId;
+        _all = await Db.ListCommentsAsync(Ws.Session.ProjectId);
+    }
+
+    private async Task Post()
+    {
+        if (Ws.Session is null || Ws.User is null || ElementId is null || string.IsNullOrWhiteSpace(_draft)) return;
+        await Db.AddCommentAsync(Ws.Session.ProjectId, ElementId, Ws.User.Id, _draft.Trim());
+        _draft = null;
+        Ws.Session.NotifyComments();
+    }
+
+    private async Task Resolve(CommentInfo c)
+    {
+        await Db.SetCommentResolvedAsync(c.Id, !c.Resolved);
+        Ws.Session?.NotifyComments();
+    }
+
+    private async Task Remove(CommentInfo c)
+    {
+        await Db.DeleteCommentAsync(c.Id);
+        Ws.Session?.NotifyComments();
+    }
+}

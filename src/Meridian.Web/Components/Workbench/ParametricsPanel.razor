@@ -1,0 +1,66 @@
+@using Meridian.Core.Analysis
+@using System.Globalization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="Block" @bind-Value="_blockId" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:240px"
+               ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
+        @foreach (var b in Blocks()) { <MudSelectItem Value="@b.Id">@b.DisplayName</MudSelectItem> }
+    </MudSelect>
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Functions" Disabled="_blockId == null" OnClick="Solve">Solve</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Save" Disabled="@(_result == null || Ws.ReadOnly)" OnClick="Store">Store results as tagged values</MudButton>
+    <MudText Typo="Typo.caption" Style="color:var(--text-3)">Value properties with a default are inputs; the rest are solved through the bound constraint equations.</MudText>
+</div>
+@if (_result != null)
+{
+    <table class="req-table" style="margin:0 12px 12px; width:calc(100% - 24px)">
+        <thead><tr><th>Value</th><th style="width:140px">Result</th><th style="width:90px">Kind</th><th>From</th></tr></thead>
+        <tbody>
+            @foreach (var v in _result.Values)
+            {
+                var value = v;
+                <tr @onclick="() => { if (value.Property != null) Shell.Navigate(value.Property); }">
+                    <td>@value.Name</td>
+                    <td style="font-variant-numeric:tabular-nums; font-weight:600; color:@(value.Computed ? "var(--accent-2)" : "var(--text)")">@(value.Value?.ToString("G6", CultureInfo.InvariantCulture) ?? "—")</td>
+                    <td style="color:var(--text-3)">@(value.Computed ? "computed" : value.Value != null ? "input" : "unknown")</td>
+                    <td style="color:var(--text-3); font-size:11.5px">@value.Source</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @foreach (var p in _result.Problems) { <div style="margin:0 14px 4px; color:var(--danger); font-size:12px">⚠ @p</div> }
+    @if (_result.Unsolved.Count > 0) { <div style="margin:0 14px 8px; color:var(--warn); font-size:12px">Not enough equations to determine: @string.Join(", ", _result.Unsolved)</div> }
+}
+
+@code {
+    private string? _blockId;
+    private ParametricResult? _result;
+
+    private IEnumerable<Element> Blocks() => Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Block or ElementKind.Class && Parametrics.ConstraintUsages(Ws.Model, e).Any()).OrderBy(e => e.Name);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _blockId ??= Blocks().FirstOrDefault()?.Id;
+    }
+
+    private void Solve()
+    {
+        if (Ws.Model.Find(_blockId) is not { } block) return;
+        _result = Parametrics.Solve(Ws.Model, block);
+        Ws.SetStatus(_result.Complete ? "Parametric solution complete" : "Parametric solution incomplete — see the panel");
+    }
+
+    private void Store()
+    {
+        if (_result == null) return;
+        try
+        {
+            using (Ws.Model.History.Transaction("Store parametric results"))
+                foreach (var v in _result.Values.Where(v => v.Computed && v.Property != null && v.Value != null))
+                    Ws.Model.Set(v.Property!, FieldKeys.TagPrefix + "computed", v.Value!.Value.ToString("G6", CultureInfo.InvariantCulture));
+            Ws.SetStatus("Stored computed values as the 'computed' tagged value");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}

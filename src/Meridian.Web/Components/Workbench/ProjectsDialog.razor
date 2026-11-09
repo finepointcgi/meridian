@@ -1,0 +1,85 @@
+@using Meridian.Data
+@inject IMeridianStore Db
+@inject Workspace Ws
+@inject IDialogService Dialogs
+@inject CollaborationHub Hub
+
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.FolderOpen" /><MudText Typo="Typo.h6">Projects</MudText></div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Style="opacity:.7">Stored in PostgreSQL · changes save automatically and sync live to everyone in the project</MudText>
+        <div class="d-flex gap-2 mt-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.NoteAdd" OnClick="@(() => MudDialog.Close(DialogResult.Ok("__new__")))">New project</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.DirectionsCar" OnClick="@(() => MudDialog.Close(DialogResult.Ok("__sample__")))">From sample</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => MudDialog.Close(DialogResult.Ok("__upload__")))">Import file</MudButton>
+        </div>
+        <MudTextField T="string" @bind-Value="_filter" Immediate="true" Placeholder="Filter projects…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Outlined.Search" Class="mt-3" />
+        <MudList T="string" Dense="true" Class="mt-2" Style="max-height:400px; overflow:auto">
+            @foreach (var p in _projects.Where(p => string.IsNullOrWhiteSpace(_filter) || p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)))
+            {
+                var project = p;
+                var live = Hub.Find(project.Id)?.Participants.Count ?? 0;
+                <MudListItem T="string" OnClick="@(() => MudDialog.Close(DialogResult.Ok(project.Id)))">
+                    <div class="d-flex align-center gap-3">
+                        <MudIcon Icon="@Icons.Material.Outlined.Description" Color="@(Ws.Session?.ProjectId == project.Id ? Color.Secondary : Color.Primary)" />
+                        <div style="flex:1; min-width:0">
+                            <div style="font-weight:600">@project.Name @if (Ws.Session?.ProjectId == project.Id) { <span style="font-weight:400; opacity:.6"> · open</span> }</div>
+                            <div style="font-size:11.5px; opacity:.65">
+                                @project.Role.ToString().ToLowerInvariant() · updated @project.UpdatedAt.ToLocalTime().ToString("MMM d, HH:mm")@(project.UpdatedBy != null ? $" by {project.UpdatedBy}" : "") · rev @project.Revision
+                                @if (live > 0) { <span style="color:#3fbf7f"> · @live online</span> }
+                            </div>
+                        </div>
+                        @if (project.Role == ProjectRole.Owner)
+                        {
+                            <span @onclick:stopPropagation="true" class="d-flex">
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(project)" />
+                            </span>
+                        }
+                    </div>
+                </MudListItem>
+            }
+            @if (_projects.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="pa-4" Style="opacity:.7">You have no projects yet — create one above.</MudText>
+            }
+        </MudList>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private IReadOnlyList<ProjectSummary> _projects = [];
+    private string? _filter;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _projects = Ws.User is null ? [] : await Db.ListProjectsAsync(Ws.User.Id);
+
+    private async Task Rename(ProjectSummary p)
+    {
+        var parameters = new DialogParameters<PromptDialog> { { x => x.Title, "Rename project" }, { x => x.Label, "Project name" }, { x => x.Value, p.Name } };
+        var r = await (await Dialogs.ShowAsync<PromptDialog>("Rename", parameters)).Result;
+        if (r is not { Canceled: false, Data: string name } || string.IsNullOrWhiteSpace(name)) return;
+        await Db.RenameProjectAsync(p.Id, name);
+        if (Hub.Find(p.Id) is { } s) s.Name = name.Trim();
+        await Reload();
+    }
+
+    private async Task Delete(ProjectSummary p)
+    {
+        if (Ws.Session?.ProjectId == p.Id || (Hub.Find(p.Id)?.Participants.Count ?? 0) > 0)
+        {
+            await Dialogs.ShowMessageBox("Project in use", "Close this project (and wait for collaborators to leave) before deleting it.");
+            return;
+        }
+        var ok = await Dialogs.ShowMessageBox("Delete project", $"Permanently delete “{p.Name}”, its version history and comments for everyone? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.DeleteProjectAsync(p.Id);
+        await Reload();
+    }
+}

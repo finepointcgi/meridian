@@ -1,0 +1,62 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-3 px-3 py-2">
+    <MudText Typo="Typo.body2" Style="color:#5a6372; flex:1">@Summary()</MudText>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="Add">New requirement</MudButton>
+</div>
+<MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="font-size:12.5px">
+    <thead>
+        <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th></tr>
+    </thead>
+    <tbody>
+        @foreach (var r in Rows())
+        {
+            var depth = r.AncestorsAndSelf().Skip(1).TakeWhile(a => a.Kind == ElementKind.Requirement).Count();
+            var leaf = !r.OwnedElements.Any(c => c.Kind == ElementKind.Requirement);
+            var sat = Ws.Model.Incoming(r, ElementKind.Satisfy).Select(x => x.Source).ToList();
+            var ver = Ws.Model.Incoming(r, ElementKind.Verify).Select(x => x.Source).ToList();
+            <tr @key="r.Id" style="@(ReferenceEquals(Ws.Selected, r) ? "background:#eef3fd" : "")" @onclick="() => Ws.Select(r)">
+                <td><MudTextField T="string" Value="@r.Get(FieldKeys.RequirementId)" ValueChanged="v => Ws.Model.Set(r, FieldKeys.RequirementId, v)" Underline="false" Margin="Margin.Dense" /></td>
+                <td style="padding-left:@(8 + depth * 14)px"><MudTextField T="string" Value="@r.Name" ValueChanged="v => Ws.Model.Set(r, FieldKeys.Name, v?.Trim())" Underline="false" Margin="Margin.Dense" /></td>
+                <td><MudTextField T="string" Value="@r.Get(FieldKeys.Text)" ValueChanged="v => Ws.Model.Set(r, FieldKeys.Text, v)" Underline="false" Margin="Margin.Dense" AutoGrow="true" Lines="1" MaxLines="5" /></td>
+                <td>
+                    @foreach (var s in sat) { <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(s)">@s.Name</span> }
+                    @if (sat.Count == 0 && leaf) { <span style="color:#c62828">not satisfied</span> }
+                </td>
+                <td>
+                    @foreach (var v in ver) { <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(v)">@v.Name</span> }
+                    @if (ver.Count == 0 && leaf) { <span style="color:#9a6700">not verified</span> }
+                </td>
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+@code {
+
+    private IEnumerable<Element> Rows()
+    {
+        // Depth-first so children follow their parent requirement.
+        IEnumerable<Element> Walk(Element e) => e.Kind == ElementKind.Requirement
+            ? new[] { e }.Concat(e.OwnedElements.Where(c => c.Kind == ElementKind.Requirement).OrderBy(c => c.Get(FieldKeys.RequirementId)).SelectMany(Walk))
+            : e.OwnedElements.Where(c => c.Kind is ElementKind.Requirement or ElementKind.Package).OrderBy(c => c.Kind).ThenBy(c => c.Get(FieldKeys.RequirementId)).SelectMany(Walk);
+        return Walk(Ws.Model.Root);
+    }
+
+    private string Summary()
+    {
+        var c = Traceability.Coverage(Ws.Model);
+        var n = Ws.Model.OfKind(ElementKind.Requirement).Count();
+        return n == 0 ? "No requirements yet — add one here, on a requirement diagram, or import a CSV."
+            : $"{n} requirements · {c.Satisfied}/{c.Total} leaf requirements satisfied ({c.SatisfiedRatio:P0}) · {c.Verified}/{c.Total} verified ({c.VerifiedRatio:P0})";
+    }
+
+    private void Add()
+    {
+        var owner = Ws.Selected is { Kind: ElementKind.Package or ElementKind.Requirement } s ? s
+            : Ws.Model.Root.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Package && p.Name.Contains("Requirement", StringComparison.OrdinalIgnoreCase)) ?? Ws.Model.Root;
+        var r = Ws.Model.Create(owner, ElementKind.Requirement);
+        Ws.Select(r);
+    }
+}

@@ -1,0 +1,68 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+<div class="card-header">
+    <MudIcon Icon="@Icons.Material.Outlined.Assignment" Style="font-size:15px" />
+    <span style="flex:1">Requirements</span>
+    <MudTooltip Text="New requirement"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" OnClick="Add" /></MudTooltip>
+</div>
+@{ var cov = Traceability.Coverage(Ws.Model); }
+<div class="px-3 pb-2" style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+    <div>
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-3)"><span>Satisfied</span><span>@cov.Satisfied/@cov.Total</span></div>
+        <MudProgressLinear Value="@(cov.SatisfiedRatio * 100)" Color="Color.Primary" Rounded="true" Size="Size.Small" Class="mt-1" />
+    </div>
+    <div>
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-3)"><span>Verified</span><span>@cov.Verified/@cov.Total</span></div>
+        <MudProgressLinear Value="@(cov.VerifiedRatio * 100)" Color="Color.Secondary" Rounded="true" Size="Size.Small" Class="mt-1" />
+    </div>
+</div>
+<div class="card-body">
+    <table class="req-table">
+        <thead><tr><th style="width:74px">Id</th><th>Requirement</th><th style="width:44px" title="Satisfied · Verified">S·V</th></tr></thead>
+        <tbody>
+            @foreach (var r in Rows())
+            {
+                var req = r.Element;
+                var leaf = !req.OwnedElements.Any(c => c.Kind == ElementKind.Requirement);
+                var sat = Ws.Model.Incoming(req, ElementKind.Satisfy).Any();
+                var ver = Ws.Model.Incoming(req, ElementKind.Verify).Any();
+                <tr class="@(ReferenceEquals(Ws.Selected, req) ? "sel" : "")" draggable="true" data-drag="@req.Id"
+                    @ondragstart="() => Ws.Dragging = req" @onclick="() => Ws.Select(req)" title="Drag onto a block to link it">
+                    <td><span class="req-id">@req.Get(FieldKeys.RequirementId)</span></td>
+                    <td style="padding-left:@(8 + r.Depth * 12)px">
+                        <div style="font-weight:500">@req.Name</div>
+                        <div class="req-text">@req.Get(FieldKeys.Text)</div>
+                    </td>
+                    <td style="white-space:nowrap">
+                        @if (leaf)
+                        {
+                            <span class="status-dot" style="background:@(sat ? "var(--ok)" : "var(--danger)")" title="@(sat ? "Satisfied" : "Not satisfied")"></span>
+                            <span class="status-dot" style="background:@(ver ? "var(--ok)" : "var(--warn)")" title="@(ver ? "Verified" : "Not verified")"></span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private sealed record Row(Element Element, int Depth);
+
+    private IEnumerable<Row> Rows()
+    {
+        IEnumerable<Row> Walk(Element e, int depth) => e.Kind == ElementKind.Requirement
+            ? new[] { new Row(e, depth) }.Concat(e.OwnedElements.Where(c => c.Kind == ElementKind.Requirement).OrderBy(c => c.Get(FieldKeys.RequirementId)).SelectMany(c => Walk(c, depth + 1)))
+            : e.OwnedElements.Where(c => c.Kind is ElementKind.Requirement or ElementKind.Package).OrderBy(c => c.Kind).ThenBy(c => c.Get(FieldKeys.RequirementId)).SelectMany(c => Walk(c, depth));
+        return Walk(Ws.Model.Root, 0);
+    }
+
+    private void Add()
+    {
+        var owner = Ws.Selected is { Kind: ElementKind.Package or ElementKind.Requirement } s ? s
+            : Ws.Model.Root.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Package && p.Name.Contains("Requirement", StringComparison.OrdinalIgnoreCase)) ?? Ws.Model.Root;
+        var r = Ws.Model.Create(owner, ElementKind.Requirement);
+        Ws.Select(r);
+    }
+}

@@ -1,0 +1,39 @@
+# Meridian development stack: PostgreSQL (system of record) + optional app container.
+#   docker compose up -d db            # database only (app runs with `dotnet run`)
+#   docker compose up -d --build       # database + app on http://localhost:8180
+services:
+  db:
+    image: postgres:17
+    container_name: meridian-postgres
+    environment:
+      POSTGRES_DB: meridian
+      POSTGRES_USER: meridian
+      POSTGRES_PASSWORD: meridian_dev
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - meridian-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meridian -d meridian"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    container_name: meridian-app
+    profiles: ["app"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Meridian: "Host=db;Port=5432;Database=meridian;Username=meridian;Password=meridian_dev"
+      ASPNETCORE_URLS: "http://+:8080"
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - meridian-data:/data
+
+volumes:
+  meridian-pg:
+  meridian-data:

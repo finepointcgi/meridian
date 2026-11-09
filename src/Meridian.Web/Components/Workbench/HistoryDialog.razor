@@ -1,0 +1,117 @@
+@using Meridian.Data
+@using Meridian.Core.Analysis
+@using Meridian.Serialization
+@inject IMeridianStore Db
+@inject Workspace Ws
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.History" /><MudText Typo="Typo.h6">Version history</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="d-flex gap-2 align-start mt-1">
+            <MudTextField T="string" @bind-Value="_message" Placeholder="Describe this version (e.g. 'Baseline for PDR')" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="Ws.ReadOnly" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-1" Disabled="@(Ws.ReadOnly || string.IsNullOrWhiteSpace(_message))" OnClick="Commit">Commit</MudButton>
+        </div>
+        <div style="display:grid; grid-template-columns: 300px 1fr; gap:14px; margin-top:12px; min-height:360px">
+            <MudList T="string" Dense="true" Style="max-height:440px; overflow:auto; border-right:1px solid var(--mud-palette-lines-default)">
+                @foreach (var v in _versions)
+                {
+                    var version = v;
+                    <MudListItem T="string" OnClick="() => Compare(version)" Style="@(_selected?.Id == version.Id ? "background:var(--mud-palette-action-default-hover)" : "")">
+                        <div>
+                            <div style="font-weight:600">v@(version.Number) · @version.Message</div>
+                            <div style="font-size:11.5px; opacity:.65">@version.Author · @version.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</div>
+                        </div>
+                    </MudListItem>
+                }
+                @if (_versions.Count == 0) { <MudText Typo="Typo.body2" Class="pa-3" Style="opacity:.7">No versions yet. Commit one to create a baseline you can compare against or restore.</MudText> }
+            </MudList>
+            <div style="max-height:440px; overflow:auto">
+                @if (_selected is null)
+                {
+                    <MudText Typo="Typo.body2" Style="opacity:.7">Select a version to compare it with the current model.</MudText>
+                }
+                else
+                {
+                    <div class="d-flex align-center gap-2 mb-2">
+                        <MudText Typo="Typo.subtitle2">Changes since v@_selected.Number (@(_diff?.Count ?? 0))</MudText>
+                        <MudSpacer />
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download" OnClick="DownloadSelected">Download</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Outlined.Restore" Disabled="Ws.ReadOnly" OnClick="Restore">Restore</MudButton>
+                    </div>
+                    @if (_diff is { Count: 0 }) { <MudText Typo="Typo.body2" Style="opacity:.7">No differences.</MudText> }
+                    @foreach (var d in _diff ?? [])
+                    {
+                        var color = d.Kind switch { DiffKind.Added => "#3fbf7f", DiffKind.Removed => "#ff6b6b", DiffKind.Moved => "#a283ff", _ => "#f0b429" };
+                        <div style="padding:6px 0; border-bottom:1px solid var(--mud-palette-lines-default)">
+                            <div class="d-flex align-center gap-2">
+                                <span style="font-size:10.5px; font-weight:700; color:@color; min-width:62px">@d.Kind.ToString().ToUpperInvariant()</span>
+                                <MudIcon Icon="@UiKinds.Icon(d.ElementKind)" Style="font-size:15px; opacity:.7" />
+                                <span style="font-weight:500">@d.Name</span>
+                                <span style="font-size:11.5px; opacity:.6">@d.Path</span>
+                            </div>
+                            @foreach (var f in d.Fields)
+                            {
+                                <div style="font-size:12px; margin-left:70px; opacity:.85"><b>@f.Key</b>: <span style="text-decoration:line-through; opacity:.6">@Short(f.Before)</span> → @Short(f.After)</div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    private IReadOnlyList<VersionInfo> _versions = [];
+    private VersionInfo? _selected;
+    private IReadOnlyList<ElementDiff>? _diff;
+    private string? _message;
+    private string? _selectedJson;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _versions = Ws.Session is null ? [] : await Db.ListVersionsAsync(Ws.Session.ProjectId);
+
+    private static string Short(string? s) => s is null ? "∅" : s.Length > 60 ? s[..60] + "…" : s;
+
+    private async Task Commit()
+    {
+        if (Ws.Session is null || Ws.User is null) return;
+        await Ws.Session.PersistAsync();
+        var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, _message!.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
+        Snackbar.Add($"Committed version {n}", Severity.Success);
+        _message = null;
+        await Reload();
+    }
+
+    private async Task Compare(VersionInfo v)
+    {
+        if (Ws.Session is null) return;
+        _selected = v;
+        _selectedJson = await Db.LoadVersionAsync(Ws.Session.ProjectId, v.Id);
+        _diff = _selectedJson is null ? [] : ModelDiff.Compare(ProjectFile.Deserialize(_selectedJson), Ws.Model);
+    }
+
+    private async Task DownloadSelected()
+    {
+        if (_selectedJson is null || _selected is null) return;
+        await JS.InvokeVoidAsync("meridian.download", $"{Ws.Session?.Name} v{_selected.Number}.meridian", "application/json",
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_selectedJson)));
+    }
+
+    private async Task Restore()
+    {
+        if (_selectedJson is null || _selected is null || Ws.Session is null || Ws.User is null) return;
+        var ok = await Dialogs.ShowMessageBox("Restore version", $"Replace the current model with v{_selected.Number} for everyone in the project? The current state is committed as a version first, so this can be undone by restoring it.", yesText: "Restore", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.CommitVersionAsync(Ws.Session.ProjectId, $"Before restoring v{_selected.Number}", ProjectFile.Serialize(Ws.Model), Ws.User.Id);
+        Ws.Session.Reset(_selectedJson, Ws.User.Id);
+        Snackbar.Add($"Restored v{_selected.Number}", Severity.Success);
+        MudDialog.Close();
+    }
+}

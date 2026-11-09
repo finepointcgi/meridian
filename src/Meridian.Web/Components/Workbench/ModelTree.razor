@@ -1,0 +1,232 @@
+@inherits WorkspaceComponent
+
+<div class="card-header">
+    <MudIcon Icon="@Icons.Material.Outlined.AccountTree" Style="font-size:15px" />
+    <span style="flex:1">Model explorer</span>
+    <MudTooltip Text="@(ShowRelationships ? "Hide relationships" : "Show relationships")">
+        <MudIconButton Size="Size.Small" Icon="@(ShowRelationships ? Icons.Material.Outlined.Link : Icons.Material.Outlined.LinkOff)" OnClick="ToggleRelationships" />
+    </MudTooltip>
+    <MudTooltip Text="Collapse all"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.UnfoldLess" OnClick="CollapseAll" /></MudTooltip>
+</div>
+<div class="px-3 pb-2">
+    <MudTextField T="string" @ref="_search" Value="_query" ValueChanged="Search" Immediate="true" DebounceInterval="120"
+                  Placeholder="Search elements…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Outlined.Search" Clearable="true" />
+</div>
+<div class="chips">
+    @foreach (var f in Filters)
+    {
+        var filter = f;
+        <span class="chip @(_filter == filter.Name ? "on" : "")" @onclick="() => _filter = filter.Name">@filter.Name</span>
+    }
+</div>
+
+<div class="card-body">
+    @{ var favorites = Ws.FavoriteElements.ToList(); }
+    @if (favorites.Count > 0 && _hits == null)
+    {
+        <div class="section-label"><MudIcon Icon="@Icons.Material.Filled.Star" Style="font-size:13px; color:#f0b429" /> Favorites</div>
+        @foreach (var f in favorites) { @FlatItem(f) }
+        <div class="section-label">Model</div>
+    }
+
+    @if (_hits != null)
+    {
+        <div class="section-label">@_hits.Count result@(_hits.Count == 1 ? "" : "s")</div>
+        @foreach (var h in _hits) { @FlatItem(h) }
+    }
+    else if (_filter != "All")
+    {
+        var kinds = Filters.First(f => f.Name == _filter).Kinds;
+        var items = Ws.Model.AllElements.Where(e => kinds.Contains(e.Kind)).OrderBy(e => e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.RequirementId) : e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var e in items) { @FlatItem(e) }
+        if (items.Count == 0) { <div class="section-label" style="text-transform:none; letter-spacing:0">Nothing here yet.</div> }
+    }
+    else
+    {
+        <MudTreeView T="Element" Items="_items" SelectedValue="Ws.Selected" SelectedValueChanged="OnSelected" Dense="true" Hover="false" Style="padding:2px 0 12px">
+            <ItemTemplate>
+                <MudTreeViewItem T="Element" Value="context.Value" Items="context.Children" Expanded="context.Expanded"
+                                 ExpandedChanged="v => OnExpanded(context, v)" CanExpand="context.Expandable">
+                    <BodyContent Context="item">
+                        @{ var el = context.Value!; }
+                        <div class="row @(_dropTarget == el ? "drop-target" : "")" draggable="true" data-drag="@el.Id"
+                             @ondragstart="() => Ws.Dragging = el"
+                             @ondragenter="() => _dropTarget = el" @ondragenter:preventDefault="true" @ondragover:preventDefault="true"
+                             @ondragleave="() => { if (_dropTarget == el) _dropTarget = null; }"
+                             @ondrop="() => Drop(el)"
+                             @ondblclick="() => Shell.Activate(el)"
+                             @oncontextmenu="e => Context(e, el)" @oncontextmenu:preventDefault="true" @oncontextmenu:stopPropagation="true">
+                            @KindIcon.For(el)
+                            <span class="label">@context.Text</span>
+                            @if (el is Diagram d) { <span class="meta">@Metamodel.DiagramAbbreviation(d.DiagramType)</span> }
+                            @if (el.Kind != ElementKind.Model)
+                            {
+                                <span class="star @(Ws.Favorites.Contains(el.Id) ? "on" : "")" title="Favorite" @onclick="() => Ws.ToggleFavorite(el)" @onclick:stopPropagation="true">
+                                    <MudIcon Icon="@(Ws.Favorites.Contains(el.Id) ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)" Style="font-size:14px" />
+                                </span>
+                            }
+                        </div>
+                    </BodyContent>
+                </MudTreeViewItem>
+            </ItemTemplate>
+        </MudTreeView>
+    }
+</div>
+
+@code {
+    private static readonly (string Name, ElementKind[] Kinds)[] Filters =
+    [
+        ("All", []),
+        ("Diagrams", [ElementKind.Diagram]),
+        ("Requirements", [ElementKind.Requirement, ElementKind.TestCase]),
+        ("Structure", [ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Class, ElementKind.Interface, ElementKind.DataType, ElementKind.Enumeration, ElementKind.Component]),
+        ("Behavior", [ElementKind.Actor, ElementKind.UseCase, ElementKind.Activity, ElementKind.StateMachine]),
+    ];
+
+    private List<TreeItemData<Element>> _items = new();
+    private readonly HashSet<string> _expanded = new();
+    private int _builtVersion = -1;
+    private ModelRepository? _builtFor;
+    private string? _query;
+    private string _filter = "All";
+    private List<Element>? _hits;
+    private Element? _dropTarget;
+    private MudTextField<string>? _search;
+    public bool ShowRelationships { get; private set; }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Sync();
+    }
+
+    protected override void OnWorkspaceChanged() => Sync();
+
+    private void Sync()
+    {
+        if (!ReferenceEquals(_builtFor, Ws.Model))
+        {
+            _expanded.Clear();
+            _expanded.Add(Ws.Model.Root.Id);
+            foreach (var c in Ws.Model.Root.OwnedElements) _expanded.Add(c.Id);
+            _builtFor = Ws.Model;
+            _builtVersion = -1;
+        }
+        if (_builtVersion != Ws.Version) Rebuild();
+    }
+
+    public void Rebuild()
+    {
+        if (Ws.Selected != null) foreach (var a in Ws.Selected.AncestorsAndSelf().Skip(1)) _expanded.Add(a.Id);
+        _items = [Build(Ws.Model.Root)];
+        _builtVersion = Ws.Version;
+        if (_query is { Length: >= 2 }) _hits = Ws.Model.Search(_query).Take(150).ToList();
+    }
+
+    public Task FocusSearch() => _search?.FocusAsync().AsTask() ?? Task.CompletedTask;
+
+    private RenderFragment FlatItem(Element e) => __builder =>
+    {
+        <div class="flat-item @(ReferenceEquals(Ws.Selected, e) ? "sel" : "")" draggable="true" data-drag="@e.Id"
+             @ondragstart="() => Ws.Dragging = e" @onclick="() => Ws.Select(e)" @ondblclick="() => Shell.Activate(e)"
+             @oncontextmenu="ev => Context(ev, e)" @oncontextmenu:preventDefault="true">
+            @KindIcon.For(e)
+            <div style="min-width:0; flex:1">
+                <div class="row"><span class="label">@UiKinds.Label(Ws.Model, e)</span></div>
+                <div class="row"><span class="meta" style="margin:0">@(e.Owner?.QualifiedName ?? "")</span></div>
+            </div>
+        </div>
+    };
+
+    /// <summary>Children are only materialised for expanded branches, so huge models stay responsive.</summary>
+    private TreeItemData<Element> Build(Element e)
+    {
+        var expanded = _expanded.Contains(e.Id);
+        var hasChildren = Order(e).Any();
+        return new TreeItemData<Element>
+        {
+            Value = e,
+            Text = UiKinds.Label(Ws.Model, e),
+            Children = expanded && hasChildren ? Order(e).Select(Build).ToList() : hasChildren ? [] : null,
+            Expandable = hasChildren,
+            Expanded = expanded,
+        };
+    }
+
+    /// <summary>Diagrams, packages, features (model order), other elements (alphabetical), relationships.</summary>
+    private IEnumerable<Element> Order(Element e)
+    {
+        int Group(Element c) => c switch
+        {
+            Diagram => 0,
+            { Kind: ElementKind.Package } => 1,
+            Relationship => 4,
+            _ when Metamodel.IsTypedFeature(c.Kind) || c.Kind is ElementKind.Operation or ElementKind.EnumerationLiteral => 2,
+            _ => 3,
+        };
+        var behaviour = e.Kind is ElementKind.Activity or ElementKind.StateMachine;
+        return e.OwnedElements
+            .Where(c => ShowRelationships || c is not Relationship)
+            .GroupBy(Group).OrderBy(g => g.Key)
+            .SelectMany(g => g.Key == 2 || behaviour ? g.AsEnumerable()
+                : g.OrderBy(x => x.Kind == ElementKind.Requirement ? x.Get(FieldKeys.RequirementId) : x.Name, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void OnExpanded(TreeItemData<Element> item, bool expanded)
+    {
+        item.Expanded = expanded;
+        if (expanded)
+        {
+            _expanded.Add(item.Value!.Id);
+            if (item.Children is { Count: 0 }) item.Children = Order(item.Value!).Select(Build).ToList();
+        }
+        else _expanded.Remove(item.Value!.Id);
+    }
+
+    private void OnSelected(Element? e)
+    {
+        if (e != null && !ReferenceEquals(e, Ws.Selected)) Ws.Select(e);
+    }
+
+    private void Context(MouseEventArgs e, Element el)
+    {
+        Ws.Select(el);
+        Shell.ShowTreeMenu(el, e.ClientX, e.ClientY);
+    }
+
+    private void Drop(Element target)
+    {
+        _dropTarget = null;
+        var dragged = Ws.Dragging;
+        Ws.Dragging = null;
+        if (dragged == null || ReferenceEquals(dragged, target) || ReferenceEquals(dragged.Owner, target)) return;
+        try
+        {
+            Ws.Model.Move(dragged, target);
+            _expanded.Add(target.Id);
+            Ws.Select(dragged);
+            Ws.SetStatus($"Moved {dragged.DisplayName} into {target.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Search(string? q)
+    {
+        _query = q;
+        _hits = q is { Length: >= 2 } ? Ws.Model.Search(q.Trim()).Take(150).ToList() : null;
+    }
+
+    private void ToggleRelationships()
+    {
+        ShowRelationships = !ShowRelationships;
+        Rebuild();
+    }
+
+    private void CollapseAll()
+    {
+        _expanded.Clear();
+        _expanded.Add(Ws.Model.Root.Id);
+        Rebuild();
+    }
+}

@@ -1,0 +1,792 @@
+@using System.Globalization
+@using System.Text
+@using Meridian.Serialization
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject Workspace Ws
+
+<div class="canvas @(C.Tool != null ? "tool-active" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !Ws.ReadOnly ? "shapes-open" : "")"
+     tabindex="0" @ref="_canvas"
+     @onpointerdown="Down" @onpointermove="Move" @onpointerup="Up" @onpointerleave="Leave"
+     @onwheel="Wheel" @onkeydown="Key" @onkeyup="KeyUp"
+     @ondragenter:preventDefault="true" @ondragover:preventDefault="true" @ondrop="Drop">
+    <svg class="main" xmlns="http://www.w3.org/2000/svg">
+        @((MarkupString)Theme.Defs)
+        <g transform="translate(@F(C.PanX),@F(C.PanY)) scale(@F(C.Zoom))" font-size="12">
+            @((MarkupString)Body())
+            @Adorners()
+        </g>
+    </svg>
+
+    @* Shapes panel (draw.io style): search, sections, click to insert, drag to place. Collapses to an icon strip. *@
+    <div class="toolbox @(_shapesOpen ? "open" : "")" style="@(Ws.ReadOnly ? "display:none" : "")"
+         @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true" @onkeydown:stopPropagation="true">
+        @if (_shapesOpen)
+        {
+            <div class="shapes-head">
+                <input class="shapes-search" placeholder="Search shapes" value="@_shapeQuery" @oninput="e => _shapeQuery = e.Value?.ToString()" />
+                <MudTooltip Text="Collapse" Placement="Placement.Right">
+                    <button class="tool sm" @onclick="() => ShowShapes(false)"><MudIcon Icon="@Icons.Material.Outlined.KeyboardDoubleArrowLeft" /></button>
+                </MudTooltip>
+            </div>
+            <div class="shapes-body">
+                @foreach (var (title, items) in Sections())
+                {
+                    <div class="shapes-sec">@title</div>
+                    <div class="shapes-grid">
+                        @foreach (var it in items)
+                        {
+                            var item = it;
+                            var on = C.Tool == item.Kind && C.ToolSubtype == item.Subtype;
+                            var link = Metamodel.IsRelationship(item.Kind);
+                            <div class="tile @(on ? "on" : "")" draggable="@(link ? "false" : "true")" data-drag="palette"
+                                 title="@(link ? $"{item.Title}: click, then drag from one shape to another" : $"{item.Title}: click to add, or drag onto the canvas (Shift+click keeps the tool)")"
+                                 @ondragstart="() => _paletteDrag = item" @ondragend="() => _paletteDrag = null"
+                                 @onclick="e => TileClick(item, e)">
+                                @Thumb(item, on)
+                                <span>@item.Title</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <MudTooltip Text="Show shapes" Placement="Placement.Right">
+                <button class="tool" @onclick="() => ShowShapes(true)"><MudIcon Icon="@Icons.Material.Outlined.Category" /></button>
+            </MudTooltip>
+            <MudTooltip Text="Select (Esc)" Placement="Placement.Right">
+                <button class="tool @(C.Tool == null ? "on" : "")" @onclick="() => SetTool(null)"><MudIcon Icon="@Icons.Material.Outlined.NearMe" /></button>
+            </MudTooltip>
+            <div class="tsep"></div>
+            @foreach (var it in Metamodel.PaletteItems(C.Diagram.DiagramType).Concat(Metamodel.PaletteLinks(C.Diagram.DiagramType)))
+            {
+                var item = it;
+                var on = C.Tool == item.Kind && C.ToolSubtype == item.Subtype;
+                <MudTooltip Text="@item.Title" Placement="Placement.Right">
+                    <button class="tool @(on ? "on" : "")" draggable="@(Metamodel.IsRelationship(item.Kind) ? "false" : "true")" data-drag="palette"
+                            @ondragstart="() => _paletteDrag = item" @onclick="e => TileClick(item, e)">
+                        @Thumb(item, on)
+                    </button>
+                </MudTooltip>
+            }
+        }
+    </div>
+
+    @if (!Ws.ReadOnly && C.Tool == null && C.Current == DiagramController.Gesture.None && (C.SelectedNodes.Count > 0 || C.SelectedEdge != null)
+         && C.Editing == null && C.EditingEdge == null)
+    {
+        var nodes = C.SelectedNodes.Count > 0;
+        var shapes = C.SelectedNodes.Where(n => n.Element.Kind == ElementKind.Shape).ToList();
+        var line = C.SelectedEdge?.Relationship.Kind == ElementKind.Line;
+        <div class="selbar" @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+            @if (C.SelectedNodes.Count >= 2)
+            {
+                <span class="cnt">@C.SelectedNodes.Count selected</span>
+                @SelBtn("left", Icons.Material.Outlined.AlignHorizontalLeft, "Align left")
+                @SelBtn("center", Icons.Material.Outlined.AlignHorizontalCenter, "Align centers")
+                @SelBtn("right", Icons.Material.Outlined.AlignHorizontalRight, "Align right")
+                @SelBtn("top", Icons.Material.Outlined.AlignVerticalTop, "Align top")
+                @SelBtn("middle", Icons.Material.Outlined.AlignVerticalCenter, "Align middles")
+                @SelBtn("bottom", Icons.Material.Outlined.AlignVerticalBottom, "Align bottom")
+                @SelBtn("hdist", Icons.Material.Outlined.HorizontalDistribute, "Distribute horizontally (3+)")
+                @SelBtn("vdist", Icons.Material.Outlined.VerticalDistribute, "Distribute vertically (3+)")
+                @SelBtn("width", Icons.Material.Outlined.SwapHoriz, "Same width")
+                @SelBtn("height", Icons.Material.Outlined.SwapVert, "Same height")
+                <span class="sep"></span>
+            }
+            @if (nodes) { @ColorBtn("fill", "Fill", Icons.Material.Outlined.FormatColorFill) }
+            @ColorBtn("stroke", nodes ? "Line color" : "Connector color", Icons.Material.Outlined.BorderColor)
+            @if (nodes) { @ColorBtn("text", "Text color", Icons.Material.Outlined.FormatColorText) }
+            @if (C.SelectedEdge != null && !nodes)
+            {
+                <span class="fmt-wrap">
+                    <MudTooltip Text="Line width"><button class="tool @(_fmtMenu == "width" ? "on" : "")" @onclick='() => ToggleFmt("width")'><MudIcon Icon="@Icons.Material.Outlined.LineWeight" /></button></MudTooltip>
+                    @if (_fmtMenu == "width")
+                    {
+                        <div class="fmt-pop widths">
+                            @foreach (var w in new[] { "1.3", "2", "3", "4.5" })
+                            {
+                                var width = w;
+                                <div class="@WidthClass(width)" @onclick="() => SetWidth(width)">
+                                    <svg width="60" height="14"><line x1="4" y1="7" x2="56" y2="7" stroke="currentColor" stroke-width="@width" /></svg>
+                                </div>
+                            }
+                        </div>
+                    }
+                </span>
+            }
+            @if (shapes.Count > 0 || line)
+            {
+                var kind = line && !nodes ? ElementKind.Line : ElementKind.Shape;
+                <span class="fmt-wrap">
+                    <MudTooltip Text="@(kind == ElementKind.Shape ? "Change shape" : "Line style")"><button class="tool @(_fmtMenu == "shape" ? "on" : "")" @onclick='() => ToggleFmt("shape")'><MudIcon Icon="@(kind == ElementKind.Shape ? Icons.Material.Outlined.Category : Icons.Material.Outlined.NorthEast)" /></button></MudTooltip>
+                    @if (_fmtMenu == "shape")
+                    {
+                        <div class="fmt-pop shapes-grid">
+                            @foreach (var sub in Subtypes.For(kind))
+                            {
+                                var st = sub;
+                                var item = new PaletteItem(kind, st);
+                                <div class="tile" title="@item.Title" @onclick="() => { C.SetSelectionSubtype(kind, st); _fmtMenu = null; }">@Thumb(item, false)<span>@item.Title</span></div>
+                            }
+                        </div>
+                    }
+                </span>
+            }
+            <span class="sep"></span>
+            <MudTooltip Text="Copy format"><button class="tool" @onclick="C.CopyFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatPaint" /></button></MudTooltip>
+            <MudTooltip Text="Paste format"><button class="tool" disabled="@(!C.CanPasteFormat)" @onclick="C.PasteFormat"><MudIcon Icon="@Icons.Material.Outlined.ContentPasteGo" /></button></MudTooltip>
+            <MudTooltip Text="Reset to default look"><button class="tool" @onclick="C.ClearFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatClear" /></button></MudTooltip>
+            @if (nodes)
+            {
+                <MudTooltip Text="Duplicate (⌘D)"><button class="tool" @onclick="C.DuplicateSelection"><MudIcon Icon="@Icons.Material.Outlined.ContentCopy" /></button></MudTooltip>
+            }
+            <MudTooltip Text="Remove from diagram (Backspace)"><button class="tool" @onclick="C.RemoveSelectionFromDiagram"><MudIcon Icon="@Icons.Material.Outlined.Delete" /></button></MudTooltip>
+        </div>
+    }
+
+    @if (C.Tool is { } activeTool)
+    {
+        <div class="hint">
+            @{ var title = C.ToolSubtype != null ? Subtypes.Display(C.ToolSubtype) : Metamodel.DisplayName(activeTool); }
+            @(Metamodel.IsRelationship(activeTool) ? $"Drag from a source shape to a target to create {title}" : $"Click to place a {title}")
+            · <b>Esc</b> to cancel
+        </div>
+    }
+
+    @if (C.Diagram.Nodes.Count == 0)
+    {
+        <div class="empty-hint">
+            <div>
+                <MudIcon Icon="@UiKinds.DiagramIcon(C.Diagram.DiagramType)" Style="font-size:44px; opacity:.5" />
+                <h3>@Metamodel.DisplayName(C.Diagram.DiagramType) is empty</h3>
+                <div>Drag a shape from the left, double-click anywhere to add one, or drag elements here from the model explorer.</div>
+                <div style="margin-top:6px; font-size:12px">Hover a shape and click a blue arrow to add a connected one.</div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="minimap" @onpointerdown="MiniMapClick" @onpointerdown:stopPropagation="true" @ref="_minimap">
+            @{ var cb = C.ContentBounds(); var vp = C.Viewport; }
+            <svg viewBox="@F(cb.X) @F(cb.Y) @F(cb.Width) @F(cb.Height)" preserveAspectRatio="xMidYMid meet">
+                @foreach (var e in C.Diagram.Edges)
+                {
+                    var pts = Notation.RouteIn(C.Diagram, e, C.BoundsOf);
+                    <polyline points="@SvgRenderer.Points(pts)" fill="none" stroke="@Theme.Edge" stroke-opacity="0.6" stroke-width="@F(cb.Width / 200)" />
+                }
+                @foreach (var n in C.Diagram.Nodes)
+                {
+                    var b = C.BoundsOf(n);
+                    <rect x="@F(b.X)" y="@F(b.Y)" width="@F(b.Width)" height="@F(b.Height)" rx="@F(cb.Width / 120)" fill="@Theme.Header(n.Element.Kind)" stroke="@Theme.Accent(n.Element.Kind)" stroke-width="@F(cb.Width / 260)" />
+                }
+                <rect x="@F(vp.X)" y="@F(vp.Y)" width="@F(vp.Width)" height="@F(vp.Height)" fill="#4f8cff" fill-opacity="0.08" stroke="#4f8cff" stroke-width="@F(cb.Width / 130)" rx="@F(cb.Width / 100)" />
+            </svg>
+        </div>
+    }
+
+    @if (C.Editing != null || C.EditingEdge != null)
+    {
+        var r = C.Editing is { } editing ? C.EditorRect(editing) : C.EditorRect(C.EditingEdge!);
+        var multiline = C.Editing?.Element.Kind is ElementKind.Comment or ElementKind.Shape;
+        <div class="inline-editor" style="left:@F(r.X)px; top:@F(r.Y)px; width:@F(r.W)px; height:@F(multiline && C.Editing?.Element.Kind == ElementKind.Comment ? r.H : 32)px"
+             @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true">
+            @if (multiline)
+            {
+                <textarea @ref="_editor" value="@_editText" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="Type a label"></textarea>
+            }
+            else
+            {
+                <input @ref="_editor" value="@_editText" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="@(C.EditingEdge != null ? "Label" : "Name")" />
+            }
+        </div>
+    }
+
+    @if (C.QuickAddRequest is { } qa)
+    {
+        var hits = QuickAddItems().ToList();
+        <div class="quickadd" style="left:@F(Math.Min(qa.X, C.ViewWidth - 250))px; top:@F(Math.Min(qa.Y, C.ViewHeight - 300))px"
+             @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+            <input @ref="_quickInput" placeholder="Add shape…" value="@_quickQuery" @oninput="e => _quickQuery = e.Value?.ToString()" @onkeydown="QuickKey" />
+            <div class="qa-list">
+                @for (var i = 0; i < hits.Count; i++)
+                {
+                    var item = hits[i];
+                    var idx = i;
+                    <div class="qa-item @(idx == _quickIndex ? "on" : "")" @onclick="() => QuickPick(item)" @onmouseenter="() => _quickIndex = idx">
+                        @Thumb(item, false)
+                        <span>@item.Title</span>
+                        <span class="qa-sec">@(Metamodel.GeneralItems.Contains(item) && C.Diagram.DiagramType != DiagramType.Whiteboard ? "General" : "")</span>
+                    </div>
+                }
+                @if (hits.Count == 0) { <div class="qa-empty">No matching shapes</div> }
+            </div>
+        </div>
+    }
+</div>
+
+<ContextMenu Entries="_dropMenu" X="_dropX" Y="_dropY" OnClose="() => _dropMenu = null" />
+
+@code {
+    [Parameter, EditorRequired] public DiagramController C { get; set; } = default!;
+    [Parameter] public EventCallback<(double X, double Y, DiagramNode? Node, DiagramEdge? Edge)> OnContextMenu { get; set; }
+
+    private ElementReference _canvas, _editor, _minimap, _quickInput;
+    private DotNetObjectReference<DiagramView>? _self;
+    private (double Left, double Top) _origin;
+    private object? _editorShownFor;
+    private string? _appliedSeed;
+    private string? _editText;
+    private static bool _shapesOpen = true;
+    private string? _shapeQuery;
+    private PaletteItem? _paletteDrag;
+    private Pt? _quickShownFor;
+    private string? _quickQuery;
+    private int _quickIndex;
+    private long _lastDown;
+    private (double X, double Y) _lastDownAt;
+    private bool _skipRender;
+    private DiagramController? _installedFor;
+    private IReadOnlyList<Components.Workbench.MenuEntry>? _dropMenu;
+    private double _dropX, _dropY;
+
+    private string? _fmtMenu;
+
+    private static readonly string[] FormatColors =
+    [
+        "#ffffff", "#f1f5f9", "#dae8fc", "#d5e8d4", "#ffe6cc", "#fff2cc", "#f8cecc", "#e1d5e7",
+        "#1e293b", "#475569", "#4f8cff", "#2dd4bf", "#3fbf7f", "#f0b429", "#ff6b6b", "#a78bfa",
+    ];
+
+    private void SetWidth(string width) => SetFmt("width", width == "1.3" ? null : width);
+    private string WidthClass(string width) => (C.SelectionStyle("width") ?? "1.3") == width ? "wopt on" : "wopt";
+
+    private void ToggleFmt(string key) => _fmtMenu = _fmtMenu == key ? null : key;
+
+    private void SetFmt(string key, string? value)
+    {
+        C.SetSelectionStyle(key, value);
+        _fmtMenu = null;
+    }
+
+    private RenderFragment ColorBtn(string key, string tip, string icon) => __builder =>
+    {
+        var current = C.SelectionStyle(key);
+        <span class="fmt-wrap">
+            <MudTooltip Text="@tip">
+                <button class="tool color-btn @(_fmtMenu == key ? "on" : "")" @onclick="() => ToggleFmt(key)">
+                    <MudIcon Icon="@icon" />
+                    <span class="cbar" style="background:@(current ?? "transparent"); border-color:@(current == null ? "var(--border-strong)" : current)"></span>
+                </button>
+            </MudTooltip>
+            @if (_fmtMenu == key)
+            {
+                <div class="fmt-pop">
+                    <div class="fmt-title">@tip</div>
+                    <div class="swatch-grid">
+                        @foreach (var c in FormatColors)
+                        {
+                            var color = c;
+                            <span class="sw @(string.Equals(current, color, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@color" title="@color" @onclick="() => SetFmt(key, color)"></span>
+                        }
+                    </div>
+                    <div class="fmt-row">
+                        <button class="fmt-link" @onclick="() => SetFmt(key, null)">Default</button>
+                        <label class="fmt-link">Custom… <input type="color" value="@(current is { Length: 7 } ? current : "#4f8cff")" @onchange="e => SetFmt(key, e.Value?.ToString())" /></label>
+                    </div>
+                </div>
+            }
+        </span>
+    };
+
+    private RenderFragment SelBtn(string mode, string icon, string tip) => __builder =>
+    {
+        <MudTooltip Text="@tip"><button class="tool" @onclick="() => C.Align(mode)"><MudIcon Icon="@icon" /></button></MudTooltip>
+    };
+
+    private SvgTheme Theme => Ws.DarkMode ? SvgTheme.Dark : SvgTheme.Light;
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    protected override bool ShouldRender()
+    {
+        if (!_skipRender) return true;
+        _skipRender = false;
+        return false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender || !ReferenceEquals(_installedFor, C))
+        {
+            _self ??= DotNetObjectReference.Create(this);
+            if (firstRender) await JS.InvokeVoidAsync("meridian.installCanvas", _canvas, _self);
+            _installedFor = C;
+            await RefreshOrigin();
+            await JS.InvokeVoidAsync("meridian.focus", _canvas);
+        }
+        object? target = (object?)C.Editing ?? C.EditingEdge;
+        if (target != null && !ReferenceEquals(_editorShownFor, target))
+        {
+            _editorShownFor = target;
+            _appliedSeed = C.EditSeed;
+            _editText = C.EditSeed ?? (C.Editing is { } n
+                ? n.Element.Kind == ElementKind.Comment ? n.Element.Get(FieldKeys.Body) : n.Element.Name
+                : C.EditingEdge!.Relationship.Name);
+            StateHasChanged();
+            await Task.Yield();
+            await JS.InvokeVoidAsync(C.EditSeed != null ? "meridian.caretEnd" : "meridian.select", _editor);
+        }
+        else if (target != null && C.EditSeed != null && C.EditSeed != _appliedSeed)
+        {
+            // Keys typed before the editor took focus.
+            _appliedSeed = C.EditSeed;
+            _editText = C.EditSeed;
+            StateHasChanged();
+            await Task.Yield();
+            await JS.InvokeVoidAsync("meridian.caretEnd", _editor);
+        }
+        if (target == null) _editorShownFor = null;
+
+        if (C.QuickAddRequest is { } qa && _quickShownFor != qa)
+        {
+            _quickShownFor = qa;
+            _quickQuery = null;
+            _quickIndex = 0;
+            StateHasChanged();
+            await Task.Yield();
+            await JS.InvokeVoidAsync("meridian.select", _quickInput);
+        }
+        if (C.QuickAddRequest == null) _quickShownFor = null;
+    }
+
+    private async Task RefreshOrigin()
+    {
+        var r = await JS.InvokeAsync<RectDto>("meridian.rect", _canvas);
+        _origin = (r.Left, r.Top);
+        C.ViewWidth = r.Width;
+        C.LeftInset = _shapesOpen && !Ws.ReadOnly ? 236 : 64;
+        C.ViewHeight = r.Height;
+        if (C.NeedsFit && r.Width > 50) { C.ZoomToFit(); StateHasChanged(); }
+    }
+
+    [JSInvokable]
+    public async Task OnResize(double width, double height)
+    {
+        await RefreshOrigin();
+        StateHasChanged();
+    }
+
+    private sealed record RectDto(double Left, double Top, double Width, double Height);
+
+    private static Mods ModsOf(MouseEventArgs e) =>
+        (e.ShiftKey ? Mods.Shift : 0) | (e.CtrlKey ? Mods.Ctrl : 0) | (e.AltKey ? Mods.Alt : 0) | (e.MetaKey ? Mods.Meta : 0);
+
+    private void SetTool(PaletteItem? item)
+    {
+        C.SetTool(item);
+        _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
+    }
+
+    private async Task Down(PointerEventArgs e)
+    {
+        if (C.Editing != null || C.EditingEdge != null) CommitEdit();
+        _fmtMenu = null;
+        var sx = e.ClientX - _origin.Left;
+        var sy = e.ClientY - _origin.Top;
+        // Pointer events report detail = 0 in Chromium, so detect double-clicks from timing and distance.
+        var clicks = (int)e.Detail;
+        var now = Environment.TickCount64;
+        if (e.Button == 0 && clicks < 2 && now - _lastDown < 450 && Math.Abs(e.ClientX - _lastDownAt.X) < 6 && Math.Abs(e.ClientY - _lastDownAt.Y) < 6) clicks = 2;
+        _lastDown = clicks >= 2 || e.Button != 0 ? 0 : now;
+        _lastDownAt = (e.ClientX, e.ClientY);
+        var menu = C.PointerDown(sx, sy, (int)e.Button, ModsOf(e), clicks);
+        if (C.DrillRequest is { } drill)
+        {
+            C.DrillRequest = null;
+            Ws.DrillDown(drill);
+            return;
+        }
+        if (menu)
+        {
+            var node = C.HitNode(C.PressModel);
+            var edge = node == null ? C.HitEdge(C.PressModel) : null;
+            await OnContextMenu.InvokeAsync((e.ClientX, e.ClientY, node, edge));
+        }
+    }
+
+    private void Move(PointerEventArgs e)
+    {
+        if (!C.PointerMove(e.ClientX - _origin.Left, e.ClientY - _origin.Top)) _skipRender = true;
+    }
+
+    private void Up(PointerEventArgs e) => C.PointerUp(ModsOf(e));
+
+    private void Leave(PointerEventArgs e)
+    {
+        if (C.Current == DiagramController.Gesture.None && C.Hover != null) C.PointerMove(-10000, -10000);
+        else _skipRender = true;
+    }
+
+    private void KeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == " " && C.SpaceHeld) C.SpaceHeld = false;
+        else _skipRender = true;
+    }
+
+    // ---------------------------------------------------------------- shapes panel
+
+    private IEnumerable<(string Title, IReadOnlyList<PaletteItem> Items)> Sections()
+    {
+        var t = C.Diagram.DiagramType;
+        var q = _shapeQuery?.Trim();
+        IReadOnlyList<PaletteItem> F(IEnumerable<PaletteItem> items) =>
+            string.IsNullOrEmpty(q) ? items.ToList() : items.Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        var sections = t == DiagramType.Whiteboard
+            ? new List<(string, IReadOnlyList<PaletteItem>)> { ("Shapes", F(Metamodel.PaletteItems(t))), ("Connectors", F(Metamodel.PaletteLinks(t))) }
+            : [
+                (Metamodel.DisplayName(t).Replace(" Diagram", ""), F(Metamodel.PaletteItems(t))),
+                ("Relationships", F(Metamodel.PaletteLinks(t))),
+                ("General", F(Metamodel.GeneralItems)),
+                ("Lines", F(Metamodel.GeneralLinks)),
+              ];
+        return sections.Where(x => x.Item2.Count > 0);
+    }
+
+    private void ShowShapes(bool open)
+    {
+        _shapesOpen = open;
+        C.LeftInset = open && !Ws.ReadOnly ? 236 : 64;
+    }
+
+    private void TileClick(PaletteItem item, MouseEventArgs e)
+    {
+        if (Metamodel.IsRelationship(item.Kind) || e.ShiftKey) SetTool(item);
+        else
+        {
+            C.SetTool(null);
+            C.InsertItem(item);
+        }
+        _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
+    }
+
+    private IEnumerable<PaletteItem> QuickAddItems()
+    {
+        var t = C.Diagram.DiagramType;
+        var all = Metamodel.PaletteItems(t).Concat(t == DiagramType.Whiteboard ? [] : Metamodel.GeneralItems);
+        var q = _quickQuery?.Trim();
+        return (string.IsNullOrEmpty(q) ? all : all.Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase))).Take(12);
+    }
+
+    private void QuickKey(KeyboardEventArgs e)
+    {
+        var hits = QuickAddItems().ToList();
+        switch (e.Key)
+        {
+            case "Escape": C.QuickAddRequest = null; _ = JS.InvokeVoidAsync("meridian.focus", _canvas); break;
+            case "ArrowDown": _quickIndex = Math.Min(hits.Count - 1, _quickIndex + 1); break;
+            case "ArrowUp": _quickIndex = Math.Max(0, _quickIndex - 1); break;
+            case "Enter" when hits.Count > 0: QuickPick(hits[Math.Clamp(_quickIndex, 0, hits.Count - 1)]); break;
+            default: _quickIndex = 0; break;
+        }
+    }
+
+    private void QuickPick(PaletteItem item)
+    {
+        if (C.QuickAddRequest is not { } at) return;
+        C.QuickAddRequest = null;
+        C.CreateAtScreen(item, at.X, at.Y);
+        _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
+    }
+
+    /// <summary>Palette preview: a small drawing of free shapes and lines, otherwise the element's icon.</summary>
+    private RenderFragment Thumb(PaletteItem item, bool on) => __builder =>
+    {
+        var svg = ThumbSvg(item);
+        if (svg != null)
+        {
+            <span class="thumb">@((MarkupString)svg)</span>
+        }
+        else if (item.Subtype != null && item.Kind == ElementKind.ArchiElement)
+        {
+            <span class="thumb glyph" style="@(on ? "" : $"color:{UiKinds.ArchiColor(item.Subtype)}")">@(Subtypes.ArchiGlyph(item.Subtype) is { Length: > 0 } g ? g : "▭")</span>
+        }
+        else
+        {
+            <span class="thumb"><MudIcon Icon="@UiKinds.Icon(item.Kind, item.Subtype)" Style="@(on || Metamodel.IsRelationship(item.Kind) ? "" : $"color:{UiKinds.Accent(item.Kind)}")" /></span>
+        }
+    };
+
+    private static string? ThumbSvg(PaletteItem item)
+    {
+        const string a = "fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linejoin=\"round\"";
+        string? body = (item.Kind, item.Subtype) switch
+        {
+            (ElementKind.Shape, "rectangle") => $"<rect x=\"3\" y=\"5\" width=\"28\" height=\"16\" {a}/>",
+            (ElementKind.Shape, "rounded") => $"<rect x=\"3\" y=\"5\" width=\"28\" height=\"16\" rx=\"5\" {a}/>",
+            (ElementKind.Shape, "ellipse") => $"<ellipse cx=\"17\" cy=\"13\" rx=\"14\" ry=\"8.5\" {a}/>",
+            (ElementKind.Shape, "diamond") => $"<polygon points=\"17,3 31,13 17,23 3,13\" {a}/>",
+            (ElementKind.Shape, "text") => "<text x=\"17\" y=\"18\" text-anchor=\"middle\" font-size=\"13\" font-weight=\"600\" fill=\"currentColor\">Aa</text>",
+            (ElementKind.Shape, "cylinder") => $"<path d=\"M9,6 A8,3 0 0 1 25,6 V20 A8,3 0 0 1 9,20 Z M9,6 A8,3 0 0 0 25,6\" {a}/>",
+            (ElementKind.Shape, "hexagon") => $"<polygon points=\"9,5 25,5 31,13 25,21 9,21 3,13\" {a}/>",
+            (ElementKind.Shape, "parallelogram") => $"<polygon points=\"9,5 31,5 25,21 3,21\" {a}/>",
+            (ElementKind.Shape, "triangle") => $"<polygon points=\"17,3 30,22 4,22\" {a}/>",
+            (ElementKind.Shape, "document") => $"<path d=\"M4,4 H30 V19 Q24,15 17,19 T4,19 Z\" {a}/>",
+            (ElementKind.Shape, "cloud") => $"<path d=\"M10,20 C3,20 3,12 9,12 C9,5 19,4 20,9 C25,5 31,10 28,14 C32,16 30,21 25,20 Z\" {a}/>",
+            (ElementKind.Shape, "callout") => $"<path d=\"M3,4 H31 V17 H15 L10,22 L11,17 H3 Z\" {a}/>",
+            (ElementKind.Line, "line") => $"<line x1=\"4\" y1=\"20\" x2=\"30\" y2=\"6\" {a}/>",
+            (ElementKind.Line, "dashed") => $"<line x1=\"4\" y1=\"20\" x2=\"30\" y2=\"6\" {a} stroke-dasharray=\"4,3\"/>",
+            (ElementKind.Line, "dotted") => $"<line x1=\"4\" y1=\"20\" x2=\"28\" y2=\"7\" {a} stroke-dasharray=\"1.5,2.5\"/><polyline points=\"22,6 29,6.5 26,13\" {a}/>",
+            (ElementKind.Line, "dashedArrow") => $"<line x1=\"4\" y1=\"20\" x2=\"27\" y2=\"8\" {a} stroke-dasharray=\"4,3\"/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/>",
+            (ElementKind.Line, "bidirectional") => $"<line x1=\"7\" y1=\"18\" x2=\"27\" y2=\"8\" {a}/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/><polygon points=\"4,20 13,19.5 8,13\" fill=\"currentColor\"/>",
+            (ElementKind.Line, _) => $"<line x1=\"4\" y1=\"20\" x2=\"27\" y2=\"8\" {a}/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/>",
+            _ => null,
+        };
+        return body == null ? null : $"<svg viewBox=\"0 0 34 26\" width=\"34\" height=\"26\">{body}</svg>";
+    }
+
+    private void Wheel(WheelEventArgs e) => C.Wheel(e.ClientX - _origin.Left, e.ClientY - _origin.Top, e.DeltaX, e.DeltaY, ModsOf(e));
+
+    private void Key(KeyboardEventArgs e)
+    {
+        if (e.Key == " " && C.Editing == null && C.EditingEdge == null)
+        {
+            if (C.SpaceHeld || e.Repeat) { _skipRender = true; return; }
+            C.SpaceHeld = true;
+            return;
+        }
+        var mods = (e.ShiftKey ? Mods.Shift : 0) | (e.CtrlKey ? Mods.Ctrl : 0) | (e.AltKey ? Mods.Alt : 0) | (e.MetaKey ? Mods.Meta : 0);
+        try
+        {
+            if (!C.Key(e.Key, mods)) _skipRender = true;
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private async Task MiniMapClick(PointerEventArgs e)
+    {
+        var r = await JS.InvokeAsync<RectDto>("meridian.rect", _minimap);
+        var cb = C.ContentBounds();
+        // preserveAspectRatio meet: compute the scale and letterbox offset used by the browser.
+        var scale = Math.Min(r.Width / cb.Width, r.Height / cb.Height);
+        var ox = (r.Width - cb.Width * scale) / 2;
+        var oy = (r.Height - cb.Height * scale) / 2;
+        C.CenterOn(new Pt(cb.X + (e.ClientX - r.Left - ox) / scale, cb.Y + (e.ClientY - r.Top - oy) / scale));
+    }
+
+    /// <summary>
+    /// Dropping a tree element onto empty canvas shows it; dropping it onto a shape offers the relationships that
+    /// are valid between the two (e.g. requirement on a block → «satisfy»), so linking is one gesture.
+    /// </summary>
+    private void Drop(DragEventArgs e)
+    {
+        if (_paletteDrag is { } palette)
+        {
+            _paletteDrag = null;
+            C.SetTool(null);
+            C.CreateAtScreen(palette, e.ClientX - _origin.Left, e.ClientY - _origin.Top);
+            _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
+            return;
+        }
+        var el = Ws.Dragging;
+        Ws.Dragging = null;
+        if (el == null) return;
+        var sx = e.ClientX - _origin.Left;
+        var sy = e.ClientY - _origin.Top;
+        var target = C.HitNode(C.ToModel(sx, sy));
+        if (target == null || ReferenceEquals(target.Element, el) || el is Diagram || el is Relationship)
+        {
+            C.ShowAtScreen(el, sx, sy);
+            return;
+        }
+        var t = target.Element;
+        var entries = new List<Components.Workbench.MenuEntry> { Components.Workbench.MenuEntry.Title($"{el.DisplayName} → {t.DisplayName}") };
+        var involvesRequirement = el.Kind == ElementKind.Requirement || t.Kind == ElementKind.Requirement;
+        foreach (var kind in UiKinds.LinkKinds)
+        {
+            // Structural relationships make no sense with requirements; offer traceability only.
+            if (involvesRequirement && kind is ElementKind.Composition or ElementKind.Association or ElementKind.Generalization) continue;
+            Element? src = null, dst = null;
+            // Design elements refine/satisfy/verify requirements, so point those at the requirement when possible.
+            var preferTowardRequirement = kind is ElementKind.Refine or ElementKind.Satisfy or ElementKind.Verify && el.Kind == ElementKind.Requirement;
+            if (!preferTowardRequirement && Metamodel.CheckEnds(kind, el.Kind, t.Kind) == null) (src, dst) = (el, t);
+            else if (Metamodel.CheckEnds(kind, t.Kind, el.Kind) == null) (src, dst) = (t, el);
+            else if (Metamodel.CheckEnds(kind, el.Kind, t.Kind) == null) (src, dst) = (el, t);
+            if (src == null || dst == null) continue;
+            var s = src; var d = dst; var k = kind;
+            var verb = Metamodel.Style(k).Keyword is { } kw ? $"«{kw}»" : Metamodel.DisplayName(k);
+            entries.Add(Components.Workbench.MenuEntry.Do($"{verb}  {s.DisplayName} → {d.DisplayName}", () => Link(k, s, d)));
+        }
+        entries.Add(Components.Workbench.MenuEntry.Sep());
+        entries.Add(Components.Workbench.MenuEntry.Do("Just show it on the diagram", () => C.ShowAtScreen(el, sx + 40, sy + 40)));
+        _dropMenu = entries;
+        _dropX = e.ClientX;
+        _dropY = e.ClientY;
+    }
+
+    private void Link(ElementKind kind, Element s, Element d)
+    {
+        try
+        {
+            using (Ws.Model.History.Transaction($"Link «{Metamodel.Style(kind).Keyword ?? Metamodel.DisplayName(kind)}»"))
+            {
+                var r = Ws.Model.Connect(kind, s, d);
+                Ws.Model.AddEdge(C.Diagram, r);
+            }
+            Ws.SetStatus($"Linked {s.DisplayName} «{Metamodel.Style(kind).Keyword ?? Metamodel.DisplayName(kind)}» {d.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void EditorKey(KeyboardEventArgs e)
+    {
+        // Multi-line labels (notes, shapes): Shift+Enter inserts a line break; Enter commits everywhere.
+        if (e.Key == "Enter" && !(C.Editing?.Element.Kind is ElementKind.Comment or ElementKind.Shape && e.ShiftKey)) CommitEdit();
+        else if (e.Key == "Escape") { C.Editing = null; C.EditingEdge = null; C.EditSeed = null; _ = JS.InvokeVoidAsync("meridian.focus", _canvas); }
+    }
+
+    private void CommitEdit()
+    {
+        if (C.Editing == null && C.EditingEdge == null) return;
+        C.CommitInlineEdit(_editText);
+        _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
+    }
+
+    private string Body()
+    {
+        var sb = new StringBuilder();
+        var cb = C.ContentBounds();
+        var frame = C.Diagram.DiagramType == DiagramType.InternalBlock && C.Diagram.Nodes.Count > 0 ? 40 : 0;
+        SvgRenderer.RenderHeader(sb, C.Diagram, cb.X - frame, cb.Y - 34 - frame, Theme);
+        SvgRenderer.RenderBody(sb, C.Model, C.Diagram, C.BoundsOf, C.WaypointsFor, Theme, C.Viewport);
+        return sb.ToString();
+    }
+
+    private RenderFragment Adorners() => builder =>
+    {
+        var seq = 0;
+        var zi = 1 / C.Zoom;
+        var hs = DiagramController.HandleSize * zi;
+        var sw = F(2 * zi);
+        const string sel = "#4f8cff";
+
+        // Simulation: active tokens / states glow.
+        foreach (var sn in C.Diagram.Nodes.Where(n => Ws.SimHighlight.Contains(n.Element.Id)))
+        {
+            var sb2 = C.BoundsOf(sn);
+            builder.AddMarkupContent(seq++, $"<rect x=\"{F(sb2.X - 5 * zi)}\" y=\"{F(sb2.Y - 5 * zi)}\" width=\"{F(sb2.Width + 10 * zi)}\" height=\"{F(sb2.Height + 10 * zi)}\" rx=\"{F(10 * zi)}\" fill=\"#3fbf7f\" fill-opacity=\"0.12\" stroke=\"#3fbf7f\" stroke-width=\"{F(3 * zi)}\"><animate attributeName=\"stroke-opacity\" values=\"1;0.35;1\" dur=\"1.4s\" repeatCount=\"indefinite\"/></rect>");
+        }
+
+        // Collaborators: their current selection, in their colour, with a name tag.
+        foreach (var p in Ws.Others.Where(o => o.SelectedId != null))
+        {
+            var pn = C.Diagram.Nodes.FirstOrDefault(n => n.Element.Id == p.SelectedId);
+            if (pn == null) continue;
+            var pb = C.BoundsOf(pn);
+            var tagW = (p.User.DisplayName.Length * 6.6 + 14) * zi;
+            builder.AddMarkupContent(seq++,
+                $"<rect x=\"{F(pb.X - 6 * zi)}\" y=\"{F(pb.Y - 6 * zi)}\" width=\"{F(pb.Width + 12 * zi)}\" height=\"{F(pb.Height + 12 * zi)}\" rx=\"{F(8 * zi)}\" fill=\"none\" stroke=\"{p.User.Color}\" stroke-width=\"{F(2 * zi)}\" stroke-dasharray=\"{F(6 * zi)},{F(3 * zi)}\"/>" +
+                $"<rect x=\"{F(pb.X - 6 * zi)}\" y=\"{F(pb.Y - 26 * zi)}\" width=\"{F(tagW)}\" height=\"{F(18 * zi)}\" rx=\"{F(5 * zi)}\" fill=\"{p.User.Color}\"/>" +
+                $"<text x=\"{F(pb.X + 1 * zi)}\" y=\"{F(pb.Y - 13 * zi)}\" font-size=\"{F(11 * zi)}\" font-weight=\"600\" fill=\"#fff\">{System.Net.WebUtility.HtmlEncode(p.User.DisplayName)}</text>");
+        }
+
+        // Sub-diagram badges (drill-down)
+        foreach (var n in C.Diagram.Nodes.Where(n => C.HasSubDiagram(n.Element)))
+        {
+            var bb = C.BadgeBounds(n);
+            builder.AddMarkupContent(seq++,
+                $"<g style=\"cursor:pointer\"><title>Open sub-diagram</title><rect x=\"{F(bb.X)}\" y=\"{F(bb.Y)}\" width=\"{F(bb.Width)}\" height=\"{F(bb.Height)}\" rx=\"{F(4 * zi)}\" fill=\"#2dd4bf\" fill-opacity=\"0.18\" stroke=\"#2dd4bf\" stroke-width=\"{F(zi)}\"/>" +
+                $"<path d=\"M{F(bb.X + bb.Width * .28)},{F(bb.Y + bb.Height * .28)} h{F(bb.Width * .3)} v{F(bb.Height * .3)} h-{F(bb.Width * .3)} Z M{F(bb.X + bb.Width * .42)},{F(bb.Y + bb.Height * .42)} h{F(bb.Width * .3)} v{F(bb.Height * .3)} h-{F(bb.Width * .3)} Z\" fill=\"none\" stroke=\"#2dd4bf\" stroke-width=\"{F(1.2 * zi)}\"/></g>");
+        }
+
+        if (C.SelectedEdge is { } edge)
+        {
+            var pts = Notation.RouteIn(C.Diagram, edge, C.BoundsOf, C.WaypointsFor(edge));
+            builder.AddMarkupContent(seq++, $"<polyline points=\"{SvgRenderer.Points(pts)}\" fill=\"none\" stroke=\"{sel}\" stroke-opacity=\"0.5\" stroke-width=\"{F(6 * zi)}\" stroke-linecap=\"round\"/>");
+            foreach (var wp in C.WaypointPreview ?? edge.Waypoints)
+            {
+                var p = C.HandlePoint(edge, wp);
+                builder.AddMarkupContent(seq++, $"<circle cx=\"{F(p.X)}\" cy=\"{F(p.Y)}\" r=\"{F(hs / 1.6)}\" fill=\"#fff\" stroke=\"{sel}\" stroke-width=\"{sw}\" style=\"cursor:move\"/>");
+            }
+        }
+        // Hover: faint outline and the four quick-connect arrows.
+        if (C.Hover is { } hv && C.Diagram.Nodes.Contains(hv) && C.ShowsQuickArrows(hv))
+        {
+            var hb = C.BoundsOf(hv);
+            if (!C.SelectedNodes.Contains(hv))
+                builder.AddMarkupContent(seq++, $"<rect x=\"{F(hb.X - 3 * zi)}\" y=\"{F(hb.Y - 3 * zi)}\" width=\"{F(hb.Width + 6 * zi)}\" height=\"{F(hb.Height + 6 * zi)}\" rx=\"{F(6 * zi)}\" fill=\"none\" stroke=\"{sel}\" stroke-opacity=\"0.45\" stroke-width=\"{F(1.5 * zi)}\"/>");
+            foreach (var dir in C.ArrowDirs(hv))
+            {
+                var ap = C.ArrowPoint(hv, dir);
+                var hot = C.HoverArrow == dir;
+                var rot = dir * 90 - 90;
+                var s = 7 * zi;
+                builder.AddMarkupContent(seq++,
+                    $"<g transform=\"translate({F(ap.X)},{F(ap.Y)}) rotate({rot})\" style=\"cursor:pointer\"><title>Click to add a connected shape, or drag to connect</title>" +
+                    $"<circle r=\"{F(11 * zi)}\" fill=\"{sel}\" fill-opacity=\"{(hot ? "0.22" : "0.0")}\"/>" +
+                    $"<path d=\"M{F(-s)},{F(-s * .55)} L{F(s * .2)},{F(-s * .55)} L{F(s * .2)},{F(-s)} L{F(s)},0 L{F(s * .2)},{F(s)} L{F(s * .2)},{F(s * .55)} L{F(-s)},{F(s * .55)} Z\" fill=\"{sel}\" fill-opacity=\"{(hot ? "1" : "0.55")}\"/></g>");
+            }
+        }
+
+        // Alignment guides while dragging.
+        foreach (var g in C.Guides)
+            builder.AddMarkupContent(seq++, g.Vertical
+                ? $"<line x1=\"{F(g.Pos)}\" y1=\"{F(g.From)}\" x2=\"{F(g.Pos)}\" y2=\"{F(g.To)}\" stroke=\"#2dd4bf\" stroke-width=\"{F(zi)}\" stroke-dasharray=\"{F(4 * zi)},{F(3 * zi)}\"/>"
+                : $"<line x1=\"{F(g.From)}\" y1=\"{F(g.Pos)}\" x2=\"{F(g.To)}\" y2=\"{F(g.Pos)}\" stroke=\"#2dd4bf\" stroke-width=\"{F(zi)}\" stroke-dasharray=\"{F(4 * zi)},{F(3 * zi)}\"/>");
+
+        foreach (var n in C.SelectedNodes)
+        {
+            var b = C.BoundsOf(n);
+            builder.AddMarkupContent(seq++, $"<rect x=\"{F(b.X - 4 * zi)}\" y=\"{F(b.Y - 4 * zi)}\" width=\"{F(b.Width + 8 * zi)}\" height=\"{F(b.Height + 8 * zi)}\" rx=\"{F(7 * zi)}\" fill=\"{sel}\" fill-opacity=\"0.06\" stroke=\"{sel}\" stroke-width=\"{sw}\"/>");
+            if (C.SelectedNodes.Count == 1 && !Ws.ReadOnly && !Notation.IsBorderShape(n.Element) && C.Current == DiagramController.Gesture.None)
+                foreach (var (i, at) in C.Handles(n))
+                    builder.AddMarkupContent(seq++, $"<rect x=\"{F(at.X - hs / 2)}\" y=\"{F(at.Y - hs / 2)}\" width=\"{F(hs)}\" height=\"{F(hs)}\" rx=\"{F(2 * zi)}\" fill=\"#fff\" stroke=\"{sel}\" stroke-width=\"{sw}\" style=\"cursor:{DiagramController.HandleCursor(i)}\"/>");
+        }
+
+        if (C.Current == DiagramController.Gesture.QuickConnect && C.ConnectFrom is { } qf && Notation.Dist(C.CurrentModel, C.PressModel) > 4 * zi)
+        {
+            var qt = C.HitNode(C.CurrentModel, qf);
+            var ok = qt == null || C.DefaultLink(qf.Element.Kind, qt.Element.Kind) != null;
+            var color = ok ? (qt != null ? "#3fbf7f" : sel) : "#ff6b6b";
+            var start = Notation.Clip(C.BoundsOf(qf), Notation.ShapeOf(qf.Element), C.CurrentModel);
+            builder.AddMarkupContent(seq++, $"<line x1=\"{F(start.X)}\" y1=\"{F(start.Y)}\" x2=\"{F(C.CurrentModel.X)}\" y2=\"{F(C.CurrentModel.Y)}\" stroke=\"{color}\" stroke-width=\"{F(2 * zi)}\" stroke-dasharray=\"{F(6 * zi)},{F(4 * zi)}\"/>");
+            if (qt != null)
+            {
+                var tb = C.BoundsOf(qt);
+                builder.AddMarkupContent(seq++, $"<rect x=\"{F(tb.X - 4 * zi)}\" y=\"{F(tb.Y - 4 * zi)}\" width=\"{F(tb.Width + 8 * zi)}\" height=\"{F(tb.Height + 8 * zi)}\" rx=\"{F(7 * zi)}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{sw}\"/>");
+            }
+            else if (C.Successor(qf.Element) is { } nx)
+            {
+                var (w, h) = Notation.DefaultSizeOf(nx.Kind, nx.Subtype);
+                builder.AddMarkupContent(seq++, $"<rect x=\"{F(C.CurrentModel.X - w / 2)}\" y=\"{F(C.CurrentModel.Y - h / 3)}\" width=\"{F(w)}\" height=\"{F(h)}\" rx=\"{F(6 * zi)}\" fill=\"{sel}\" fill-opacity=\"0.06\" stroke=\"{sel}\" stroke-opacity=\"0.6\" stroke-dasharray=\"{F(5 * zi)},{F(4 * zi)}\" stroke-width=\"{F(1.5 * zi)}\"/>");
+            }
+        }
+        if (C.Current == DiagramController.Gesture.Connect && C.ConnectFrom is { } from && C.Tool is { } kind)
+        {
+            var target = C.HitNode(C.CurrentModel, from);
+            var start = Notation.Clip(C.BoundsOf(from), Notation.ShapeOf(from.Element), C.CurrentModel);
+            var ok = target != null && Metamodel.CheckEnds(kind, from.Element.Kind, target.Element.Kind) == null;
+            var color = target == null ? sel : ok ? "#3fbf7f" : "#ff6b6b";
+            builder.AddMarkupContent(seq++, $"<line x1=\"{F(start.X)}\" y1=\"{F(start.Y)}\" x2=\"{F(C.CurrentModel.X)}\" y2=\"{F(C.CurrentModel.Y)}\" stroke=\"{color}\" stroke-width=\"{F(2 * zi)}\" stroke-dasharray=\"{F(6 * zi)},{F(4 * zi)}\"/>");
+            if (target != null)
+            {
+                var tb = C.BoundsOf(target);
+                builder.AddMarkupContent(seq++, $"<rect x=\"{F(tb.X - 4 * zi)}\" y=\"{F(tb.Y - 4 * zi)}\" width=\"{F(tb.Width + 8 * zi)}\" height=\"{F(tb.Height + 8 * zi)}\" rx=\"{F(7 * zi)}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{sw}\"/>");
+            }
+        }
+        if (C.Current == DiagramController.Gesture.Marquee)
+        {
+            var r = Bounds.FromPoints(C.PressModel, C.CurrentModel);
+            builder.AddMarkupContent(seq++, $"<rect x=\"{F(r.X)}\" y=\"{F(r.Y)}\" width=\"{F(r.Width)}\" height=\"{F(r.Height)}\" rx=\"{F(4 * zi)}\" fill=\"{sel}\" fill-opacity=\"0.08\" stroke=\"{sel}\" stroke-dasharray=\"{F(4 * zi)},{F(3 * zi)}\" stroke-width=\"{F(zi)}\"/>");
+        }
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("meridian.uninstallCanvas", _canvas); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+        _self?.Dispose();
+    }
+}

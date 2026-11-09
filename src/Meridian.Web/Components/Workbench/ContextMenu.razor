@@ -1,0 +1,36 @@
+@* Lightweight floating menu used for right-click on the tree and the diagram canvas. *@
+@if (Entries is { Count: > 0 })
+{
+    <div class="ctx-backdrop" @onclick="Close" @oncontextmenu="Close" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-menu" style="left:@(Px(X))px; top:@(Px(Y))px">
+        @foreach (var e in Entries)
+        {
+            if (e.Separator) { <div class="ctx-sep"></div> }
+            else if (e.Header) { <div class="ctx-header">@e.Label</div> }
+            else
+            {
+                <div class="ctx-item" @onclick="() => Run(e)">
+                    <span>@e.Label</span>
+                    @if (e.Shortcut != null) { <span class="key">@e.Shortcut</span> }
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<MenuEntry>? Entries { get; set; }
+    [Parameter] public double X { get; set; }
+    [Parameter] public double Y { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static string Px(double v) => Math.Max(4, v).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Run(MenuEntry e)
+    {
+        await OnClose.InvokeAsync();
+        if (e.Action != null) await e.Action();
+    }
+}

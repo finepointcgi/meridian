@@ -1,0 +1,23 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject Workspace Ws
+
+<MudThemeProvider Theme="Themes.Meridian" IsDarkMode="Ws.DarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseOnEscapeKey="true" />
+<MudSnackbarProvider />
+
+@Body
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool _dark;
+    protected override void OnInitialized() { _dark = Ws.DarkMode; Ws.Changed += OnChanged; }
+    private void OnChanged() { if (_dark != Ws.DarkMode) { _dark = Ws.DarkMode; _ = InvokeAsync(StateHasChanged); } }
+    public void Dispose() => Ws.Changed -= OnChanged;
+}

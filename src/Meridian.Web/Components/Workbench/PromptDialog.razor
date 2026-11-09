@@ -1,0 +1,30 @@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">@Title</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @ref="_field" @bind-Value="Value" Label="@Label" AutoFocus="true" Immediate="true" Variant="Variant.Outlined"
+                      Lines="@(Multiline ? 4 : 1)" OnKeyDown="KeyDown" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Ok">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public bool Multiline { get; set; }
+
+    private MudTextField<string>? _field;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _field != null) { await Task.Delay(60); await _field.SelectAsync(); }
+    }
+
+    private void Ok() => MudDialog.Close(DialogResult.Ok(Value ?? ""));
+    private void Cancel() => MudDialog.Cancel();
+    private void KeyDown(KeyboardEventArgs e) { if (e.Key == "Enter" && !Multiline) Ok(); }
+}

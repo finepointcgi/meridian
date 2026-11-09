@@ -1,0 +1,476 @@
+@inherits WorkspaceComponent
+
+<div class="card-header">
+    <MudIcon Icon="@Icons.Material.Outlined.Tune" Style="font-size:15px" />
+    <span style="flex:1">Properties</span>
+    @if (E is { } sel && sel.Kind != ElementKind.Model)
+    {
+        <MudTooltip Text="Favorite">
+            <MudIconButton Size="Size.Small" Icon="@(Ws.Favorites.Contains(sel.Id) ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
+                           Style="@(Ws.Favorites.Contains(sel.Id) ? "color:#f0b429" : "")" OnClick="() => Ws.ToggleFavorite(sel)" />
+        </MudTooltip>
+    }
+</div>
+<div class="card-body inspector">
+    @if (E is null)
+    {
+        <div style="color:var(--text-3); padding:24px 4px; text-align:center">
+            <MudIcon Icon="@Icons.Material.Outlined.AdsClick" Style="font-size:36px; opacity:.5" />
+            <div style="margin-top:6px">Select an element on a diagram or in the model explorer.</div>
+        </div>
+    }
+    else
+    {
+        var e = E;
+        <div class="insp-head">
+            @KindIcon.For(e)
+            <div style="min-width:0">
+                <div class="title">@(e.Kind == ElementKind.Requirement ? $"{e.Get(FieldKeys.RequirementId)} {e.DisplayName}" : e.DisplayName)</div>
+                <div class="sub">@UiKinds.KindName(e)@(e.Owner != null ? $" · in {e.Owner.DisplayName}" : "")</div>
+            </div>
+        </div>
+
+        if (e is Relationship r)
+        {
+            <div class="section-title">Ends <span class="grow"></span></div>
+            <div class="trace-group">
+                <span class="pill" @onclick="() => Shell.Navigate(r.Source)">@KindIcon.For(r.Source)<span class="t">@r.Source.DisplayName</span></span>
+                <span style="color:var(--text-3); margin:0 4px">«@(Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind))» →</span>
+                <span class="pill" @onclick="() => Shell.Navigate(r.Target)">@KindIcon.For(r.Target)<span class="t">@r.Target.DisplayName</span></span>
+            </div>
+        }
+
+        @* ---------- Traceability: the links between requirements and design ---------- *@
+        if (e is not Relationship && e is not Diagram && e.Kind != ElementKind.Model && e.Kind != ElementKind.Package)
+        {
+            <div class="section-title">Traceability <span class="grow"></span></div>
+            var any = false;
+            foreach (var (title, kind, outgoing) in Notation.TraceSlots(e.Kind))
+            {
+                var rels = (outgoing ? Ws.Model.Outgoing(e, kind) : Ws.Model.Incoming(e, kind)).ToList();
+                if (rels.Count == 0) continue;
+                any = true;
+                <div class="trace-group">
+                    <div class="tg-title"><MudIcon Icon="@UiKinds.Icon(kind)" Style="font-size:14px; color:var(--accent)" /> @title</div>
+                    @foreach (var rel in rels)
+                    {
+                        var other = outgoing ? rel.Target : rel.Source;
+                        <span class="pill" title="@other.QualifiedName" @onclick="() => Shell.Navigate(other)">
+                            @KindIcon.For(other)
+                            <span class="t">@(other.Kind == ElementKind.Requirement ? $"{other.Get(FieldKeys.RequirementId)} {other.Name}" : other.DisplayName)</span>
+                            <span class="rm" title="Remove link" @onclick="() => Ws.Model.Delete(rel)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                        </span>
+                    }
+                </div>
+            }
+            if (!any)
+            {
+                <div style="color:var(--text-3); font-size:12px; margin-bottom:6px">
+                    @(e.Kind == ElementKind.Requirement ? "Not satisfied or verified by anything yet." : "Not linked to any requirement yet.")
+                </div>
+            }
+            var slots = LinkSlots(e).ToList();
+            if (slots.Count > 0)
+            {
+                var slot = slots[Math.Min(_slot, slots.Count - 1)];
+                <div class="d-flex gap-2 align-start">
+                    <MudSelect T="int" @bind-Value="_slot" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px">
+                        @for (var i = 0; i < slots.Count; i++) { var idx = i; <MudSelectItem Value="idx">@slots[idx].Title</MudSelectItem> }
+                    </MudSelect>
+                    <MudAutocomplete @key="@(e.Id + _slot)" T="Element" Placeholder="+ link element…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                     SearchFunc="(q, ct) => Candidates(e, slot, q)" ToStringFunc="Describe"
+                                     ValueChanged="v => AddLink(e, slot, v)" ResetValueOnEmptyText="true"
+                                     MaxItems="40" ShowProgressIndicator="false" />
+                </div>
+            }
+        }
+
+        @* ---------- Structure: features of blocks/classes ---------- *@
+        if (Metamodel.IsStructuralClassifier(e.Kind) && e.Kind != ElementKind.Actor)
+        {
+            <div class="section-title">Structure <span class="grow"></span></div>
+            foreach (var f in e.OwnedElements.Where(c => c.Kind is ElementKind.Property or ElementKind.Port or ElementKind.Operation or ElementKind.EnumerationLiteral))
+            {
+                var feature = f;
+                <div class="feature-row" @onclick="() => Shell.Navigate(feature)">
+                    <MudIcon Icon="@UiKinds.Icon(feature.Kind)" Style="@($"font-size:15px; color:{UiKinds.Accent(feature.Kind)}")" />
+                    <span>@feature.Name @(feature.Kind == ElementKind.Operation ? (feature.Get(FieldKeys.Signature) is { Length: > 0 } sig ? sig : "()") : "")</span>
+                    <span class="ftype">@(Metamodel.IsTypedFeature(feature.Kind) ? Ws.Model.TypeDisplayName(feature) + (feature.Multiplicity is { Length: > 0 } m && m != "1" ? $" [{m}]" : "") : "")</span>
+                </div>
+            }
+            <div class="d-flex gap-1 flex-wrap mt-1">
+                @foreach (var k in new[] { ElementKind.Property, ElementKind.Port, ElementKind.Operation, ElementKind.EnumerationLiteral }.Where(k => Metamodel.CanOwn(e.Kind, k)))
+                {
+                    var kind = k;
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Shell.CreateElement(e, kind)">@(kind == ElementKind.Property ? "Part / value" : Metamodel.DisplayName(kind))</MudButton>
+                }
+            </div>
+        }
+
+        <div class="section-title">Specification <span class="grow"></span></div>
+        foreach (var key in Fields(e))
+        {
+            switch (key)
+            {
+                case FieldKeys.IsAbstract:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="e.IsAbstract" ValueChanged="v => SetFlag(e, key, v)" Label="Abstract" Color="Color.Primary" Size="Size.Small" />
+                    break;
+                case FieldKeys.Visibility:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Visibility" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        @foreach (var v in new[] { "", "public", "private", "protected", "package" }) { <MudSelectItem Value="@v">@(v == "" ? "(unspecified)" : v)</MudSelectItem> }
+                    </MudSelect>
+                    break;
+                case FieldKeys.Direction:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Direction" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        @foreach (var v in new[] { "", "in", "out", "inout" }) { <MudSelectItem Value="@v">@(v == "" ? "(unspecified)" : v)</MudSelectItem> }
+                    </MudSelect>
+                    break;
+                case FieldKeys.Subtype:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Type" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" MaxHeight="420">
+                        @foreach (var st in Subtypes.For(e.Kind)) { <MudSelectItem Value="@st">@Subtypes.Display(st)</MudSelectItem> }
+                    </MudSelect>
+                    break;
+                case FieldKeys.PortKind:
+                    @Choice(e, key, "Port kind", ("", "(unspecified)"), ("proxy", "Proxy port"), ("full", "Full port"))
+                    break;
+                case FieldKeys.FlowDirection:
+                    @Choice(e, key, "Flow direction", ("", "Source → target"), ("reverse", "Target → source"))
+                    break;
+                case FieldKeys.TagType:
+                    @Choice(e, key, "Value type", ("", "String"), ("Integer", "Integer"), ("Real", "Real"), ("Boolean", "Boolean"), ("Enum", "Enumeration (literals below)"))
+                    break;
+                case FieldKeys.Legend:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Show legend" />
+                    break;
+                case FieldKeys.PrimaryKey or FieldKeys.Nullable or FieldKeys.Unique:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small"
+                               Label="@(key == FieldKeys.PrimaryKey ? "Primary key" : key == FieldKeys.Nullable ? "Nullable" : "Unique")" />
+                    break;
+                case FieldKeys.Behavior:
+                    @RefChoice(e, key, "Calls behavior", Ws.Model.OfKind(ElementKind.Activity).Where(a => !a.IsAncestorOf(e)))
+                    break;
+                case FieldKeys.Represents:
+                    @RefChoice(e, key, "Represents (allocated to)", Ws.Model.AllElements.Where(x => x.Kind is ElementKind.Block or ElementKind.Actor or ElementKind.Component or ElementKind.Class))
+                    break;
+                case FieldKeys.ItemFlow:
+                    <MudAutocomplete @key="@(e.Id + key)" T="string" Label="Item flow (conveyed item)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
+                                     SearchFunc="(q, ct) => Task.FromResult(ItemNames(q))" CoerceValue="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Clearable="true" />
+                    break;
+                case FieldKeys.Metaclass:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Applies to (metaclass)" MultiSelection="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" MaxHeight="420"
+                               SelectedValues="@e.Get(key).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)"
+                               SelectedValuesChanged="vs => SetCsv(e, key, vs)" HelperText="Leave empty to allow any element">
+                        @foreach (var k in Metamodel.ElementKinds.Where(k => k != ElementKind.Model)) { <MudSelectItem Value="@k.ToString()">@Metamodel.DisplayName(k)</MudSelectItem> }
+                    </MudSelect>
+                    break;
+                case FieldKeys.Color:
+                    <div class="section-title" style="margin-top:10px">Colour</div>
+                    @Swatches(e.Get(key), v => Set(e, key, v))
+                    break;
+                case FieldKeys.Stereotypes:
+                    @StereotypeEditor(e)
+                    break;
+                case FieldKeys.Operator:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Operator" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        @foreach (var op in Metamodel.FragmentOperators) { <MudSelectItem Value="@op">@op</MudSelectItem> }
+                    </MudSelect>
+                    break;
+                case FieldKeys.MessageSort:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Message sort" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        <MudSelectItem Value="@("synchCall")">Synchronous call</MudSelectItem>
+                        <MudSelectItem Value="@("asynchCall")">Asynchronous call</MudSelectItem>
+                        <MudSelectItem Value="@("reply")">Reply</MudSelectItem>
+                    </MudSelect>
+                    break;
+                case FieldKeys.Type:
+                    <MudSelect @key="@(e.Id + key)" T="string" Label="Type" Value="@e.TypeRef" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense"
+                               Variant="Variant.Outlined" MaxHeight="420" ToStringFunc="TypeLabel">
+                        <MudSelectItem Value="@("")">(none)</MudSelectItem>
+                        @foreach (var p in Metamodel.PrimitiveTypes) { <MudSelectItem Value="@p">@p</MudSelectItem> }
+                        @foreach (var t in TypeCandidates(e)) { <MudSelectItem Value="@t.Id">@t.DisplayName  ·  @Metamodel.DisplayName(t.Kind)</MudSelectItem> }
+                    </MudSelect>
+                    if (Ws.Model.ResolveType(e) is { } resolved)
+                    {
+                        <div style="font-size:12px; margin:4px 2px">Go to <span class="link" @onclick="() => Shell.Navigate(resolved)">@resolved.QualifiedName</span></div>
+                    }
+                    break;
+                default:
+                    var multi = key is FieldKeys.Documentation or FieldKeys.Text or FieldKeys.Body;
+                    <MudTextField @key="@(e.Id + key)" T="string" Label="@Label(key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
+                                  Lines="@(multi ? 3 : 1)" AutoGrow="multi" MaxLines="12" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Help(key)" />
+                    break;
+            }
+        }
+
+        if (Ws.Active is { } activeDiagram && activeDiagram.Diagram.Nodes.FirstOrDefault(n => ReferenceEquals(n.Element, e)) is { } shown && !Ws.ReadOnly)
+        {
+            <div class="section-title">Appearance on this diagram <span class="grow"></span></div>
+            @Swatches(shown.Style.GetValueOrDefault("fill"), v => SetStyle(activeDiagram, shown, v))
+        }
+
+        if (e is not Diagram && e.Kind != ElementKind.Model)
+        {
+            <div class="section-title">Tagged values <span class="grow"></span></div>
+            foreach (var (k, v) in e.TaggedValues.ToList())
+            {
+                <div class="d-flex align-center gap-1">
+                    <span style="min-width:90px; font-size:12px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis">@k</span>
+                    <MudTextField @key="@(e.Id + "tag" + k)" T="string" Value="@v" ValueChanged="nv => Set(e, FieldKeys.TagPrefix + k, nv)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Set(e, FieldKeys.TagPrefix + k, null)" />
+                </div>
+            }
+            <div class="d-flex align-center gap-1">
+                <MudTextField T="string" @bind-Value="_newTag" Placeholder="tag" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                <MudTextField T="string" @bind-Value="_newTagValue" Placeholder="value" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newTag)" OnClick="() => AddTag(e)" />
+            </div>
+        }
+
+        var otherRels = Ws.Model.RelationshipsOf(e).Where(x => !TraceKinds.Contains(x.Kind)).ToList();
+        if (otherRels.Count > 0 && e is not Relationship)
+        {
+            <div class="section-title">Other relationships <span class="grow"></span></div>
+            foreach (var rel in otherRels.OrderBy(x => x.Kind))
+            {
+                var outgoing = ReferenceEquals(rel.Source, e);
+                var other = outgoing ? rel.Target : rel.Source;
+                <div class="feature-row" @onclick="() => Shell.Navigate(other)">
+                    <MudIcon Icon="@UiKinds.Icon(rel.Kind)" Style="font-size:15px; color:var(--text-3)" />
+                    <span>@other.DisplayName</span>
+                    <span class="ftype link" @onclick="() => Shell.Navigate(rel)" @onclick:stopPropagation="true">@(outgoing ? "→" : "←") @(Metamodel.Style(rel.Kind).Keyword ?? Metamodel.DisplayName(rel.Kind))</span>
+                </div>
+            }
+        }
+
+        if (Metamodel.IsClassifier(e.Kind))
+        {
+            var typedBy = Ws.Model.AllElements.Where(x => Metamodel.IsTypedFeature(x.Kind) && x.TypeRef == e.Id).ToList();
+            if (typedBy.Count > 0)
+            {
+                <div class="section-title">Used as type by <span class="grow"></span></div>
+                foreach (var t in typedBy)
+                {
+                    var feature = t;
+                    <div class="feature-row" @onclick="() => Shell.Navigate(feature)">
+                        <MudIcon Icon="@UiKinds.Icon(feature.Kind)" Style="font-size:15px; color:var(--text-3)" />
+                        <span>@feature.Owner?.DisplayName.@feature.Name</span><span></span>
+                    </div>
+                }
+            }
+        }
+        <CommentsSection ElementId="@e.Id" />
+        <div class="section-title">Identity <span class="grow"></span></div>
+        <div style="font:11px Menlo,Consolas,monospace; color:var(--text-3); word-break:break-all">@e.Id</div>
+    }
+</div>
+
+@code {
+    private static readonly ElementKind[] TraceKinds = [ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.DeriveReqt, ElementKind.Trace, ElementKind.Allocate];
+    private string? _newTag;
+    private string? _newTagValue;
+    private int _slot;
+
+    private Element? E => Ws.Selected is { } s && Ws.Model.Contains(s) ? s : null;
+
+    private sealed record Slot(string Title, ElementKind Kind, bool Outgoing);
+
+    /// <summary>Link kinds this element can take part in, phrased from its point of view.</summary>
+    private static IEnumerable<Slot> LinkSlots(Element e)
+    {
+        foreach (var (title, kind, outgoing) in Notation.TraceSlots(e.Kind))
+        {
+            var possible = Metamodel.ElementKinds.Any(k => outgoing ? Metamodel.CheckEnds(kind, e.Kind, k) == null : Metamodel.CheckEnds(kind, k, e.Kind) == null);
+            if (possible) yield return new Slot(title, kind, outgoing);
+        }
+    }
+
+    private Task<IEnumerable<Element>> Candidates(Element e, Slot slot, string? query)
+    {
+        var existing = (slot.Outgoing ? Ws.Model.Outgoing(e, slot.Kind).Select(r => r.Target) : Ws.Model.Incoming(e, slot.Kind).Select(r => r.Source)).ToHashSet();
+        var q = query?.Trim() ?? "";
+        var items = Ws.Model.AllElements
+            .Where(x => x is not Relationship && x is not Diagram && x.Kind is not (ElementKind.Model or ElementKind.Package) && !ReferenceEquals(x, e) && !existing.Contains(x))
+            .Where(x => slot.Outgoing ? Metamodel.CheckEnds(slot.Kind, e.Kind, x.Kind) == null : Metamodel.CheckEnds(slot.Kind, x.Kind, e.Kind) == null)
+            .Where(x => q.Length == 0 || Describe(x).Contains(q, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x.Kind == ElementKind.Requirement ? 0 : 1).ThenBy(Describe);
+        return Task.FromResult<IEnumerable<Element>>(items.ToList());
+    }
+
+    private static string Describe(Element? x) => x == null ? "" :
+        x.Kind == ElementKind.Requirement ? $"{x.Get(FieldKeys.RequirementId)} {x.Name}" : $"{x.DisplayName} ({Metamodel.DisplayName(x.Kind)})";
+
+    private void AddLink(Element e, Slot slot, Element? other)
+    {
+        if (other == null) return;
+        try
+        {
+            var (s, t) = slot.Outgoing ? (e, other) : (other, e);
+            var r = Ws.Model.Connect(slot.Kind, s, t);
+            if (Ws.Active is { } c) Ws.Model.AddEdge(c.Diagram, r);
+            Ws.SetStatus($"{s.DisplayName} «{Metamodel.Style(slot.Kind).Keyword}» {t.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private static IEnumerable<string> Fields(Element e) =>
+        e is Diagram ? [FieldKeys.Name, FieldKeys.Legend, FieldKeys.Documentation] : Metamodel.EditableFields(e.Kind);
+
+    private void Set(Element e, string key, string? value)
+    {
+        if (!Ws.Model.Contains(e)) return;
+        if (key == FieldKeys.Name) value = value?.Trim();
+        try { Ws.Model.Set(e, key, value); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void SetFlag(Element e, string key, bool v) => Set(e, key, v ? "true" : null);
+
+    private static readonly string[] SwatchColors = ["#ffeec4", "#dce8ff", "#d9f1e1", "#fbdede", "#ece2ff", "#d8f0ef", "#fff4b0", "#e3e6eb", "#4f8cff", "#2dd4bf", "#f0b429", "#ff6b6b", "#a283ff", "#3fbf7f"];
+
+    private RenderFragment Swatches(string? current, Action<string?> set) => __builder =>
+    {
+        <div class="swatches">
+            @foreach (var c in SwatchColors)
+            {
+                var color = c;
+                <span class="swatch @(string.Equals(current, color, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@color" title="@color" @onclick="() => set(color)"></span>
+            }
+            <span class="swatch none @(string.IsNullOrEmpty(current) ? "on" : "")" title="Default" @onclick="() => set(null)">⨯</span>
+        </div>
+    };
+
+    private void SetStyle(DiagramController c, DiagramNode n, string? color)
+    {
+        try { Ws.Model.SetNodeStyle(c.Diagram, n, "fill", color); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private RenderFragment Choice(Element e, string key, string label, params (string Value, string Text)[] options) => __builder =>
+    {
+        <MudSelect @key="@(e.Id + key)" T="string" Label="@label" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+            @foreach (var (v, t) in options) { <MudSelectItem Value="@v">@t</MudSelectItem> }
+        </MudSelect>
+    };
+
+    private RenderFragment RefChoice(Element e, string key, string label, IEnumerable<Element> candidates) => __builder =>
+    {
+        <MudSelect @key="@(e.Id + key)" T="string" Label="@label" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                   ToStringFunc="@(v => string.IsNullOrEmpty(v) ? "(none)" : Ws.Model.Find(v)?.DisplayName ?? v)">
+            <MudSelectItem Value="@("")">(none)</MudSelectItem>
+            @foreach (var c in candidates.OrderBy(x => x.Name)) { <MudSelectItem Value="@c.Id">@c.DisplayName  ·  @Metamodel.DisplayName(c.Kind)</MudSelectItem> }
+        </MudSelect>
+        if (Ws.Model.Find(e.Get(key)) is { } target)
+        {
+            <div style="font-size:12px; margin:4px 2px">Go to <span class="link" @onclick="() => Shell.Navigate(target)">@target.QualifiedName</span></div>
+        }
+    };
+
+    private IEnumerable<string> ItemNames(string? q) =>
+        Ws.Model.AllElements.Where(x => x.Kind is ElementKind.Block or ElementKind.ValueType or ElementKind.InterfaceBlock or ElementKind.DataType or ElementKind.Class)
+            .Select(x => x.Name).Where(n => string.IsNullOrEmpty(q) || n.Contains(q, StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(n => n).Take(40);
+
+    /// <summary>Stereotypes defined in profiles that may be applied to this element (metaclass match).</summary>
+    private IEnumerable<Element> ApplicableStereotypes(Element e) =>
+        Ws.Model.OfKind(ElementKind.Stereotype).Where(s =>
+        {
+            var meta = s.Get(FieldKeys.Metaclass).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return meta.Length == 0 || meta.Contains(e.Kind.ToString());
+        }).OrderBy(s => s.Name);
+
+    private void SetBool(Element e, string key, bool v) => Set(e, key, v ? "true" : "false");
+
+    private void SetCsv(Element e, string key, IEnumerable<string> values) => Set(e, key, string.Join(", ", values));
+
+    private static string PillStyle(Element? stereotype) =>
+        stereotype?.Get(FieldKeys.Color) is { Length: > 0 } c ? $"border-color:{c}" : "";
+
+    private void SetStereotypes(Element e, IEnumerable<string> names) => Set(e, FieldKeys.Stereotypes, string.Join(", ", names.Distinct()));
+
+    private RenderFragment StereotypeEditor(Element e) => __builder =>
+    {
+        var applied = e.Stereotypes.ToList();
+        <div class="section-title" style="margin-top:12px">Stereotypes <span class="grow"></span></div>
+        <div>
+            @foreach (var name in applied)
+            {
+                var n = name;
+                var def = Ws.Model.OfKind(ElementKind.Stereotype).FirstOrDefault(s => s.Name == n);
+                <span class="pill" style="@PillStyle(def)" @onclick="() => { if (def != null) Shell.Navigate(def); }">
+                    <span class="t">«@n»</span>
+                    <span class="rm" @onclick="() => SetStereotypes(e, applied.Where(x => x != n))" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                </span>
+            }
+        </div>
+        var options = ApplicableStereotypes(e).Where(s => !applied.Contains(s.Name)).ToList();
+        <MudAutocomplete T="string" Placeholder="+ apply stereotype…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" CoerceValue="true" ResetValueOnEmptyText="true"
+                         SearchFunc="@((q, ct) => Task.FromResult(options.Select(o => o.Name).Where(n => string.IsNullOrEmpty(q) || n.Contains(q, StringComparison.OrdinalIgnoreCase))))"
+                         ValueChanged="@(v => { if (!string.IsNullOrWhiteSpace(v)) SetStereotypes(e, applied.Append(v.Trim())); })" />
+        @* Typed tagged values contributed by applied stereotypes *@
+        foreach (var name in applied)
+        {
+            var def = Ws.Model.OfKind(ElementKind.Stereotype).FirstOrDefault(s => s.Name == name);
+            if (def == null) continue;
+            foreach (var tag in def.OwnedElements.Where(t => t.Kind == ElementKind.TagDefinition))
+            {
+                var key = FieldKeys.TagPrefix + tag.Name;
+                var type = tag.Get(FieldKeys.TagType);
+                var current = e.Get(key) is { Length: > 0 } v ? v : tag.Get(FieldKeys.DefaultValue);
+                switch (type)
+                {
+                    case "Boolean":
+                        <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(current == "true")" ValueChanged="b => SetBool(e, key, b)" Color="Color.Primary" Size="Size.Small" Label="@($"{tag.Name} («{name}»)")" />
+                        break;
+                    case "Enum":
+                        <MudSelect @key="@(e.Id + key)" T="string" Label="@($"{tag.Name} «{name}»")" Value="@current" ValueChanged="x => Set(e, key, x)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                            @foreach (var lit in tag.Get(FieldKeys.TagValues).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) { <MudSelectItem Value="@lit">@lit</MudSelectItem> }
+                        </MudSelect>
+                        break;
+                    default:
+                        <MudTextField @key="@(e.Id + key)" T="string" Label="@($"{tag.Name} «{name}»")" Value="@current" ValueChanged="x => SetTyped(e, key, type, x)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                      HelperText="@(type is "Integer" or "Real" ? type : null)" InputType="@(type is "Integer" or "Real" ? InputType.Number : InputType.Text)" />
+                        break;
+                }
+            }
+        }
+    };
+
+    private void SetTyped(Element e, string key, string type, string? value)
+    {
+        if (!string.IsNullOrEmpty(value) && type == "Integer" && !long.TryParse(value, out _)) { Ws.SetStatus($"{key[FieldKeys.TagPrefix.Length..]} must be a whole number"); return; }
+        if (!string.IsNullOrEmpty(value) && type == "Real" && !double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)) { Ws.SetStatus($"{key[FieldKeys.TagPrefix.Length..]} must be a number"); return; }
+        Set(e, key, value);
+    }
+
+    private void AddTag(Element e)
+    {
+        Set(e, FieldKeys.TagPrefix + _newTag!.Trim(), string.IsNullOrEmpty(_newTagValue) ? "true" : _newTagValue);
+        _newTag = _newTagValue = null;
+    }
+
+    private IEnumerable<Element> TypeCandidates(Element e)
+    {
+        ElementKind[] allowed = e.Kind == ElementKind.Port
+            ? [ElementKind.InterfaceBlock, ElementKind.Interface, ElementKind.Block, ElementKind.ValueType, ElementKind.DataType]
+            : [ElementKind.Block, ElementKind.Class, ElementKind.ValueType, ElementKind.DataType, ElementKind.Enumeration, ElementKind.InterfaceBlock,
+               ElementKind.Interface, ElementKind.Component, ElementKind.ConstraintBlock, ElementKind.Actor];
+        return Ws.Model.AllElements.Where(x => allowed.Contains(x.Kind)).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private string TypeLabel(string? v) => string.IsNullOrEmpty(v) ? "(none)" : Ws.Model.Find(v)?.DisplayName ?? v;
+
+    private static string Label(string key) => key switch
+    {
+        FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity",
+        FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
+        FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
+        FieldKeys.Stereotypes => "Stereotypes", _ => key,
+    };
+
+    private static string? Help(string key) => key switch
+    {
+        FieldKeys.Multiplicity => "e.g. 1, 0..1, 1..*, *",
+        FieldKeys.Signature => "e.g. (speed : Real) : Boolean",
+        FieldKeys.Stereotypes => "Comma separated",
+        _ => null,
+    };
+}

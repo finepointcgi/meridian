@@ -1,0 +1,35 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+@if (Ws.Selected is not { } target || target.Kind == ElementKind.Model)
+{
+    <div style="padding:16px; color:var(--text-3)">Select an element to see what depends on it — every element that would be affected if it changed.</div>
+}
+else
+{
+    var impact = Traceability.Impact(Ws.Model, target);
+    <div class="d-flex align-center gap-2 px-3 py-2">
+        @KindIcon.For(target)
+        <span style="font-weight:600">@target.DisplayName</span>
+        <span style="color:var(--text-3)">· @impact.Count dependent element@(impact.Count == 1 ? "" : "s") · live</span>
+    </div>
+    @if (impact.Count == 0)
+    {
+        <div style="padding:0 16px 16px; color:var(--text-3)">Nothing depends on this element.</div>
+    }
+    @foreach (var depth in impact.GroupBy(i => i.Depth).OrderBy(g => g.Key))
+    {
+        <div class="section-label">@(depth.Key == 1 ? "Directly affected" : $"{depth.Key} steps away")</div>
+        <div style="display:flex; flex-wrap:wrap; gap:4px; padding:0 12px 8px">
+            @foreach (var (el, _, via) in depth)
+            {
+                var e = el;
+                <span class="pill" title="@e.QualifiedName" @onclick="() => Shell.Navigate(e)">
+                    @KindIcon.For(e)
+                    <span class="t">@(e.Kind == ElementKind.Requirement ? $"{e.Get(FieldKeys.RequirementId)} {e.Name}" : e.DisplayName)</span>
+                    <span style="color:var(--text-3); font-size:11px; padding-right:6px">@(via != null ? $"«{Metamodel.Style(via.Kind).Keyword ?? Metamodel.DisplayName(via.Kind)}»" : "typed by")</span>
+                </span>
+            }
+        </div>
+    }
+}

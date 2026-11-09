@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Meridian
+Comment=Model-based systems engineering (SysML, requirements, BPMN, ArchiMate)
+Exec=__DIR__/Meridian %U
+Icon=__DIR__/meridian.png
+Terminal=false
+Categories=Development;Engineering;
+StartupWMClass=Meridian

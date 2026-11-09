@@ -1,0 +1,45 @@
+@using Meridian.Core.Validation
+@using Sev = Meridian.Core.Validation.Severity
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-3 px-3 py-2">
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="() => Run()">Validate model</MudButton>
+    <MudText Typo="Typo.body2" Style="color:#5a6372">@_summary</MudText>
+</div>
+@if (_issues is { Count: > 0 })
+{
+    <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="font-size:12.5px">
+        <thead><tr><th style="width:90px">Severity</th><th style="width:80px">Rule</th><th>Message</th><th>Element</th></tr></thead>
+        <tbody>
+            @foreach (var i in _issues)
+            {
+                <tr style="cursor:pointer" @onclick="() => Shell.Navigate(i.Element)">
+                    <td><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@(i.Severity switch { Sev.Error => Color.Error, Sev.Warning => Color.Warning, _ => Color.Info })">@i.Severity</MudChip></td>
+                    <td style="color:#6b7586">@i.RuleId</td>
+                    <td>@i.Message</td>
+                    <td style="color:#6b7586">@i.Element.QualifiedName</td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    private IReadOnlyList<ValidationIssue>? _issues;
+    private string _summary = "Run validation to check the model against the active rule set.";
+    private ModelRepository? _for;
+
+    protected override void OnInitialized() { base.OnInitialized(); Run(); }
+
+    protected override void OnWorkspaceChanged() => Run(render: false);
+
+    public int Run(bool render = true)
+    {
+        _issues = new ModelValidator().Validate(Ws.Model);
+        var errors = _issues.Count(i => i.Severity == Sev.Error);
+        _summary = _issues.Count == 0 ? "No issues found."
+            : $"{errors} errors · {_issues.Count(i => i.Severity == Sev.Warning)} warnings · {_issues.Count(i => i.Severity == Sev.Info)} info";
+        if (render) StateHasChanged();
+        return errors;
+    }
+}

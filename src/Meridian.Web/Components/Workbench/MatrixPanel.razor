@@ -1,0 +1,95 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-3 px-3 py-2 flex-wrap">
+    <MudSelect T="int" Label="Rows" @bind-Value="_rows" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="width:180px">
+        @for (var i = 0; i < Axes.Length; i++) { var idx = i; <MudSelectItem Value="idx">@Axes[idx].Label</MudSelectItem> }
+    </MudSelect>
+    <MudSelect T="int" Label="Columns" @bind-Value="_cols" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="width:180px">
+        @for (var i = 0; i < Axes.Length; i++) { var idx = i; <MudSelectItem Value="idx">@Axes[idx].Label</MudSelectItem> }
+    </MudSelect>
+    <MudSelect T="ElementKind" Label="Relationship" @bind-Value="_rel" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="width:170px">
+        @foreach (var k in Metamodel.RelationshipKinds) { <MudSelectItem Value="k">@Metamodel.DisplayName(k)</MudSelectItem> }
+    </MudSelect>
+    <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+        <MudButton OnClick="() => Preset(0, 1, ElementKind.Satisfy)">Satisfy</MudButton>
+        <MudButton OnClick="() => Preset(0, 6, ElementKind.Verify)">Verify</MudButton>
+        <MudButton OnClick="() => Preset(9, 1, ElementKind.Allocate)">Allocation</MudButton>
+        <MudButton OnClick="() => Preset(0, 0, ElementKind.DeriveReqt)">Derivation</MudButton>
+    </MudButtonGroup>
+    <MudText Typo="Typo.caption" Style="color:var(--text-3)">Click an empty cell to create the relationship; a filled cell to select it.</MudText>
+</div>
+@{
+    var m = Traceability.BuildMatrix(Ws.Model, Axes[_rows].Kinds, Axes[_cols].Kinds, [_rel]);
+}
+@if (m.Rows.Count == 0 || m.Columns.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="px-3" Style="color:#6b7586">Nothing to show for this row/column choice.</MudText>
+}
+else
+{
+    <div class="px-3 pb-3" style="overflow:auto">
+        <table class="matrix">
+            <thead>
+                <tr>
+                    <th></th>
+                    @foreach (var c in m.Columns) { <th class="col" title="@c.QualifiedName"><div><span>@c.DisplayName</span></div></th> }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in m.Rows)
+                {
+                    <tr>
+                        <th class="row" title="@r.QualifiedName"><span class="link" @onclick="() => Shell.Navigate(r)">@(r.Kind == ElementKind.Requirement ? $"{r.Get(FieldKeys.RequirementId)} {r.Name}" : r.DisplayName)</span></th>
+                        @foreach (var c in m.Columns)
+                        {
+                            var cell = m.Cell(r, c);
+                            <td class="@(cell.IsEmpty ? "" : "on")" title="@r.DisplayName × @c.DisplayName" @onclick="() => Click(cell, r, c)">
+                                @(cell.IsEmpty ? "" : ReferenceEquals(cell.Relationships[0].Source, r) ? "↗" : "↙")
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+
+    private static readonly (string Label, ElementKind[] Kinds)[] Axes =
+    [
+        ("Requirements", [ElementKind.Requirement]),
+        ("Blocks", [ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ConstraintBlock]),
+        ("Classes", [ElementKind.Class, ElementKind.Interface, ElementKind.Component]),
+        ("Parts / Ports", [ElementKind.Property, ElementKind.Port]),
+        ("Use Cases", [ElementKind.UseCase]),
+        ("Actors", [ElementKind.Actor]),
+        ("Test Cases", [ElementKind.TestCase]),
+        ("Activities / Actions", [ElementKind.Activity, ElementKind.Action]),
+        ("States", [ElementKind.StateMachine, ElementKind.State]),
+        ("Actions (functions)", [ElementKind.Action]),
+    ];
+
+    private void Preset(int rows, int cols, ElementKind rel)
+    {
+        _rows = rows;
+        _cols = cols;
+        _rel = rel;
+    }
+
+    private int _rows;
+    private int _cols = 1;
+    private ElementKind _rel = ElementKind.Satisfy;
+
+    private void Click(MatrixCell cell, Element row, Element col)
+    {
+        if (!cell.IsEmpty) { Shell.Navigate(cell.Relationships[0]); return; }
+        // Pick the valid direction: trace relationships usually point from design (column) to requirement (row).
+        var (s, t) = Metamodel.CheckEnds(_rel, col.Kind, row.Kind) == null ? (col, row)
+                   : Metamodel.CheckEnds(_rel, row.Kind, col.Kind) == null ? (row, col) : (null, null);
+        if (s == null || t == null) { Ws.SetStatus($"{Metamodel.DisplayName(_rel)} can't connect {Metamodel.DisplayName(row.Kind)} and {Metamodel.DisplayName(col.Kind)}"); return; }
+        try { Ws.Model.Connect(_rel, s, t); Ws.SetStatus($"Created {Metamodel.DisplayName(_rel)}: {s.DisplayName} → {t.DisplayName}"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}
