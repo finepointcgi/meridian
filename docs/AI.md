@@ -75,8 +75,34 @@ it. The acknowledgement is stored on the server, once per user.
   - *Review this model*: looks for unsatisfied or unverified requirements, orphan blocks, vague "shall" wording,
     missing units and missing rationale. The result is a checklist; each item links to its element and can be ticked
     off.
-  - *Diagram from description…*: describe a system or process and choose a block definition, internal block or
-    activity diagram. You get the elements plus an automatically laid-out diagram.
+  - *Diagram from description…*: describe a system or process and choose a block definition, internal block,
+    activity or package diagram. You get the elements plus an automatically laid-out diagram (a package diagram
+    nests sub-packages inside their owners and draws the dependencies between them).
+  - *Diagram my model*: Claude looks at the deterministic auto-diagram plan (`plan_diagrams`) and the existing
+    diagrams, decides which views tell the story (usually a package overview, the main structure, the internals of the
+    important blocks, key behaviors and requirement views), names them, chooses what to include and leave out, and
+    writes a one-line purpose for each. The proposal arrives as the usual change card with **one item per diagram**, so
+    you accept or reject each view; Apply creates them all as one undo step. The purpose becomes the diagram's
+    documentation, which reports print above the figure. Layout is done by Meridian, not by Claude.
+
+### Auto-diagram without AI
+
+The same layout engine works without an API key: **Diagram ▸ Auto-diagram** in the ribbon, ⌘K → "Diagram the whole
+model", or right-click a package → "Auto-diagram this package". It plans a package overview, a block definition
+diagram per package with blocks, an internal block diagram per block with parts, a requirement diagram per
+requirements package, a diagram per activity or state machine that has none, and use case diagrams. Elements already on
+a diagram of that kind are skipped unless you tick *Regenerate existing views*; groups bigger than about 25 shapes are
+split. The code is `src/Meridian.Core/Language/AutoDiagrammer.cs`.
+
+### AI narrative in generated documents
+
+**Generate ▸ Formats ▸ Generate SDD…** (or ⌘K) first offers to add the missing views (it lists them), then opens the
+document dialog with the System Design Description template selected. When the assistant is configured, that dialog
+has an **AI narrative** switch: *Draft narrative* sends a summary of the model (names, documentation, structure,
+requirements, diagram names; see `NarrativeWriter.Digest`) and the section titles to Claude, which returns an overview
+and a rationale paragraph per section through the strict `submit_narrative` tool. The draft is shown in the dialog for
+review: edit any paragraph or untick a section. Only the reviewed text is added to the document, at the top of each
+section; nothing is added silently. It uses the same model, settings, data notice and refusal handling as the chat.
 
 ## Tools
 
@@ -94,6 +120,7 @@ Read-only:
 | `get_traceability` | What satisfies, verifies, refines, traces to or derives a requirement, plus its sub-requirements, suspect links and coverage. |
 | `validate_model` | Runs Meridian's validation rules, optionally for one package. |
 | `get_sysml_text` | A package as SysML v2 text, with `@id` comments so that edits keep element identity. |
+| `plan_diagrams` | The auto-diagrammer's plan for the model or one package: diagram type, suggested name, owner, element ids, shape count, new or update. |
 | `report_findings` | Records review findings for the checklist. It doesn't change the model. |
 
 Write tools (these only propose changes; nothing is applied until you click Apply):
@@ -104,7 +131,8 @@ Write tools (these only propose changes; nothing is applied until you click Appl
 | `update_fields` | New field values, including renames. The card shows old → new. |
 | `create_relationship` | A Satisfy, Verify, DeriveReqt, Composition, Allocate or other relationship, optionally with a confidence and a reason. End types are checked against the metamodel. |
 | `delete_element` | Deleting an element, along with what it owns, its relationships and its diagram shapes. The card shows the cascade. |
-| `create_diagram_with_elements` | A new diagram showing the given elements and the relationships between them, laid out automatically. |
+| `create_diagram_with_elements` | A new diagram showing the given elements and the relationships between them, laid out automatically by the auto-diagrammer (nesting, ports, no overlaps). |
+| `create_diagrams` | Several diagrams at once, one reviewable item each, with a name, an owner, a one-line purpose and the elements to show (or the owner's default content minus `exclude_ids`). At most 60 shapes per diagram. |
 | `apply_sysml_text` | An edited SysML v2 text for a package, applied through the same sync as the SysML text editor. It is dry-run on a copy of the model so the card can list the exact changes. Syntax errors are returned to Claude. |
 
 ## How it calls Claude
@@ -148,4 +176,6 @@ million (check Anthropic's pricing page for current prices). To keep costs down:
 
 `tests/Meridian.Tests/AssistantTests.cs` covers the tools, schema validation, change-set apply, undo, replication and
 rollback, and the message loop against a fake HTTP handler (`AssistantFakes.cs`).
+`tests/Meridian.Tests/AutoDiagramAssistantTests.cs` covers `plan_diagrams`, `create_diagrams`, the "Diagram my model"
+turn, the SDD figures and the narrative writer, with the same fake handler.
 `tests/Meridian.Web.Tests/AssistantPanelTests.cs` covers the panel. The tests never call the real API.

@@ -85,6 +85,7 @@ public partial class Workbench
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
+        list.AddRange(AutoDiagramPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -387,6 +388,7 @@ public partial class Workbench
         if (e.Owner != null) m.Add(MenuEntry.Async("Delete", () => Delete(e), "⌦"));
         m.AddRange(LockEntries(e));   // element locking (Workbench.VersionControl.cs)
         m.Add(MenuEntry.Sep());
+        m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)

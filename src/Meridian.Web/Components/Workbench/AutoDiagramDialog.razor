@@ -1,0 +1,131 @@
+@* "Diagram it all out": the auto-diagrammer's plan (Meridian.Core.Language.AutoDiagrammer) as a reviewable list.
+   Create applies every checked diagram as ONE undoable step (done by the workbench). Works without any AI. *@
+@inject Workspace Ws
+
+<MudDialog Class="auto-diagram-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" />
+            <MudText Typo="Typo.h6">@(ForSdd ? "Add the missing views first?" : "Auto-diagram")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:10px">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2)">
+                @if (ForSdd)
+                {
+                    @("The System Design Description shows a package overview, block definition and internal block diagrams and behavior diagrams. These views are missing; Meridian can create them now, laid out automatically.")
+                }
+                else
+                {
+                    @("Meridian looks at the model and proposes a set of tidy, automatically laid-out diagrams: a package overview, structure (BDD) per package, internal structure (IBD) per block with parts, requirements per requirements package, a diagram per behavior without one, and use cases. Elements already on a diagram of that kind are skipped.")
+                }
+            </MudText>
+            @if (!ForSdd)
+            {
+                <div class="d-flex align-center gap-3" style="flex-wrap:wrap">
+                    <MudSelect T="string" Label="Scope" Value="_scopeId" ValueChanged="ScopeChanged" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:260px; flex:1" Class="ad-scope">
+                        <MudSelectItem Value="@Ws.Model.Root.Id">Whole model</MudSelectItem>
+                        @foreach (var p in Packages())
+                        {
+                            <MudSelectItem Value="@p.Id">Package: @p.QualifiedName</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudCheckBox T="bool" Value="_regenerate" ValueChanged="RegenerateChanged" Dense="true" Color="Color.Primary" Class="ad-regenerate"
+                                 Label="Regenerate existing views" />
+                    <MudCheckBox T="bool" Value="_deps" ValueChanged="DepsChanged" Dense="true" Color="Color.Primary"
+                                 Label="Add «use» dependencies between packages that reference each other" />
+                </div>
+            }
+            @if (_plan.IsEmpty)
+            {
+                <div class="ad-empty" style="padding:18px; text-align:center; color:var(--text-3)">
+                    Nothing to add: every element in this scope is already on a diagram of its kind.
+                    @if (!_regenerate && !ForSdd) { <br />@("Tick “Regenerate existing views” to rebuild them anyway.") }
+                </div>
+            }
+            else
+            {
+                <div class="ad-list" style="max-height:46vh; overflow:auto; border:1px solid var(--border); border-radius:8px">
+                    <div class="ad-head" style="display:grid; grid-template-columns:28px 52px 1fr 1fr 64px 66px; gap:8px; align-items:center; padding:6px 10px; font-size:12px; color:var(--text-3); border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel-solid)">
+                        <input type="checkbox" title="Select all" checked="@_plan.Diagrams.All(p => p.Selected)" @onchange="e => SelectAll(e.Value is true)" />
+                        <span>Kind</span><span>Name</span><span>Owner</span><span style="text-align:right">Shapes</span><span></span>
+                    </div>
+                    @foreach (var d in _plan.Diagrams)
+                    {
+                        var item = d;
+                        <label class="ad-row" style="display:grid; grid-template-columns:28px 52px 1fr 1fr 64px 66px; gap:8px; align-items:center; padding:6px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid var(--border)" title="@item.Purpose">
+                            <input type="checkbox" checked="@item.Selected" @onchange="e => item.Selected = e.Value is true" />
+                            <span style="display:flex; align-items:center; gap:4px; color:var(--accent-2)"><MudIcon Icon="@UiKinds.DiagramIcon(item.Type)" Style="font-size:16px" /><b style="font-size:11px">@Metamodel.DiagramAbbreviation(item.Type).ToUpperInvariant()</b></span>
+                            <span class="ad-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@item.Name</span>
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-3)">@item.Owner.DisplayName</span>
+                            <span style="text-align:right">@item.NodeCount</span>
+                            <span class="ad-status" style="justify-self:end; font-size:11px; padding:1px 8px; border-radius:10px; background:@(item.Status == AutoDiagramStatus.New ? "rgba(63,191,127,.18)" : "rgba(91,141,239,.18)")">@(item.Status == AutoDiagramStatus.New ? "new" : "update")</span>
+                        </label>
+                    }
+                </div>
+                <MudText Typo="Typo.caption" Style="color:var(--text-3)">
+                    @Selected.Count() of @_plan.Diagrams.Count diagrams, @Selected.Sum(p => p.NodeCount) shapes@(_plan.Dependencies.Count > 0 && Selected.Any(p => p.Type == DiagramType.Package) ? $", {_plan.Dependencies.Count} package dependencies" : "") — created as one undoable step.
+                </MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        @if (ForSdd)
+        {
+            <MudButton OnClick="Skip">Skip, generate as is</MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="ad-create" Disabled="@(Ws.ReadOnly || !Selected.Any())" OnClick="Create">
+            @(ForSdd ? $"Add {Selected.Count()} diagrams and continue" : $"Create {Selected.Count()} diagrams")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>The dialog's answer: the plan to apply, or null for "skip" (SDD mode).</summary>
+    public sealed record Answer(AutoDiagramPlan? Plan);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Initial scope: a package (or the model root); null = whole model.</summary>
+    [Parameter] public Element? Scope { get; set; }
+
+    /// <summary>Asked before generating an SDD: lists only the missing views, offers to skip.</summary>
+    [Parameter] public bool ForSdd { get; set; }
+
+    private AutoDiagramPlan _plan = new();
+    private string _scopeId = "";
+    private bool _regenerate;
+    private bool _deps = true;
+
+    private IEnumerable<PlannedDiagram> Selected => _plan.Diagrams.Where(p => p.Selected);
+
+    protected override void OnInitialized()
+    {
+        _scopeId = (Scope is { Kind: ElementKind.Package or ElementKind.Model } s && Ws.Model.Contains(s) ? s : Ws.Model.Root).Id;
+        Replan();
+    }
+
+    private IEnumerable<Element> Packages() =>
+        Ws.Model.OfKind(ElementKind.Package).Where(p => p.Name != Meridian.Serialization.Reports.ReportTemplates.PackageName)
+          .OrderBy(p => p.QualifiedName, StringComparer.OrdinalIgnoreCase);
+
+    private void Replan()
+    {
+        var scope = Ws.Model.Find(_scopeId) ?? Ws.Model.Root;
+        _plan = AutoDiagrammer.Plan(Ws.Model, new AutoDiagramOptions { Scope = scope, Regenerate = _regenerate, DerivePackageDependencies = _deps });
+    }
+
+    private void ScopeChanged(string id) { _scopeId = id; Replan(); }
+    private void RegenerateChanged(bool v) { _regenerate = v; Replan(); }
+    private void DepsChanged(bool v) { _deps = v; Replan(); }
+
+    private void SelectAll(bool on)
+    {
+        foreach (var p in _plan.Diagrams) p.Selected = on;
+    }
+
+    private void Create() => MudDialog.Close(DialogResult.Ok(new Answer(_plan)));
+    private void Skip() => MudDialog.Close(DialogResult.Ok(new Answer(null)));
+}

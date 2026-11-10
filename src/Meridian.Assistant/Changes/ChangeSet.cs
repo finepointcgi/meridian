@@ -54,6 +54,9 @@ public sealed class Proposal
     public double? Confidence { get; init; }
     public string? Reason { get; init; }
 
+    /// <summary>Proposed diagrams: the one-line purpose of the view (stored as the diagram's documentation).</summary>
+    public string? Purpose { get; init; }
+
     /// <summary>One-line, human readable description shown in the diff card.</summary>
     public required string Title { get; init; }
 
@@ -206,6 +209,16 @@ public sealed class ChangeSet
             case ProposalKind.CreateDiagram:
             {
                 var owner = Resolve(m, p.OwnerRef, created);
+                if (AutoDiagrammer.SupportedTypes.Contains(p.DiagramType!.Value))
+                {
+                    // The auto-diagrammer's layout: layered / grid, nesting, ports on the facing side, no overlaps.
+                    var elements = p.ElementRefs.Select(r => Resolve(m, r, created)).ToList();
+                    created[p.Ref!] = AutoDiagrammer.Build(m, new PlannedDiagram
+                    {
+                        Type = p.DiagramType.Value, Owner = owner, Name = p.Name ?? "", Elements = elements, Purpose = p.Purpose ?? "",
+                    });
+                    break;
+                }
                 var d = m.CreateDiagram(owner, p.DiagramType!.Value, string.IsNullOrWhiteSpace(p.Name) ? null : p.Name);
                 var x = 40.0;
                 foreach (var r in p.ElementRefs)
