@@ -5,9 +5,10 @@
 
 @{
     var all = AllRows();
-    var rows = Sorted(TraceabilityTable.Apply(all, new TraceFilter(_notSatisfied, _notVerified, _suspect, Ws.Model.Find(_packageId), _search))).ToList();
-    var suspectCount = all.Sum(r => r.Links.Values.Sum(l => l.Count(x => x.Suspect)));
-    var packages = TraceabilityTable.CoverageByPackage(all);
+    var rows = FilteredRows(all);
+    var suspectCount = _suspectCount;
+    var packages = _packages;
+    var page = Pager.Slice(rows, _page, PageSize);
 }
 <div class="tt-panel">
     <div class="tt-toolbar">
@@ -18,7 +19,7 @@
         </div>
         <div class="tt-search">
             <MudIcon Icon="@Icons.Material.Outlined.Search" />
-            <input placeholder="Search id, text, links…" value="@_search" @oninput="e => _search = e.Value?.ToString()" />
+            <input placeholder="Search id, text, links…" value="@_search" @oninput="e => OnSearch(e.Value?.ToString())" />
         </div>
         @if (_mode == Mode.Table)
         {
@@ -27,7 +28,7 @@
             <span class="chip @(_suspect ? "on" : "")" @onclick="() => _suspect = !_suspect"><MudIcon Icon="@Icons.Material.Filled.WarningAmber" Style="font-size:13px; vertical-align:-2px" /> Suspect</span>
             <select class="tt-select" value="@(_packageId ?? "")" @onchange="e => _packageId = e.Value?.ToString() is { Length: > 0 } v ? v : null" title="Package">
                 <option value="">All packages</option>
-                @foreach (var p in Ws.Model.AllElements.Where(x => x.Kind == ElementKind.Package && x.Descendants().Any(d => d.Kind == ElementKind.Requirement)).OrderBy(x => x.QualifiedName))
+                @foreach (var p in _requirementPackages)
                 {
                     <option value="@p.Id">@p.QualifiedName</option>
                 }
@@ -84,7 +85,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var r in rows)
+                    @foreach (var r in page)
                     {
                         var row = r;
                         <tr @key="row.Requirement.Id" class="@(ReferenceEquals(Ws.Selected, row.Requirement) ? "sel" : "")" @onclick="() => Ws.Select(row.Requirement)">
@@ -143,10 +144,12 @@
                     }
                 </tbody>
             </table>
+            <Pager Total="rows.Count" PageSize="PageSize" Page="_page" PageChanged="p => _page = p" />
             break;
 
         case Mode.Chain:
-            var chains = TraceabilityTable.Chains(Ws.Model).Where(c => ChainMatches(c)).ToList();
+            var allChains = ChainRows().Where(c => ChainMatches(c)).ToList();
+            var chains = Pager.Slice(allChains, _page, PageSize);
             <table class="tt chain">
                 <thead><tr><th>Need</th><th>Requirement</th><th>Derived / decomposed</th><th>Design</th><th>Test</th></tr></thead>
                 <tbody>
@@ -170,10 +173,11 @@
                     }
                 </tbody>
             </table>
+            <Pager Total="allChains.Count" PageSize="PageSize" Page="_page" PageChanged="p => _page = p" />
             break;
 
         default:
-            var orphans = TraceabilityTable.OrphanDesignElements(Ws.Model)
+            var orphans = OrphanRows()
                 .Where(o => string.IsNullOrWhiteSpace(_search) || o.QualifiedName.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
             if (orphans.Count == 0)
             {
@@ -183,7 +187,7 @@
             <table class="tt">
                 <thead><tr><th style="width:240px">Design element</th><th>Qualified name</th><th style="width:300px">Satisfies</th></tr></thead>
                 <tbody>
-                    @foreach (var o in orphans)
+                    @foreach (var o in Pager.Slice(orphans, _page, PageSize))
                     {
                         var el = o;
                         <tr @key="el.Id" class="@(ReferenceEquals(Ws.Selected, el) ? "sel" : "")" @onclick="() => Ws.Select(el)">
@@ -201,6 +205,7 @@
                     }
                 </tbody>
             </table>
+            <Pager Total="orphans.Count" PageSize="PageSize" Page="_page" PageChanged="p => _page = p" />
             break;
     }
 </div>
@@ -216,17 +221,77 @@
     private bool _desc;
     private (Element Req, TraceColumn Col)? _edit;
 
+    /// <summary>Rows per page; long tables are paged so the DOM stays small at any model size.</summary>
+    internal const int PageSize = 200;
+
+    /// <summary>Above this many requirements the search box waits for a pause in typing before filtering.</summary>
+    internal const int DebounceAbove = 1000;
+
+    private int _page;
+
+    // Everything derived from the model is cached against Workspace.ModelVersion (content changes only), so selecting a
+    // row or another workspace bump re-renders without rebuilding the traceability table.
     private int _cachedVersion = -1;
+    private ModelRepository? _cachedModel;
     private IReadOnlyList<TraceRow> _cached = [];
+    private int _suspectCount;
+    private IReadOnlyList<PackageCoverage> _packages = [];
+    private List<Element> _requirementPackages = [];
 
     private IReadOnlyList<TraceRow> AllRows()
     {
-        if (_cachedVersion != Ws.Version || _cached.Any(r => !Ws.Model.Contains(r.Requirement)))
+        if (_cachedVersion != Ws.ModelVersion || !ReferenceEquals(_cachedModel, Ws.Model) || _cached.Any(r => !Ws.Model.Contains(r.Requirement)))
         {
             _cached = TraceabilityTable.Build(Ws.Model);
-            _cachedVersion = Ws.Version;
+            _cachedVersion = Ws.ModelVersion;
+            _cachedModel = Ws.Model;
+            _suspectCount = _cached.Sum(r => r.Links.Values.Sum(l => l.Count(x => x.Suspect)));
+            _packages = TraceabilityTable.CoverageByPackage(_cached);
+            // Packages that contain requirements: the package ancestors of every requirement.
+            var pkgs = new HashSet<Element>(ReferenceEqualityComparer.Instance);
+            foreach (var r in Ws.Model.OfKind(ElementKind.Requirement))
+                for (var a = r.Owner; a != null; a = a.Owner)
+                    if (a.Kind == ElementKind.Package) pkgs.Add(a);
+            _requirementPackages = Ws.Model.AllElements.Where(pkgs.Contains).OrderBy(x => x.QualifiedName).ToList();
+            _filteredKey = null;
+            _chains = null;
+            _orphans = null;
         }
         return _cached;
+    }
+
+    private object? _filteredKey;
+    private List<TraceRow> _filtered = [];
+    private object? _viewKey;
+
+    /// <summary>Filtered and sorted rows, recomputed only when the rows, a filter or the sort order change.</summary>
+    private List<TraceRow> FilteredRows(IReadOnlyList<TraceRow> all)
+    {
+        var key = (_notSatisfied, _notVerified, _suspect, _packageId, _search, _sort, _desc);
+        if (!Equals(_viewKey, (key, _mode))) { _viewKey = (key, _mode); _page = 0; }
+        if (Equals(_filteredKey, key)) return _filtered;
+        _filtered = Sorted(TraceabilityTable.Apply(all, new TraceFilter(_notSatisfied, _notVerified, _suspect, Ws.Model.Find(_packageId), _search))).ToList();
+        _filteredKey = key;
+        return _filtered;
+    }
+
+    private IReadOnlyList<TraceChainRow>? _chains;
+    private IReadOnlyList<TraceChainRow> ChainRows() => _chains ??= TraceabilityTable.Chains(Ws.Model);
+
+    private IReadOnlyList<Element>? _orphans;
+    private IReadOnlyList<Element> OrphanRows() => _orphans ??= TraceabilityTable.OrphanDesignElements(Ws.Model);
+
+    private CancellationTokenSource? _searchDelay;
+
+    /// <summary>Small tables filter on every keystroke; large ones wait 250 ms after the last one.</summary>
+    private async Task OnSearch(string? text)
+    {
+        _searchDelay?.Cancel();
+        if (_cached.Count <= DebounceAbove) { _search = text; return; }
+        var cts = _searchDelay = new CancellationTokenSource();
+        try { await Task.Delay(250, cts.Token); }
+        catch (TaskCanceledException) { return; }
+        _search = text;
     }
 
     private IEnumerable<TraceRow> Sorted(IEnumerable<TraceRow> rows)

@@ -45,8 +45,14 @@ public sealed class ModelRepository
     public bool Contains(Element e) => _index.TryGetValue(e.Id, out var x) && ReferenceEquals(x, e);
     public IEnumerable<Element> AllElements => _index.Values;
     public IEnumerable<Relationship> Relationships => _index.Values.OfType<Relationship>();
-    public IEnumerable<Diagram> Diagrams => _index.Values.OfType<Diagram>();
-    public IEnumerable<Element> OfKind(ElementKind k) => _index.Values.Where(e => e.Kind == k);
+    public IEnumerable<Diagram> Diagrams => OfKind(ElementKind.Diagram).Cast<Diagram>();
+
+    /// <summary>Elements of one kind, from a per-kind index (no scan of the whole model).</summary>
+    public IEnumerable<Element> OfKind(ElementKind k) =>
+        _byKind.TryGetValue(k, out var d) ? d.Values : Array.Empty<Element>();
+
+    /// <summary>Number of elements in the model (O(1)).</summary>
+    public int Count => _index.Count;
 
     public IReadOnlyList<Relationship> RelationshipsOf(Element e) =>
         _incident.TryGetValue(e, out var l) ? l : Array.Empty<Relationship>();
@@ -80,6 +86,10 @@ public sealed class ModelRepository
     private void IndexRecursive(Element e)
     {
         _index[e.Id] = e;
+        if (!_byKind.TryGetValue(e.Kind, out var byKind)) _byKind[e.Kind] = byKind = new Dictionary<string, Element>(StringComparer.Ordinal);
+        byKind[e.Id] = e;
+        if (e.Kind == ElementKind.Requirement && _maxRequirementNumber is { } max)
+            _maxRequirementNumber = Math.Max(max, RequirementNumber(e));
         if (e is Relationship r)
         {
             AddIncident(r.Source, r);
@@ -92,6 +102,8 @@ public sealed class ModelRepository
     {
         foreach (var c in e.Children) UnindexRecursive(c);
         _index.Remove(e.Id);
+        if (_byKind.TryGetValue(e.Kind, out var byKind)) byKind.Remove(e.Id);
+        if (e.Kind == ElementKind.Requirement) _maxRequirementNumber = null;
         if (e is Relationship r)
         {
             RemoveIncident(r.Source, r);
@@ -542,11 +554,30 @@ public sealed class ModelRepository
 
     public string NextRequirementId()
     {
-        var max = OfKind(ElementKind.Requirement)
-            .Select(r => r.Get(FieldKeys.RequirementId))
-            .Select(id => int.TryParse(new string(id.SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray()), out var n) ? n : 0)
-            .DefaultIfEmpty(0).Max();
-        return Analysis.RequirementIds.Format(Analysis.RequirementIds.Prefix(this), max + 1);
+        // The highest number is cached; adding requirements raises it in place, removing one or changing any
+        // requirement id (RequirementIdGeneration) makes it recompute.
+        var generation = Element.RequirementIdGeneration;
+        if (_maxRequirementNumber == null || _maxRequirementGeneration != generation)
+        {
+            _maxRequirementNumber = OfKind(ElementKind.Requirement).Select(RequirementNumber).DefaultIfEmpty(0).Max();
+            _maxRequirementGeneration = generation;
+        }
+        return Analysis.RequirementIds.Format(Analysis.RequirementIds.Prefix(this), _maxRequirementNumber.Value + 1);
+    }
+
+    private int? _maxRequirementNumber;
+    private int _maxRequirementGeneration;
+    private readonly Dictionary<ElementKind, Dictionary<string, Element>> _byKind = new();
+
+    /// <summary>The first run of digits of a requirement id ("REQ-012" → 12), 0 when there is none.</summary>
+    private static int RequirementNumber(Element r)
+    {
+        var id = r.Get(FieldKeys.RequirementId);
+        var start = 0;
+        while (start < id.Length && !char.IsDigit(id[start])) start++;
+        var end = start;
+        while (end < id.Length && char.IsDigit(id[end])) end++;
+        return int.TryParse(id.AsSpan(start, end - start), out var n) ? n : 0;
     }
 
     // ------------------------------------------------------------------ diagram API

@@ -22,7 +22,17 @@ public class Element
 
     public string Id { get; }
     public ElementKind Kind { get; }
-    public Element? Owner { get; internal set; }
+    public Element? Owner
+    {
+        get => _owner;
+        internal set
+        {
+            if (ReferenceEquals(_owner, value)) return;
+            _owner = value;
+            InvalidateNames();
+        }
+    }
+    private Element? _owner;
     public IReadOnlyList<Element> OwnedElements => Children;
     public IReadOnlyDictionary<string, string> Fields => _fields;
 
@@ -46,7 +56,21 @@ public class Element
     {
         if (string.IsNullOrEmpty(value)) _fields.Remove(key);
         else _fields[key] = value;
+        if (key == FieldKeys.Name) InvalidateNames();
+        else if (key == FieldKeys.RequirementId) Interlocked.Increment(ref _requirementIdGeneration);
     }
+
+    private static int _requirementIdGeneration;
+    /// <summary>Bumped whenever any element's requirement id changes (lets repositories cache the highest id number).</summary>
+    internal static int RequirementIdGeneration => Volatile.Read(ref _requirementIdGeneration);
+
+    // Qualified names are cached per element. Any rename or move anywhere bumps a global generation, which
+    // invalidates every cached name at once (renames and moves are rare next to reads; a stale name is never served).
+    private static int _nameGeneration;
+    private sealed record NameCache(int Generation, string Value);
+    private NameCache? _qualifiedName;
+
+    private static void InvalidateNames() => Interlocked.Increment(ref _nameGeneration);
 
     public bool IsRelationship => Metamodel.IsRelationship(Kind);
 
@@ -67,9 +91,25 @@ public class Element
     public bool IsAncestorOf(Element other) => other.AncestorsAndSelf().Skip(1).Contains(this);
 
     /// <summary>Package-qualified name, e.g. "Vehicle::Powertrain::Engine".</summary>
-    public string QualifiedName =>
-        string.Join("::", AncestorsAndSelf().Reverse().Where(e => e.Kind != ElementKind.Model || e.Owner != null)
-                                         .Select(e => string.IsNullOrEmpty(e.Name) ? "<unnamed>" : e.Name));
+    public string QualifiedName
+    {
+        get
+        {
+            var generation = Volatile.Read(ref _nameGeneration);
+            if (_qualifiedName is { } c && c.Generation == generation) return c.Value;
+            // Built from the owner's (cached) name, so a whole subtree costs O(n) rather than O(n · depth).
+            var own = string.IsNullOrEmpty(Name) ? "<unnamed>" : Name;
+            string value;
+            if (Owner == null) value = Kind == ElementKind.Model ? "" : own;
+            else
+            {
+                var prefix = Owner.QualifiedName;
+                value = prefix.Length == 0 ? own : prefix + "::" + own;
+            }
+            _qualifiedName = new NameCache(generation, value);
+            return value;
+        }
+    }
 
     public string DisplayName => string.IsNullOrEmpty(Name) ? $"<{Metamodel.DisplayName(Kind)}>" : Name;
 

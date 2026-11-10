@@ -26,7 +26,79 @@ public partial class TablesPanel
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private IDialogService Dialogs { get; set; } = default!;
 
-    internal const int MaxRows = 1000;
+    /// <summary>Rows per page in the table and the query results (every row stays reachable through the pager).</summary>
+    internal const int PageSize = 200;
+
+    /// <summary>Above this many rows, per-column filter boxes wait for a pause in typing.</summary>
+    internal const int DebounceAbove = 1000;
+
+    private int _tablePage, _queryPage;
+
+    // Table rows, query results and the stereotype list are cached against Workspace.ModelVersion plus their definition,
+    // so re-renders caused by selection or other workspace bumps don't re-run the query.
+    private object? _tableKey;
+    private string? _tableDefKey;
+    private IReadOnlyList<ModelTableRow> _tableRows = [];
+    private string? _tableError;
+
+    private IReadOnlyList<ModelTableRow> TableRows(out string? error)
+    {
+        var defKey = _def.Query + "\u001f" + _def.ColumnsJson();
+        var key = (Ws.ModelVersion, Ws.Model, defKey);
+        if (!Equals(_tableKey, key))
+        {
+            if (_tableDefKey != defKey) _tablePage = 0;
+            try { _tableRows = ModelTables.Build(Ws.Model, _def); _tableError = null; }
+            catch (QueryParseException ex) { _tableRows = []; _tableError = ex.Message; }
+            _tableKey = key;
+            _tableDefKey = defKey;
+        }
+        error = _tableError;
+        return _tableRows;
+    }
+
+    private object? _queryKey;
+    private string? _queryTextKey;
+    private IReadOnlyList<Element> _queryResults = [];
+
+    private IReadOnlyList<Element> QueryResults()
+    {
+        var text = _parsed.ToString();
+        var key = (Ws.ModelVersion, Ws.Model, text, _parsed);
+        if (!Equals(_queryKey, key))
+        {
+            if (_queryTextKey != text) _queryPage = 0;
+            _queryResults = _parsed.Run(Ws.Model);
+            _queryKey = key;
+            _queryTextKey = text;
+        }
+        return _queryResults;
+    }
+
+    private object? _stereoKey;
+    private List<string> _stereotypes = [];
+
+    private List<string> StereotypeNames()
+    {
+        var key = (Ws.ModelVersion, Ws.Model);
+        if (Equals(_stereoKey, key)) return _stereotypes;
+        _stereotypes = Ws.Model.AllElements.SelectMany(x => x.Stereotypes).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToList();
+        _stereoKey = key;
+        return _stereotypes;
+    }
+
+    private CancellationTokenSource? _filterDelay;
+
+    /// <summary>Column filters apply on every keystroke for small tables, and 250 ms after the last one for large ones.</summary>
+    private async Task OnFilterInput(TableViewColumn col, string? value)
+    {
+        _filterDelay?.Cancel();
+        if (_tableRows.Count <= DebounceAbove && _tableError == null) { SetFilter(col, value); return; }
+        var cts = _filterDelay = new CancellationTokenSource();
+        try { await Task.Delay(250, cts.Token); }
+        catch (TaskCanceledException) { return; }
+        SetFilter(col, value);
+    }
 
     private Mode _mode = Mode.Table;
     private Request? _applied;

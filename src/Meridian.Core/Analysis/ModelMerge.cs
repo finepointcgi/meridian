@@ -331,19 +331,39 @@ public static class ModelMerge
             foreach (var id in baseIds)
                 if (other[id] != null && !other.IsInSubtree(id, root)) return $"moved “{other[id]!.Label}” out of it";
             // New or re-pointed relationships and diagram shapes that reference the deleted elements.
-            foreach (var e in other.Elements.Values)
+            foreach (var (e, referenced, isShape) in NewReferences(other))
             {
-                if (baseIds.Contains(e.Id)) continue;
-                var be = b[e.Id];
-                foreach (var key in new[] { SourceKey, TargetKey })
-                    if (e.Fields.TryGetValue(key, out var end) && baseIds.Contains(end) && be?.Fields.GetValueOrDefault(key) != end)
-                        return $"added “{e.Label}” referencing it";
-                foreach (var n in e.Nodes.Values)
-                    if (baseIds.Contains(n.ElementId) && be?.Nodes.ContainsKey(n.Id) != true)
-                        return $"showed it on diagram “{e.Label}”";
+                if (baseIds.Contains(e.Id) || !baseIds.Contains(referenced)) continue;
+                return isShape ? $"showed it on diagram “{e.Label}”" : $"added “{e.Label}” referencing it";
             }
             return null;
         }
+
+        private readonly Dictionary<Snapshot, List<(FElement Element, string Referenced, bool IsShape)>> _newRefs = new(ReferenceEqualityComparer.Instance);
+
+        /// <summary>
+        /// Every reference <paramref name="other"/> has that the base lacks: relationship ends that are new or re-pointed and
+        /// diagram shapes that are new, in snapshot order. Computed once per side, so <see cref="Touch"/> doesn't rescan the model
+        /// for every deletion.
+        /// </summary>
+        private List<(FElement Element, string Referenced, bool IsShape)> NewReferences(Snapshot other)
+        {
+            if (_newRefs.TryGetValue(other, out var list)) return list;
+            list = new();
+            foreach (var e in other.Elements.Values)
+            {
+                var be = b[e.Id];
+                foreach (var key in EndKeys)
+                    if (e.Fields.TryGetValue(key, out var end) && be?.Fields.GetValueOrDefault(key) != end)
+                        list.Add((e, end, false));
+                foreach (var n in e.Nodes.Values)
+                    if (be?.Nodes.ContainsKey(n.Id) != true)
+                        list.Add((e, n.ElementId, true));
+            }
+            return _newRefs[other] = list;
+        }
+
+        private static readonly string[] EndKeys = [SourceKey, TargetKey];
 
         // ------------------------------------------------------------ element content
 
@@ -378,6 +398,13 @@ public static class ModelMerge
         private Dictionary<string, string> MergeFields(FElement info, IReadOnlyDictionary<string, string> bf, Dictionary<string, string> of, Dictionary<string, string> tf)
         {
             var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (SameFields(of, tf))
+            {
+                // Both sides agree (the common case): no conflicts are possible, take ours.
+                foreach (var key in of.Keys.OrderBy(k => k, StringComparer.Ordinal))
+                    if (!string.IsNullOrEmpty(of[key])) result[key] = of[key];
+                return result;
+            }
             foreach (var key in bf.Keys.Union(of.Keys).Union(tf.Keys).OrderBy(k => k, StringComparer.Ordinal))
             {
                 var bv = bf.GetValueOrDefault(key);
@@ -404,6 +431,14 @@ public static class ModelMerge
                 if (!string.IsNullOrEmpty(v)) result[key] = v;
             }
             return result;
+        }
+
+        private static bool SameFields(Dictionary<string, string> a, Dictionary<string, string> b)
+        {
+            if (a.Count != b.Count) return false;
+            foreach (var (k, v) in a)
+                if (!b.TryGetValue(k, out var w) || v != w) return false;
+            return true;
         }
 
         private string? MergeOwner(FElement info, FElement? be, FElement oe, FElement te)
@@ -608,7 +643,8 @@ public static class ModelMerge
             {
                 var set = list.ToHashSet(StringComparer.Ordinal);
                 var ordered = Order(b[owner]?.Children ?? [], o[owner]?.Children ?? [], t[owner]?.Children ?? []).Where(set.Contains).ToList();
-                ordered.AddRange(list.Where(x => !ordered.Contains(x)));
+                var inOrder = ordered.ToHashSet(StringComparer.Ordinal);
+                ordered.AddRange(list.Where(x => !inOrder.Contains(x)));
                 childrenOf[owner] = ordered;
             }
 
@@ -645,18 +681,17 @@ public static class ModelMerge
             var pending = alive.Where(id => !made.ContainsKey(id)).ToList();
             while (pending.Count > 0)
             {
-                var progress = false;
-                foreach (var id in pending.ToList())
+                var remaining = new List<string>();
+                foreach (var id in pending)
                 {
                     var m = _out[id];
-                    if (!made.TryGetValue(m.Fields[SourceKey], out var s) || !made.TryGetValue(m.Fields[TargetKey], out var tg)) continue;
+                    if (!made.TryGetValue(m.Fields[SourceKey], out var s) || !made.TryGetValue(m.Fields[TargetKey], out var tg)) { remaining.Add(id); continue; }
                     var r = new Relationship(m.Kind, s, tg, id);
                     foreach (var (k, v) in m.Fields) if (k is not (SourceKey or TargetKey)) r.SetRaw(k, v);
                     made[id] = r;
-                    pending.Remove(id);
-                    progress = true;
                 }
-                if (!progress) break;   // ends that never materialise (cyclic relationship chains): drop
+                if (remaining.Count == pending.Count) break;   // ends that never materialise (cyclic relationship chains): drop
+                pending = remaining;
             }
 
             void Link(Element e)

@@ -100,6 +100,22 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .app .mud-treeview-item-content { border-radius: 6px; margin: 0 6px; padding-top: 2px; padding-bottom: 2px; }
 .app .mud-treeview-item-content:hover { background: var(--hover); }
 .app .mud-treeview-item-content.mud-treeview-item-selected { background: var(--sel) !important; }
+/* Virtualized model tree: fixed-height rows (the virtualizer's ItemSize) indented by depth. */
+.mtree-row { display: flex; align-items: center; gap: 2px; height: 26px; box-sizing: border-box; border-radius: 6px; margin: 0 6px; padding-right: 6px; cursor: pointer; user-select: none; }
+.mtree-row:hover { background: var(--hover); }
+.mtree-row.sel { background: var(--sel); }
+.mtree-toggle { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--text-3); }
+.mtree-toggle:hover { background: var(--hover); color: var(--text); }
+.mtree-toggle .mud-icon-root { transition: transform .12s; }
+.mtree-toggle.open .mud-icon-root { transform: rotate(90deg); }
+.app .card-body .flat-item { min-height: 46px; box-sizing: border-box; }
+/* Pager for long tables (traceability, generic tables, requirements). */
+.pager { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; color: var(--text-2); position: sticky; left: 0; }
+.pager-range { margin-right: 6px; font-variant-numeric: tabular-nums; }
+.pager-page { padding: 0 4px; }
+.pager-btn { min-width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.pager-btn:hover:not(:disabled) { background: var(--hover); }
+.pager-btn:disabled { opacity: .4; cursor: default; }
 
 /* ============================================================ center: tabs, breadcrumb, canvas, dock */
 .center { display: grid; grid-template-rows: 40px 38px minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
