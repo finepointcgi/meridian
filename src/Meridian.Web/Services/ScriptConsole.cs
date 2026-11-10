@@ -10,7 +10,7 @@ public sealed record ConsoleLine(string Kind, string Text, int Line = 0);
 /// Per-circuit script console state (editor text, output, the running script). Lives as long as the browser tab, so the
 /// draft and output survive closing the dock, and a running script keeps going while other panels are shown.
 /// </summary>
-public sealed class ScriptConsole(Workspace ws, ScriptEngine engine, ScriptingSettings settings, IJSRuntime js)
+public sealed class ScriptConsole(Workspace ws, ScriptEngine engine, ScriptingSettings settings, IJSRuntime js, IServiceProvider services)
 {
     private CancellationTokenSource? _cts;
     private DateTime _lastRender;
@@ -48,6 +48,9 @@ public sealed class ScriptConsole(Workspace ws, ScriptEngine engine, ScriptingSe
     public async Task<ScriptRunResult?> RunAsync()
     {
         if (Running) return null;
+        // Server roles change without a new sign-in: check the account's current state, not the one cached at start-up.
+        if (!settings.LocalMode && ws.User is { } user && services.GetService(typeof(Admin.AdminAccess)) is Admin.AdminAccess access)
+            ws.IsServerAdmin = await access.StateAsync(user.Id, fresh: true) is { IsAdmin: true, Disabled: false };
         if (DenialReason is { } reason)
         {
             Output.Add(new ConsoleLine("error", reason));

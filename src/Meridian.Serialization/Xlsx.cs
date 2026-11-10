@@ -96,7 +96,8 @@ public static class Xlsx
     /// <summary>Reads the first worksheet as rows of strings (shared, inline, numeric and boolean cells).</summary>
     public static List<List<string>> Read(Stream stream)
     {
-        using var doc = SpreadsheetDocument.Open(stream, false);
+        // Bound each part: a small .xlsx can inflate to gigabytes of XML.
+        using var doc = SpreadsheetDocument.Open(stream, false, new OpenSettings { MaxCharactersInPart = 64L * 1024 * 1024 });
         var wb = doc.WorkbookPart ?? throw new FormatException("Not an Excel workbook");
         var first = wb.Workbook.Sheets?.Elements<DocumentFormat.OpenXml.Spreadsheet.Sheet>().FirstOrDefault()
                     ?? throw new FormatException("The workbook has no sheets");

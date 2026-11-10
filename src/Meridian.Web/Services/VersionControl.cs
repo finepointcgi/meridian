@@ -47,6 +47,9 @@ public static class VersionControl
     /// <summary>Commits the session's current model as a version on the line it edits.</summary>
     public static async Task<(long Id, int Number)> CommitAsync(IMeridianStore db, ProjectSession session, string message, Guid? author, UserAccount? authorAccount = null)
     {
+        // The authoritative role check (the buttons are only disabled for viewers; ⌘S and the palette reach this too).
+        if (author is { } a && await db.RoleOfAsync(session.ProjectId, a) is not (ProjectRole.Editor or ProjectRole.Owner))
+            throw new InvalidOperationException("Only editors and owners can commit versions of this project.");
         await session.PersistAsync();
         var result = await db.CommitBranchVersionAsync(session.ProjectId, session.BranchId, message.Trim(), session.Snapshot(), author);
         session.NotifyVersionCommitted(result.Number, message.Trim(), authorAccount);   // webhooks

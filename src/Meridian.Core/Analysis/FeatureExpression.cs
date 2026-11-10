@@ -80,7 +80,9 @@ public static class FeatureExpression
 
     private sealed class Parser(List<Tok> toks, Func<string, bool> isSelected)
     {
-        private int _i;
+        /// <summary>Deepest nesting accepted (deeper input would overflow the stack).</summary>
+        internal const int MaxDepth = 200;
+        private int _i, _depth;
         private Tok? Cur => _i < toks.Count ? toks[_i] : null;
         private bool IsOp(string op) => Cur is { Kind: 'o' } t && t.Text == op;
 
@@ -120,10 +122,16 @@ public static class FeatureExpression
             return l;
         }
 
+        // Every level of nesting (parentheses and '!') passes through here.
         private bool Not()
         {
-            if (IsOp("!")) { _i++; return !Not(); }
-            return Primary();
+            if (++_depth > MaxDepth) throw new FeatureExpressionException($"Expression is nested too deeply (more than {MaxDepth} levels)");
+            try
+            {
+                if (IsOp("!")) { _i++; return !Not(); }
+                return Primary();
+            }
+            finally { _depth--; }
         }
 
         private bool Primary()

@@ -5,7 +5,8 @@ using Meridian.Serialization;
 
 namespace Meridian.Web.Services;
 
-public sealed record Presence(string ParticipantId, UserAccount User, string? SelectedId, string? DiagramId);
+/// <summary>A tab in a session. <paramref name="CanEdit"/> is false for viewers: their operations are refused by the session, not only by their own replica.</summary>
+public sealed record Presence(string ParticipantId, UserAccount User, string? SelectedId, string? DiagramId, bool CanEdit = true);
 
 /// <summary>
 /// Live collaboration. One <see cref="ProjectSession"/> per open project holds the authoritative model; every

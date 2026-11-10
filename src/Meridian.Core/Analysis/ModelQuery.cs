@@ -227,8 +227,10 @@ public sealed class ModelQuery
 
     private sealed class Parser
     {
+        /// <summary>Deepest nesting of parentheses / 'not' accepted (deeper input would overflow the stack).</summary>
+        internal const int MaxDepth = 200;
         private readonly List<Tok> _toks;
-        private int _i;
+        private int _i, _depth;
 
         public Parser(string text) => _toks = Lex(text ?? "");
 
@@ -349,16 +351,21 @@ public sealed class ModelQuery
 
         private QueryExpr ParseUnary()
         {
-            if (IsWord("not")) { Next(); return new NotExpr(ParseUnary()); }
-            if (Peek().Type == T.LParen)
+            if (++_depth > MaxDepth) throw Error(Peek(), $"The query is nested too deeply (more than {MaxDepth} levels)");
+            try
             {
-                Next();
-                var inner = ParseOr();
-                if (Peek().Type != T.RParen) throw Error(Peek(), "Expected ')'");
-                Next();
-                return inner;
+                if (IsWord("not")) { Next(); return new NotExpr(ParseUnary()); }
+                if (Peek().Type == T.LParen)
+                {
+                    Next();
+                    var inner = ParseOr();
+                    if (Peek().Type != T.RParen) throw Error(Peek(), "Expected ')'");
+                    Next();
+                    return inner;
+                }
+                return ParseAtom();
             }
-            return ParseAtom();
+            finally { _depth--; }
         }
 
         private QueryExpr ParseAtom()

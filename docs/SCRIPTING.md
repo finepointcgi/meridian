@@ -11,7 +11,7 @@ process's permissions. The console is not a sandbox.**
 | Mode | Console | Who can run scripts |
 | --- | --- | --- |
 | Desktop / local mode | On by default. Turn off with `Meridian:Scripting:Enabled=false`. | The local user |
-| Server mode | **Off** unless `Meridian:Scripting:Enabled=true` | Only the **owner** of the open project |
+| Server mode | **Off** unless `Meridian:Scripting:Enabled=true` | Only **server administrators** (add `Meridian:Scripting:AllowProjectOwners=true` to also allow the owner of the open project; any user can create and own a project) |
 
 Before a script runs, Meridian applies a policy as a guard rail. It is not a security boundary:
 

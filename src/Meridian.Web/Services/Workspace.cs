@@ -49,6 +49,9 @@ public sealed class Workspace : IDisposable, ISessionClient
     public ProjectSession? Session { get; private set; }
     public ProjectRole Role { get; private set; } = ProjectRole.Owner;
     public bool ReadOnly => Role == ProjectRole.Viewer;
+
+    /// <summary>The signed-in user is a server administrator (team servers; set when the workbench starts, re-checked before scripts run).</summary>
+    public bool IsServerAdmin { get; set; }
     public string ParticipantId { get; } = Guid.NewGuid().ToString("N");
     public int CommentsVersion { get; private set; }
 
@@ -64,7 +67,7 @@ public sealed class Workspace : IDisposable, ISessionClient
         LeaveSession();
         _joining = true;
         _buffered.Clear();
-        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null), this, branchId);
+        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
         if (session is null) { _joining = false; return false; }
         var replica = ProjectFile.Deserialize(session.Snapshot());
         Session = session;

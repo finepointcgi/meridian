@@ -94,7 +94,7 @@ public class DiagramExtrasTests
         Assert.Equal("https://example.com/docs", DiagramExtras.LinkOf(replica.Diagrams.Single().FindNode(a.Id)!));
 
         var svg = SvgRenderer.Render(m, d);
-        Assert.Contains("<a href=\"https://example.com/docs\" target=\"_blank\">", svg);
+        Assert.Contains("<a href=\"https://example.com/docs\" target=\"_blank\" rel=\"noopener noreferrer\">", svg);
         Assert.Equal(2, CountOf(svg, "class=\"link-badge\""));
         Assert.DoesNotContain("href=\"element:", svg);   // internal links only work inside Meridian
 

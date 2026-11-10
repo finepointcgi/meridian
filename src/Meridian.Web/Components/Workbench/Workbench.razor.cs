@@ -33,6 +33,7 @@ public partial class Workbench
     [Inject] private Meridian.Web.Admin.IAuditLog Audit { get; set; } = default!;
     private bool _desktop;
     [Inject] private NavigationManager Nav { get; set; } = default!;
+    [Inject] private IServiceProvider Services { get; set; } = default!;
 
     private ModelTree? _tree;
     private CommandPalette? _palette;
@@ -117,6 +118,8 @@ public partial class Workbench
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         if (Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
             Ws.User = new UserAccount(id, user.Identity?.Name ?? "", user.FindFirstValue("display_name") ?? user.Identity?.Name ?? "", user.FindFirstValue("color") ?? "#4f8cff");
+        if (Services.GetService(typeof(Meridian.Web.Admin.AdminAccess)) is Meridian.Web.Admin.AdminAccess access)
+            Ws.IsServerAdmin = await access.IsAdminAsync(user);
         _csvTarget = Ws.Model.Root;
     }
 
@@ -823,8 +826,8 @@ public partial class Workbench
                         using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
                         foreach (var entry in zip.Entries.Where(x => x.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !x.FullName.Contains("/obj/") && !x.FullName.Contains("/bin/")))
                         {
-                            using var r = new StreamReader(entry.Open());
-                            csharp.Add((entry.FullName, await r.ReadToEndAsync()));
+                            csharp.Add((entry.FullName, SafeZip.ReadText(entry, 16 * 1024 * 1024)));
+                            if (csharp.Sum(x => (long)x.Item2.Length) > MaxUpload) throw new InvalidDataException("The archive unpacks to more than 64 MB of source.");
                         }
                         break;
                     }
@@ -899,7 +902,7 @@ public partial class Workbench
                     ms.Position = 0;
                     using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
                     var entry = zip.Entries.FirstOrDefault(x => x.Name.EndsWith(".reqif", StringComparison.OrdinalIgnoreCase)) ?? throw new FormatException("No .reqif file inside the archive");
-                    await using var es = entry.Open();
+                    await using var es = SafeZip.Open(entry, MaxUpload);
                     doc = System.Xml.Linq.XDocument.Load(es);
                 }
                 else
@@ -959,6 +962,8 @@ public partial class Workbench
     private async Task Save()
     {
         if (Ws.Session is null || Ws.User is null) return;
+        // Reachable from ⌘S and the command palette as well as the (disabled) button, so check the role here.
+        if (Ws.ReadOnly) { Snackbar.Add("This project is view-only for you.", Severity.Warning); return; }
         var message = await Prompt("Commit version", "Describe this version", $"Snapshot {DateTime.Now:MMM d HH:mm}");
         if (string.IsNullOrWhiteSpace(message)) return;
         var (_, n) = await VersionControl.CommitAsync(Db, Ws.Session, message, Ws.User.Id, Ws.User);   // on the open branch

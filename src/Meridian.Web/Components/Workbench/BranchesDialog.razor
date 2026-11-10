@@ -83,7 +83,7 @@
 
     private async Task Delete(BranchInfo b)
     {
-        if (Ws.Session is null) return;
+        if (Ws.Session is null || Ws.ReadOnly) return;
         var ok = await Dialogs.ShowMessageBox("Delete branch", $"Delete branch “{b.Name}” and its unmerged head? Baselines on its versions are kept.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return;
         try

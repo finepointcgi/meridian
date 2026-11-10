@@ -84,8 +84,11 @@ public static class RequirementsSheet
         return sb.ToString();
     }
 
-    private static string Quote(string s) =>
-        s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    private static string Quote(string s)
+    {
+        s = Meridian.Core.Analysis.CsvSafety.Neutralize(s);
+        return s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    }
 
     /// <summary>Reads .xlsx or .csv content into rows.</summary>
     public static List<List<string>> ReadRows(string fileName, Stream content)

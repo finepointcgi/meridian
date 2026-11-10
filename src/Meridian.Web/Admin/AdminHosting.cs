@@ -132,6 +132,7 @@ public static class AdminHosting
     public static void UseMeridianAdmin(this WebApplication app)
     {
         if (app.Services.GetRequiredService<AdminSettings>().Security.TrustForwardedHeaders) app.UseForwardedHeaders();
+        app.UseMeridianSecurityHeaders();
         app.UseRateLimiter();
     }
 

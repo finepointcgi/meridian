@@ -36,7 +36,7 @@ public static class FmiImport
         using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
         var entry = zip.Entries.FirstOrDefault(e => e.FullName.Equals("modelDescription.xml", StringComparison.OrdinalIgnoreCase))
                     ?? throw new FormatException("The FMU has no modelDescription.xml at its root");
-        using var s = entry.Open();
+        using var s = SafeZip.Open(entry);
         var md = Parse(XDocument.Load(s));
         var bins = zip.Entries.Where(e => e.FullName.StartsWith("binaries/", StringComparison.OrdinalIgnoreCase) && e.Length > 0).Select(e => e.FullName).ToList();
         return md with { Binaries = bins };

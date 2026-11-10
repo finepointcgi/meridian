@@ -79,8 +79,11 @@ public static class RequirementsCsv
         return (created, updated);
     }
 
-    private static string Quote(string s) =>
-        s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    private static string Quote(string s)
+    {
+        s = Meridian.Core.Analysis.CsvSafety.Neutralize(s);
+        return s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
+    }
 
     /// <summary>RFC 4180 parser (quoted fields, embedded newlines and quotes).</summary>
     public static IEnumerable<List<string>> Parse(string csv)
@@ -101,16 +104,19 @@ public static class RequirementsCsv
             switch (c)
             {
                 case '"': inQuotes = true; break;
-                case ',': row.Add(field.ToString()); field.Clear(); break;
+                case ',': row.Add(ReadCell(field)); field.Clear(); break;
                 case '\r': break;
                 case '\n':
-                    row.Add(field.ToString()); field.Clear();
+                    row.Add(ReadCell(field)); field.Clear();
                     yield return row;
                     row = new List<string>();
                     break;
                 default: field.Append(c); break;
             }
         }
-        if (field.Length > 0 || row.Count > 0) { row.Add(field.ToString()); yield return row; }
+        if (field.Length > 0 || row.Count > 0) { row.Add(ReadCell(field)); yield return row; }
     }
+
+    // Cells Meridian exported with a formula guard (see CsvSafety) read back as the original text.
+    private static string ReadCell(StringBuilder field) => Meridian.Core.Analysis.CsvSafety.Restore(field.ToString());
 }
