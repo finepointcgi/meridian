@@ -229,7 +229,6 @@ public sealed class CSharpCodeReader : ICodeReader
         // Members, in declaration order (partial parts in file order).
         var members = new List<CodeMember>();
         var memberTypes = new HashSet<string>(StringComparer.Ordinal);
-        var methodNames = new HashSet<string>(StringComparer.Ordinal);
         var positional = ordered.Select(d => d.Syntax).OfType<RecordDeclarationSyntax>()
             .SelectMany(r => r.ParameterList?.Parameters ?? default).Select(p => p.Identifier.Text).ToHashSet(StringComparer.Ordinal);
         foreach (var m in sym.GetMembers())
@@ -240,13 +239,15 @@ public sealed class CSharpCodeReader : ICodeReader
             switch (m)
             {
                 case IFieldSymbol f when sym.TypeKind == TypeKind.Enum:
-                    if (f.HasConstantValue || f.IsConst) members.Add(new CodeMember(f.Name, CodeMemberKind.EnumValue, sym.Name, null, false, "public"));
+                    if (f.HasConstantValue || f.IsConst)
+                        members.Add(new CodeMember(f.Name, CodeMemberKind.EnumValue, sym.Name, null, false, "public") { Doc = MemberDoc(f), Line = MemberLine(f) });
                     break;
                 case IFieldSymbol f when f.AssociatedSymbol == null:
                 {
                     var (ts, many) = ElementType(f.Type, Scanned);
                     if (ts != null) memberTypes.Add(ts);
-                    members.Add(new CodeMember(f.Name, CodeMemberKind.Field, f.Type.ToDisplayString(TypeDisplay), ts, many, Visibility(f.DeclaredAccessibility)));
+                    members.Add(new CodeMember(f.Name, CodeMemberKind.Field, f.Type.ToDisplayString(TypeDisplay), ts, many, Visibility(f.DeclaredAccessibility))
+                    { IsStatic = f.IsStatic || f.IsConst, Doc = MemberDoc(f), Line = MemberLine(f) });
                     break;
                 }
                 case IPropertySymbol p when !p.IsIndexer:
@@ -254,13 +255,29 @@ public sealed class CSharpCodeReader : ICodeReader
                     if (p.Name == "EqualityContract" && p.IsImplicitlyDeclared) break;
                     var (ts, many) = ElementType(p.Type, Scanned);
                     if (ts != null) memberTypes.Add(ts);
-                    members.Add(new CodeMember(p.Name, CodeMemberKind.Property, p.Type.ToDisplayString(TypeDisplay), ts, many, Visibility(p.DeclaredAccessibility)));
+                    members.Add(new CodeMember(p.Name, CodeMemberKind.Property, p.Type.ToDisplayString(TypeDisplay), ts, many, Visibility(p.DeclaredAccessibility))
+                    { IsStatic = p.IsStatic, IsAbstract = p.IsAbstract && sym.TypeKind != TypeKind.Interface, Doc = MemberDoc(p), Line = MemberLine(p) });
                     break;
                 }
-                case IMethodSymbol md when md.MethodKind == MethodKind.Ordinary && methodNames.Add(md.Name):
+                case IMethodSymbol md when md.MethodKind == MethodKind.Ordinary:
                 {
                     var (ts, many) = ElementType(md.ReturnType, Scanned);
-                    members.Add(new CodeMember(md.Name, CodeMemberKind.Method, md.ReturnType.ToDisplayString(TypeDisplay), ts, many, Visibility(md.DeclaredAccessibility)));
+                    var parameters = md.Parameters.Select(p =>
+                    {
+                        var (pts, pmany) = ElementType(p.Type, Scanned);
+                        var dir = p.RefKind switch
+                        {
+                            RefKind.Out => CodeParameterDirection.Out,
+                            RefKind.Ref => CodeParameterDirection.InOut,
+                            _ => CodeParameterDirection.In,
+                        };
+                        return new CodeParameter(p.Name, p.Type.ToDisplayString(TypeDisplay), pts, pmany, dir);
+                    }).ToList();
+                    members.Add(new CodeMember(md.Name, CodeMemberKind.Method, md.ReturnType.ToDisplayString(TypeDisplay), ts, many, Visibility(md.DeclaredAccessibility))
+                    {
+                        Parameters = parameters, IsStatic = md.IsStatic, IsAbstract = md.IsAbstract && sym.TypeKind != TypeKind.Interface,
+                        Doc = MemberDoc(md), Line = MemberLine(md),
+                    });
                     break;
                 }
             }
@@ -291,8 +308,28 @@ public sealed class CSharpCodeReader : ICodeReader
             }
 
         return new CodeType(info.Key, DisplayName(sym), NamespaceOf(sym), kind, first.SyntaxTree.FilePath, line, doc,
-            bases.Distinct().ToList(), interfaces, members, deps.ToList());
+            bases.Distinct().ToList(), interfaces, members, deps.ToList())
+        {
+            IsAbstract = sym.IsAbstract && kind is CodeTypeKind.Class or CodeTypeKind.Record && !sym.IsStatic,
+            IsStatic = sym.IsStatic,
+        };
     }
+
+    /// <summary>The XML summary on the member's declaration (a field's doc sits on its field declaration).</summary>
+    private static string? MemberDoc(ISymbol member)
+    {
+        foreach (var r in member.DeclaringSyntaxReferences.OrderBy(r => r.SyntaxTree.FilePath, StringComparer.Ordinal).ThenBy(r => r.Span.Start))
+        {
+            var node = r.GetSyntax();
+            if (node is VariableDeclaratorSyntax { Parent.Parent: { } decl }) node = decl;
+            if (Doc(node) is { } d) return d;
+        }
+        return null;
+    }
+
+    private static int MemberLine(ISymbol member) =>
+        member.Locations.Where(l => l.IsInSource).OrderBy(l => l.SourceTree?.FilePath, StringComparer.Ordinal).ThenBy(l => l.SourceSpan.Start)
+            .Select(l => l.GetLineSpan().StartLinePosition.Line + 1).FirstOrDefault();
 
     /// <summary>The type and its type arguments / array element types, recursively.</summary>
     private static IEnumerable<ITypeSymbol> Flatten(ITypeSymbol t, int depth = 0)
