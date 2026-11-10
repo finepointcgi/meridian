@@ -71,7 +71,9 @@ deep. Each limit produces a warning; uploads and drops are limited to 8 MB.
 | `id((text))` circle | **Initial node** when it has only outgoing links, **activity final node** when it has only incoming links, else an action |
 | `id(((text)))` double circle, `@{ shape: fr-circ }` / `stop` | **Activity final node** |
 | `@{ shape: sm-circ }` / `start` | **Initial node** |
-| `id[(text)]` cylinder, `@{ shape: cyl / db / disk }` | **Object node** (central buffer; Meridian has no separate datastore node) |
+| `id[(text)]` cylinder, `@{ shape: cyl / db / database / disk / lin-cyl }` | **Data store node** («datastore» object node) |
+| `@{ shape: h-cyl / das }` (horizontal cylinder) | **Central buffer node** («centralBuffer» object node) |
+| `@{ shape: doc / document }` | **Object node** (plain) |
 | `@{ shape: fork }` / `join` | **Fork / join node** |
 | `-->`, `---`, `-.->`, `==>`, `--o`, `--x`, longer variants | **Control flow** (an **object flow** when either end is an object node) |
 | `-->\|text\|`, `-- text -->`, `-. text .->`, `== text ==>` | the text becomes the flow's **guard** |
@@ -105,7 +107,7 @@ lanes (an `LR` direction is noted in a warning).
 | `A o-- B` | **Aggregation** A → B |
 | `A --> B`, `A -- B` | **Association** (the label is its name) |
 | `A ..> B`, `A .. B` | **Dependency** |
-| `"1" … "*"` cardinalities | the target end's multiplicity on the relationship (and on the part property); the source end is not stored (warning) |
+| `"1" … "*"` cardinalities | both ends: the target end's multiplicity on the relationship (and on the part property), the source end's in its **source multiplicity** (drawn at the source end) |
 | `note "…"`, `note for A "…"` | **Comment** (placed next to A) |
 | `direction LR` | layout direction |
 
@@ -118,7 +120,8 @@ lanes (an `LR` direction is noted in a warning).
 | `[*] --> A` / `A --> [*]` | **Initial state** / **final state**, one of each per composite state |
 | `A --> B : event [guard] / effect` | **Transition** with trigger (name), guard and effect |
 | `state A { … }` | **Composite state** owning its substates (nested on the diagram) |
-| `<<choice>>`, `<<fork>>`, `<<join>>`, `<<history>>` | a **state** of that name (Meridian has no pseudostates of these kinds; warning) |
+| `state c <<choice>>`, `<<fork>>`, `<<join>>` | **Choice**, **fork** and **join pseudostates** named after the id (inside the composite state that declares them) |
+| `<<history>>`, `<<deephistory>>` | **Shallow** and **deep history pseudostates** |
 | `--` concurrent regions | one region (warning) |
 | `note right of A : …`, `note left of A … end note` | **Comment** next to A |
 | `classDef`, `class`, `:::` | skipped (warning) |
@@ -136,7 +139,7 @@ lanes (an `LR` direction is noted in a warning).
 | `<<->>` | one synchronous call (warning) |
 | `activate` / `deactivate`, `+` / `-` suffixes | Meridian derives activation bars from call / reply pairs; the explicit markers are not stored (warning) |
 | `loop`, `alt`, `opt`, `par`, `critical`, `break` … `end` | **Combined fragment** with that operator and the condition as guard, sized around its messages |
-| `else`, `and`, `option` | merged into the enclosing fragment; their conditions are appended to its guard, separated by `\|` (warning) |
+| `alt … else …`, `par … and …`, `critical … option …` | one **operand** per branch, each with its condition as guard (an `else` without one is guarded `else`, an `and` without one is unguarded); the dashed separators are placed between the branches' messages |
 | `Note left of / right of / over A[,B]: text` | **Comment** at that point |
 | `title`, `autonumber`, `box … end`, `rect … end`, `create`, `destroy`, `link(s)` | title names the diagram; the rest is skipped (warnings) |
 
@@ -166,7 +169,7 @@ lanes (an `LR` direction is noted in a warning).
 | --- | --- |
 | entity, `p[Person]` alias | **Block** |
 | `type name PK, FK "comment"` | **property** with the type (common SQL types mapped to SysML primitives); keys and comment go to its documentation |
-| `A \|\|--o{ B : label` (any cardinality markers, `--` or `..`) | **Association** A → B named after the label, with B's multiplicity (`1`, `0..1`, `*`, `1..*`); both ends are written in its documentation |
+| `A \|\|--o{ B : label` (any cardinality markers, `--` or `..`) | **Association** A → B named after the label, with B's multiplicity (`1`, `0..1`, `*`, `1..*`) and A's as its source multiplicity; a non-identifying (`..`) relationship says so in its documentation |
 
 ### C4 (`C4Context`, `C4Container`, `C4Component`) → block definition diagram
 
@@ -192,12 +195,15 @@ imported.
 
 | Meridian diagram | Mermaid |
 | --- | --- |
-| Activity | `flowchart` (TD or LR from the layout): actions `id("…")`, decisions `{…}`, initial `((…))`, final `(((…)))`, object nodes `[(…)]`, fork / join `@{ shape: fork }`, swimlanes as `subgraph`, flows with their guard as `-->\|guard\|` |
-| State machine | `stateDiagram-v2`: states with entry / do / exit and documentation lines, composite states as `state X { … }`, `[*]` in the right scope, transitions as `event [guard] / effect` |
-| Sequence | `sequenceDiagram`: participants (actors when typed by an actor), messages in time order (`->>`, `-->>`, `-)`), combined fragments with `else` / `and` / `option` for merged operands, comments as notes |
-| Block definition, class | `classDiagram`: blocks with annotations, properties, operations and enumeration literals, generalization, realization, composition (with the part name), aggregation, association, dependency; comments as notes; other relationships (satisfy, allocate …) as `%%` comments |
+| Activity | `flowchart` (TD or LR from the layout): actions `id("…")`, decisions `{…}`, initial `((…))`, final `(((…)))`, data stores `[(…)]`, central buffers `@{ shape: h-cyl }`, other object nodes `@{ shape: doc }`, fork / join `@{ shape: fork }`, swimlanes as `subgraph`, flows with their guard as `-->\|guard\|` |
+| State machine | `stateDiagram-v2`: states with entry / do / exit and documentation lines, composite states as `state X { … }`, `[*]` in the right scope, choice / fork / join / history pseudostates as `state X <<choice>>` (`<<fork>>`, `<<join>>`, `<<history>>`, `<<deephistory>>`), transitions as `event [guard] / effect` |
+| Sequence | `sequenceDiagram`: participants (actors when typed by an actor), messages in time order (`->>`, `-->>`, `-)`), combined fragments with an `else` / `and` / `option` line where each later operand starts (so every message stays in its operand), comments as notes |
+| Block definition, class | `classDiagram`: blocks with annotations, properties, operations and enumeration literals, generalization, realization, composition (with the part name), aggregation, association (multiplicities at both ends), dependency; comments as notes; other relationships (satisfy, allocate …) as `%%` comments |
 | Requirement | `requirementDiagram`: requirements with id, text, risk and verification method (and their Mermaid type), other elements as `element`, containment as `contains`, satisfy / verify / trace / deriveReqt / refine / copy |
 
-Importing an exported diagram gives back the same elements and the same relationships between them (the round trip is
-covered by tests). What is not carried: layout positions, styles, pins, comments on activity and state diagrams, source
-end multiplicities, and the position of `else` separators inside fragments.
+Importing an exported diagram gives back the same elements and the same relationships between them, including
+operands with their guards and which operand each message is in, pseudostate kinds, data store / central buffer nodes
+and multiplicities at both ends (the round trips are covered by tests). What is not carried: layout positions (also the
+exact height of operand separators, which are placed between the branches' messages again), styles, pins, comments on
+activity and state diagrams. Mermaid has no junction, entry point, exit point or terminate: a junction is written as a
+`<<choice>>`, the others as a plain state with a `%%` comment, so they come back as a choice and as states.

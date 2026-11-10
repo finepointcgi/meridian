@@ -52,6 +52,7 @@ dotnet test tests/Meridian.E2E
 | `TemplateAndExportTests` | every project template creates a project that opens cleanly; SVG and PNG downloads |
 | `AdminTests` | `/admin` for the admin, forbidden for a normal user, admin API protection |
 | `CollaborationTests` | two browsers on one project see each other's edits live |
+| `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
 
 Tests in the `server` collection share one server and run one at a time; each creates its own project, so they do not
 depend on each other's data.

@@ -17,8 +17,8 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 | Requirement | `req` | package | requirements, test cases, blocks, use cases; derive, satisfy, verify, refine, trace, copy |
 | Use case | `uc` | package | actors, use cases, subject blocks; association, include, extend, generalization |
 | Activity | `act` | activity | actions, initial/final nodes, decisions/merges, forks/joins, swimlanes, object nodes, pins; control and object flows |
-| State machine | `stm` | state machine | states (also composite), initial and final states, transitions |
-| Sequence | `sd` | interaction | lifelines, messages, combined fragments |
+| State machine | `stm` | state machine | states (also composite), initial and final states, pseudostates (choice, junction, fork, join, shallow / deep history, entry / exit point, terminate), transitions |
+| Sequence | `sd` | interaction | lifelines, messages, combined fragments with operands |
 | Package | `pkg` | package | packages, profiles, stereotypes; dependency, generalization |
 | Class | `class` | package | UML classes, interfaces, data types, enumerations, components |
 | BPMN | `bpmn` | package | pools, lanes, events, tasks, gateways, data objects; sequence, message and association flows |
@@ -75,7 +75,9 @@ can own behaviors (activities, state machines, interactions) that describe them.
   offers to open the called diagram.
 - **Decision/merge** nodes split and join flows; put guards such as `started` or `else` on the outgoing control flows.
 - **Fork/join** bars run flows in parallel and synchronise them.
-- **Pins** (*Add input pin* / *Add output pin*) and **object nodes** with **object flows** carry items.
+- **Pins** (*Add input pin* / *Add output pin*) and **object nodes** with **object flows** carry items. An object node
+  can be a **Data Store** («datastore», keeps what it is given) or a **Central Buffer** («centralBuffer»): pick them
+  from the shapes panel or change the *Type* in the inspector.
 - **Swimlanes** represent blocks or actors (set **Represents** in the inspector). **Allocate actions to swimlanes**
   creates an *allocate* relationship from every action to the block of the lane it sits in, and removes allocations
   that no longer match after you move actions between lanes.
@@ -95,11 +97,20 @@ guard and an optional effect:
 Put states inside a state to make a **composite state**; it needs its own initial state. Validation warns about
 states that nothing transitions into and about state machines without exactly one initial state.
 
+**Pseudostates** come from the shapes panel with their UML notation: **choice** ◇ (guards on the outgoing transitions
+are evaluated after the trigger), **junction** ●, **fork** / **join** bars, **shallow history** Ⓗ and **deep history**
+Ⓗ*, **entry point** ○ and **exit point** ⊗ (dropped on a state, they belong to it and sit on its border) and
+**terminate** ✕. The inspector's *Type* changes one kind into another.
+
 ## Sequence diagrams
 
 Lifelines can be typed by a block or actor. Messages have a sort (synchronous call, asynchronous call, reply) and an
 optional signature; a message from a lifeline to itself is a self call. Activation bars are drawn automatically.
 Combined fragments (`alt`, `opt`, `loop`, `par`, `break`, `critical`, `neg`, `seq`, `strict`) have a guard.
+A fragment is split into **operands** by dashed lines, each with its own guard (`[card ok]`, `[else]`): right-click the
+fragment and pick **Add operand**, or use **+ Operand** under *Operands* in the inspector, where each guard is edited
+(and an operand removed). Select the fragment and drag a dashed line up or down to change where an operand starts; the
+messages between two lines belong to that operand. Each change is one undo step.
 
 ## BPMN, ArchiMate and ER diagrams
 
@@ -125,9 +136,9 @@ activity from use case", "Create sequence from activity", …).
 | --- | --- | --- |
 | Requirements | use cases named after each functional requirement's "shall …" phrase, with actors | «refine» |
 | Use case | an activity with swimlanes; the steps come from the use case's description (numbered lines, "If …", "Alternate: …") | the activity is the use case's behaviour |
-| Activity | a sequence diagram: one lifeline per swimlane, one message per hand-over between swimlanes, and alt / loop / par fragments | «allocate» action → block |
+| Activity | a sequence diagram: one lifeline per swimlane, one message per hand-over between swimlanes, alt fragments with an operand per decision branch, par fragments with an operand per fork branch, and loop fragments | «allocate» action → block |
 | Sequence | a BDD and an IBD: a block per lifeline, a context block with parts, an operation per message, and ports with connectors | «trace» message → operation |
-| Sequence or activity | a state machine for a chosen block, built from the events it receives (approximate) | classifier behaviour |
+| Sequence or activity | a state machine for a chosen block, built from the events it receives and its replies, with guarded transitions (through a choice when branches start with the same event) for alternatives (approximate) | classifier behaviour |
 | Blocks / requirements | «satisfy» and test case «verify» proposals, each reviewed one by one | «satisfy», «verify» |
 
 A dialog lists what will be created, with checkboxes and warnings, and **Create** applies it as one undo step. When a
