@@ -63,7 +63,12 @@ public static class IntegrationsSetup
     {
         services.AddDataProtection();
         services.AddHttpClient(IntegrationService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(20))
-            .RedactLoggedHeaders(_ => true);   // never log Authorization or signature headers
+            .RedactLoggedHeaders(_ => true)   // never log Authorization or signature headers
+            // Webhook and tracker URLs are chosen by project owners: on a team server they must not reach the server's own
+            // network (cloud metadata, admin ports, internal services) unless an administrator allows private networks.
+            .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<MeridianHostInfo>().LocalMode
+                ? new SocketsHttpHandler()
+                : OutboundGuard.CreateHandler(string.Equals(sp.GetRequiredService<IConfiguration>()[OutboundGuard.AllowPrivateNetworksKey], "true", StringComparison.OrdinalIgnoreCase)));
         services.AddSingleton(new WebhookOptions());
         services.AddSingleton<ProjectEvents>();
         services.AddSingleton<IntegrationService>();
