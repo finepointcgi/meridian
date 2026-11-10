@@ -20,7 +20,11 @@ public sealed partial class SqliteStore
         })
         {
             if (await ScalarAsync("select count(*) from pragma_table_info('users') where name = $1", column) is 0L)
-                await ExecAsync($"alter table users add column {ddl}");
+            {
+                // Another process migrating at the same moment may add the column between the check and the alter.
+                try { await ExecAsync($"alter table users add column {ddl}"); }
+                catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase)) { }
+            }
         }
 
         await ExecAsync("""
