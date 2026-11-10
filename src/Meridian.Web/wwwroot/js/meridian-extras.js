@@ -60,10 +60,25 @@
     }
   }
 
-  /** Canvas: drop picture files onto it, or paste a picture while it has focus. */
+  const MERMAID_FILE = /\.(mmd|mermaid|md)$/i;
+  const MAX_MERMAID_BYTES = 8 * 1024 * 1024;   // MermaidImport.MaxBytes
+
+  /** Mermaid files dropped on the canvas: read as text and imported by the server (one undo step). */
+  async function importMermaid(dotnet, files) {
+    for (const f of files) {
+      if (f.size > MAX_MERMAID_BYTES) { dotnet.invokeMethodAsync("OnImageError", `${f.name} is larger than 8 MB.`); continue; }
+      try { await dotnet.invokeMethodAsync("OnMermaidFile", f.name, await f.text()); }
+      catch (e) { dotnet.invokeMethodAsync("OnImageError", e?.message || String(e)); }
+    }
+  }
+
+  /** Canvas: drop picture or Mermaid (.mmd) files onto it, or paste a picture while it has focus. */
   m.installCanvasExtras = (el, dotnet) => {
     const onDrop = e => {
-      const files = [...(e.dataTransfer?.files || [])].filter(f => f.type?.startsWith("image/"));
+      const all = [...(e.dataTransfer?.files || [])];
+      const mermaid = all.filter(f => MERMAID_FILE.test(f.name || ""));
+      if (mermaid.length > 0) { e.preventDefault(); importMermaid(dotnet, mermaid); }
+      const files = all.filter(f => f.type?.startsWith("image/"));
       if (files.length === 0) return;
       e.preventDefault();
       const r = el.getBoundingClientRect();
@@ -91,6 +106,22 @@
     input.addEventListener("change", () => { insertFiles(dotnet, [...input.files], x, y); input.remove(); });
     document.body.appendChild(input);
     input.click();
+  };
+
+  /** Puts text on the clipboard. Returns null on success, else a message. */
+  m.copyText = async text => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return null; }
+      const ta = Object.assign(document.createElement("textarea"), { value: text });
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok ? null : "This browser can't put text on the clipboard. Use Export diagram as Mermaid instead.";
+    } catch (e) {
+      return "The clipboard is not available here. Use Export diagram as Mermaid instead.";
+    }
   };
 
   /** Opens a web link: in a new tab, or in the system browser from the desktop app. */

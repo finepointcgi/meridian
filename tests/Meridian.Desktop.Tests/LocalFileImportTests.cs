@@ -75,6 +75,26 @@ public sealed class LocalFileImportTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Imports_mermaid_and_markdown_files()
+    {
+        var mmd = Path.Combine(_dir.FullName, "Flow.mmd");
+        await File.WriteAllTextAsync(mmd, "flowchart LR\n  A[Start] --> B{Ok?}\n  B -->|yes| C[Done]\n");
+        using (var res = await Post(mmd))
+        {
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            var body = await res.Content.ReadFromJsonAsync<LocalFileImport.Response>(JsonSerializerOptions.Web);
+            var model = ProjectFile.Deserialize((await _app.Services.GetRequiredService<IMeridianStore>().LoadProjectAsync(body!.ProjectId))!.Value.ModelJson);
+            Assert.Single(model.Diagrams);
+        }
+        var md = Path.Combine(_dir.FullName, "Notes.md");
+        await File.WriteAllTextAsync(md, "# Notes\n\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n");
+        using (var res = await Post(md)) Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var prose = Path.Combine(_dir.FullName, "Prose.md");
+        await File.WriteAllTextAsync(prose, "# Just text\n");
+        using (var res = await Post(prose)) Assert.Equal((HttpStatusCode)422, res.StatusCode);
+    }
+
+    [Fact]
     public async Task Requires_the_launch_token()
     {
         var file = Path.Combine(_dir.FullName, "a.meridian");

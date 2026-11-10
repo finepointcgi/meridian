@@ -42,6 +42,9 @@ public sealed class PlannedDiagram
     /// <summary>Shapes the diagram will have (elements, ports, nested parts).</summary>
     public int NodeCount { get; internal set; }
 
+    /// <summary>Run the layers of hierarchies and flows left to right instead of top to bottom (e.g. Mermaid "LR").</summary>
+    public bool LeftToRight { get; init; }
+
     public bool Selected { get; set; } = true;
     public AutoDiagramStatus Status => Existing == null ? AutoDiagramStatus.New : AutoDiagramStatus.Update;
 }
@@ -476,7 +479,7 @@ public static class AutoDiagrammer
 
         var roots = Collect(m, p.Type, p.Owner, p.Elements);
         var links = Links(m, p.Type, roots);
-        Layout(m, p.Type, roots, links);
+        Layout(m, p.Type, roots, links, p.LeftToRight);
         foreach (var n in roots) Materialize(m, d, n, null);
         foreach (var e in d.Nodes.Select(n => n.Element).Distinct().ToList())
             foreach (var r in m.RelationshipsOf(e).ToList())
@@ -635,9 +638,9 @@ public static class AutoDiagrammer
         return links;
     }
 
-    private static void Layout(ModelRepository m, DiagramType type, List<LNode> roots, List<Link> links)
+    private static void Layout(ModelRepository m, DiagramType type, List<LNode> roots, List<Link> links, bool leftToRight = false)
     {
-        Arrange(type, roots, links, topLevel: true);
+        Arrange(type, roots, links, topLevel: true, leftToRight);
         foreach (var r in roots) Offset(r, 40, 40);
         foreach (var n in roots.SelectMany(r => r.SelfAndDescendants()).Where(n => n.Ports.Count > 0).ToList()) PlacePorts(n, links);
     }
@@ -650,11 +653,11 @@ public static class AutoDiagrammer
     }
 
     /// <summary>Arranges one level of siblings (children first, so containers know their size). Positions are relative to the level's origin.</summary>
-    private static void Arrange(DiagramType type, List<LNode> level, List<Link> links, bool topLevel)
+    private static void Arrange(DiagramType type, List<LNode> level, List<Link> links, bool topLevel, bool leftToRight = false)
     {
         foreach (var n in level.Where(n => n.Kids.Count > 0))
         {
-            Arrange(type, n.Kids, links, topLevel: false);
+            Arrange(type, n.Kids, links, topLevel: false, leftToRight);
             var (left, top) = ContainerLayout.Header(new DiagramNode(n.E, default));
             var right = n.Kids.Max(k => k.X + k.W);
             var bottom = n.Kids.Max(k => k.Y + k.H);
@@ -708,6 +711,7 @@ public static class AutoDiagrammer
 
         if (pairs.Count == 0) Grid(level, hGap, vGap, type == DiagramType.Package && topLevel ? 4 : perRow);
         else if (type == DiagramType.InternalBlock) Layered(level, pairs, index, vGap, hGap, perRow, horizontal: true);
+        else if (leftToRight) Layered(level, pairs, index, vGap, hGap + 20, perRow, horizontal: true);
         else Layered(level, pairs, index, hGap, vGap, perRow, horizontal: false);
     }
 

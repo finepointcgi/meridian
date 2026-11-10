@@ -9,6 +9,7 @@ using Meridian.Data;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
 using Meridian.Serialization;
+using Meridian.Serialization.Mermaid;
 using Meridian.Web.Services;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
@@ -76,7 +77,7 @@ public partial class Workbench
             CA("Export diagram as PNG…", Icons.Material.Outlined.Image, ExportImage),
             CA("Copy diagram as image", Icons.Material.Outlined.ContentCopy, CopyDiagramImage),
             CA("Take the guided tour", Icons.Material.Outlined.Tour, StartTour),
-            CA("Import into this project (BPMN, ArchiMate, SQL, C#, MagicDraw re-import)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
+            CA("Import into this project (BPMN, ArchiMate, SQL, C#, Mermaid, MagicDraw re-import)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
             CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
             C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
@@ -87,6 +88,7 @@ public partial class Workbench
         list.AddRange(SettingsPaletteCommands());
         list.AddRange(AutoDiagramPaletteCommands());
         list.AddRange(CodeSyncPaletteCommands());
+        list.AddRange(MermaidPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -749,6 +751,7 @@ public partial class Workbench
                 return;
             }
             if (IsMagicDrawFile(file.Name)) { await OpenMagicDrawProject(file); return; }
+            if (MermaidImporter.IsMermaidFile(file.Name)) { await OpenMermaidProject(file); return; }
             var text = await ReadText(file);
             if (ext is ".xmi" or ".xml" or ".uml")
                 (model, report) = XmiExchange.Import(System.Xml.Linq.XDocument.Parse(text));
@@ -767,7 +770,7 @@ public partial class Workbench
             }
             Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);
         }
-        catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
+        catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
             Snackbar.Add($"Could not open {file.Name}: {ex.Message}", Severity.Error);
         }
@@ -781,7 +784,7 @@ public partial class Workbench
         return PickFile(inputId);
     }
 
-    /// <summary>BPMN (.bpmn), ArchiMate exchange (.xml), SQL DDL (.sql/.ddl) and C# sources (.cs or a .zip of them) into the selected package.</summary>
+    /// <summary>BPMN (.bpmn), ArchiMate exchange (.xml), SQL DDL (.sql/.ddl), Mermaid (.mmd/.mermaid/.md) and C# sources (.cs or a .zip of them) into the selected package.</summary>
     private async Task OnImportInto(InputFileChangeEventArgs e)
     {
         var target = _importTarget ?? Ws.Model.Root;
@@ -820,6 +823,9 @@ public partial class Workbench
                     }
                     case ".mdzip" or ".mdxml":
                         await ReimportMagicDraw(file);   // updates elements by MagicDraw id
+                        break;
+                    case ".mmd" or ".mermaid" or ".md":
+                        await PasteMermaid(await ReadMermaid(file), file.Name);   // preview and options first
                         break;
                     case ".cs":
                         csharp.Add((file.Name, await ReadText(file)));
