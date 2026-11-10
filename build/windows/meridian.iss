@@ -83,6 +83,14 @@ Root: HKA; Subkey: "Software\Classes\Meridian.SysML\DefaultIcon"; ValueType: str
 Root: HKA; Subkey: "Software\Classes\Meridian.SysML\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Meridian.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\Applications\Meridian.exe\SupportedTypes"; ValueType: string; ValueName: ".meridian"; ValueData: ""; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Applications\Meridian.exe\SupportedTypes"; ValueType: string; ValueName: ".sysml"; ValueData: ""
+; MagicDraw / Cameo projects: offered under "Open with" only (Cameo keeps the default association).
+Root: HKA; Subkey: "Software\Classes\.mdzip\OpenWithProgids"; ValueType: string; ValueName: "Meridian.MagicDraw"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.mdxml\OpenWithProgids"; ValueType: string; ValueName: "Meridian.MagicDraw"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Meridian.MagicDraw"; ValueType: string; ValueName: ""; ValueData: "MagicDraw / Cameo Project"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Meridian.MagicDraw\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Meridian.exe,0"
+Root: HKA; Subkey: "Software\Classes\Meridian.MagicDraw\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Meridian.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\Applications\Meridian.exe\SupportedTypes"; ValueType: string; ValueName: ".mdzip"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\Applications\Meridian.exe\SupportedTypes"; ValueType: string; ValueName: ".mdxml"; ValueData: ""
 
 [Run]
 Filename: "{app}\Meridian.exe"; Description: "{cm:LaunchProgram,Meridian}"; Flags: nowait postinstall skipifsilent

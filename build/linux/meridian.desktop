@@ -6,5 +6,5 @@ Exec=__EXEC__ %F
 Icon=__ICON__
 Terminal=false
 Categories=Development;Engineering;
-MimeType=application/x-meridian;text/x-sysml;
+MimeType=application/x-meridian;text/x-sysml;application/x-magicdraw-mdzip;application/x-magicdraw-mdxml;
 StartupWMClass=Meridian

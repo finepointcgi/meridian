@@ -29,6 +29,12 @@
       <key>LSHandlerRank</key><string>Default</string>
       <key>LSItemContentTypes</key><array><string>org.omg.sysml.text</string></array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>MagicDraw / Cameo Project</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>com.nomagic.magicdraw.mdzip</string><string>com.nomagic.magicdraw.mdxml</string></array>
+    </dict>
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
@@ -54,6 +60,26 @@
       <dict>
         <key>public.filename-extension</key><array><string>sysml</string></array>
         <key>public.mime-type</key><array><string>text/x-sysml</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.nomagic.magicdraw.mdzip</string>
+      <key>UTTypeDescription</key><string>MagicDraw / Cameo Project</string>
+      <key>UTTypeConformsTo</key><array><string>public.zip-archive</string><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>mdzip</string></array>
+        <key>public.mime-type</key><array><string>application/x-magicdraw-mdzip</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.nomagic.magicdraw.mdxml</string>
+      <key>UTTypeDescription</key><string>MagicDraw / Cameo XMI Project</string>
+      <key>UTTypeConformsTo</key><array><string>public.xml</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>mdxml</string></array>
+        <key>public.mime-type</key><array><string>application/x-magicdraw-mdxml</string></array>
       </dict>
     </dict>
   </array>
