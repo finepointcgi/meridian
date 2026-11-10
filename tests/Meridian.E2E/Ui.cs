@@ -69,4 +69,16 @@ public static class Ui
 
     public static Task SnackbarAsync(this IPage p, string text) =>
         Expect(p.Locator(".mud-snackbar").Filter(new() { HasTextString = text }).First).ToBeVisibleAsync();
+
+    /// <summary>Polls a condition (like Expect.Poll) until it holds or the timeout passes.</summary>
+    public static async Task EventuallyAsync(Func<Task<bool>> condition, string because, int timeoutMs = 10_000)
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (true)
+        {
+            if (await condition()) return;
+            if (DateTime.UtcNow > until) throw new Xunit.Sdk.XunitException("Timed out: " + because);
+            await Task.Delay(100);
+        }
+    }
 }

@@ -16,7 +16,18 @@ window.meridian = (() => {
     rect: el => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; },
     focus: el => el?.focus({ preventScroll: true }),
     select: el => { el?.focus(); el?.select?.(); },
-    caretEnd: el => { if (!el) return; el.focus(); const n = el.value?.length ?? 0; try { el.setSelectionRange(n, n); } catch { } },
+    caretEnd: el => { if (!el) return; el.focus(); const n = el.value?.length ?? 0; el._seedEnd = n; try { el.setSelectionRange(n, n); } catch { } },
+    // Keys typed on the canvas before the inline editor had focus: insert them where the seed ends, ahead of anything
+    // typed into the editor since, and tell Blazor (input event) so nothing typed quickly is lost or reordered.
+    insertSeed: (el, text) => {
+      if (!el || !text) return;
+      const at = Math.min(el._seedEnd ?? el.value.length, el.value.length);
+      el.value = el.value.slice(0, at) + text + el.value.slice(at);
+      el._seedEnd = at + text.length;
+      const n = el.value.length;
+      try { el.setSelectionRange(n, n); } catch { }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    },
     click: id => document.getElementById(id)?.click(),
     // Desktop app (Photino) bridge: window.external.sendMessage reaches the native host.
     isDesktop: () => typeof window.external?.sendMessage === "function",

@@ -135,10 +135,17 @@ public abstract class E2ETest(ServerFixture fixture) : IAsyncLifetime
 {
     protected ServerFixture F { get; } = fixture;
     private readonly List<BrowserSession> _sessions = [];
+    private string _test = "";
+
+    /// <summary>Where the last screen of every page is saved after each test (uploaded by CI for debugging).</summary>
+    public static string ScreenshotDir => Environment.GetEnvironmentVariable("MERIDIAN_E2E_SCREENSHOTS") is { Length: > 0 } d ? d
+        : Path.Combine(AppContext.BaseDirectory, "e2e-screenshots");
 
     /// <summary>Opens a signed-in browser for <paramref name="user"/> at <paramref name="path"/> and waits for the workbench.</summary>
-    protected async Task<BrowserSession> OpenAsync(TestUser? user, string path = "/", bool waitForWorkbench = true)
+    protected async Task<BrowserSession> OpenAsync(TestUser? user, string path = "/", bool waitForWorkbench = true,
+        [System.Runtime.CompilerServices.CallerMemberName] string test = "")
     {
+        _test = test;
         var s = await BrowserSession.CreateAsync(F, user);
         _sessions.Add(s);
         await s.Page.GotoAsync(path);
@@ -153,8 +160,11 @@ public abstract class E2ETest(ServerFixture fixture) : IAsyncLifetime
         // Give late errors (e.g. a circuit failing after the last click) a moment to arrive.
         if (_sessions.Count > 0) await Task.Delay(300);
         var failures = new List<string>();
-        foreach (var s in _sessions)
+        for (var i = 0; i < _sessions.Count; i++)
         {
+            var s = _sessions[i];
+            try { Directory.CreateDirectory(ScreenshotDir); await s.Page.ScreenshotAsync(new() { Path = Path.Combine(ScreenshotDir, $"{GetType().Name}.{_test}.{i}.png"), Timeout = 5000 }); }
+            catch (PlaywrightException) { }
             try { s.AssertNoErrors(); } catch (Exception ex) { failures.Add(ex.Message); }
             await s.DisposeAsync();
         }

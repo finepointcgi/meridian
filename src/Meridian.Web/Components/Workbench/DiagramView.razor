@@ -443,12 +443,19 @@
         }
         else if (target != null && C.EditSeed != null && C.EditSeed != _appliedSeed)
         {
-            // Keys typed before the editor took focus.
+            // Keys typed before the editor took focus. Insert only the new ones client-side: re-rendering the whole seed
+            // would overwrite characters already typed into the focused editor.
+            var applied = _appliedSeed ?? "";
             _appliedSeed = C.EditSeed;
-            _editText = C.EditSeed;
-            StateHasChanged();
-            await Task.Yield();
-            await JS.InvokeVoidAsync("meridian.caretEnd", _editor);
+            if (C.EditSeed.StartsWith(applied, StringComparison.Ordinal))
+                await JS.InvokeVoidAsync("meridian.insertSeed", _editor, C.EditSeed[applied.Length..]);
+            else
+            {
+                _editText = C.EditSeed;
+                StateHasChanged();
+                await Task.Yield();
+                await JS.InvokeVoidAsync("meridian.caretEnd", _editor);
+            }
         }
         if (target == null) _editorShownFor = null;
 
