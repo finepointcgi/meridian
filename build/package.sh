@@ -6,7 +6,7 @@
 #   Meridian-Server-<ver>.zip                       web server, needs the .NET 10 runtime (Docker image via Dockerfile)
 #   SHA256SUMS.txt                                  checksums of all of the above (the in-app updater verifies against it)
 #
-# Usage: build/package.sh [version] [rid ...]     e.g. build/package.sh 0.2.0 osx-arm64
+# Usage: build/package.sh [version] [rid ...]     e.g. build/package.sh 0.3.0 osx-arm64
 #
 # Optional environment (all signing is skipped when unset; see docs/RELEASING.md):
 #   MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"; otherwise ad-hoc signing
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-0.2.0}"
+VERSION="${1:-0.3.0}"
 shift || true
 RIDS=("$@")
 [ ${#RIDS[@]} -eq 0 ] && RIDS=(osx-arm64 osx-x64 win-x64 linux-x64)

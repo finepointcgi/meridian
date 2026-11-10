@@ -16,8 +16,8 @@ A release is a git tag. Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, w
 
 ```sh
 # bump <Version> in src/Meridian.Desktop/Meridian.Desktop.csproj, commit, then:
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 You can also start the workflow by hand (**Actions → Release → Run workflow**) to build and download the packages as
@@ -26,8 +26,8 @@ workflow artifacts. A manual run never publishes a release.
 ## Building locally
 
 ```sh
-build/package.sh 0.2.0 osx-arm64              # one platform
-build/package.sh 0.2.0                        # osx-arm64 osx-x64 win-x64 linux-x64 + server
+build/package.sh 0.3.0 osx-arm64              # one platform
+build/package.sh 0.3.0                        # osx-arm64 osx-x64 win-x64 linux-x64 + server
 ```
 
 Files go to `artifacts/` together with a `SHA256SUMS.txt`. Each format is built when its tool is available and skipped
@@ -74,7 +74,7 @@ What happens on the macOS runner:
 If you have only the certificate secrets, the build is Developer ID signed but not notarized. If you have none, it is ad-hoc signed.
 
 To sign locally, import the certificate into your login keychain and run:
-`MACOS_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" APPLE_ID=… APPLE_APP_PASSWORD=… APPLE_TEAM_ID=… build/package.sh 0.2.0 osx-arm64`
+`MACOS_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" APPLE_ID=… APPLE_APP_PASSWORD=… APPLE_TEAM_ID=… build/package.sh 0.3.0 osx-arm64`
 
 ### Windows: Authenticode
 

@@ -306,3 +306,10 @@
   .tab, .dock-tab, .crumbs .mud-icon-button { min-height: 40px; }
   .app:has(.m-shell[data-mode="view"]) .diagram-host :is(.toolbox, .selbar, .quickadd) { display: none !important; }
 }
+
+/* ============================================================ narrow desktop windows (1280–1500px) */
+/* Every group no longer fits: Generate and Extend (8th and 9th groups) move into the "More" menu, so AI stays in view. */
+@media (min-width: 1280px) and (max-width: 1499.98px) {
+  .ribbon > .rgroup:nth-child(8):not(.r-overflow), .ribbon > .rgroup:nth-child(9):not(.r-overflow) { display: none; }
+  .ribbon > .r-overflow { display: flex; }
+}
