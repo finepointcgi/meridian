@@ -52,7 +52,7 @@ public static partial class SvgRenderer
             var x = b.X + 6;
             if (r.PrimaryKey) KeyGlyph(sb, x, cy, PkColor);
             else if (r.ForeignKey) KeyGlyph(sb, x, cy, FkColor);
-            if (r.PrimaryKey && r.ForeignKey) sb.Append($"<circle cx=\"{F(x + 15)}\" cy=\"{F(cy - 4)}\" r=\"2.4\" fill=\"{FkColor}\"><title>also a foreign key</title></circle>");
+            if (r.PrimaryKey && r.ForeignKey) sb.Append($"<circle cx=\"{F(x + 13.5)}\" cy=\"{F(cy - 4.5)}\" r=\"2\" fill=\"{FkColor}\"><title>also a foreign key</title></circle>");
             else if (r.Unique && !r.PrimaryKey && !r.ForeignKey) Text(sb, x, baseline, "UQ", false, "start", size: 8.5, color: t.Muted);
             var nameX = b.X + 24;
             var typeText = r.Type;

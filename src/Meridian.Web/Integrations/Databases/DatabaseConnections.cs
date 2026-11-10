@@ -44,7 +44,7 @@ public sealed class DatabaseConnectionConfig
 /// </summary>
 public sealed class DatabaseConnectionService(IntegrationService integrations, IMeridianStore db, MeridianHostInfo host, IConfiguration config)
 {
-    public const string Kind = "database";
+    public const string Kind = IntegrationKinds.Database;
 
     public bool LocalMode => host.LocalMode;
     private bool AllowPrivate => string.Equals(config[OutboundGuard.AllowPrivateNetworksKey], "true", StringComparison.OrdinalIgnoreCase);
@@ -53,6 +53,13 @@ public sealed class DatabaseConnectionService(IntegrationService integrations, I
     public bool CanManage(bool isServerAdmin) => host.LocalMode || isServerAdmin;
 
     public Task<IReadOnlyList<IntegrationConnection>> ListAsync(Guid projectId) => integrations.ListAsync(projectId, Kind);
+
+    /// <summary>Re-reads the user's administrator state (it can change without a new sign-in) before changing connections.</summary>
+    public async Task RefreshAdminAsync(Workspace ws, IServiceProvider services)
+    {
+        if (host.LocalMode || ws.User is not { } user || services.GetService(typeof(Admin.AdminAccess)) is not Admin.AdminAccess access) return;
+        ws.IsServerAdmin = await access.StateAsync(user.Id, fresh: true) is { IsAdmin: true, Disabled: false };
+    }
 
     public async Task<IntegrationConnection?> FindAsync(Guid projectId, Guid id) =>
         await db.FindIntegrationAsync(id) is { } c && c.ProjectId == projectId && c.Kind == Kind ? c : null;

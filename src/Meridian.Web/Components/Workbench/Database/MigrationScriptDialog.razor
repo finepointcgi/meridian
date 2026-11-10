@@ -120,7 +120,7 @@
     private DbCatalog? FromJson(string? json)
     {
         if (string.IsNullOrEmpty(json)) return null;
-        var other = ProjectFile.Deserialize(json);
+        var other = ProjectFile.Deserialize(PackagePermissions.RedactJson(json, Ws.Access));   // hidden packages stay hidden
         var db = other.Find(Database!.Id) is { } same && DbModel.IsDatabase(same) ? same
                : DbModel.Databases(other).FirstOrDefault(d => DbCatalog.Eq(d.Name, Database.Name));
         return db == null ? new DbCatalog { Name = Database.Name } : DbExtract.FromModel(other, db).Catalog;

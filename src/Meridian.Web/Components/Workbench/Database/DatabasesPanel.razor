@@ -9,6 +9,7 @@
 @inject DatabaseConnectionService Connections
 @inject Workspace Ws
 @inject ISnackbar Snackbar
+@inject IServiceProvider Services
 
 <div data-testid="db-connections">
     @if (_form is null)
@@ -130,6 +131,7 @@
         if (Ws.Session is not { } s || _form is null) return;
         ApplySchemas();
         _busy = true;
+        await Connections.RefreshAdminAsync(Ws, Services);
         try { _message = await Connections.TestAsync(s.ProjectId, _editId, _form, _secret, Ws.IsServerAdmin, CancellationToken.None); _ok = true; }
         catch (DatabaseImportException ex) { _message = ex.Message; _ok = false; }
         finally { _busy = false; }
@@ -139,6 +141,7 @@
     {
         if (Ws.Session is not { } s || _form is null) return;
         ApplySchemas();
+        await Connections.RefreshAdminAsync(Ws, Services);
         try
         {
             await Connections.SaveAsync(s.ProjectId, _editId, _name ?? "", _form, _secret, Ws.IsServerAdmin);
@@ -153,6 +156,7 @@
     private async Task Delete(IntegrationConnection c)
     {
         if (Ws.Session is not { } s) return;
+        await Connections.RefreshAdminAsync(Ws, Services);
         try { await Connections.DeleteAsync(s.ProjectId, c.Id, Ws.IsServerAdmin); }
         catch (DatabaseImportException ex) { Snackbar.Add(ex.Message, Severity.Error); }
         await Reload();
