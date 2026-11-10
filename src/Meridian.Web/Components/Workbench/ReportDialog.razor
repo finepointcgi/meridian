@@ -1,99 +1,255 @@
-@using Meridian.Serialization
+@* Template-driven document generation (SRS, ICD, SDD, VCRM, model overview, user templates) to PDF / Word / HTML,
+   generated in the background on a model snapshot with progress and cancel. *@
+@using Meridian.Serialization.Reports
+@implements IDisposable
 @inject Workspace Ws
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
+@inject IDialogService Dialogs
 
 <MudDialog>
     <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Description" /><MudText Typo="Typo.h6">Generate document</MudText></div></TitleContent>
     <DialogContent>
-        <MudSelect T="string" Label="Template" Value="_preset" ValueChanged="ApplyPreset" Variant="Variant.Outlined" Margin="Margin.Dense">
-            @foreach (var p in ReportTemplate.Presets.Keys) { <MudSelectItem Value="@p">@p</MudSelectItem> }
-        </MudSelect>
-        <MudTextField T="string" @bind-Value="_title" Label="Document title" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        <MudTextField T="string" @bind-Value="_author" Label="Author" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        <div class="section-title" style="margin-top:14px">Sections</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr">
-            @foreach (var s in Enum.GetValues<ReportSection>())
+        <div style="display:flex; flex-direction:column; gap:10px">
+            <div class="d-flex align-center gap-2">
+                <MudSelect T="string" Label="Template" Value="_selectedKey" ValueChanged="Select" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy" Style="flex:1">
+                    @foreach (var e in _entries)
+                    {
+                        <MudSelectItem Value="@e.Key">@e.Label</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true" Disabled="_busy" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Edit" OnClick="EditTemplate">@(_current?.Element != null ? "Edit template…" : "Edit a copy…")</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="Duplicate">Duplicate into model</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="ExportJson">Export template (.json)</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => JS.InvokeVoidAsync("meridian.click", "report-template-file").AsTask())">Import template (.json)…</MudMenuItem>
+                    @if (_current?.Element != null)
+                    {
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteTemplate">Delete from model</MudMenuItem>
+                    }
+                </MudMenu>
+            </div>
+            @if (_current != null && _current.Template.Description.Length > 0)
             {
-                var section = s;
-                <MudCheckBox T="bool" Value="_sections.Contains(section)" ValueChanged="v => Toggle(section, v)" Label="@Label(section)" Dense="true" Size="Size.Small" />
+                <MudText Typo="Typo.caption" Style="color:var(--text-3); margin-top:-6px">@_current.Template.Description</MudText>
+            }
+            <MudTextField T="string" @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+                <MudTextField T="string" @bind-Value="_subtitle" Label="Subtitle" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                <MudTextField T="string" @bind-Value="_number" Label="Document number" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                <MudTextField T="string" @bind-Value="_revision" Label="Revision" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                <MudTextField T="string" @bind-Value="_classification" Label="Classification marking" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                <MudTextField T="string" @bind-Value="_author" Label="Author" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                <MudSelect T="string" @bind-Value="_pageSize" Label="Page size" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy">
+                    <MudSelectItem Value="@("Letter")">US Letter</MudSelectItem>
+                    <MudSelectItem Value="@("A4")">A4</MudSelectItem>
+                </MudSelect>
+            </div>
+            <div class="section-title" style="margin-top:4px">Format</div>
+            <MudRadioGroup T="ReportFormat" @bind-Value="_format" Disabled="_busy">
+                <MudRadio Value="ReportFormat.Pdf" Color="Color.Primary" Dense="true">PDF</MudRadio>
+                <MudRadio Value="ReportFormat.Docx" Color="Color.Primary" Dense="true">Word (.docx)</MudRadio>
+                <MudRadio Value="ReportFormat.Html" Color="Color.Primary" Dense="true">HTML (single file)</MudRadio>
+            </MudRadioGroup>
+            @if (_busy || _progressText.Length > 0)
+            {
+                <div>
+                    <MudProgressLinear Color="Color.Primary" Value="@(_progress * 100)" Rounded="true" Size="Size.Small" />
+                    <MudText Typo="Typo.caption" Style="color:var(--text-3)">@_progressText</MudText>
+                </div>
             }
         </div>
-        @if (_sections.Contains(ReportSection.Diagrams))
-        {
-            <MudSelect T="DiagramType" Label="Diagram types (empty = all)" MultiSelection="true" @bind-SelectedValues="_diagramTypes" Variant="Variant.Outlined" Margin="Margin.Dense">
-                @foreach (var t in Enum.GetValues<DiagramType>()) { <MudSelectItem Value="t">@Metamodel.DisplayName(t)</MudSelectItem> }
-            </MudSelect>
-        }
-        <div class="section-title" style="margin-top:14px">Format</div>
-        <MudRadioGroup T="string" @bind-Value="_format">
-            <MudRadio Value="@("docx")" Color="Color.Primary" Dense="true">Word (.docx)</MudRadio>
-            <MudRadio Value="@("pdf")" Color="Color.Primary" Dense="true">PDF</MudRadio>
-        </MudRadioGroup>
+        <InputFile id="report-template-file" accept=".json,application/json" OnChange="ImportJson" style="display:none" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || _sections.Count == 0" OnClick="Generate">@(_busy ? "Generating…" : "Generate")</MudButton>
+        @if (_busy)
+        {
+            <MudButton OnClick="CancelGeneration" StartIcon="@Icons.Material.Outlined.StopCircle">Cancel generation</MudButton>
+        }
+        else
+        {
+            <MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || _current == null" OnClick="Generate">@(_busy ? "Generating…" : "Generate")</MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
+    private sealed record Entry(string Key, string Label, DocTemplate Template, Element? Element);
+
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-    private string _preset = "System design description";
-    private string _title = "";
-    private string _author = "";
-    private string _format = "docx";
+    private List<Entry> _entries = new();
+    private string _selectedKey = "";
+    private Entry? _current;
+    private string _title = "", _subtitle = "", _number = "", _revision = "", _classification = "", _author = "", _pageSize = "Letter";
+    private ReportFormat _format = ReportFormat.Pdf;
     private bool _busy;
-    private readonly List<ReportSection> _sections = new();
-    private IEnumerable<DiagramType> _diagramTypes = [];
+    private double _progress;
+    private string _progressText = "";
+    private CancellationTokenSource? _cts;
 
     protected override void OnInitialized()
     {
-        _title = $"{Ws.Model.Root.Name} — System Design Description";
-        _author = Ws.User?.DisplayName ?? "";
-        ApplyPreset(_preset);
+        Load();
+        Select(_entries.FirstOrDefault()?.Key ?? "");
     }
 
-    private void ApplyPreset(string preset)
+    private void Load(string? select = null)
     {
-        _preset = preset;
-        _sections.Clear();
-        _sections.AddRange(ReportTemplate.Presets[preset]);
-        _title = $"{Ws.Model.Root.Name} — {preset}";
+        _entries = ReportTemplates.BuiltIn.Select((t, i) => new Entry("builtin:" + i, t.Name + " (built-in)", t, null))
+            .Concat(ReportTemplates.InModel(Ws.Model).Select(x => new Entry("model:" + x.Element.Id, x.Template.Name, x.Template, x.Element)))
+            .ToList();
+        if (select != null) Select(select);
     }
 
-    private void Toggle(ReportSection s, bool on)
+    private void Select(string key)
     {
-        if (on && !_sections.Contains(s)) { _sections.Add(s); _sections.Sort(); }
-        if (!on) _sections.Remove(s);
+        _selectedKey = key;
+        _current = _entries.FirstOrDefault(e => e.Key == key);
+        if (_current == null) return;
+        var t = _current.Template;
+        _title = t.Title;
+        _subtitle = t.Subtitle;
+        _number = t.DocumentNumber;
+        _revision = t.Revision;
+        _classification = t.Classification;
+        _author = t.Author.Length > 0 ? t.Author : Ws.User?.DisplayName ?? "";
+        _pageSize = t.PageSize;
+        _progressText = "";
     }
 
-    private static string Label(ReportSection s) => s switch
+    /// <summary>The selected template with this dialog's document properties applied.</summary>
+    private DocTemplate Effective()
     {
-        ReportSection.TitlePage => "Title page",
-        ReportSection.Elements => "Element specifications",
-        _ => s.ToString(),
-    };
+        var t = _current!.Template.Clone();
+        t.Title = _title ?? ""; t.Subtitle = _subtitle ?? ""; t.DocumentNumber = _number ?? ""; t.Revision = _revision ?? "";
+        t.Classification = _classification ?? ""; t.Author = _author ?? ""; t.PageSize = _pageSize;
+        return t;
+    }
 
     private async Task Generate()
     {
+        if (_current == null) return;
         _busy = true;
+        _progress = 0;
+        _progressText = "Taking a model snapshot…";
         StateHasChanged();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        var format = _format;
+        var template = Effective();
         try
         {
-            var template = new ReportTemplate(_title, _sections.ToList(), _diagramTypes.ToList(), null, _author);
-            var model = Ws.Model;
-            var bytes = await Task.Run(() => _format == "pdf" ? DocumentReports.Pdf(model, template) : DocumentReports.Docx(model, template));
-            var name = string.Join("_", _title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + "." + _format;
-            var mime = _format == "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-            await JS.InvokeVoidAsync("meridian.download", name, mime, Convert.ToBase64String(bytes));
+            var snapshot = ReportEngine.Snapshot(Ws.Model);   // UI thread: consistent copy, then work off-thread
+            var lastUi = DateTime.MinValue;
+            var progress = new Progress<ReportProgress>(p =>
+            {
+                _progress = p.Fraction;
+                _progressText = p.Phase;
+                if ((DateTime.UtcNow - lastUi).TotalMilliseconds < 120 && p.Fraction < 1) return;
+                lastUi = DateTime.UtcNow;
+                _ = InvokeAsync(StateHasChanged);
+            });
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var bytes = await ReportEngine.GenerateAsync(snapshot, template, format, progress, ct);
+            ct.ThrowIfCancellationRequested();
+            var title = DocResolverTitle(template, snapshot);
+            var name = string.Join("_", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + "." + ReportEngine.Extension(format);
+            await JS.InvokeVoidAsync("meridian.download", name, ReportEngine.MimeType(format), Convert.ToBase64String(bytes));
+            _progress = 1;
+            _progressText = $"Generated {name} ({bytes.Length / 1024:N0} KB) in {sw.Elapsed.TotalSeconds:0.0} s";
             Snackbar.Add($"Generated {name}", Severity.Success);
-            MudDialog.Close();
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        catch (OperationCanceledException)
         {
+            _progressText = "Generation cancelled.";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or Meridian.Core.Analysis.QueryParseException or System.Text.Json.JsonException)
+        {
+            _progressText = "";
             Snackbar.Add($"Document generation failed: {ex.Message}", Severity.Error);
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+            _cts?.Dispose();
+            _cts = null;
+            StateHasChanged();
+        }
+    }
+
+    private static string DocResolverTitle(DocTemplate t, ModelRepository m)
+    {
+        var title = t.Title.Replace("{model.name}", m.Root.Name, StringComparison.OrdinalIgnoreCase);
+        var sub = t.Subtitle.Replace("{model.name}", m.Root.Name, StringComparison.OrdinalIgnoreCase);
+        return (t.DocumentNumber.Length > 0 ? t.DocumentNumber + " " : "") + title + (sub.Length > 0 ? " - " + sub : "");
+    }
+
+    private void CancelGeneration()
+    {
+        _cts?.Cancel();
+        _progressText = "Cancelling…";
+    }
+
+    private async Task EditTemplate()
+    {
+        if (_current == null) return;
+        var template = Effective();
+        if (_current.Element == null) template.Name = _current.Template.Name + " (copy)";
+        var parameters = new DialogParameters<ReportTemplateEditor> { { x => x.Template, template }, { x => x.Element, _current.Element } };
+        var dialog = await Dialogs.ShowAsync<ReportTemplateEditor>("Edit report template", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraExtraLarge, FullWidth = true, CloseOnEscapeKey = false });
+        if (await dialog.Result is { Canceled: false, Data: Element saved }) Load("model:" + saved.Id);
+    }
+
+    private void Duplicate()
+    {
+        if (_current == null) return;
+        var copy = Effective();
+        copy.Name = _current.Template.Name + " (copy)";
+        var e = ReportTemplates.Save(Ws.Model, copy);
+        Snackbar.Add($"Saved '{copy.Name}' in the {ReportTemplates.PackageName} package", Severity.Success);
+        Load("model:" + e.Id);
+    }
+
+    private void DeleteTemplate()
+    {
+        if (_current?.Element is not { } e) return;
+        Ws.Model.Delete(e);
+        Snackbar.Add($"Deleted template '{_current.Template.Name}' (undo restores it)", Severity.Info);
+        Load();
+        Select(_entries.FirstOrDefault()?.Key ?? "");
+    }
+
+    private async Task ExportJson()
+    {
+        if (_current == null) return;
+        var t = Effective();
+        t.Name = _current.Template.Name;
+        var name = string.Join("_", t.Name.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + ".report.json";
+        await JS.InvokeVoidAsync("meridian.download", name, "application/json", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(t.ToJson())));
+    }
+
+    private async Task ImportJson(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(4 * 1024 * 1024));
+            var t = DocTemplate.FromJson(await reader.ReadToEndAsync());
+            var saved = ReportTemplates.Save(Ws.Model, t);
+            Snackbar.Add($"Imported template '{t.Name}'", Severity.Success);
+            Load("model:" + saved.Id);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or NotSupportedException)
+        {
+            Snackbar.Add($"Not a report template: {ex.Message}", Severity.Error);
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
     }
 }

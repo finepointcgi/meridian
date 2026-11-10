@@ -1,0 +1,486 @@
+@* Report template editor: a tree of sections and blocks, a property sheet for the selection, and a live HTML preview
+   rendered (with capped loops) from a snapshot of the model taken when the editor opened. Saves the template as a
+   model element, so it versions and replicates with the model. *@
+@using System.Collections
+@using Meridian.Core.Analysis
+@using Meridian.Serialization.Reports
+@implements IDisposable
+@inject Workspace Ws
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.EditNote" /><MudText Typo="Typo.h6">Report template — @Template.Name</MudText></div>
+    </TitleContent>
+    <DialogContent>
+        <div class="rte">
+            <div class="rte-tree">
+                <div class="rte-bar">
+                    <MudTooltip Text="Add section after the selected one"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PostAdd" OnClick="AddSection" /></MudTooltip>
+                    <MudTooltip Text="Add subsection"><MudIconButton Class="rte-add-sub" Size="Size.Small" Icon="@Icons.Material.Outlined.SubdirectoryArrowRight" OnClick="AddSubsection" Disabled="@(_selected is not DocSection)" /></MudTooltip>
+                    <MudMenu Icon="@Icons.Material.Outlined.AddBox" Size="Size.Small" Dense="true" Label="Block" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                        @foreach (var (type, label, create) in DocBlock.Catalog)
+                        {
+                            var make = create;
+                            <MudMenuItem OnClick="() => AddBlock(make())">@label</MudMenuItem>
+                        }
+                    </MudMenu>
+                    <span style="flex:1"></span>
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="() => Move(-1)" Disabled="@(SelectedRow?.Container == null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="() => Move(1)" Disabled="@(SelectedRow?.Container == null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="DuplicateSelected" Disabled="@(SelectedRow?.Container == null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteSelected" Disabled="@(SelectedRow?.Container == null)" />
+                </div>
+                <div class="rte-rows">
+                    <div class="rte-row @(_selected == null ? "on" : "")" @onclick="() => SelectItem(null)">
+                        <MudIcon Icon="@Icons.Material.Outlined.Article" Size="Size.Small" /> <b>Document</b>
+                    </div>
+                    @foreach (var r in _rows)
+                    {
+                        var row = r;
+                        <div class="rte-row @(ReferenceEquals(row.Item, _selected) ? "on" : "") @(row.Item is DocSection ? "sec" : "")" style="padding-left:@(10 + row.Depth * 14)px"
+                             @onclick="() => SelectItem(row.Item)" title="@row.Label">
+                            <MudIcon Icon="@row.Icon" Size="Size.Small" /> <span>@row.Label</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="rte-props" @key="_selected">
+                @switch (_selected)
+                {
+                    case null:
+                        @DocumentProps()
+                        break;
+                    case DocSection s:
+                        @SectionProps(s)
+                        break;
+                    case ElseRef:
+                        <MudText Typo="Typo.body2">Blocks under <b>else</b> are used when the condition is false. Select this row and add blocks.</MudText>
+                        break;
+                    case DocBlock b:
+                        @BlockProps(b)
+                        break;
+                }
+                <details class="rte-help">
+                    <summary>Placeholders and references</summary>
+                    <div>
+                        <code>{name}</code> <code>{reqId}</code> <code>{text}</code> <code>{documentation}</code> <code>{tag:priority}</code> <code>{satisfiedBy}</code> — any value key of the current loop element;
+                        <code>{var.name}</code> — a named outer loop element; <code>{doc.title}</code> <code>{doc.number}</code> <code>{model.name}</code> <code>{date}</code> <code>{index}</code> <code>{count}</code>.<br />
+                        Cross-references: <code>{ref:name}</code> (Figure 3-2 / Table 4-1 / Section 2.3), <code>{page:name}</code>, <code>{title:name}</code>, where <i>name</i> is a section, figure or table <b>Ref</b>.<br />
+                        Queries: <code>kind:Requirement in:{id} where priority = high and not has:in:verify</code>.
+                    </div>
+                </details>
+            </div>
+
+            <div class="rte-preview">
+                <div class="rte-bar">
+                    <span class="section-title" style="margin:0">Live preview</span>
+                    <span style="flex:1"></span>
+                    <MudCheckBox T="bool" Value="_previewDiagrams" ValueChanged="v => { _previewDiagrams = v; _ = RefreshPreview(0); }" Label="Diagrams" Dense="true" Size="Size.Small" />
+                    <MudTooltip Text="Refresh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => RefreshPreview(0)" /></MudTooltip>
+                </div>
+                @if (_previewError != null)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true">@_previewError</MudAlert>
+                }
+                <iframe class="rte-frame" sandbox="allow-same-origin" srcdoc="@_previewHtml" title="Template preview"></iframe>
+                <MudText Typo="Typo.caption" Style="color:var(--text-3)">Loops show at most @LoopLimit items in the preview.@(_previewBusy ? " Updating…" : "")</MudText>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Save" OnClick="Save">@(Element == null ? "Save to model" : "Save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .rte { display:grid; grid-template-columns: minmax(220px, 300px) minmax(280px, 1fr) minmax(320px, 1.2fr); gap:12px; height:72vh; min-height:420px }
+    .rte > div { min-height:0; display:flex; flex-direction:column; border:1px solid var(--border-strong); border-radius:8px; overflow:hidden }
+    .rte-bar { display:flex; align-items:center; gap:2px; padding:4px 6px; border-bottom:1px solid var(--border-strong) }
+    .rte-rows { overflow:auto; flex:1; padding:4px 0 }
+    .rte-row { display:flex; align-items:center; gap:6px; padding:3px 10px; cursor:pointer; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-2) }
+    .rte-row span { overflow:hidden; text-overflow:ellipsis }
+    .rte-row.sec { color:var(--text); font-weight:600 }
+    .rte-row:hover { background:var(--border) }
+    .rte-row.on { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--text) }
+    .rte-props { overflow:auto; padding:10px 12px; gap:10px }
+    .rte-props > * + * { margin-top:10px }
+    .rte-help { font-size:12px; color:var(--text-2) } .rte-help code { font-size:11.5px }
+    .rte-preview { padding:0 }
+    .rte-frame { flex:1; width:100%; border:0; background:#fff }
+    @@media (max-width: 900px) { .rte { grid-template-columns: 1fr; height:auto } .rte > div { min-height:300px } }
+</style>
+
+@code {
+    private sealed record Row(int Depth, object Item, IList? Container, string Label, string Icon);
+    /// <summary>The "else" branch of a condition, as a selectable tree row.</summary>
+    private sealed record ElseRef(IfBlock If);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DocTemplate Template { get; set; } = new();
+    /// <summary>The model element the template is stored on (null = save as a new element).</summary>
+    [Parameter] public Element? Element { get; set; }
+
+    private const int LoopLimit = 5;
+    private readonly List<Row> _rows = new();
+    private object? _selected;
+    private ModelRepository? _snapshot;
+    private string _previewHtml = "";
+    private string? _previewError;
+    private bool _previewBusy, _previewDiagrams = true;
+    private CancellationTokenSource? _previewCts;
+
+    private Row? SelectedRow => _rows.FirstOrDefault(r => ReferenceEquals(r.Item, _selected));
+
+    protected override void OnInitialized()
+    {
+        Template = Template.Clone();
+        _snapshot = ReportEngine.Snapshot(Ws.Model);
+        BuildRows();
+        _ = RefreshPreview(0);
+    }
+
+    // ================================================================== tree
+
+    private void BuildRows()
+    {
+        _rows.Clear();
+        var counters = new int[12];
+        void Section(DocSection s, int depth, IList container)
+        {
+            var number = "";
+            if (s.Numbered)
+            {
+                counters[depth]++;
+                for (var i = depth + 1; i < counters.Length; i++) counters[i] = 0;
+                number = string.Join(".", counters.Take(depth + 1).Select(c => Math.Max(1, c))) + " ";
+            }
+            _rows.Add(new Row(depth, s, container, number + s.Title + (s.Landscape ? "  ⟷" : ""), Icons.Material.Outlined.Title));
+            foreach (var b in s.Blocks) Block(b, depth + 1, s.Blocks);
+            foreach (var c in s.Sections) Section(c, depth + 1, s.Sections);
+        }
+        void Block(DocBlock b, int depth, IList container)
+        {
+            _rows.Add(new Row(depth, b, container, b.Summary, IconFor(b)));
+            if (b is ForEachBlock f) foreach (var c in f.Blocks) Block(c, depth + 1, f.Blocks);
+            if (b is IfBlock i)
+            {
+                foreach (var c in i.Blocks) Block(c, depth + 1, i.Blocks);
+                var e = _elseRefs.TryGetValue(i, out var er) ? er : _elseRefs[i] = new ElseRef(i);
+                _rows.Add(new Row(depth, e, null, "else", Icons.Material.Outlined.CallSplit));
+                foreach (var c in i.Else) Block(c, depth + 1, i.Else);
+            }
+        }
+        foreach (var s in Template.Sections) Section(s, 0, Template.Sections);
+    }
+
+    private readonly Dictionary<IfBlock, ElseRef> _elseRefs = new(ReferenceEqualityComparer.Instance);
+
+    private static string IconFor(DocBlock b) => b switch
+    {
+        TextBlock or DocumentationBlock => Icons.Material.Outlined.Notes,
+        ForEachBlock => Icons.Material.Outlined.Repeat,
+        IfBlock => Icons.Material.Outlined.Rule,
+        FieldsBlock => Icons.Material.Outlined.ListAlt,
+        TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock => Icons.Material.Outlined.TableChart,
+        TraceMatrixBlock => Icons.Material.Outlined.GridOn,
+        CoverageBlock => Icons.Material.Outlined.DonutLarge,
+        DiagramBlock => Icons.Material.Outlined.Schema,
+        ElementListBlock => Icons.Material.Outlined.FormatListBulleted,
+        _ => Icons.Material.Outlined.InsertPageBreak,
+    };
+
+    private void SelectItem(object? item) => _selected = item;
+
+    private void Changed(bool rebuild = true)
+    {
+        if (rebuild) BuildRows();
+        _ = RefreshPreview(600);
+    }
+
+    private void AddSection()
+    {
+        var s = new DocSection { Title = "New section" };
+        if (SelectedRow is { Item: DocSection cur, Container: { } list }) list.Insert(list.IndexOf(cur) + 1, s);
+        else Template.Sections.Add(s);
+        _selected = s;
+        Changed();
+    }
+
+    private void AddSubsection()
+    {
+        if (_selected is not DocSection parent) return;
+        var s = new DocSection { Title = "New subsection" };
+        parent.Sections.Add(s);
+        _selected = s;
+        Changed();
+    }
+
+    private void AddBlock(DocBlock b)
+    {
+        switch (_selected)
+        {
+            case DocSection s: s.Blocks.Add(b); break;
+            case ForEachBlock f: f.Blocks.Add(b); break;
+            case IfBlock i: i.Blocks.Add(b); break;
+            case ElseRef e: e.If.Else.Add(b); break;
+            case DocBlock cur when SelectedRow?.Container is { } list: list.Insert(list.IndexOf(cur) + 1, b); break;
+            default:
+                if (Template.Sections.Count == 0) Template.Sections.Add(new DocSection { Title = "Introduction" });
+                Template.Sections[^1].Blocks.Add(b);
+                break;
+        }
+        _selected = b;
+        Changed();
+    }
+
+    private void Move(int delta)
+    {
+        if (SelectedRow is not { Container: { } list } row) return;
+        var i = list.IndexOf(row.Item);
+        var j = i + delta;
+        if (i < 0 || j < 0 || j >= list.Count) return;
+        list.RemoveAt(i);
+        list.Insert(j, row.Item);
+        Changed();
+    }
+
+    private void DeleteSelected()
+    {
+        if (SelectedRow is not { Container: { } list } row) return;
+        list.Remove(row.Item);
+        _selected = null;
+        Changed();
+    }
+
+    private void DuplicateSelected()
+    {
+        if (SelectedRow is not { Container: { } list } row) return;
+        object copy = row.Item switch
+        {
+            DocSection s => System.Text.Json.JsonSerializer.Deserialize<DocSection>(System.Text.Json.JsonSerializer.Serialize(s, DocTemplate.JsonOptions), DocTemplate.JsonOptions)!,
+            DocBlock b => System.Text.Json.JsonSerializer.Deserialize<DocBlock>(System.Text.Json.JsonSerializer.Serialize(b, DocTemplate.JsonOptions), DocTemplate.JsonOptions)!,
+            _ => row.Item,
+        };
+        if (ReferenceEquals(copy, row.Item)) return;
+        list.Insert(list.IndexOf(row.Item) + 1, copy);
+        _selected = copy;
+        Changed();
+    }
+
+    // ================================================================== preview
+
+    private async Task RefreshPreview(int delayMs)
+    {
+        _previewCts?.Cancel();
+        var cts = _previewCts = new CancellationTokenSource();
+        try
+        {
+            if (delayMs > 0) await Task.Delay(delayMs, cts.Token);
+            _previewBusy = true;
+            StateHasChanged();
+            var template = Template.Clone();
+            var snapshot = _snapshot!;
+            var diagrams = _previewDiagrams;
+            var html = await Task.Run(() => ReportEngine.Preview(snapshot, template, LoopLimit, diagrams, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested) return;
+            _previewHtml = html;
+            _previewError = null;
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or QueryParseException or System.Text.Json.JsonException or FormatException)
+        {
+            _previewError = "Preview failed: " + ex.Message;
+        }
+        _previewBusy = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Save()
+    {
+        if (string.IsNullOrWhiteSpace(Template.Name)) { Snackbar.Add("Give the template a name", Severity.Warning); return; }
+        var e = ReportTemplates.Save(Ws.Model, Template, Element);
+        Snackbar.Add($"Saved template '{Template.Name}' in {e.Owner?.DisplayName}", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(e));
+    }
+
+    public void Dispose()
+    {
+        _previewCts?.Cancel();
+        _previewCts?.Dispose();
+    }
+
+    // ================================================================== property editors
+
+    private RenderFragment Txt(string label, string? value, Action<string> set, int lines = 1, string? help = null, bool mono = false) =>
+        @<MudTextField T="string" Label="@label" Value="@value" ValueChanged="@((string v) => { set(v ?? ""); Changed(); })" Lines="@lines" AutoGrow="@(lines > 1)" MaxLines="16"
+                       HelperText="@help" Variant="Variant.Outlined" Margin="Margin.Dense" Style="@(mono ? "font-family:'JetBrains Mono',Menlo,monospace;font-size:12.5px" : null)" />;
+
+    private RenderFragment Opt(string label, string? value, Action<string?> set, string? help = null) =>
+        Txt(label, value, v => set(string.IsNullOrWhiteSpace(v) ? null : v), 1, help);
+
+    private RenderFragment Chk(string label, bool value, Action<bool> set) =>
+        @<MudCheckBox T="bool" Label="@label" Value="@value" ValueChanged="@((bool v) => { set(v); Changed(); })" Dense="true" Size="Size.Small" />;
+
+    private RenderFragment Num(string label, int value, Action<int> set, string? help = null) =>
+        @<MudNumericField T="int" Label="@label" Value="@value" ValueChanged="@((int v) => { set(v); Changed(); })" HelperText="@help" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" />;
+
+    private RenderFragment Pick(string label, string value, Action<string> set, params (string Value, string Label)[] options) =>
+        @<MudSelect T="string" Label="@label" Value="@value" ValueChanged="@((string v) => { set(v); Changed(); })" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+            @foreach (var o in options) { <MudSelectItem Value="@o.Value">@o.Label</MudSelectItem> }
+        </MudSelect>;
+
+    private RenderFragment Multi(string label, IEnumerable<string> all, IEnumerable<string> selected, Action<IEnumerable<string>> set, string? help = null) =>
+        @<MudSelect T="string" Label="@label" MultiSelection="true" SelectedValues="@selected.ToList()" SelectedValuesChanged="@((IEnumerable<string> vs) => { set(vs); Changed(); })"
+                    HelperText="@help" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" MaxHeight="360">
+            @foreach (var o in all) { <MudSelectItem Value="@o">@o</MudSelectItem> }
+        </MudSelect>;
+
+    private static string Csv(IEnumerable<string> items) => string.Join(", ", items);
+    private static List<string> FromCsv(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>Columns as "key" or "key:Header", comma separated.</summary>
+    private static string ColumnsText(IEnumerable<TableViewColumn> cols) =>
+        string.Join(", ", cols.Select(c => string.IsNullOrWhiteSpace(c.Label) ? c.Key : $"{c.Key}={c.Label}"));
+    private static List<TableViewColumn> ParseColumns(string s) =>
+        FromCsv(s).Select(x => x.Split('=', 2) is var p && p.Length == 2 ? new TableViewColumn(p[0].Trim(), p[1].Trim()) : new TableViewColumn(x)).ToList();
+
+    private static IEnumerable<string> Names<TE>(IEnumerable<TE> xs) where TE : struct, Enum => xs.Select(x => x.ToString());
+    private static List<TE> Parse<TE>(IEnumerable<string> xs) where TE : struct, Enum => xs.Select(x => Enum.TryParse<TE>(x, out var v) ? (TE?)v : null).OfType<TE>().ToList();
+
+    private RenderFragment DocumentProps() =>
+        @<div>
+            @Txt("Template name", Template.Name, v => Template.Name = v)
+            @Txt("Description", Template.Description, v => Template.Description = v, 2)
+            <div class="section-title">Document properties</div>
+            @Txt("Title", Template.Title, v => Template.Title = v, help: "Placeholders allowed, e.g. {model.name}")
+            @Txt("Subtitle", Template.Subtitle, v => Template.Subtitle = v)
+            @Txt("Document number", Template.DocumentNumber, v => Template.DocumentNumber = v)
+            @Txt("Revision", Template.Revision, v => Template.Revision = v)
+            @Txt("Classification marking", Template.Classification, v => Template.Classification = v, help: "Shown in every page header and footer")
+            @Txt("Author", Template.Author, v => Template.Author = v)
+            @Txt("Organization", Template.Organization, v => Template.Organization = v)
+            @Txt("Title page notes (markdown)", Template.TitleNotes, v => Template.TitleNotes = v, 3)
+            @Pick("Page size", Template.PageSize, v => Template.PageSize = v, ("Letter", "US Letter"), ("A4", "A4"))
+            <div class="section-title">Front matter</div>
+            @Chk("Title page", Template.TitlePage, v => Template.TitlePage = v)
+            @Chk("Revision history", Template.RevisionHistory, v => Template.RevisionHistory = v)
+            @Chk("Table of contents", Template.TableOfContents, v => Template.TableOfContents = v)
+            @Num("Contents depth", Template.TocDepth, v => Template.TocDepth = Math.Clamp(v, 1, 6))
+            @Chk("List of figures", Template.ListOfFigures, v => Template.ListOfFigures = v)
+            @Chk("List of tables", Template.ListOfTables, v => Template.ListOfTables = v)
+            @Pick("Caption numbering", Template.CaptionNumbering, v => Template.CaptionNumbering = v, ("chapter", "Per chapter (Figure 3-2)"), ("sequential", "Sequential (Figure 12)"))
+            <div class="section-title">Revision history entries</div>
+            @Txt("One per line: revision | date | description | author", RevisionsText(), SetRevisions, 4, mono: true)
+        </div>;
+
+    private string RevisionsText() => string.Join("\n", Template.Revisions.Select(r => $"{r.Revision} | {r.Date} | {r.Description} | {r.Author}"));
+
+    private void SetRevisions(string text) =>
+        Template.Revisions = text.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Split('|').Select(x => x.Trim()).ToArray())
+            .Select(p => new RevisionEntry { Revision = p.ElementAtOrDefault(0) ?? "", Date = p.ElementAtOrDefault(1) ?? "", Description = p.ElementAtOrDefault(2) ?? "", Author = p.ElementAtOrDefault(3) ?? "" })
+            .ToList();
+
+    private RenderFragment SectionProps(DocSection s) =>
+        @<div>
+            @Txt("Heading", s.Title, v => s.Title = v, help: "Placeholders allowed")
+            @Opt("Ref (cross-reference name)", s.Ref, v => s.Ref = v, "Other text can cite it with {ref:name}")
+            @Chk("Numbered heading", s.Numbered, v => s.Numbered = v)
+            @Chk("Start on a new page", s.PageBreakBefore, v => s.PageBreakBefore = v)
+            @Chk("Landscape pages (wide tables)", s.Landscape, v => s.Landscape = v)
+        </div>;
+
+    private RenderFragment Caption(CaptionedBlock b) =>
+        @<div>
+            @Opt("Caption", b.Caption, v => b.Caption = v, "Numbered automatically, e.g. Table 3-1")
+            @Opt("Ref (cross-reference name)", b.Ref, v => b.Ref = v, "Cite with {ref:name} / {page:name}")
+        </div>;
+
+    private RenderFragment BlockProps(DocBlock block) => block switch
+    {
+        TextBlock t => @<div>@Txt("Markdown", t.Markdown, v => t.Markdown = v, 10, "**bold**, *italic*, `code`, - bullets, 1. numbers, > quotes; placeholders and {ref:…}", mono: true)</div>,
+        DocumentationBlock d => @<div>
+                @Txt("Value key", d.Key, v => d.Key = v, help: "documentation, text, tag:rationale … rendered as markdown")
+                @Txt("Text when empty", d.EmptyText, v => d.EmptyText = v)
+            </div>,
+        ForEachBlock f => @<div>
+                @Txt("Query", f.Query, v => f.Query = v, 2, "e.g. kind:Requirement in:{id} where priority = high", mono: true)
+                @Opt("Related to current element (instead of the whole model)", f.Related, v => f.Related = v, "children, descendants, satisfiedBy, verifies, rel:in:Allocate …")
+                @Opt("Variable name", f.Variable, v => f.Variable = v, "Nested blocks can use {var.key}")
+                @Opt("Sort by", f.SortBy, v => f.SortBy = v, "Value key, e.g. reqId")
+                @Chk("Descending", f.Descending, v => f.Descending = v)
+                @Opt("Heading per element", f.Heading, v => f.Heading = v, "e.g. {reqId} {name} — makes a numbered subsection for each")
+                @Opt("Heading ref", f.HeadingRef, v => f.HeadingRef = v, "e.g. req-{reqId}")
+                @Chk("New page for each element", f.PageBreakEach, v => f.PageBreakEach = v)
+                @Num("Limit (0 = all)", f.Limit, v => f.Limit = v)
+                @Txt("Text when nothing matches", f.EmptyText, v => f.EmptyText = v)
+            </div>,
+        IfBlock i => @<div>
+                @Opt("Condition on the current element", i.Condition, v => i.Condition = v, "e.g. priority = high and has:in:verify")
+                @Opt("…and this query finds something", i.Exists, v => i.Exists = v, "e.g. kind:Port in:{id}")
+            </div>,
+        FieldsBlock f => @<div>
+                @Txt("Keys (comma separated; empty = standard)", Csv(f.Keys), v => f.Keys = FromCsv(v), 2, "e.g. reqId, priority, tag:safety, satisfiedBy, prop:mass")
+                @Chk("Include tagged values", f.IncludeTags, v => f.IncludeTags = v)
+                @Chk("Include empty values", f.IncludeEmpty, v => f.IncludeEmpty = v)
+                @Pick("Layout", f.Layout, v => f.Layout = v, ("table", "Table"), ("inline", "Inline lines"))
+            </div>,
+        TableBlock t => @<div>
+                @Caption(t)
+                @Opt("Saved table view (name)", t.TableView, v => t.TableView = v, "Uses the view's query and columns; leave empty for the inline definition below")
+                @Txt("Query", t.Query, v => t.Query = v, 2, mono: true)
+                @Txt("Columns", ColumnsText(t.Columns), v => t.Columns = ParseColumns(v), 2, "key or key=Header, comma separated (empty = defaults)", mono: true)
+                @Opt("Sort by", t.SortBy, v => t.SortBy = v)
+                @Chk("Descending", t.Descending, v => t.Descending = v)
+            </div>,
+        RequirementTableBlock r => @<div>
+                @Caption(r)
+                @Txt("Query", r.Query, v => r.Query = v, 2, mono: true)
+                @Txt("Attributes", Csv(r.Attributes), v => r.Attributes = FromCsv(v), 2, "reqId, name, text, priority, status, verifyMethod, risk, rationale, satisfiedBy, attr:…")
+                @Pick("Style", r.Style, v => r.Style = v, ("table", "Table"), ("detailed", "Detailed paragraphs"))
+            </div>,
+        TraceTableBlock t => @<div>
+                @Caption(t)
+                @Txt("Requirement query", t.Query, v => t.Query = v, 1, mono: true)
+                @Multi("Link columns", Enum.GetNames<TraceColumn>(), Names(t.Columns), vs => t.Columns = Parse<TraceColumn>(vs))
+                @Chk("Coverage column", t.ShowCoverage, v => t.ShowCoverage = v)
+                @Chk("Only requirements with gaps", t.GapsOnly, v => t.GapsOnly = v)
+            </div>,
+        TraceMatrixBlock x => @<div>
+                @Caption(x)
+                @Txt("Row query", x.RowQuery, v => x.RowQuery = v, 1, mono: true)
+                @Txt("Column query", x.ColumnQuery, v => x.ColumnQuery = v, 1, mono: true)
+                @Multi("Relationship kinds", Metamodel.RelationshipKinds.Select(k => k.ToString()), Names(x.RelationshipKinds), vs => x.RelationshipKinds = Parse<ElementKind>(vs))
+                @Num("Columns per table", x.MaxColumns, v => x.MaxColumns = v, "Wider matrices continue in further tables")
+            </div>,
+        CoverageBlock c => @<div>
+                @Caption(c)
+                @Chk("Coverage by package", c.ByPackage, v => c.ByPackage = v)
+                @Chk("List requirements with gaps", c.ListGaps, v => c.ListGaps = v)
+            </div>,
+        DiagramBlock d => @<div>
+                @Caption(d)
+                @Opt("Diagram (name, qualified name or id)", d.Diagram, v => d.Diagram = v, "Empty = the current loop element if it is a diagram, else every diagram matching the query")
+                @Opt("Diagram query", d.Query, v => d.Query = v, "e.g. kind:Diagram in:{id}")
+                @Multi("Diagram types", Enum.GetNames<DiagramType>(), Names(d.DiagramTypes), vs => d.DiagramTypes = Parse<DiagramType>(vs))
+                @Chk("Include diagram documentation", d.IncludeDocumentation, v => d.IncludeDocumentation = v)
+                @Num("Max height (% of page)", (int)Math.Round(d.MaxHeight * 100), v => d.MaxHeight = Math.Clamp(v, 10, 100) / 100.0)
+            </div>,
+        ElementListBlock l => @<div>
+                @Txt("Query", l.Query, v => l.Query = v, 1, mono: true)
+                @Opt("Related to current element", l.Related, v => l.Related = v)
+                @Txt("Item format (markdown)", l.Format, v => l.Format = v)
+                @Chk("Numbered", l.Numbered, v => l.Numbered = v)
+            </div>,
+        StatisticsBlock s => Caption(s),
+        ValidationBlock v => @<div>
+                @Caption(v)
+                @Chk("Include info messages", v.IncludeInfo, x => v.IncludeInfo = x)
+                @Num("Maximum rows", v.Limit, x => v.Limit = x)
+            </div>,
+        _ => @<MudText Typo="Typo.body2">Starts a new page.</MudText>,
+    };
+}

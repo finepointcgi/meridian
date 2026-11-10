@@ -55,7 +55,9 @@ You can change the choice later from your avatar menu (**Switch workspace or ser
   - XMI 2.5.1 (with diagrams), SysML v2 text, ReqIF, BPMN XML and ArchiMate exchange files.
   - Enterprise Architect `.qea` import.
   - A read-only SysML v2 REST API.
-- **Reports**: Word and PDF from templates, plus SVG export.
+- **Reports**: program deliverables (SRS, ICD, SDD, VCRM / test report, model overview) as PDF, Word and HTML from
+  editable templates: numbered sections, TOC, lists of figures / tables, captions and cross-references, query-driven
+  loops and tables, traceability matrices and vector diagrams. Templates are stored in the model or as JSON. Plus SVG export.
 - **Collaboration** (server)
   - Accounts and project roles (owner, editor, viewer).
   - Live co-editing with presence.
