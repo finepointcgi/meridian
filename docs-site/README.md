@@ -25,5 +25,9 @@ Conventions:
 
 - Describe behaviour that exists in the code; check labels against the UI source in `src/Meridian.Web/Components`.
 - Mark missing screenshots as `> [!NOTE]` blocks starting with `**TODO (screenshot):**`, then put images in `images/`.
+- The screenshots in `images/` come in a `-dark` and a `-light` version and are shown with `<picture>` (dark when the
+  reader's system is dark). They are taken from the E2E fixtures; regenerate them all with
+  `MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreenshotTests` (needs Playwright's
+  Chromium, see `tests/Meridian.E2E/README.md`).
 - The SysML v2 text and the scores quoted in the tutorials are checked by `tests/Meridian.Tests/DocsTutorialTests.cs`,
   and the scripting examples by `DocsExampleTests.cs`; update the tests when you change those pages.

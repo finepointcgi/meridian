@@ -141,30 +141,41 @@ avatar menu → **API tokens…** (server mode) to create (shown once) and revok
 
 ## 5. Code repositories (code sync)
 
-A project can follow a GitHub or GitLab repository (cloud or self-hosted). When code is pushed to the chosen branch,
-Meridian reads the C# code at that commit, updates the model on a review branch, highlights what changed on the
-diagrams, and posts a `meridian/model` commit status back to the commit. Host code lives in
-`src/Meridian.Web/CodeSync/Hosts/`, the UI in `Components/Workbench/CodeRepositoriesPanel.razor`.
+A project can follow a GitHub, GitLab or Bitbucket repository (cloud or self-hosted). When code is pushed to the chosen
+branch, Meridian reads the C# code at that commit, updates the model on a review branch, highlights what changed on the
+diagrams, and posts a `meridian/model` commit status back to the commit. Pull requests into the branch get a preview
+branch, a status and one comment with the model changes (see [CODE-SYNC.md](CODE-SYNC.md#pull-request-previews)). Host
+code lives in `src/Meridian.Web/CodeSync/Hosts/`, the UI in `Components/Workbench/CodeRepositoriesPanel.razor`.
 
 ### Connect a repository
 
 Project menu → **Integrations…** → *Code repositories* → **Add repository** (project owners only).
 
-| Field | GitHub | GitLab |
-|---|---|---|
-| Server URL | `https://api.github.com`, or `https://ghe.example.com/api/v3` | `https://gitlab.com`, or your server |
-| Repository | owner and repository name | project path (`group/project`) or numeric id |
-| Access token | fine-grained token: *Contents: read*, *Commit statuses: write* | project or personal token: `read_repository`, plus `api` to post statuses |
+| Field | GitHub | GitLab | Bitbucket Cloud | Bitbucket Data Center / Server |
+|---|---|---|---|---|
+| Server URL | `https://api.github.com`, or `https://ghe.example.com/api/v3` | `https://gitlab.com`, or your server | `https://api.bitbucket.org/2.0` (any `bitbucket.org` URL works) | your server, e.g. `https://bitbucket.example.com` |
+| Repository | owner and repository name | project path (`group/project`) or numeric id | workspace and repository slug | project key and repository slug |
+| Access token | fine-grained token: *Contents: read*, *Commit statuses: write*, *Pull requests: write* (for comments) | project or personal token: `read_repository`, plus `api` to post statuses and comments | repository or workspace access token (*Repositories: read*, *Pull requests: write*), or `username:app-password` | HTTP access token with *Repository write* (build statuses and comments), or `username:password` |
 
-* **Branch** (default `main`): pushes to other branches are ignored.
+A token that contains `:` is sent with basic authentication (Bitbucket app passwords); every other token as a bearer token.
+
+* **Branch** (default `main`): pushes to other branches, and pull requests into other branches, are ignored.
 * **Folders to include**: comma separated, e.g. `src/Domain, src/Shared`. Empty means the whole repository.
-* **Model package**: where the code goes. Defaults to the repository name.
+* **Model**: *Model package* is where the code goes (defaults to the repository name). *Create diagrams for new packages
+  and classes* (on by default) runs the auto-diagrammer for new namespaces and blocks. The model root's
+  `codeSync.rootPackage` and `codeSync.autoDiagrams` fields override these when set; the form says when they do.
 * **Sync on every push**: turn off to sync only with the sync button.
 * **Post a commit status**: `pending` while Meridian works, then `success` (no changes, or changes waiting on the
-  review branch, with a link to the review) or `failure`.
+  review branch, with a link to the review) or `failure`. Bitbucket shows it as a build status (`INPROGRESS`,
+  `SUCCESSFUL`, `FAILED`, key `meridian-model`); Bitbucket needs a link, so the commit itself is used until there is a
+  review to link to.
+* **Preview pull requests** (on by default): sync each pull / merge request into the branch into
+  `code-sync/<repo>/pr-<n>`. Previews follow this switch, not *Sync on every push*.
+* **Comment on pull requests** (on by default): keep one comment on each previewed pull request with the counts, the
+  first 10 changes and a link to the preview, edited in place on later pushes.
 
 **Test connection** checks the token, the repository and the branch. The sync button (⟳) fetches the branch head
-and syncs it straight away.
+and syncs it straight away. The connection lists its open pull request previews (*PR #n*, status, link to the preview).
 
 ### Set up the webhook
 
@@ -172,27 +183,52 @@ Saving a new connection shows the **payload URL** (`https://<meridian>/api/code-
 **secret**. Copy the secret then: it is stored encrypted and not shown again (the webhook button can create a new one).
 
 * **GitHub**: *Settings → Webhooks → Add webhook*. Paste the URL, content type `application/json`, paste the secret,
-  choose *Just the push event*. GitHub signs each delivery with `X-Hub-Signature-256` (HMAC-SHA256).
+  choose *Let me select individual events*: **Pushes** and **Pull requests**. GitHub signs each delivery with
+  `X-Hub-Signature-256` (HMAC-SHA256).
 * **GitLab**: *Settings → Webhooks → Add new webhook*. Paste the URL, paste the secret as *Secret token*, tick
-  *Push events*. GitLab sends it back in `X-Gitlab-Token`.
+  *Push events* and *Merge request events*. GitLab sends the secret back in `X-Gitlab-Token`.
+* **Bitbucket Cloud**: *Repository settings → Webhooks → Add webhook*. Bitbucket Cloud does not sign deliveries unless a
+  secret is set there, so the URL Meridian shows carries the secret: `…/webhook?token=<secret>` (compared in constant
+  time). Treat that URL like a password; it can appear in proxy access logs, so regenerate the secret if it leaks.
+  Triggers: *Repository: Push* and *Pull request: Created, Updated, Merged, Declined*. If you also paste the secret into
+  Bitbucket's *Secret* field, a delivery signed with a valid `X-Hub-Signature` is accepted without the token.
+* **Bitbucket Data Center / Server**: *Repository settings → Webhooks → Create webhook*. Paste the URL and the secret.
+  Deliveries are signed with `X-Hub-Signature: sha256=<HMAC-SHA256>`, which Meridian requires. Events:
+  *Repository: Push* and *Pull request: Opened, Source branch updated, Merged, Declined, Deleted*. *Test connection*
+  in Bitbucket sends `diagnostics:ping`, which Meridian answers with `200`.
 
-The endpoint answers `401` for a missing or wrong signature/token, `404` for an unknown connection, `200` to GitHub's
-`ping`, `202` for pushes it queued or ignored (other branch, deleted branch, other events, automatic sync off) and
-`429` when one connection sends more than 30 requests a minute. Set `Meridian:PublicUrl` so the URL shown and the
-review links in commit statuses use your public address. The desktop app cannot receive webhooks; use the sync button.
+The endpoint answers `401` for a missing or wrong signature/token, `404` for an unknown connection, `200` to a ping
+(GitHub, Bitbucket Data Center), `202` for pushes and pull request events it queued or ignored (other branch, deleted
+branch, pull request into another branch or without new commits, other events, automatic sync or previews off), `400`
+for a payload it cannot read and `429` when one connection sends more than 30 requests a minute. Set
+`Meridian:PublicUrl` so the URL shown and the review links in commit statuses and comments use your public address.
+The desktop app cannot receive webhooks; use the sync button.
+
+| Host | Push event | Pull request events (opened / updated → preview; merged / closed → remove preview) |
+|---|---|---|
+| GitHub | `push` | `pull_request`: `opened`, `reopened`, `ready_for_review`, `synchronize`; `closed` (merged or not) |
+| GitLab | `Push Hook` | `Merge Request Hook`: `open`, `reopen`, `update` with new commits; `merge`, `close` |
+| Bitbucket Cloud | `repo:push` | `pullrequest:created`, `pullrequest:updated`; `pullrequest:fulfilled`, `pullrequest:rejected` |
+| Bitbucket Data Center | `repo:refs_changed` | `pr:opened`, `pr:from_ref_updated`; `pr:merged`, `pr:declined`, `pr:deleted` |
 
 ### How a sync runs
 
 Webhooks never sync inside the request: the push is queued and a background worker runs syncs one at a time. If
 several pushes arrive for one connection while it waits, only the latest commit is synced (every sync reads a full
-snapshot). For each sync Meridian downloads the repository archive at the commit (GitHub tarball, GitLab
-`archive.tar.gz`), streams it without writing to disk, and keeps the C# files in the watched folders. Limits: 200 MB
-archive, 4 GB unpacked, 20,000 source files, 500 MB of source in total; source files over 2 MB are skipped.
-Archives with absolute or `..` paths are rejected; symlinks and hard links are ignored.
+snapshot). Each pull request waits in its own slot, so it never replaces a push to the branch; closing a pull request
+replaces its waiting preview sync. For each sync Meridian downloads the repository archive at the commit (GitHub
+tarball, GitLab `archive.tar.gz`, Bitbucket Cloud `…/get/<sha>.tar.gz`, Bitbucket Data Center
+`/rest/api/1.0/…/archive?format=tar.gz`), streams it without writing to disk, and keeps the C# files in the watched
+folders. Limits: 200 MB archive, 4 GB unpacked, 20,000 source files, 500 MB of source in total; source files over 2 MB
+are skipped. Archives with absolute or `..` paths are rejected; symlinks and hard links are ignored.
+
+For a pull request, Meridian posts the status on the PR head, syncs into the preview branch, and writes or edits its
+comment (GitHub issue comments, GitLab merge request notes, Bitbucket pull request comments; Data Center edits send the
+comment's current version). A failed comment is logged and does not fail the sync.
 
 All calls to the git host use the same address checks as issue trackers (see *Which addresses the server will
-call*): allow private networks for an on-premises GitHub Enterprise or GitLab. The access token and the webhook
-secret are encrypted like other integration secrets and never written to the log.
+call*): allow private networks for an on-premises GitHub Enterprise, GitLab or Bitbucket Data Center. The access token
+and the webhook secret are encrypted like other integration secrets and never written to the log.
 
 ## Storage
 

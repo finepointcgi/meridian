@@ -1,6 +1,6 @@
 # Code sync
 
-A push to a connected GitHub or GitLab repository updates a **review branch** of the model from the code. Diagrams that
+A push to a connected GitHub, GitLab or Bitbucket repository updates a **review branch** of the model from the code. Diagrams that
 show changed elements are refreshed, the differences are highlighted, and an owner or editor accepts all or some of the
 changes into `main`.
 
@@ -76,12 +76,48 @@ Each push that is applied:
   the IBD of its block, a new child to a package or block drawn as a container — placed in free space below what is already
   there. Shapes people positioned never move (a container may grow to hold a new child);
 - creates diagrams for new namespaces and blocks with the auto-diagrammer (a structure diagram per new package, an IBD per new
-  block with parts). A project turns this off by setting the model root's `codeSync.autoDiagrams` field to `false`;
+  block with parts). Each repository connection has a **Create diagrams for new packages and classes** switch (on by
+  default, under *Model* in its settings). The model root's `codeSync.autoDiagrams` field (`true` or `false`) overrides the
+  switch when it is set, and the settings say so;
 - commits the result on the branch as `Code sync: <short sha> <first line of the commit message>` (authored by the system);
 - records a **sync run**: commit, link, author, message, status, summary, counts and the list of changed elements.
 
 Anyone with the branch open sees the update at once. A push that only carries the changed files (not a full snapshot)
 never deletes elements.
+
+**Edits made while a sync runs are kept.** The sync maps the code onto a copy of the branch and records every change it
+makes as replication operations (the same `ModelOp`s collaborators exchange). When someone has the branch open, those
+operations are applied to the live session. Whatever people changed on the branch in the meantime stays, and they see the
+sync's changes arrive like a collaborator's. With nobody on the branch, the result is written to the store; if the stored
+head changed while the sync ran, the operations are replayed onto the new head instead of replacing it.
+
+**A failed sync leaves nothing behind.** When a sync fails (or is cancelled) after it created a new review or preview
+branch, that branch is deleted again and the failed run is recorded without a branch. An existing branch is never deleted.
+
+## Pull request previews
+
+When a pull request (GitHub, Bitbucket) or merge request (GitLab) **into the followed branch** is opened, reopened or gets
+new commits, Meridian syncs its head into a **preview branch** `code-sync/<repository>/pr-<n>`, created from `main`. The
+name is shortened to fit the 60-character branch limit, keeping the `/pr-<n>` suffix. Pull requests into other branches
+are ignored, and the connection's **Preview pull requests** switch turns previews off.
+
+- The PR head gets the `meridian/model` commit status: `pending` while Meridian works, then `success` with the summary
+  ("Model preview: 3 added, 1 changed") and a link to the preview, or `failure`. A preview never leaves a pending status,
+  because nobody accepts it.
+- With **Comment on pull requests** (on by default), Meridian keeps **one** comment on the pull request: the counts, the
+  first 10 changes (kind, name, element kind, owner) and a link to the preview. Later pushes edit that comment in place.
+  If someone deleted it, a new one is posted. The comment id is kept in the connection's settings.
+- In Meridian the title-bar badge shows open previews as **PR #n**, next to *Code changes (N)* when the followed branch has
+  changes to review. *What changed* lists each preview under a **PR #n** heading. A preview is for looking only: its
+  changes cannot be selected, accepted or rejected, and on `main` the diagram highlights leave previews out. Open the
+  preview branch to see its highlights.
+
+When the pull request is **merged**, Meridian deletes the preview branch and closes its runs. It does not carry the
+preview's changes over: the merge is a push to the followed branch, and that push's full-snapshot sync brings the same
+changes, worked out against the current `main`, to the review branch. That is simpler than moving the preview, and it is
+always right, because the preview may be out of date with `main` or with what was finally merged. When the pull request
+is **closed without merging**, the preview branch is deleted and its runs are marked rejected. If someone has the preview
+branch open at that moment, the branch is kept (its runs are still closed) and can be deleted from the branch menu.
 
 ### The review
 
@@ -129,8 +165,17 @@ status colours, so they read in light and dark mode.
 - `ICodeSyncRunner.RunAsync(CodeSyncRequest)` (the git-host integration calls it after fetching files) returns a
   `CodeSyncOutcome`: `AwaitingReview` with the review link, `NoChanges`, or `Failed` with the reason. Runs of one project are
   serialized; review decisions take the same lock.
+- `IPullRequestPreviews` (implemented by `CodeSyncRunner`): `RunPreviewAsync(request, n)` syncs into the preview branch,
+  `ClosePreviewAsync(project, repo, n, merged)` deletes it, and `PreviewChangesAsync(project, repo, n)` lists its net
+  changes for the pull request comment. `CodeSyncRunner.PreviewBranchNameFor` and `PreviewNumber` map between numbers and
+  branch names; `CodeSyncReview.IsPreview` and `PullRequest` tell the UI.
 - `CodeSyncReviewService.Accepted` is raised once per run when its last pending change is decided and at least one was
   accepted, with `(outcome, connectionId, commitSha)` — use it to update the commit status. `Rejected` is raised when all of a
   run's changes were rejected.
 - Runs are stored in the `code_sync_runs` table (SQLite and PostgreSQL), one row per push, with the change list as JSON.
-- The model root's `codeSync.rootPackage` field names the package code is mapped into (default `Code`).
+- The model root's `codeSync.rootPackage` field names the package code is mapped into. It overrides the connection's
+  *Model package*, which defaults to the repository name. `codeSync.autoDiagrams` likewise overrides the connection's
+  *Create diagrams for new packages and classes* switch.
+- `CodeSyncEvents.RunCompleted` is raised with `(request, outcome)` after each run that did not fail (pull request
+  previews included). The architecture check subscribes to it and posts its own `meridian/architecture` status
+  ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)).

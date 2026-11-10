@@ -1,0 +1,48 @@
+@inherits WorkspaceComponent
+
+@* Shown in the canvas area when no diagram is open. A project without diagrams gets one-click ways to start. *@
+<div class="empty-hint empty-project" data-testid="empty-project">
+    <div style="max-width:520px">
+        <MudIcon Icon="@Icons.Material.Outlined.Schema" Style="font-size:52px; opacity:.45" />
+        @if (HasDiagrams)
+        {
+            <h3>No diagram open</h3>
+            <div>Double-click a diagram in the explorer, or create one from the Diagram toolbar group.</div>
+        }
+        else
+        {
+            <h3>@(HasElements ? "Nothing is drawn yet" : "This project is empty")</h3>
+            <div>@(HasElements ? "Draw what is already in the model, or bring in more." : "Pick a way to start. You can also create a diagram from the Diagram toolbar group.")</div>
+            <div class="empty-actions">
+                @if (HasElements && !Ws.ReadOnly)
+                {
+                    <button class="empty-action primary" data-action="@AutoDiagram" @onclick="() => Run(AutoDiagram)"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" />Auto-diagram</button>
+                }
+                @if (!Ws.ReadOnly)
+                {
+                    <button class="empty-action" data-action="@Mermaid" @onclick="() => Run(Mermaid)"><MudIcon Icon="@Icons.Material.Outlined.Schema" />Import Mermaid</button>
+                }
+                <button class="empty-action" data-action="@OpenFile" @onclick="() => Run(OpenFile)" title="Cameo / MagicDraw .mdzip, Enterprise Architect .qea, XMI, SysML v2 or Mermaid; opens as a new project"><MudIcon Icon="@Icons.Material.Outlined.UploadFile" />Open a Cameo file</button>
+                <button class="empty-action" data-action="@Sample" @onclick="() => Run(Sample)"><MudIcon Icon="@Icons.Material.Outlined.DirectionsCar" />Start from a sample</button>
+                @if (!HasElements && !Ws.ReadOnly)
+                {
+                    <button class="empty-action" data-action="@AutoDiagram" @onclick="() => Run(AutoDiagram)" disabled title="Add some elements first, then Auto-diagram draws them"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" />Auto-diagram</button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    public const string AutoDiagram = "auto-diagram", Mermaid = "mermaid", OpenFile = "open-file", Sample = "sample";
+
+    /// <summary>Called with one of the action names (<see cref="AutoDiagram"/>, <see cref="Mermaid"/>, …).</summary>
+    [Parameter] public EventCallback<string> OnAction { get; set; }
+
+    private bool HasDiagrams => Ws.Model.Diagrams.Any();
+
+    /// <summary>Anything besides the root package (and diagrams) to draw.</summary>
+    private bool HasElements => Ws.Model.AllElements.Any(e => e is not Diagram && !ReferenceEquals(e, Ws.Model.Root));
+
+    private Task Run(string action) => OnAction.InvokeAsync(action);
+}

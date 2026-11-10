@@ -30,6 +30,7 @@ Playwright cache (`~/Library/Caches/ms-playwright` on macOS, `~/.cache/ms-playwr
 
 ```bash
 dotnet test tests/Meridian.E2E
+MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreenshotTests   # refresh docs-site/images
 ```
 
 - Without the browser installed, every test is **skipped** with a message saying how to install it, so a plain
@@ -52,6 +53,8 @@ dotnet test tests/Meridian.E2E
 | `TemplateAndExportTests` | every project template creates a project that opens cleanly; SVG and PNG downloads |
 | `AdminTests` | `/admin` for the admin, forbidden for a normal user, admin API protection |
 | `CollaborationTests` | two browsers on one project see each other's edits live |
+| `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
+| `DocsScreenshotTests` | opt-in (`MERIDIAN_DOCS_SCREENSHOTS=1`): writes the user guide's screenshots to `docs-site/images` in the dark and the light theme |
 
 Tests in the `server` collection share one server and run one at a time; each creates its own project, so they do not
 depend on each other's data.
