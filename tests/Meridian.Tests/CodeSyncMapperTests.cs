@@ -21,6 +21,31 @@ public class CodeSyncMapperTests
         files.Select(f => f.Path == path ? f with { Content = edit(f.Content) } : f).ToList();
 
     [Fact]
+    public void Elements_from_submodule_code_carry_the_submodule_without_a_bump_counting_as_a_change()
+    {
+        var m = new ModelRepository("Mission");
+        var files = new List<CodeFile>
+        {
+            new("src/Eps.cs", "namespace Sat; public class Eps { public Battery Main { get; set; } }"),
+            new("libs/core/Battery.cs", "namespace Sat; public class Battery { public double Capacity { get; set; } }"),
+        };
+        var v1 = Options() with { Submodules = [new CodeSubmodulePin("libs/core", "1111111111111111111111111111111111111111")] };
+        Sync(m, files, options: v1);
+        Assert.Equal("libs/core@1111111111111111111111111111111111111111", S(m, "Sat.Battery").Get(CodeFieldKeys.Submodule));
+        Assert.Equal("libs/core@1111111111111111111111111111111111111111", S(m, "Sat.Battery.Capacity").Get(CodeFieldKeys.Submodule));
+        Assert.Equal("", S(m, "Sat.Eps").Get(CodeFieldKeys.Submodule));
+
+        var v2 = Options() with { Submodules = [new CodeSubmodulePin("libs/core", "2222222222222222222222222222222222222222")] };
+        var bump = Sync(m, files, "c2", v2);
+        Assert.True(bump.IsEmpty);
+        Assert.Equal("libs/core@2222222222222222222222222222222222222222", S(m, "Sat.Battery").Get(CodeFieldKeys.Submodule));
+
+        // The file moves out of the submodule (vendored into the repository): the field goes.
+        Sync(m, [files[0], new("src/Battery.cs", files[1].Content)], "c3", v2);
+        Assert.Equal("", S(m, "Sat.Battery").Get(CodeFieldKeys.Submodule));
+    }
+
+    [Fact]
     public void First_sync_builds_packages_blocks_properties_and_relationships()
     {
         var m = new ModelRepository("Mission");

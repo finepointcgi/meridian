@@ -884,6 +884,155 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         Assert.Equal("Code sync: abcdef1 Fix things", CodeSyncRunner.CommitMessage(new CodeSyncRequest(Guid.Empty, Guid.Empty, "r", "main", "abcdef1234", null, null, "Fix things\nmore", [], true)));
     }
 
+    // ================================================================ submodules
+
+    private const string CoreA = "1111111111111111111111111111111111111111";
+    private const string CoreB = "2222222222222222222222222222222222222222";
+    private const string CompareCore = "https://github.com/acme/core/compare/{old}...{new}";
+
+    [Fact]
+    public async Task A_Submodule_Bump_Shows_In_What_Changed_With_A_Compare_Link_And_Is_Accepted_With_Its_Changes()
+    {
+        var pinsKey = CodeSubmodulePins.FieldKey(_connection.ToString());
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request() with { Submodules = [new("libs/core", CoreA, CompareCore)] });
+        Assert.True((await _review.AcceptAsync(_project, null, null, _ann)).Done);
+        Assert.Equal($"libs/core@{CoreA} <{CompareCore}>", (await MainAsync()).Root.Get(pinsKey));
+
+        // The parent moves libs/core forward; the code in it changed Battery.
+        _applier.Script.Enqueue(Document("Battery", "From core v2"));
+        var outcome = await Runner().RunAsync(Request("Bump core") with { Submodules = [new("libs/core", CoreB, CompareCore)] });
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+        Assert.Contains("2 changed", outcome.Summary);
+        var preview = (await _review.LoadAsync(_project)).Single();
+        Assert.Contains(preview.Changes, c => c.Fields.Any(f => f.Key == pinsKey));
+
+        var branchId = Assert.Single(await _db.ListBranchesAsync(_project)).Id;
+        var (ws, _) = await UiAsync(_ann, ProjectRole.Owner, branchId);
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<CodeChangesTab>();
+        var bump = cut.Find(".chg-submodule[data-submodule='libs/core']");
+        Assert.Contains("1111111 → 2222222", bump.TextContent);
+        Assert.Equal($"https://github.com/acme/core/compare/{CoreA}...{CoreB}", bump.QuerySelector("a.chg-compare")!.GetAttribute("href"));
+        Assert.Contains("Battery", cut.Find(".chg-row[data-kind=changed]").TextContent);   // the element change it caused
+        Assert.Single(cut.FindAll(".chg-row[data-kind=changed]"));                        // the pins are not listed as an element
+        cut.Find(".chg-filter").Input("core");
+        Assert.Single(cut.FindAll(".chg-submodule"));
+
+        // Accepting everything moves main's pin forward too.
+        cut.Find(".chg-filter").Input("");
+        cut.Find(".chg-select-all").Change(true);
+        Assert.Contains("2 selected", cut.Markup);
+        cut.Find(".chg-accept").Click();
+        cut.WaitForAssertion(() => Assert.Contains("No code changes to review", cut.Markup), TimeSpan.FromSeconds(5));
+        Assert.Equal($"libs/core@{CoreB} <{CompareCore}>", (await MainAsync()).Root.Get(pinsKey));
+        ws.Dispose();
+    }
+
+    [Fact]
+    public async Task A_Bump_Alone_Is_A_Change_And_The_Same_Pins_Are_Not()
+    {
+        _applier.Script.Enqueue(_ => new CodeSyncChanges([], [], [], []));
+        var first = await Runner().RunAsync(Request() with { Submodules = [new("libs/core", CoreA)] });
+        Assert.Equal(CodeSyncStatus.AwaitingReview, first.Status);   // a new submodule is worth reviewing
+        _applier.Script.Enqueue(_ => new CodeSyncChanges([], [], [], []));
+        Assert.Equal(CodeSyncStatus.NoChanges, (await Runner().RunAsync(Request() with { Submodules = [new("libs/core", CoreA)] })).Status);
+
+        // A partial push without submodule information leaves the pins alone.
+        _applier.Script.Enqueue(_ => new CodeSyncChanges([], [], [], []));
+        Assert.Equal(CodeSyncStatus.NoChanges, (await Runner().RunAsync(Request() with { IsFullSnapshot = false })).Status);
+
+        // The pull request comment lists the bump by path (against main, which has no pins yet).
+        _applier.Script.Enqueue(_ => new CodeSyncChanges([], [], [], []));
+        await Runner().RunPreviewAsync(Request() with { Submodules = [new("libs/core", CoreB)] }, 4);
+        var rows = await Runner().PreviewChangesAsync(_project, "acme/sat", 4);
+        var row = Assert.Single(rows);
+        Assert.Equal(("libs/core ∅ → 2222222", "Submodule", CodeSyncChangeKind.Added), (row.Name, row.ElementKind, row.Kind));
+    }
+
+    [Fact]
+    public async Task Real_Mapper_Stamps_Elements_From_Submodule_Code()
+    {
+        var runner = new CodeSyncRunner(_db, _hub, [new Meridian.Serialization.CodeSync.CSharpCodeReader()], new CodeModelApplier(), _events, NullLogger<CodeSyncRunner>.Instance);
+        var files = new[]
+        {
+            new CodeFile("src/Power/Eps.cs", "namespace Sat.Power;\npublic class Eps { public Battery Main { get; set; } = new(); }"),
+            new CodeFile("libs/core/src/Battery.cs", "namespace Sat.Power;\npublic class Battery { public double Capacity { get; set; } }"),
+        };
+        await runner.RunAsync(Request() with { Files = files, Submodules = [new("libs/core", CoreA), new("libs/skipped", CoreB, Fetched: false)] });
+        var branch = Assert.Single(await _db.ListBranchesAsync(_project));
+        var model = await BranchAsync(branch.Id);
+        var battery = Assert.Single(model.AllElements, e => e.Kind == ElementKind.Block && e.Name == "Battery");
+        var eps = Assert.Single(model.AllElements, e => e.Kind == ElementKind.Block && e.Name == "Eps");
+        Assert.Equal($"libs/core@{CoreA}", battery.Get(CodeFieldKeys.Submodule));
+        Assert.Equal("", eps.Get(CodeFieldKeys.Submodule));
+        Assert.Equal($"libs/core@{CoreA}\nlibs/skipped@{CoreB}", model.Root.Get(CodeSubmodulePins.FieldKey(_connection.ToString())));
+
+        // A bump keeps the stamp current without reporting Battery as changed.
+        var bump = Request() with { Files = files, Submodules = [new("libs/core", CoreB), new("libs/skipped", CoreB, Fetched: false)] };
+        var again = await runner.RunAsync(bump);
+        Assert.Equal(CodeSyncStatus.AwaitingReview, again.Status);
+        var run = (await _db.ListCodeSyncRunsAsync(_project)).Single(r => r.Commit == bump.Commit);
+        Assert.Equal([model.Root.Id], run.Changes.Select(c => c.ElementId));
+        Assert.Equal($"libs/core@{CoreB}", (await BranchAsync(branch.Id)).Find(battery.Id)!.Get(CodeFieldKeys.Submodule));
+    }
+
+    [Fact]
+    public async Task Repository_Settings_List_The_Last_Syncs_Submodules_And_Save_Submodule_Settings()
+    {
+        var ws = await Open(_ann, ProjectRole.Owner);
+        var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
+        var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
+        var hosts = new CodeSync.Hosts.CodeSyncHostService(_db, integrations, factory, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new CodeSync.Hosts.CodeSyncQueue(), new CodeSync.Hosts.CodeSyncRateLimiter(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<CodeSync.Hosts.CodeSyncHostService>.Instance);
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "app" }, "token");
+        // What a sync records (server state, never taken from the form).
+        var row = (await _db.FindIntegrationAsync(saved.Connection.Id))!;
+        var cfg = CodeSync.Hosts.CodeRepoConfig.Parse(row.ConfigJson);
+        cfg.Submodules =
+        [
+            new() { Path = "libs/core", Sha = CoreA, Status = CodeSync.Hosts.CodeRepoSubmodule.Fetched, Files = 12, Url = "../core.git" },
+            new() { Path = "libs/core/deps/util", Sha = CoreB, Status = CodeSync.Hosts.CodeRepoSubmodule.Fetched, Files = 1, Depth = 2 },
+            new() { Path = "closed", Sha = CoreB, Status = CodeSync.Hosts.CodeRepoSubmodule.NoAccess, Message = "Could not read github.com/acme/closed" },
+            new() { Path = "stale", Status = CodeSync.Hosts.CodeRepoSubmodule.NotFound, Message = "No submodule at this path in the commit" },
+            new() { Path = "vendor/big", Sha = CoreA, Status = CodeSync.Hosts.CodeRepoSubmodule.Skipped, Message = "update = none in .gitmodules." },
+        ];
+        await _db.SaveIntegrationAsync(row with { ConfigJson = cfg.ToJson() });
+
+        Services.AddSingleton(ws);
+        Services.AddSingleton(hosts);
+        Services.AddSingleton(new MeridianHostInfo(false, Path.GetTempPath(), null));
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<CodeRepositoriesPanel>(p => p.Add(x => x.CanManage, true));
+        cut.WaitForAssertion(() => Assert.Equal(5, cut.FindAll(".code-repo-submodule").Count));
+        var core = cut.Find(".code-repo-submodule[data-path='libs/core']");
+        Assert.Contains("@1111111", core.TextContent);
+        Assert.Contains("fetched (12 files)", core.TextContent);
+        Assert.Contains("padding-left:14px", cut.Find(".code-repo-submodule[data-path='libs/core/deps/util']").GetAttribute("style"));
+        Assert.Contains("no access", cut.Find(".code-repo-submodule[data-status='no-access']").TextContent);
+        Assert.Contains("github.com/acme/closed", cut.Find(".code-repo-submodule[data-status='no-access']").TextContent);
+        Assert.Contains("not found", cut.Find(".code-repo-submodule[data-status='not-found']").TextContent);
+        Assert.Contains("skipped", cut.Find(".code-repo-submodule[data-path='vendor/big']").TextContent);
+
+        // The form: the switch, and the paths to skip (shown only while submodules are included).
+        cut.Find("button.code-repo-edit").Click();
+        cut.WaitForAssertion(() => Assert.Contains("Include git submodules", cut.Markup));
+        cut.Find(".code-repo-skip-submodules input").Change("./vendor/big/, libs/x");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save").Click();
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Include git submodules", cut.Markup));
+        var stored = CodeSync.Hosts.CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson);
+        Assert.Equal(["vendor/big", "libs/x"], stored.SkipSubmodules);
+        Assert.True(stored.IncludeSubmodules);
+        Assert.Equal(5, stored.Submodules.Count);   // kept: a save from the form never replaces sync state
+
+        cut.Find("button.code-repo-edit").Click();
+        cut.WaitForAssertion(() => Assert.Contains("vendor/big, libs/x", cut.Find(".code-repo-skip-submodules input").GetAttribute("value")));
+        cut.Find(".code-repo-include-submodules input").Change(false);
+        Assert.Empty(cut.FindAll(".code-repo-skip-submodules"));
+        ws.Dispose();
+    }
+
     [Fact]
     public void Runner_Is_Registered_Over_The_Hosts_Fallback()
     {

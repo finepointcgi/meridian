@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 namespace Meridian.Web.CodeSync.Hosts;
 
 /// <summary>A failure talking to a git host or reading its archive. The message never contains credentials.</summary>
-public sealed class GitHostException(string message, HttpStatusCode? status = null) : Exception(message)
+public class GitHostException(string message, HttpStatusCode? status = null) : Exception(message)
 {
     public HttpStatusCode? Status { get; } = status;
 }
@@ -33,6 +33,14 @@ public interface IGitHost
     /// Hosts that cannot comment keep the default, which fails (the caller logs it and carries on).</summary>
     Task<string> UpsertPullRequestCommentAsync(int number, string? commentId, string body, CancellationToken ct = default) =>
         throw new GitHostException("This host cannot comment on pull requests.");
+    /// <summary>As <see cref="FetchSnapshotAsync(string, IReadOnlyList{string}, Func{string, bool}, CancellationToken)"/>, counting
+    /// against <paramref name="budget"/> so the limits cover the repository and its submodules together (see Submodules.cs).</summary>
+    Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotBudget budget, CancellationToken ct = default) =>
+        FetchSnapshotAsync(commit, paths, include, ct);
+    /// <summary>The commit each submodule path is pinned to at <paramref name="commit"/> (its gitlink). Paths without a
+    /// gitlink are left out. Hosts that cannot tell keep the default, which finds none.</summary>
+    Task<IReadOnlyDictionary<string, string>> ResolveSubmoduleCommitsAsync(string commit, IReadOnlyList<string> paths, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>(StringComparer.Ordinal));
 }
 
 /// <summary>Builds host clients over a supplied <see cref="HttpClient"/> (tests pass one with a fake handler).</summary>
@@ -165,7 +173,10 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
         return new GitHostException($"{HostName}: {what}{(detail is { Length: > 0 } ? $" ({detail})" : "")}.", status);
     }
 
-    public async Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, CancellationToken ct = default)
+    public Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, CancellationToken ct = default) =>
+        FetchSnapshotAsync(commit, paths, include, new SnapshotBudget(limits), ct);
+
+    public async Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotBudget budget, CancellationToken ct = default)
     {
         if (!IsSha(commit)) throw new GitHostException("Not a commit id.");
         using var request = Request(HttpMethod.Get, ArchiveUrl(commit), "application/octet-stream");
@@ -174,12 +185,12 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
         timeout.CancelAfter(DownloadTimeout);
         using var response = await Send(request, timeout.Token, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!response.IsSuccessStatusCode) throw Error(response.StatusCode, await ReadSmallAsync(response, timeout.Token));
-        if (response.Content.Headers.ContentLength > limits.MaxArchiveBytes)
-            throw new GitHostException($"The repository archive is larger than {limits.MaxArchiveBytes / (1024 * 1024)} MB.");
+        if (response.Content.Headers.ContentLength > budget.RemainingArchiveBytes)
+            throw new SnapshotLimitException($"The repository archive is larger than {SnapshotArchive.Mb(budget.Limits.MaxArchiveBytes)}.");
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            return await SnapshotArchive.ReadTarGzAsync(stream, paths.Select(CodeRepoConfig.NormalizePath).Where(p => p.Length > 0).ToList(), include, limits, timeout.Token);
+            return await SnapshotArchive.ReadTarGzAsync(stream, paths.Select(CodeRepoConfig.NormalizePath).Where(p => p.Length > 0).ToList(), include, budget, timeout.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new GitHostException("Downloading the repository archive took too long."); }
         catch (HttpRequestException ex) { throw new GitHostException($"Downloading the repository archive failed: {ex.Message}"); }
@@ -194,6 +205,10 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
         return Encoding.UTF8.GetString(buffer, 0, n);
     }
 
+    /// <summary>Submodule gitlinks; each host overrides it (Submodules.Hosts.cs).</summary>
+    public virtual Task<IReadOnlyDictionary<string, string>> ResolveSubmoduleCommitsAsync(string commit, IReadOnlyList<string> paths, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>(StringComparer.Ordinal));
+
     /// <summary>A full or abbreviated hexadecimal commit id (SHA-1 or SHA-256).</summary>
     public static bool IsSha(string? s) => s is { Length: >= 7 and <= 64 } && s.All(Uri.IsHexDigit);
 
@@ -206,7 +221,7 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
 }
 
 /// <summary>GitHub (github.com or Enterprise Server) over the REST API, with a fine-grained or classic token.</summary>
-public sealed class GitHubHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
+public sealed partial class GitHubHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
 {
     private readonly string _api = config.BaseUrl.Trim().TrimEnd('/');
     private string Repo => $"{_api}/repos/{Uri.EscapeDataString(config.Owner.Trim())}/{Uri.EscapeDataString(config.Repo.Trim())}";
@@ -216,7 +231,8 @@ public sealed class GitHubHost(CodeRepoConfig config, string token, HttpClient h
 
     protected override void Authorize(HttpRequestMessage request)
     {
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        // No token: anonymous access to a public submodule (Submodules.cs).
+        if (token.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
     }
 
@@ -263,7 +279,7 @@ public sealed class GitHubHost(CodeRepoConfig config, string token, HttpClient h
 }
 
 /// <summary>GitLab (gitlab.com or self-managed) over REST API v4, with a personal, project or group access token.</summary>
-public sealed class GitLabHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
+public sealed partial class GitLabHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
 {
     private readonly string _api = ApiRoot(config.BaseUrl);
     private string Project => $"{_api}/projects/{Uri.EscapeDataString(config.Project.Trim().Trim('/'))}";
@@ -278,7 +294,10 @@ public sealed class GitLabHost(CodeRepoConfig config, string token, HttpClient h
     public override string RepoDisplay => config.Project.Trim().Trim('/');
     protected override string HostName => "GitLab";
 
-    protected override void Authorize(HttpRequestMessage request) => request.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", token);
+    protected override void Authorize(HttpRequestMessage request)
+    {
+        if (token.Length > 0) request.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", token);
+    }
 
     protected override string ArchiveUrl(string commit) => $"{Project}/repository/archive.tar.gz?sha={commit}";
 

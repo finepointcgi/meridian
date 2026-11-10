@@ -87,6 +87,7 @@ public sealed class CodeSyncHostService(
         config.ProtectedWebhookSecret = stored?.ProtectedWebhookSecret;
         config.LastSync = stored?.LastSync;
         config.PullRequests = stored?.PullRequests ?? [];
+        config.Submodules = stored?.Submodules ?? [];
         if (config.ProtectedWebhookSecret is null)
         {
             newSecret = CodeWebhooks.NewSecret();
@@ -307,13 +308,22 @@ public sealed class CodeSyncHostService(
             var sp = scope.ServiceProvider;
             var reader = sp.GetServices<ICodeReader>().LastOrDefault(r => r.Language == config.Language);
             Func<string, bool> include = reader is null ? DefaultInclude(config.Language) : reader.Handles;
-            var snapshot = await host.FetchSnapshotAsync(job.Commit, config.Paths, include, ct);
+            // The archive, then its git submodules (archives leave their code out), all within one set of limits.
+            var fetched = await new SubmoduleFetcher(Host, log).FetchAsync(host, config, integrations.Unprotect(c.ProtectedSecret) ?? "", job.Commit, include,
+                await OtherCredentialsAsync(c), new SnapshotBudget(Limits), ct);
+            var snapshot = fetched.Snapshot;
+            if (job.PullRequest is null && (fetched.Submodules.Count > 0 || config.Submodules.Count > 0)) await UpdateConfigAsync(c.Id, cfg => cfg.Submodules = [.. fetched.Submodules]);
             if (snapshot.Skipped.Count > 0)
                 log.LogInformation("Code sync {Connection} at {Commit}: skipped {Count} files ({First})", c.Id, Short(job.Commit), snapshot.Skipped.Count, snapshot.Skipped[0]);
-            var request = new CodeSyncRequest(c.ProjectId, c.Id, host.RepoDisplay, job.Branch, job.Commit, job.CommitUrl, job.Author, job.Message, snapshot, IsFullSnapshot: true);
+            var request = new CodeSyncRequest(c.ProjectId, c.Id, host.RepoDisplay, job.Branch, job.Commit, job.CommitUrl, job.Author, job.Message, snapshot, IsFullSnapshot: true)
+            {
+                Submodules = fetched.Pins,
+            };
             var outcome = await run(sp, request);
             if (snapshot.Skipped.Count > 0 && outcome.Status != CodeSyncStatus.Failed)
                 outcome = outcome with { Summary = $"{outcome.Summary} ({snapshot.Skipped.Count} file{(snapshot.Skipped.Count == 1 ? "" : "s")} skipped)" };
+            if (fetched.Missing > 0 && outcome.Status != CodeSyncStatus.Failed)
+                outcome = outcome with { Summary = $"{outcome.Summary} ({fetched.Missing} submodule{(fetched.Missing == 1 ? "" : "s")} not read)" };
             return outcome;
         }
         catch (GitHostException ex)
@@ -327,6 +337,22 @@ public sealed class CodeSyncHostService(
             log.LogError(ex, "Code sync {Connection} at {Commit} failed", c.Id, Short(job.Commit));
             return new CodeSyncOutcome(CodeSyncStatus.Failed, "Sync failed with an internal error (see the server log).", null, null);
         }
+    }
+
+    /// <summary>The project's other code-repo connections whose token can be read: a submodule on another host or
+    /// account uses the one for exactly its repository (<see cref="SubmoduleFetcher"/>).</summary>
+    private async Task<IReadOnlyList<SubmoduleCredential>> OtherCredentialsAsync(IntegrationConnection c)
+    {
+        var list = new List<SubmoduleCredential>();
+        foreach (var other in await integrations.ListAsync(c.ProjectId, CodeRepoKinds.CodeRepo))
+        {
+            if (other.Id == c.Id || other.ProjectId != c.ProjectId) continue;
+            if (integrations.Unprotect(other.ProtectedSecret) is not { Length: > 0 } token) continue;
+            var cfg = CodeRepoConfig.Parse(other.ConfigJson);
+            cfg.Normalize();
+            if (cfg.Validate() is null) list.Add(new SubmoduleCredential(other.Name, cfg, token.Trim()));
+        }
+        return list;
     }
 
     /// <summary>

@@ -150,8 +150,19 @@ public sealed partial class CodeSyncRunner(
         if (runs.Count == 0 || await db.LoadBranchAsync(branch.Id) is not { } models) return [];
         var baseModel = ProjectFile.Deserialize(models.BaseJson);
         var head = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(db, hub, projectId, branch.Id));
-        return CodeSyncReviewService.Pending(baseModel, head, baseModel, runs)
-            .Select(c => new Hosts.PreviewChange(c.Kind, c.Name, c.Path, Metamodel.DisplayName(c.ElementKind))).ToList();
+        return CodeSyncReviewService.Pending(baseModel, head, baseModel, runs).SelectMany(PreviewChanges).ToList();
+    }
+
+    /// <summary>A pending change as pull request comment rows: a submodule bump (a change of the pins on the model root)
+    /// reads "libs/core 1a2b3c4 → 5d6e7f8", kind "Submodule".</summary>
+    private static IEnumerable<Hosts.PreviewChange> PreviewChanges(CodeSyncPendingChange c)
+    {
+        var pins = c.Fields.Where(f => CodeSubmodulePins.IsPinsField(f.Key)).ToList();
+        foreach (var bump in pins.SelectMany(f => CodeSubmodulePins.Bumps(f.Before, f.After)))
+            yield return new Hosts.PreviewChange(bump.OldSha is null ? CodeSyncChangeKind.Added : bump.NewSha is null ? CodeSyncChangeKind.Removed : CodeSyncChangeKind.Changed,
+                $"{bump.Path} {(bump.OldSha is { } o ? Short(o) : "∅")} → {(bump.NewSha is { } n ? Short(n) : "∅")}", "", "Submodule");
+        if (pins.Count == 0 || pins.Count < c.Fields.Count)
+            yield return new Hosts.PreviewChange(c.Kind, c.Name, c.Path, Metamodel.DisplayName(c.ElementKind));
     }
 
     /// <summary>The branch a run is working on, and whether the run created it (a failed run deletes a branch it created).</summary>
@@ -249,8 +260,9 @@ public sealed partial class CodeSyncRunner(
             Commit = request.Commit,
             // A partial push (only the changed files) must not read as "everything else was deleted".
             RemoveDeleted = request.IsFullSnapshot,
+            Submodules = request.Submodules.Where(s => s.Fetched).ToList(),
         };
-        var changes = applier.Apply(model, code, options);
+        var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
         ct.ThrowIfCancellationRequested();
 
         if (changes.IsEmpty)
@@ -275,6 +287,22 @@ public sealed partial class CodeSyncRunner(
                       + (changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
         await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
         return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
+    }
+
+    /// <summary>
+    /// Records the commits the repository pins its submodules to on the model root
+    /// (<see cref="CodeSubmodulePins.FieldKey"/>). A different pin is a change of the root, which "What changed" shows
+    /// as a submodule bump next to the element changes the bump caused; accepting it moves main's pins forward.
+    /// A partial push without submodule information leaves the pins alone.
+    /// </summary>
+    internal static CodeSyncChanges WithSubmodulePins(ModelRepository model, CodeSyncRequest request, CodeSyncChanges changes)
+    {
+        if (!request.IsFullSnapshot && request.Submodules.Count == 0) return changes;
+        var key = CodeSubmodulePins.FieldKey(request.ConnectionId.ToString());
+        var value = CodeSubmodulePins.Format(request.Submodules);
+        if ((value ?? "") == model.Root.Get(key)) return changes;
+        model.Set(model.Root, key, value);
+        return changes.Changed.Contains(model.Root.Id) ? changes : changes with { Changed = [.. changes.Changed, model.Root.Id] };
     }
 
     /// <summary>

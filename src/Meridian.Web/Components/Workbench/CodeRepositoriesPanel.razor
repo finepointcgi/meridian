@@ -63,6 +63,28 @@
                         }
                     </div>
                 }
+                @if (cfg.Submodules.Count > 0)
+                {
+                    <div class="integration-sub code-repo-submodules">
+                        <div>Submodules @(cfg.IncludeSubmodules ? "in the last sync" : "(not read: turned off)")</div>
+                        @foreach (var sm in cfg.Submodules)
+                        {
+                            <div class="code-repo-submodule" data-path="@sm.Path" data-status="@sm.Status" style="@($"padding-left:{(sm.Depth - 1) * 14}px")" title="@sm.Url">
+                                <MudIcon Icon="@Icons.Material.Outlined.Inventory2" Style="font-size:13px; vertical-align:-2px" />
+                                <code>@sm.Path</code>
+                                @if (sm.Sha.Length > 0)
+                                {
+                                    <span class="code-repo-submodule-sha" title="@sm.Sha">@("@" + Short(sm.Sha))</span>
+                                }
+                                <span class="code-repo-submodule-status" style="@($"color:{SubmoduleColor(sm.Status)}")"> · @SubmoduleLabel(sm.Status)@(sm.Status == CodeRepoSubmodule.Fetched ? $" ({sm.Files} file{(sm.Files == 1 ? "" : "s")})" : "")</span>
+                                @if (sm.Message is { Length: > 0 } why)
+                                {
+                                    <span style="opacity:.75"> · @why</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
             </div>
             @if (CanManage)
             {
@@ -167,6 +189,13 @@ else
         }
         <MudTextField T="string" Label="Branch" @bind-Value="f.Branch" Variant="Variant.Outlined" Margin="Margin.Dense" />
         <MudTextField T="string" Label="Folders to include" @bind-Value="_paths" Placeholder="src/Domain, src/Shared" HelperText="Comma separated. Empty includes the whole repository." Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudSwitch T="bool" @bind-Value="f.IncludeSubmodules" Label="Include git submodules (fetched at the pinned commit)" Color="Color.Primary" Class="code-repo-include-submodules" />
+        @if (f.IncludeSubmodules)
+        {
+            <MudTextField T="string" Label="Submodules to skip" @bind-Value="_skipSubmodules" Placeholder="vendor/big-library" Class="code-repo-skip-submodules"
+                          HelperText="Comma separated submodule paths. Submodules on another host or account use that repository's connection in this project, else anonymous access to public repositories."
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        }
         <div class="code-repo-model-settings">
             <MudText Typo="Typo.subtitle2">Model</MudText>
             <MudTextField T="string" Label="Model package" @bind-Value="f.RootPackage" Placeholder="@(f.RepoName is { Length: > 0 } n ? n : "Repository name")"
@@ -209,6 +238,7 @@ else
     private Guid? _editId;
     private string? _name;
     private string? _paths;
+    private string? _skipSubmodules;
     private string? _token;
     private bool _tokenSet;
     private string? _message;
@@ -278,12 +308,29 @@ else
         _ => "inherit",
     };
 
+    private static string SubmoduleLabel(string s) => s switch
+    {
+        CodeRepoSubmodule.Fetched => "fetched",
+        CodeRepoSubmodule.Skipped => "skipped",
+        CodeRepoSubmodule.NoAccess => "no access",
+        CodeRepoSubmodule.NotFound => "not found",
+        _ => s,
+    };
+
+    private static string SubmoduleColor(string s) => s switch
+    {
+        CodeRepoSubmodule.Fetched => "var(--mud-palette-success)",
+        CodeRepoSubmodule.NoAccess or CodeRepoSubmodule.NotFound => "var(--mud-palette-warning)",
+        _ => "inherit",
+    };
+
     private void New()
     {
         _form = new CodeRepoConfig();
         _editId = null;
         _name = null;
         _paths = null;
+        _skipSubmodules = null;
         _token = null;
         _tokenSet = false;
         _message = null;
@@ -296,6 +343,7 @@ else
         _editId = c.Id;
         _name = c.Name;
         _paths = string.Join(", ", _form.Paths);
+        _skipSubmodules = string.Join(", ", _form.SkipSubmodules);
         _token = null;
         _tokenSet = c.ProtectedSecret != null;
         _message = null;
@@ -314,6 +362,7 @@ else
     {
         var f = _form!.Clone();
         f.Paths = (_paths ?? "").Split([',', '\n', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        f.SkipSubmodules = (_skipSubmodules ?? "").Split([',', '\n', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         f.Normalize();
         return f;
     }

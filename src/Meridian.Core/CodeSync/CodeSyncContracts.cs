@@ -86,8 +86,14 @@ public static class CodeFieldKeys
     public const string Repo = "code.repo";
     /// <summary>Commit sha of the sync that last created or changed the element.</summary>
     public const string Commit = "code.commit";
+    /// <summary>"path@sha" of the git submodule the element's file is in (absent for the repository's own code).
+    /// Kept current like <see cref="File"/>; a submodule bump alone does not count as a change of the element.</summary>
+    public const string Submodule = "code.submodule";
+    /// <summary>Prefix of the model-root field that pins a connection's submodules ("code.submodules:&lt;connection id&gt;");
+    /// its value is <see cref="CodeSubmodulePins.Format"/>. A change of it is a submodule bump in "What changed".</summary>
+    public const string SubmodulePinsPrefix = "code.submodules:";
 
-    public static readonly IReadOnlyList<string> All = [Symbol, File, Line, Repo, Commit];
+    public static readonly IReadOnlyList<string> All = [Symbol, File, Line, Repo, Commit, Submodule];
 }
 
 /// <summary>Options for applying a <see cref="CodeModel"/> to a model.</summary>
@@ -103,6 +109,8 @@ public sealed record CodeSyncOptions
     public bool IncludeNonPublic { get; init; }
     /// <summary>When a type disappears from code: true removes its element; false only marks it (field "code.removed").</summary>
     public bool RemoveDeleted { get; init; } = true;
+    /// <summary>Submodules whose code is in the snapshot: elements from files under one get <see cref="CodeFieldKeys.Submodule"/>.</summary>
+    public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
 }
 
 /// <summary>What one sync did to the model: ids of elements added / changed / removed (relationships included).</summary>
@@ -115,7 +123,12 @@ public sealed record CodeSyncChanges(IReadOnlyList<string> Added, IReadOnlyList<
 public sealed record CodeSyncRequest(
     Guid ProjectId, Guid ConnectionId, string RepoDisplay, string Branch, string Commit,
     string? CommitUrl, string? Author, string? Message,
-    IReadOnlyList<CodeFile> Files, bool IsFullSnapshot);
+    IReadOnlyList<CodeFile> Files, bool IsFullSnapshot)
+{
+    /// <summary>The repository's submodules at <see cref="Commit"/> (their code is in <see cref="Files"/> under their paths
+    /// when fetched). Empty when the repository has none, or the caller does not look for them.</summary>
+    public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
+}
 
 public enum CodeSyncStatus { Pending, NoChanges, AwaitingReview, Accepted, Failed }
 

@@ -318,7 +318,11 @@ Project menu → **Integrations…** → *Code repositories* → **Add repositor
 A token that contains `:` is sent with basic authentication (Bitbucket app passwords); every other token as a bearer token.
 
 * **Branch** (default `main`): pushes to other branches, and pull requests into other branches, are ignored.
-* **Folders to include**: comma separated, e.g. `src/Domain, src/Shared`. Empty means the whole repository.
+* **Folders to include**: comma separated, e.g. `src/Domain, src/Shared`. Empty means the whole repository. They also
+  apply inside submodules (`libs/core/src`).
+* **Include git submodules** (on by default) and **Submodules to skip** (comma separated paths): read the code of git
+  submodules, which archives leave out, at the commit the repository pins them to. See
+  [CODE-SYNC.md](CODE-SYNC.md#git-submodules) and *Submodules* below.
 * **Model**: *Model package* is where the code goes (defaults to the repository name). *Create diagrams for new packages
   and classes* (on by default) runs the auto-diagrammer for new namespaces and blocks. The model root's
   `codeSync.rootPackage` and `codeSync.autoDiagrams` fields override these when set; the form says when they do.
@@ -387,6 +391,32 @@ comment's current version). A failed comment is logged and does not fail the syn
 All calls to the git host use the same address checks as issue trackers (see *Which addresses the server will
 call*): allow private networks for an on-premises GitHub Enterprise, GitLab or Bitbucket Data Center. The access token
 and the webhook secret are encrypted like other integration secrets and never written to the log.
+
+### Submodules
+
+Archives leave out the code of git submodules. After the archive, Meridian reads `.gitmodules`, asks the host for each
+submodule's pinned commit (GitHub contents API, GitLab repository tree, Bitbucket Cloud `src` listing, Data Center
+`browse`), downloads the submodule's archive at that commit and merges its files in under the submodule path, nested up
+to three levels, with cycles cut. The archive limits above apply to the repository and its submodules **together**.
+
+Which credentials read a submodule:
+
+| Submodule is… | Read with |
+|---|---|
+| a repository another code-repo connection **of the same project** follows | that connection's token and server URL |
+| on the connection's own host (`../lib.git`, or an absolute URL on the same host) | the connection's token |
+| on `github.com`, `gitlab.com` or `bitbucket.org` | anonymously (public repositories) — also the fallback when a token above is refused |
+| anywhere else | not read: *no access* |
+
+Tokens are only sent to the API address of their own connection, and `.gitmodules` URLs never pick an address: a
+submodule on an unknown host costs no request at all. The sync goes on without a submodule it cannot read and says so in
+its summary (“1 submodule not read”); the connection lists each submodule of the last sync with its pinned commit and
+status (*fetched*, *skipped*, *no access*, *not found*). To read a private submodule on another account or host, add a
+connection for it in the same project (its own sync can stay manual).
+
+The token needs read access to the submodule repositories as well: GitHub fine-grained tokens list each repository
+(*Contents: read*), GitLab project tokens only see their own project (use a group or personal token, or a connection per
+submodule), Bitbucket repository access tokens likewise.
 
 ## Storage
 

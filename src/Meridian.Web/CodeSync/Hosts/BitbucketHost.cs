@@ -11,7 +11,7 @@ namespace Meridian.Web.CodeSync.Hosts;
 /// The token is a Cloud repository / workspace access token or a Data Center HTTP access token (sent as a bearer token),
 /// or <c>username:app-password</c> (sent with basic authentication).
 /// </summary>
-public sealed class BitbucketHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
+public sealed partial class BitbucketHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
 {
     /// <summary>Build-status key of the current <see cref="GitHostFactory.StatusContext"/> ("meridian/model" → "meridian-model").
     /// Bitbucket identifies a status by its key (at most 40 characters), so each context keeps its own status.</summary>
@@ -47,6 +47,7 @@ public sealed class BitbucketHost(CodeRepoConfig config, string token, HttpClien
     protected override void Authorize(HttpRequestMessage request)
     {
         var t = token.Trim();
+        if (t.Length == 0) return;   // anonymous access to a public submodule
         request.Headers.Authorization = t.Contains(':')
             ? new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(t)))
             : new AuthenticationHeaderValue("Bearer", t);
