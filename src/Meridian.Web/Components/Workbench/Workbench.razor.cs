@@ -36,6 +36,7 @@ public partial class Workbench
 
     private ModelTree? _tree;
     private CommandPalette? _palette;
+    private OnboardingTour? _tour;
 
     /// <summary>Everything the ⌘K palette can run: commands, open diagrams, go to elements, create diagrams.</summary>
     private IEnumerable<CommandPalette.Command> PaletteCommands()
@@ -67,6 +68,10 @@ public partial class Workbench
             CA("Export ArchiMate exchange file", Icons.Material.Outlined.Layers, ExportArchiMate),
             CA("Generate C# code", Icons.Material.Outlined.DataObject, GenerateCode),
             C("Add UAF profile", Icons.Material.Outlined.Badge, AddUafProfile),
+            CA("New diagram from template…", Icons.Material.Outlined.AddChart, NewDiagramFromTemplate),
+            CA("Export diagram as PNG…", Icons.Material.Outlined.Image, ExportImage),
+            CA("Copy diagram as image", Icons.Material.Outlined.ContentCopy, CopyDiagramImage),
+            CA("Take the guided tour", Icons.Material.Outlined.Tour, StartTour),
             CA("Import into this project (BPMN, ArchiMate, SQL, C#)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
             CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
@@ -360,6 +365,8 @@ public partial class Workbench
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
+        if (e is not Diagram && e.Descendants().OfType<Diagram>().Any())
+            m.Add(MenuEntry.Async("Export diagrams as images (zip)…", () => ExportImages(e)));
         OpenMenu(m, x, y);
     }
 
@@ -406,6 +413,8 @@ public partial class Workbench
         {
             m.Add(MenuEntry.Do("Duplicate", c.DuplicateSelection, "⌘D"));
             m.Add(MenuEntry.Do("Copy", c.CopySelection, "⌘C"));
+            if (!Ws.ReadOnly) m.Add(MenuEntry.Async(c.SelectionLink() == null ? "Add link…" : "Edit link…", () => LinkDialog.EditAsync(Dialogs, Ws, c)));
+            if (c.SelectionLink() is { } lnk) m.Add(MenuEntry.Async("Follow link", () => DiagramLinks.FollowAsync(Ws, JS, lnk)));
         }
         if (r.Node != null || r.Edge != null)
         {
@@ -420,6 +429,8 @@ public partial class Workbench
             if (c.Diagram.DiagramType == DiagramType.Activity) m.Add(MenuEntry.Do("Allocate actions to swimlanes", () => SyncAllocations(c)));
             m.Add(MenuEntry.Do("Zoom to fit", c.ZoomToFit));
             m.Add(MenuEntry.Async("Export as SVG", ExportSvg));
+            m.Add(MenuEntry.Async("Export as PNG…", ExportImage));
+            m.Add(MenuEntry.Async("Copy diagram as image", CopyDiagramImage));
         }
         OpenMenu(m, r.X, r.Y);
     }
@@ -588,6 +599,7 @@ public partial class Workbench
         "<b>Create:</b> pick a palette tool, click the canvas. Relationship tools: drag from source shape to target shape. Hold Shift to keep the tool.<br/><br/>" +
         "<b>Tree:</b> drag items onto a diagram to show them, onto another tree item to move them. Right-click for New / Rename / Delete.<br/><br/>" +
         "<b>Canvas:</b> double-click a shape to rename · double-click a path to add a bend point · Delete removes from model · Backspace removes from diagram · arrows nudge · ⌘/Ctrl+wheel zoom · wheel or middle-drag pans.<br/><br/>" +
+        "<b>Pictures, links, layers:</b> drop or paste images onto the canvas (Shift frees their aspect ratio when resizing) · Ctrl/⌘-click a linked shape or its link icon to follow it · the layers button hides, locks and reorders layers.<br/><br/>" +
         "<b>Global:</b> ⌘S save · ⌘O open · ⌘Z / ⇧⌘Z undo/redo · ⌘F find · F7 validate."));
 
     private Task ShowAbout() => Dialogs.ShowMessageBox("About Meridian",
@@ -606,17 +618,51 @@ public partial class Workbench
 
     // ============================================================ file menu
 
+    /// <summary>New project: pick a starter template from the gallery (see <see cref="Templates"/>).</summary>
     private async Task NewModel()
     {
-        var name = await Prompt("New project", "Project name", "New Model");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        var m = new ModelRepository(name.Trim());
-        var structure = m.Create(m.Root, ElementKind.Package, "Structure");
-        m.Create(m.Root, ElementKind.Package, "Requirements");
-        m.Create(m.Root, ElementKind.Package, "Behavior");
-        m.CreateDiagram(structure, DiagramType.BlockDefinition, "System Structure");
-        await CreateProjectFrom(m, name.Trim());
+        if (await TemplateGallery.ShowAsync(Dialogs, forDiagram: false) is not { } choice) return;
+        var name = string.IsNullOrWhiteSpace(choice.Name) ? "New Model" : choice.Name;
+        await CreateProjectFrom(Templates.CreateProject(choice.TemplateId, name), name);
     }
+
+    /// <summary>New diagram from a diagram template, in the selection's package.</summary>
+    private async Task NewDiagramFromTemplate()
+    {
+        if (Ws.ReadOnly) return;
+        if (await TemplateGallery.ShowAsync(Dialogs, forDiagram: true) is not { } choice) return;
+        var context = Ws.Selected ?? Ws.Active?.Diagram.Owner ?? Ws.Model.Root;
+        try
+        {
+            var d = Templates.CreateDiagram(Ws.Model, context, choice.TemplateId);
+            Ws.Open(d);
+            Ws.Select(d, syncCanvas: false);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private async Task ExportImage()
+    {
+        if (Ws.Active is not { } c) { Ws.SetStatus("Open a diagram first"); return; }
+        var parameters = new DialogParameters<ExportImageDialog> { { x => x.Diagram, c.Diagram } };
+        await Dialogs.ShowAsync<ExportImageDialog>("Export image", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+    }
+
+    private async Task ExportImages(Element container)
+    {
+        var parameters = new DialogParameters<ExportImageDialog> { { x => x.Container, container } };
+        await Dialogs.ShowAsync<ExportImageDialog>("Export images", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+    }
+
+    private async Task CopyDiagramImage()
+    {
+        if (Ws.Active is not { } c) { Ws.SetStatus("Open a diagram first"); return; }
+        var problem = await DiagramImageExport.CopyAsync(JS, Ws.Model, c.Diagram, 2, Ws.DarkMode ? ExportBackground.Dark : ExportBackground.Light);
+        if (problem != null) Snackbar.Add(problem, Severity.Warning);
+        else Ws.SetStatus($"Copied {c.Diagram.Name} to the clipboard as a picture");
+    }
+
+    private Task StartTour() => _tour?.StartAsync() ?? Task.CompletedTask;
 
     private async Task OpenSample() => await CreateProjectFrom(SampleModels.Vehicle(), "Vehicle System (sample)");
 

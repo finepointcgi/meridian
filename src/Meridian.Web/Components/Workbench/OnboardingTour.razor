@@ -1,0 +1,154 @@
+@implements IDisposable
+@inject IJSRuntime JS
+@inject Workspace Ws
+
+@* First-run guided tour: a spotlight on one part of the workbench per step. Shown once per browser; Help ▸ Take the tour reopens it. *@
+@if (_step >= 0)
+{
+    var s = Steps[_step];
+    <div class="tour" @onkeydown="Key" tabindex="-1" @ref="_root">
+        @if (_spot is { } r)
+        {
+            <div class="tour-spot" style="left:@Px(r.Left - 6); top:@Px(r.Top - 6); width:@Px(r.Width + 12); height:@Px(r.Height + 12)"></div>
+        }
+        else
+        {
+            <div class="tour-dim"></div>
+        }
+        <div class="tour-card" style="@CardStyle()">
+            <div class="tour-step">Step @(_step + 1) of @Steps.Length</div>
+            <h3><MudIcon Icon="@s.Icon" /> @s.Title</h3>
+            <div class="tour-body">@((MarkupString)s.Html)</div>
+            <div class="tour-dots">
+                @for (var i = 0; i < Steps.Length; i++)
+                {
+                    var k = i;
+                    <span class="@(k == _step ? "on" : "")" @onclick="() => Go(k)"></span>
+                }
+            </div>
+            <div class="tour-actions">
+                <button class="tour-skip" @onclick="Finish">@(_step == Steps.Length - 1 ? "Close" : "Skip tour")</button>
+                <span style="flex:1"></span>
+                @if (_step > 0) { <button class="tour-btn" @onclick="() => Go(_step - 1)">Back</button> }
+                <button class="tour-btn primary" @onclick="Next">@(_step == Steps.Length - 1 ? "Start modeling" : "Next")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    public const string SeenKey = "meridian.tour.v1";
+
+    private sealed record Step(string Selector, string Icon, string Title, string Html);
+
+    private static readonly Step[] Steps =
+    [
+        new(".canvas .toolbox", Icons.Material.Outlined.Category, "Shapes panel",
+            "Drag a shape onto the canvas, or click it to insert one. Search to find any SysML, BPMN, ArchiMate or drawing shape. " +
+            "<b>Double-click</b> empty canvas to quick-add a shape where you clicked."),
+        new(".diagram-host", Icons.Material.Outlined.East, "Connect with hover arrows",
+            "Hover a shape and four blue arrows appear. <b>Click</b> one to add a connected shape next to it, or <b>drag</b> it onto another shape to connect the two. " +
+            "Drop pictures, paste screenshots, add links and layers from the format bar."),
+        new("aside.stack .card:first-child", Icons.Material.Outlined.Tune, "Inspector",
+            "Everything about the selected element: name, type, properties, documentation, stereotypes, relationships and comments."),
+        new("aside.stack .card:nth-child(2)", Icons.Material.Outlined.Assignment, "Requirements & traceability",
+            "Requirements with their satisfy / verify coverage. The Traceability group in the toolbar opens the matrix, impact analysis and validation."),
+        new(".titlebar .cmdk", Icons.Material.Outlined.Search, "Command palette ⌘K",
+            "Press <b>⌘K</b> (Ctrl+K) to run any command, open a diagram or jump to an element by name."),
+        new(".titlebar .btn-primary", Icons.Material.Outlined.Commit, "Commit versions",
+            "Edits save continuously and sync live with collaborators. <b>Commit</b> (⌘S) records a named version you can compare and restore."),
+        new("", Icons.Material.Outlined.RocketLaunch, "You're ready",
+            "Start from a template with <b>New project</b>, or open a diagram and start drawing. Reopen this tour any time from the project menu: <b>Take the guided tour</b>."),
+    ];
+
+    private int _step = -1;
+    private Rect? _spot;
+    private Rect _vp = new(0, 0, 1280, 800);
+    private bool _pending;
+    private ElementReference _root;
+
+    private sealed record Rect(double Left, double Top, double Width, double Height);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        Ws.Changed += OnChanged;
+        string? seen;
+        try { seen = await JS.InvokeAsync<string?>("meridian.getFlag", SeenKey); }
+        catch (JSException) { return; }
+        if (seen != null) return;
+        // Wait until a diagram is open so the canvas parts exist; start anyway after a few seconds.
+        _pending = true;
+        if (Ws.Active != null) await InvokeAsync(StartAsync);
+        else _ = Task.Delay(5000).ContinueWith(_ => InvokeAsync(async () => { if (_pending) await StartAsync(); }));
+    }
+
+    private void OnChanged()
+    {
+        if (_pending && Ws.Active != null) _ = InvokeAsync(StartAsync);
+    }
+
+    /// <summary>Opens the tour at the first step.</summary>
+    public async Task StartAsync()
+    {
+        _pending = false;
+        await Go(0);
+    }
+
+    private async Task Go(int step)
+    {
+        _step = Math.Clamp(step, 0, Steps.Length - 1);
+        _spot = null;
+        try
+        {
+            _vp = await JS.InvokeAsync<Rect?>("meridian.viewport") ?? _vp;
+            if (Steps[_step].Selector.Length > 0) _spot = await JS.InvokeAsync<Rect?>("meridian.rectOf", Steps[_step].Selector);
+        }
+        catch (JSException) { }
+        StateHasChanged();
+        await Task.Yield();
+        try { await _root.FocusAsync(); } catch (Exception ex) when (ex is JSException or InvalidOperationException) { }
+    }
+
+    private async Task Next()
+    {
+        if (_step >= Steps.Length - 1) await Finish();
+        else await Go(_step + 1);
+    }
+
+    private async Task Finish()
+    {
+        _step = -1;
+        _pending = false;
+        try { await JS.InvokeVoidAsync("meridian.setFlag", SeenKey, "done"); } catch (JSException) { }
+    }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape": await Finish(); break;
+            case "ArrowRight" or "Enter": await Next(); break;
+            case "ArrowLeft" when _step > 0: await Go(_step - 1); break;
+        }
+    }
+
+    /// <summary>Places the card beside the highlighted area where there is room, else centred.</summary>
+    private string CardStyle()
+    {
+        const double w = 330, h = 230, gap = 16;
+        if (_spot is not { } r) return $"left:{Px(_vp.Width / 2 - w / 2)}; top:{Px(_vp.Height / 2 - h / 2)}";
+        double x, y;
+        if (r.Left + r.Width + gap + w < _vp.Width) { x = r.Left + r.Width + gap; y = r.Top + 10; }
+        else if (r.Left - gap - w > 0) { x = r.Left - gap - w; y = r.Top + 10; }
+        else if (r.Top + r.Height + gap + h < _vp.Height) { x = r.Left + r.Width / 2 - w / 2; y = r.Top + r.Height + gap; }
+        else { x = r.Left + r.Width / 2 - w / 2; y = r.Top + r.Height / 2 - h / 2; }
+        x = Math.Clamp(x, 12, Math.Max(12, _vp.Width - w - 12));
+        y = Math.Clamp(y, 12, Math.Max(12, _vp.Height - h - 12));
+        return $"left:{Px(x)}; top:{Px(y)}";
+    }
+
+    private static string Px(double v) => v.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "px";
+
+    public void Dispose() => Ws.Changed -= OnChanged;
+}

@@ -1,0 +1,97 @@
+@inject Workspace Ws
+
+@* Hyperlink editor for shapes: a web address, or an element / diagram of this model picked from a list. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Link" /><MudText Typo="Typo.h6">Link</MudText></div>
+    </TitleContent>
+    <DialogContent>
+        <div class="link-dlg">
+            <div class="link-tabs">
+                <button class="@(_internal ? "" : "on")" @onclick="() => _internal = false"><MudIcon Icon="@Icons.Material.Outlined.Public" /> Web address</button>
+                <button class="@(_internal ? "on" : "")" @onclick="() => _internal = true"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /> Element or diagram</button>
+            </div>
+            @if (!_internal)
+            {
+                <MudTextField T="string" @bind-Value="_url" Label="URL" Placeholder="https://example.com/spec" Immediate="true" Variant="Variant.Outlined" AutoFocus="true"
+                              OnKeyDown="UrlKey" Error="@(!string.IsNullOrWhiteSpace(_url) && DiagramExtras.NormalizeLink(_url) == null)" ErrorText="Use an http(s) or mailto address" />
+                <div class="link-hint">Ctrl/⌘-click the shape or its link icon to open it in a new tab.</div>
+            }
+            else
+            {
+                <input class="link-search" placeholder="Search elements and diagrams…" value="@_query" @oninput="e => _query = e.Value?.ToString()" />
+                <div class="link-list">
+                    @foreach (var e in Matches())
+                    {
+                        var el = e;
+                        <div class="link-item @(el.Id == _targetId ? "on" : "")" @onclick="() => _targetId = el.Id" @ondblclick="() => { _targetId = el.Id; Ok(); }">
+                            <MudIcon Icon="@(el is Diagram dg ? UiKinds.DiagramIcon(dg.DiagramType) : UiKinds.Icon(el.Kind))" Style="font-size:16px" />
+                            <span class="nm">@el.DisplayName</span>
+                            <span class="kd">@UiKinds.KindName(el)</span>
+                        </div>
+                    }
+                    @if (!Matches().Any()) { <div class="link-empty">Nothing matches</div> }
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        @if (!string.IsNullOrEmpty(Current))
+        {
+            <MudButton Color="Color.Error" OnClick="Remove" StartIcon="@Icons.Material.Outlined.LinkOff">Remove link</MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!CanSave)" OnClick="Ok">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? Current { get; set; }
+
+    private bool _internal;
+    private string? _url;
+    private string? _query;
+    private string? _targetId;
+
+    protected override void OnInitialized()
+    {
+        if (DiagramExtras.InternalTarget(Current) is { } id) { _internal = true; _targetId = id; }
+        else _url = Current;
+    }
+
+    private IEnumerable<Element> Matches()
+    {
+        var q = _query?.Trim();
+        return Ws.Model.AllElements
+            .Where(e => e.Kind != ElementKind.Model && e is not Relationship && !string.IsNullOrEmpty(e.Name))
+            .Where(e => string.IsNullOrEmpty(q) || e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || UiKinds.KindName(e).Contains(q, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(e => e is Diagram ? 0 : 1).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(60);
+    }
+
+    private bool CanSave => _internal ? _targetId != null && Ws.Model.Find(_targetId) != null : DiagramExtras.NormalizeLink(_url) != null;
+
+    private void Ok()
+    {
+        if (!CanSave) return;
+        MudDialog.Close(DialogResult.Ok(_internal ? DiagramExtras.InternalLinkPrefix + _targetId : DiagramExtras.NormalizeLink(_url)!));
+    }
+
+    private void Remove() => MudDialog.Close(DialogResult.Ok(""));
+
+    private void UrlKey(KeyboardEventArgs e) { if (e.Key == "Enter") Ok(); }
+
+    /// <summary>Edits the link of the selected shapes of a diagram.</summary>
+    public static async Task EditAsync(IDialogService dialogs, Workspace ws, DiagramController c)
+    {
+        if (ws.ReadOnly) return;
+        if (c.SelectedNodes.Count == 0) { ws.SetStatus("Select a shape to link it"); return; }
+        var parameters = new DialogParameters<LinkDialog> { { x => x.Current, c.SelectionLink() } };
+        var dialog = await dialogs.ShowAsync<LinkDialog>("Link", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string link }) c.SetSelectionLink(link);
+        ws.Bump();
+    }
+}

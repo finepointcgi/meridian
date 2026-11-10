@@ -140,6 +140,9 @@ internal static class Program
             case "update":
                 _ = InstallUpdateAsync();
                 break;
+            case "open-url":
+                OpenUrl((string?)msg!["url"]);
+                break;
         }
     }
 
@@ -148,6 +151,14 @@ internal static class Program
         var json = JsonSerializer.Serialize(message);
         try { _window.Invoke(() => _window.SendWebMessage(json)); }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { /* window not ready or closing */ }
+    }
+
+    /// <summary>Opens a diagram hyperlink in the system browser. Only http(s) addresses are accepted.</summary>
+    private static void OpenUrl(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(uri.Host)) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception ex) { Log($"open-url failed: {ex.Message}"); }
     }
 
     // ------------------------------------------------------------------ local mode

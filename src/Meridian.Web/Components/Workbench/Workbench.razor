@@ -41,9 +41,12 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.FileDownload" OnClick="ExportXmi">Export XMI 2.5.1</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Code" OnClick="ExportSysML">Export SysML v2 text</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Image" OnClick="ExportSvg" Disabled="Ws.Active == null">Export diagram as SVG</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(Ws.Model.Root)">Rename model…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="StartTour">Take the guided tour</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
             </ChildContent>
         </MudMenu>
@@ -246,6 +249,8 @@
                             var type = t;
                             <MudMenuItem Icon="@UiKinds.DiagramIcon(type)" OnClick="() => NewDiagramSmart(type)">@Metamodel.DisplayName(type)</MudMenuItem>
                         }
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Outlined.AddChart" OnClick="NewDiagramFromTemplate" Disabled="Ws.ReadOnly">From template…</MudMenuItem>
                     </ChildContent>
                 </MudMenu>
             </div>
@@ -353,6 +358,7 @@
 
     <ContextMenu Entries="_menu" X="_menuX" Y="_menuY" OnClose="() => _menu = null" />
     <CommandPalette @ref="_palette" Source="PaletteCommands" />
+    <OnboardingTour @ref="_tour" />
 
     <div style="display:none">
         <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax" OnChange="OnOpenFile" />

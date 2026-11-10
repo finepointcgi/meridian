@@ -1,0 +1,116 @@
+@using System.Collections.Concurrent
+@using Meridian.Core.Samples
+@using Meridian.Serialization
+
+@* Starter templates for a new project (or a new diagram), with thumbnails rendered by SvgRenderer. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@(ForDiagram ? Icons.Material.Outlined.AddChart : Icons.Material.Outlined.NoteAdd)" />
+            <MudText Typo="Typo.h6">@(ForDiagram ? "New diagram from a template" : "New project")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (!ForDiagram)
+        {
+            <MudTextField T="string" @bind-Value="_name" Label="Project name" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Class="mb-3" OnKeyDown="NameKey" />
+        }
+        <div class="tpl-grid">
+            @if (ForDiagram)
+            {
+                foreach (var t in Templates.Diagrams)
+                {
+                    var tpl = t;
+                    @Card(tpl.Id, tpl.Name, tpl.Description, Metamodel.DisplayName(tpl.Type), () => DiagramThumb(tpl))
+                }
+            }
+            else
+            {
+                foreach (var t in Templates.Projects)
+                {
+                    var tpl = t;
+                    @Card(tpl.Id, tpl.Name, tpl.Description, tpl.Category, () => ProjectThumb(tpl))
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!CanCreate)" OnClick="Create">@(ForDiagram ? "Create diagram" : "Create project")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>What the user chose: a template id, and for projects the project name.</summary>
+    public sealed record Choice(string TemplateId, string Name);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public bool ForDiagram { get; set; }
+
+    private string _selected = "";
+    private string? _name = "New Model";
+    private bool _nameTouched;
+
+    private static readonly ConcurrentDictionary<string, string> Thumbs = new();
+
+    protected override void OnInitialized() => _selected = ForDiagram ? Templates.Diagrams[0].Id : Templates.Projects[0].Id;
+
+    private bool CanCreate => _selected.Length > 0 && (ForDiagram || !string.IsNullOrWhiteSpace(_name));
+
+    private RenderFragment Card(string id, string name, string description, string tag, Func<string> thumb) => __builder =>
+    {
+        <div class="tpl-card @(_selected == id ? "on" : "")" @onclick="() => Pick(id, name)" @ondblclick="() => { Pick(id, name); Create(); }" title="@description">
+            <div class="tpl-thumb"><img src="@thumb()" alt="" loading="lazy" /></div>
+            <div class="tpl-meta">
+                <div class="tpl-name">@name <span class="tpl-tag">@tag</span></div>
+                <div class="tpl-desc">@description</div>
+            </div>
+        </div>
+    };
+
+    private void Pick(string id, string name)
+    {
+        _selected = id;
+        // Suggest a project name from the template until the user types their own.
+        if (!ForDiagram && !_nameTouched) _name = id == "blank" ? "New Model" : id == "vehicle" ? "Vehicle System" : name;
+    }
+
+    private void NameKey(KeyboardEventArgs e)
+    {
+        _nameTouched = true;
+        if (e.Key == "Enter") Create();
+    }
+
+    private void Create()
+    {
+        if (!CanCreate) return;
+        MudDialog.Close(DialogResult.Ok(new Choice(_selected, (_name ?? "").Trim())));
+    }
+
+    private static string ProjectThumb(ProjectTemplate t) => Thumbs.GetOrAdd("p:" + t.Id, _ =>
+    {
+        var m = t.Build(t.Name);
+        var d = m.Diagrams.OrderByDescending(x => x.Nodes.Count).FirstOrDefault();
+        return d == null ? Blank() : Uri(SvgRenderer.Render(m, d));
+    });
+
+    private static string DiagramThumb(DiagramTemplate t) => Thumbs.GetOrAdd("d:" + t.Id, _ =>
+    {
+        var m = new ModelRepository("Template");
+        var pkg = m.Create(m.Root, ElementKind.Package, "Package");
+        return Uri(SvgRenderer.Render(m, t.Create(m, pkg)));
+    });
+
+    private static string Uri(string svg) => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg));
+    private static string Blank() => Uri("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 160 100\"><rect width=\"160\" height=\"100\" fill=\"#fff\"/></svg>");
+
+    /// <summary>Opens the gallery; returns the choice, or null when cancelled.</summary>
+    public static async Task<Choice?> ShowAsync(IDialogService dialogs, bool forDiagram)
+    {
+        var parameters = new DialogParameters<TemplateGallery> { { x => x.ForDiagram, forDiagram } };
+        var dialog = await dialogs.ShowAsync<TemplateGallery>(forDiagram ? "New diagram" : "New project", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: Choice c } ? c : null;
+    }
+}

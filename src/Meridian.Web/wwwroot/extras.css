@@ -1,0 +1,92 @@
+/* Diagram extras: images, links, layers, export, template gallery, onboarding tour. */
+
+/* ---------------------------------------------------------------- canvas */
+.canvas .link-badge { cursor: pointer; }
+.selbar .tool.has-link { color: var(--accent); }
+
+.layers-fab { position: absolute; right: 14px; top: 12px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.layers-fab > .mud-tooltip-root > .tool, .layers-fab .tool { position: relative; background: var(--panel); border: 1px solid var(--border); backdrop-filter: blur(10px); }
+.layers-fab .badge { position: absolute; right: -4px; top: -4px; min-width: 15px; height: 15px; border-radius: 8px; padding: 0 3px;
+  background: var(--accent); color: #fff; font: 700 9.5px/15px Inter, sans-serif; text-align: center; }
+.layers-fab .badge.warn { background: var(--warn, #f0b429); }
+
+.layers-pop { width: 330px; padding: 10px; background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .28); color: var(--text); font-size: 12.5px; }
+.fmt-pop.layers-in-bar { padding: 0; background: transparent; border: none; box-shadow: none; }
+.layers-head { display: flex; align-items: center; margin-bottom: 8px; }
+.layers-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; }
+.layer-row { display: flex; align-items: center; gap: 2px; padding: 3px 4px; border-radius: 7px; border: 1px solid transparent; cursor: pointer; }
+.layer-row:hover { background: var(--panel-2); }
+.layer-row.active { border-color: var(--accent); background: rgba(79, 140, 255, .08); }
+.layer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+.layer-name.off { opacity: .5; text-decoration: line-through; }
+.layer-name-edit { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--accent); background: var(--panel-2); color: var(--text); font: 12.5px Inter, sans-serif; }
+.layer-count { font-size: 10.5px; color: var(--text-3); padding: 0 4px; }
+.lbtn { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border: none; border-radius: 5px; background: transparent; color: var(--text-2); cursor: pointer; padding: 0; }
+.lbtn:hover:not(:disabled) { background: var(--panel-3); color: var(--text); }
+.lbtn:disabled { opacity: .3; cursor: default; }
+.lbtn .mud-icon-root { font-size: 16px; }
+.layers-move { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-2); }
+.layers-move select { flex: 1; height: 26px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--panel-2); color: var(--text); font: 12px Inter, sans-serif; }
+
+/* Empty canvas: little drawings that teach the two key gestures. */
+.empty-teach { max-width: 640px; }
+.teach-row { display: flex; gap: 18px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.teach { width: 170px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; line-height: 1.4; color: var(--text-2); }
+.teach svg { color: var(--text-3); }
+.teach b { color: var(--text); }
+
+/* ---------------------------------------------------------------- dialogs */
+.link-tabs, .seg { display: inline-flex; border: 1px solid var(--mud-palette-lines-default, rgba(128,128,128,.3)); border-radius: 8px; overflow: hidden; }
+.link-tabs { margin: 4px 0 14px; }
+.link-tabs button, .seg button { border: none; background: transparent; color: inherit; padding: 6px 12px; font: 500 12.5px Inter, sans-serif; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; opacity: .75; }
+.link-tabs button .mud-icon-root { font-size: 16px; }
+.link-tabs button.on, .seg button.on { background: #4f8cff; color: #fff; opacity: 1; }
+.link-hint { font-size: 12px; opacity: .65; margin-top: 6px; }
+.link-search { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid rgba(128,128,128,.35); background: transparent; color: inherit; font: 13px Inter, sans-serif; }
+.link-list { margin-top: 8px; max-height: 300px; overflow: auto; }
+.link-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.link-item:hover { background: rgba(128, 128, 128, .12); }
+.link-item.on { background: rgba(79, 140, 255, .18); }
+.link-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-item .kd, .link-empty { font-size: 11.5px; opacity: .6; }
+.link-empty { padding: 12px 8px; }
+
+.export-dlg { display: flex; flex-direction: column; gap: 12px; }
+.export-preview { height: 200px; border-radius: 8px; border: 1px solid rgba(128,128,128,.3); display: grid; place-items: center; overflow: hidden; padding: 8px; }
+.export-preview img { max-width: 100%; max-height: 100%; }
+.export-preview.checker { background: repeating-conic-gradient(rgba(128,128,128,.18) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.export-row { display: flex; align-items: center; gap: 12px; }
+.export-row .lbl { width: 90px; font-size: 13px; opacity: .75; }
+.export-note { font-size: 13px; opacity: .8; display: flex; align-items: center; gap: 8px; }
+.export-error { font-size: 13px; color: #ff6b6b; }
+
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; max-height: 60vh; overflow: auto; padding: 2px; }
+.tpl-card { border: 1px solid rgba(128,128,128,.28); border-radius: 10px; overflow: hidden; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.tpl-card:hover { border-color: rgba(79,140,255,.6); }
+.tpl-card.on { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79, 140, 255, .35); }
+.tpl-thumb { height: 120px; background: #fff; display: grid; place-items: center; padding: 6px; border-bottom: 1px solid rgba(128,128,128,.2); }
+.tpl-thumb img { max-width: 100%; max-height: 100%; }
+.tpl-meta { padding: 8px 10px 10px; }
+.tpl-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.tpl-tag { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .55; margin-left: auto; }
+.tpl-desc { font-size: 11.5px; opacity: .7; margin-top: 3px; line-height: 1.35; }
+
+/* ---------------------------------------------------------------- onboarding tour */
+.tour { position: fixed; inset: 0; z-index: 1300; outline: none; }
+.tour-dim { position: absolute; inset: 0; background: rgba(5, 10, 20, .5); }
+.tour-spot { position: absolute; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(5, 10, 20, .5), 0 0 0 2px #4f8cff inset; pointer-events: none; transition: all .25s ease; }
+.tour-card { position: absolute; width: 330px; padding: 16px 18px 14px; border-radius: 14px; background: var(--panel-solid, #fff); color: var(--text, #141b2b);
+  border: 1px solid var(--border-strong); box-shadow: 0 18px 50px rgba(0, 0, 0, .35); transition: left .25s ease, top .25s ease; font-size: 13px; }
+.tour-step { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--accent, #4f8cff); }
+.tour-card h3 { margin: 6px 0 6px; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.tour-body { line-height: 1.5; color: var(--text-2); }
+.tour-body b { color: var(--text); }
+.tour-dots { display: flex; gap: 6px; margin: 12px 0 10px; }
+.tour-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); cursor: pointer; }
+.tour-dots span.on { background: var(--accent, #4f8cff); width: 18px; border-radius: 4px; }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-skip { border: none; background: none; color: var(--text-3); font: 500 12px Inter, sans-serif; cursor: pointer; padding: 0; }
+.tour-btn { height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text); font: 600 12.5px Inter, sans-serif; cursor: pointer; }
+.tour-btn.primary { border: none; background: var(--accent-grad, #4f8cff); color: #fff; }
