@@ -267,13 +267,20 @@
                 <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
             </div>
         </div>
-        @if (Ws.CodeChanges is not null)
+        @if (Ws.CodeChanges is not null || HasArchitecture)
         {
             <div class="rgroup compact">
                 <div class="rlabel">Code</div>
                 <div class="ritems">
+                    @if (Ws.CodeChanges is not null)
+                    {
                     <MudTooltip Text="What changed: code changes from connected repositories to accept or reject"><button class="rbtn @(Ws.ActiveView?.Kind == ViewTabKind.CodeChanges ? "on" : "")" @onclick="OpenCodeChanges"><MudIcon Icon="@Icons.Material.Outlined.Difference" /><span class="t">Changes</span></button></MudTooltip>
                     <MudTooltip Text="Highlight code changes on diagrams (⌘K “Highlight code changes”)"><button class="rbtn @(Ws.HighlightCodeChanges ? "on" : "")" @onclick="ToggleCodeHighlights"><MudIcon Icon="@Icons.Material.Outlined.Highlight" /><span class="t">Highlight</span></button></MudTooltip>
+                    }
+                    @if (HasArchitecture)
+                    {
+                    <MudTooltip Text="Check architecture: the last synced code against this model (⌘K “Check architecture”)"><button class="rbtn arch-ribbon @(Ws.ActiveView?.Kind == ViewTabKind.Architecture ? "on" : "")" @onclick="CheckArchitecture"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Architecture</span></button></MudTooltip>
+                    }
                 </div>
             </div>
         }
@@ -326,7 +333,7 @@
                 @if (Ws.ActiveView is { } shownView)
                 {
                     <span class="crumb current">@shownView.Title</span>
-                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", _ => "TEMPLATE" })</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", _ => "TEMPLATE" })</span>
                 }
                 else if (Ws.Active is { } act)
                 {
@@ -459,6 +466,7 @@
         ViewTabKind.Table => Icons.Material.Outlined.TableChart,
         ViewTabKind.Query => Icons.Material.Outlined.ManageSearch,
         ViewTabKind.CodeChanges => Icons.Material.Outlined.Difference,
+        ViewTabKind.Architecture => Icons.Material.Outlined.Rule,
         _ => Icons.Material.Outlined.EditNote,
     };
 
@@ -474,6 +482,10 @@
         else if (v.Kind == ViewTabKind.CodeChanges)
         {
             <CodeChangesTab />
+        }
+        else if (v.Kind == ViewTabKind.Architecture)
+        {
+            <ArchitectureTab />
         }
         else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
         {

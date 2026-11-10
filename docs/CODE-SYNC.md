@@ -176,3 +176,6 @@ status colours, so they read in light and dark mode.
 - The model root's `codeSync.rootPackage` field names the package code is mapped into. It overrides the connection's
   *Model package*, which defaults to the repository name. `codeSync.autoDiagrams` likewise overrides the connection's
   *Create diagrams for new packages and classes* switch.
+- `CodeSyncEvents.RunCompleted` is raised with `(request, outcome)` after each run that did not fail (pull request
+  previews included). The architecture check subscribes to it and posts its own `meridian/architecture` status
+  ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)).

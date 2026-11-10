@@ -19,6 +19,16 @@ public sealed class CodeSyncEvents
         try { RunsChanged?.Invoke(projectId); }
         catch (Exception) { /* a closed circuit must not fail a sync */ }
     }
+
+    /// <summary>Raised when a sync run finished (not when it failed), with the request and its outcome. Handlers must
+    /// only queue work: the architecture check (CodeSync/Conformance) subscribes here.</summary>
+    public event Action<CodeSyncRequest, CodeSyncOutcome>? RunCompleted;
+
+    public void Completed(CodeSyncRequest request, CodeSyncOutcome outcome)
+    {
+        try { RunCompleted?.Invoke(request, outcome); }
+        catch (Exception) { /* a follow-up check must not fail a sync */ }
+    }
 }
 
 /// <summary>
@@ -159,7 +169,9 @@ public sealed partial class CodeSyncRunner(
         var runId = Guid.NewGuid();
         try
         {
-            return await RunLockedAsync(request, branchName, runId, branch, ct);
+            var outcome = await RunLockedAsync(request, branchName, runId, branch, ct);
+            events.Completed(request, outcome);
+            return outcome;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

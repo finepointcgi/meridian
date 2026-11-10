@@ -29,14 +29,36 @@ public interface IGitHost
     Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, CancellationToken ct = default);
     Task PostCommitStatusAsync(string commit, CommitState state, string description, string? targetUrl, CancellationToken ct = default);
     /// <summary>Writes Meridian's comment on pull / merge request <paramref name="number"/>: updates comment
-    /// <paramref name="commentId"/> in place when given (and still there), else adds one. Returns the comment's id.</summary>
-    Task<string> UpsertPullRequestCommentAsync(int number, string? commentId, string body, CancellationToken ct = default);
+    /// <paramref name="commentId"/> in place when given (and still there), else adds one. Returns the comment's id.
+    /// Hosts that cannot comment keep the default, which fails (the caller logs it and carries on).</summary>
+    Task<string> UpsertPullRequestCommentAsync(int number, string? commentId, string body, CancellationToken ct = default) =>
+        throw new GitHostException("This host cannot comment on pull requests.");
 }
 
 /// <summary>Builds host clients over a supplied <see cref="HttpClient"/> (tests pass one with a fake handler).</summary>
 public static class GitHostFactory
 {
-    public const string StatusContext = "meridian/model";
+    /// <summary>The context of the code-sync status ("meridian/model").</summary>
+    public const string ModelStatusContext = "meridian/model";
+
+    private static readonly AsyncLocal<string?> CurrentContext = new();
+
+    /// <summary>The context hosts post commit statuses under: <see cref="ModelStatusContext"/>, unless a caller
+    /// switched it for its own status with <see cref="UseStatusContext"/> (the architecture check posts "meridian/architecture").</summary>
+    public static string StatusContext => CurrentContext.Value ?? ModelStatusContext;
+
+    /// <summary>Posts made in this async flow, until disposed, use <paramref name="context"/> as the status context.</summary>
+    public static IDisposable UseStatusContext(string context)
+    {
+        var previous = CurrentContext.Value;
+        CurrentContext.Value = context;
+        return new Restore(() => CurrentContext.Value = previous);
+    }
+
+    private sealed class Restore(Action undo) : IDisposable
+    {
+        public void Dispose() => undo();
+    }
 
     public static IGitHost Create(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits? limits = null) => config.Host switch
     {

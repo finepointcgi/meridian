@@ -13,8 +13,9 @@ namespace Meridian.Web.CodeSync.Hosts;
 /// </summary>
 public sealed class BitbucketHost(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits limits) : GitHostBase(http, limits)
 {
-    /// <summary>Build-status key (Bitbucket keys are at most 40 characters; the name shown is the usual context).</summary>
-    public const string StatusKey = "meridian-model";
+    /// <summary>Build-status key of the current <see cref="GitHostFactory.StatusContext"/> ("meridian/model" → "meridian-model").
+    /// Bitbucket identifies a status by its key (at most 40 characters), so each context keeps its own status.</summary>
+    public static string StatusKey => GitHostFactory.StatusContext.Replace('/', '-') is var k && k.Length > 40 ? k[..40] : k;
 
     private readonly bool _cloud = CodeRepoConfig.IsBitbucketCloudUrl(config.BaseUrl);
     private readonly string _base = ServerRoot(config.BaseUrl);
