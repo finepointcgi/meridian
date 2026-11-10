@@ -146,8 +146,8 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
 ## Build the desktop apps
 
 ```bash
-build/package.sh 0.1.0                 # all platforms → artifacts/
-build/package.sh 0.1.0 osx-arm64       # just one
+build/package.sh 0.2.0                 # all platforms → artifacts/
+build/package.sh 0.2.0 osx-arm64       # just one
 ```
 
 Pushing a tag such as `v0.2.0` runs the release workflow, which builds every platform and publishes a
