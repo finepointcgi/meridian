@@ -42,6 +42,12 @@
             <MudIcon Icon="@Icons.Material.Outlined.Difference" />
             <h3 style="justify-content:center">No code changes to review</h3>
             <div>When code is pushed to a connected repository, the model changes it implies land on a <b>code-sync</b> branch and appear here for review.</div>
+            @if (!Ws.ReadOnly && Ws.Session is not null)
+            {
+                <div class="empty-actions">
+                    <button class="empty-action primary chg-connect" @onclick="() => IntegrationsDialog.ShowCodeRepositoriesAsync(Dialogs)"><MudIcon Icon="@Icons.Material.Outlined.Extension" />Connect a repository</button>
+                </div>
+            }
         </div>
     }
     else

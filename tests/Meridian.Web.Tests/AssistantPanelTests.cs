@@ -56,6 +56,37 @@ public class AssistantPanelTests : TestContext
     }
 
     [Fact]
+    public void Off_On_A_Server_Links_To_The_AI_Settings_And_The_Providers_Chapter()
+    {
+        Setup(localMode: false);
+        var cut = RenderComponent<AssistantPanel>();
+        Assert.Contains("AI settings", cut.Find("button.ai-open-settings").TextContent);
+        Assert.Contains("How the providers work", cut.Find("button.ai-tour").TextContent);
+        Assert.Empty(cut.FindAll("button[data-provider]"));   // users can't pick the provider on a server
+    }
+
+    [Fact]
+    public void Off_On_The_Desktop_Switches_Provider_In_One_Click()
+    {
+        Setup(localMode: true);
+        var cut = RenderComponent<AssistantPanel>();
+        Assert.Equal(["local", "claudecode"], cut.FindAll("button[data-provider]").Select(b => b.GetAttribute("data-provider")));
+        cut.Find("button[data-provider='local']").Click();
+        Assert.Equal(AssistantProvider.Local, Services.GetRequiredService<AssistantSettings>().Provider);
+        cut.WaitForAssertion(() => Assert.Contains("Set up the local model in Settings", cut.Find("button.ai-open-settings").TextContent));
+        Assert.Contains("Use Claude with an API key", cut.Markup);
+    }
+
+    [Fact]
+    public void Off_By_The_Administrator_Offers_No_Settings_Links()
+    {
+        Setup(localMode: false, configuredKey: TestKey, enabled: "false");
+        var cut = RenderComponent<AssistantPanel>();
+        Assert.Empty(cut.FindAll("button.ai-open-settings"));
+        Assert.Empty(cut.FindAll(".ai-off-links"));
+    }
+
+    [Fact]
     public void Admin_Can_Turn_It_Off()
     {
         Setup(localMode: false, configuredKey: TestKey, enabled: "false");

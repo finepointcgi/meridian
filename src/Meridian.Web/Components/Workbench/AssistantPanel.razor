@@ -25,6 +25,22 @@
                             _ => "Add your key in Settings",
                         })</button>
                 }
+                else if (!Assistant.Settings.DisabledByAdmin)
+                {
+                    <button class="ai-btn ai-open-settings" @onclick="OpenSettings"><MudIcon Icon="@Icons.Material.Outlined.Settings" />AI settings</button>
+                }
+                @if (!Assistant.Settings.DisabledByAdmin)
+                {
+                    <div class="ai-off-links">
+                        @if (Assistant.Settings.LocalMode && Ws.Preferences.AssistantEnabled)
+                        {
+                            @if (Assistant.Settings.Provider != AssistantProvider.Anthropic) { <button class="ai-link" data-provider="anthropic" @onclick="() => UseProvider(AssistantProvider.Anthropic)">Use Claude with an API key</button> }
+                            @if (Assistant.Settings.Provider != AssistantProvider.Local) { <button class="ai-link" data-provider="local" @onclick="() => UseProvider(AssistantProvider.Local)">Use a local model</button> }
+                            @if (Assistant.Settings.Provider != AssistantProvider.ClaudeCode) { <button class="ai-link" data-provider="claudecode" @onclick="() => UseProvider(AssistantProvider.ClaudeCode)">Use Claude Code</button> }
+                        }
+                        <button class="ai-link ai-tour" @onclick="ProvidersTour">How the providers work</button>
+                    </div>
+                }
             </div>
         </div>
     }
@@ -180,6 +196,8 @@
     .ai-off { display: flex; gap: 14px; align-items: flex-start; padding: 16px; color: var(--text-2); max-width: 760px; }
     .ai-off-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
     .ai-off-text { margin-bottom: 10px; }
+    .ai-off-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
+    .ai-link { border: none; background: none; padding: 0; color: var(--accent-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
     .ai-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
     .ai-form-title { font-weight: 600; }
     .ai-form-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -519,6 +537,15 @@
     // ---------------------------------------------------------------- settings (the API key, model and on/off live in Settings ▸ AI assistant)
 
     private Task OpenSettings() => Shell?.OpenSettings(Meridian.Web.Settings.SettingsSection.Assistant) ?? Task.CompletedTask;
+
+    /// <summary>The off state's one-click provider switch (desktop / local mode, where the provider is per device), then Settings to finish.</summary>
+    private Task UseProvider(AssistantProvider provider)
+    {
+        Assistant.Settings.SetProvider(provider);
+        return OpenSettings();
+    }
+
+    private Task ProvidersTour() => Shell?.StartTourChapter("ai") ?? Task.CompletedTask;
 
     public override void Dispose()
     {
