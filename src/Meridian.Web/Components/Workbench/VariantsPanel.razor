@@ -1,0 +1,14 @@
+@inherits WorkspaceComponent
+
+<MudTabs Elevation="0" Rounded="false" PanelClass="pt-1" Class="variants-panel" @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="Configurations" Icon="@Icons.Material.Outlined.Checklist">
+        <VariantsTab />
+    </MudTabPanel>
+    <MudTabPanel Text="Trade studies" Icon="@Icons.Material.Outlined.Balance">
+        <TradeStudyTab />
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private int _tab;
+}

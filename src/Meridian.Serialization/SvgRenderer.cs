@@ -152,6 +152,7 @@ public static class SvgRenderer
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
         foreach (var e in d.Edges) RenderEdge(sb, d, e, bounds, waypoints?.Invoke(e), t);
+        if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
         foreach (var n in d.Nodes.Except(containers).OrderBy(n => Depth(d, n))) RenderNode(sb, model, d, n, bounds(n), t);
         RenderLegend(sb, model, d, bounds, t);
     }
@@ -284,7 +285,7 @@ public static class SvgRenderer
 
     private static void Head(StringBuilder sb, Pt from, Pt tip, ArrowHead head, SvgTheme t)
     {
-        if (head is ArrowHead.Dot or ArrowHead.CrowsFoot or ArrowHead.Bar)
+        if (head is ArrowHead.Dot or ArrowHead.CrowsFoot or ArrowHead.Bar or ArrowHead.HollowDot)
         {
             var len = Notation.Dist(from, tip);
             if (len < 1e-6) return;
@@ -294,6 +295,9 @@ public static class SvgRenderer
             {
                 case ArrowHead.Dot:
                     sb.Append($"<circle cx=\"{F(tip.X - ux * 4)}\" cy=\"{F(tip.Y - uy * 4)}\" r=\"3.5\" fill=\"{t.Edge}\"/>");
+                    break;
+                case ArrowHead.HollowDot:
+                    sb.Append($"<circle cx=\"{F(tip.X - ux * 5)}\" cy=\"{F(tip.Y - uy * 5)}\" r=\"4.5\" fill=\"{t.Background}\" stroke=\"{t.Edge}\" stroke-width=\"1.3\"/>");
                     break;
                 case ArrowHead.Bar:
                     sb.Append($"<line x1=\"{F(tip.X - ux * 10 + px * 7)}\" y1=\"{F(tip.Y - uy * 10 + py * 7)}\" x2=\"{F(tip.X - ux * 10 - px * 7)}\" y2=\"{F(tip.Y - uy * 10 - py * 7)}\" stroke=\"{t.Edge}\" stroke-width=\"1.3\"/>");
@@ -478,6 +482,7 @@ public static class SvgRenderer
                     }
                 }
                 else WrappedCentered(sb, b.Center.X, b.Center.Y, b.Width - 14, c.Name, t.Text);
+                FeatureDiagramSvg.RenderBadges(sb, n.Element, b, t);
                 break;
             default:
                 if (n.Element.Kind == ElementKind.ArchiElement)

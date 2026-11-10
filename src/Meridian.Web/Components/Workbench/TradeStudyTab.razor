@@ -1,0 +1,232 @@
+@using Meridian.Core.Analysis
+@using System.Globalization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="Trade study" Value="_studyId" ValueChanged="SelectStudy" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:220px"
+               ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
+        @foreach (var s in Ws.Model.OfKind(ElementKind.TradeStudy).OrderBy(s => s.Name)) { <MudSelectItem Value="@s.Id">@s.DisplayName</MudSelectItem> }
+    </MudSelect>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="Ws.ReadOnly" OnClick="NewStudy">New trade study</MudButton>
+    @if (Study != null)
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Download" Disabled="_result == null" OnClick="ExportCsv">Export CSV</MudButton>
+    }
+</div>
+
+@if (Study == null)
+{
+    <div class="var-hint">
+        A trade study compares alternatives (blocks or configurations) against weighted criteria (measures of effectiveness). Each criterion
+        reads a value from every alternative — a value property's default, a parametric result, or a tagged value (for a configuration,
+        the sum of its selected features' tagged values) — normalises it (min-max or a utility curve) and weights it. The study is stored
+        in the model as a Trade Study element.
+    </div>
+}
+else
+{
+    <div class="var-grid" style="grid-template-columns: minmax(380px, 1.1fr) 1fr">
+        <div>
+            <MudSelect T="string" Label="Alternatives" MultiSelection="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" MaxHeight="360"
+                       SelectedValues="_def.Alternatives" SelectedValuesChanged="SetAlternatives" Disabled="Ws.ReadOnly"
+                       MultiSelectionTextFunc="@(ids => string.Join(", ", ids.Select(id => Ws.Model.Find(id)?.DisplayName ?? "?")))">
+                @foreach (var a in TradeStudies.CandidateAlternatives(Ws.Model)) { <MudSelectItem Value="@a.Id">@a.DisplayName · @Metamodel.DisplayName(a.Kind)</MudSelectItem> }
+            </MudSelect>
+            <table class="req-table trade-criteria" style="margin-top:8px">
+                <thead><tr><th>Criterion</th><th>Value</th><th style="width:64px">Weight</th><th>Better</th><th>Source</th><th>Normalize</th><th></th></tr></thead>
+                <tbody>
+                    @for (var i = 0; i < _def.Criteria.Count; i++)
+                    {
+                        var idx = i;
+                        var c = _def.Criteria[i];
+                        <tr>
+                            <td><input class="cell-input" value="@c.Name" @onchange="e => Update(idx, x => x.Name = S(e))" /></td>
+                            <td>
+                                <input class="cell-input" list="trade-values" value="@c.Value" placeholder="@c.Name" @onchange="e => Update(idx, x => x.Value = S(e))" />
+                            </td>
+                            <td><input class="cell-input" type="number" step="any" min="0" value="@c.Weight.ToString(CultureInfo.InvariantCulture)" @onchange="e => Update(idx, x => x.Weight = Num(e.Value, x.Weight))" /></td>
+                            <td>
+                                <select class="cell-input" value="@(c.Minimize ? "minimize" : "maximize")" @onchange='e => Update(idx, x => x.Direction = S(e, "maximize"))'>
+                                    <option value="maximize">max ↑</option><option value="minimize">min ↓</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select class="cell-input" value="@c.Source" @onchange='e => Update(idx, x => x.Source = S(e, "property"))'>
+                                    <option value="property">property</option><option value="parametric">parametric</option><option value="tag">tagged value</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select class="cell-input" value="@c.Normalization" @onchange='e => Update(idx, x => x.Normalization = S(e, "minmax"))'>
+                                    <option value="minmax">min-max</option><option value="utility">utility</option>
+                                </select>
+                                @if (c.Normalization == "utility")
+                                {
+                                    <input class="cell-input" value="@c.Utility" placeholder="x:u, x:u  e.g. 100:0, 300:1" @onchange="e => Update(idx, x => x.Utility = S(e))" />
+                                }
+                            </td>
+                            <td><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="Ws.ReadOnly" OnClick="() => Remove(idx)" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <datalist id="trade-values">
+                @foreach (var n in _valueNames) { <option value="@n"></option> }
+            </datalist>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" Disabled="Ws.ReadOnly" OnClick="AddCriterion">Add criterion</MudButton>
+        </div>
+        <div>
+            @if (_result is { } r)
+            {
+                @foreach (var p in r.Problems) { <div class="var-problem">⚠ @p</div> }
+                @if (r.Rows.Count > 0 && r.Criteria.Count > 0)
+                {
+                    <div class="section-label" style="padding-left:0">Weighted score</div>
+                    @((MarkupString)SvgCharts.Bars(r.Ranked.Select(x => (x.Alternative.DisplayName, x.Score)).ToList()))
+                    <table class="req-table" style="margin-top:6px">
+                        <thead>
+                            <tr><th>#</th><th>Alternative</th><th>Score</th>
+                                @for (var j = 0; j < r.Criteria.Count; j++) { <th>@r.Criteria[j].Name (w @r.Weights[j].ToString("0.##", CultureInfo.InvariantCulture))</th> }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in r.Ranked)
+                            {
+                                var alt = row.Alternative;
+                                <tr @onclick="() => Shell.Navigate(alt)" style="cursor:pointer">
+                                    <td>@row.Rank</td><td>@alt.DisplayName</td><td style="font-weight:600">@row.Score.ToString("0.###", CultureInfo.InvariantCulture)</td>
+                                    @for (var j = 0; j < r.Criteria.Count; j++)
+                                    {
+                                        <td title="normalized @row.Normalized[j].ToString("0.###", CultureInfo.InvariantCulture)">@(row.Raw[j]?.ToString("G5", CultureInfo.InvariantCulture) ?? "—") <span style="color:var(--text-3)">→ @row.Normalized[j].ToString("0.##", CultureInfo.InvariantCulture)</span></td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <div class="section-label" style="padding-left:0">Sensitivity (each weight ×0.5 … ×1.5, others unchanged)</div>
+                    <table class="req-table">
+                        <thead><tr><th>Criterion</th>@foreach (var f in Factors) { <th>×@f.ToString(CultureInfo.InvariantCulture)</th> }<th>Winner changes at share</th></tr></thead>
+                        <tbody>
+                            @foreach (var g in _sensitivity.GroupBy(x => x.Criterion))
+                            {
+                                var th = _thresholds.FirstOrDefault(t => t.Criterion == g.Key);
+                                <tr>
+                                    <td>@g.Key</td>
+                                    @foreach (var c in g)
+                                    {
+                                        <td style="color:@(c.WinnerChanged ? "var(--danger)" : c.RankChanges > 0 ? "var(--warn)" : "var(--text-3)")" title="@string.Join(" > ", c.Order)">
+                                            @(c.WinnerChanged ? $"→ {c.Winner}" : c.RankChanges > 0 ? $"{c.RankChanges} rank changes" : "same")
+                                        </td>
+                                    }
+                                    <td>
+                                        @if (th?.SwitchShare is { } s) { <span>@th.CurrentShare.ToString("P0", CultureInfo.InvariantCulture) → @s.ToString("P0", CultureInfo.InvariantCulture) (@th.NewWinner)</span> }
+                                        else { <span style="color:var(--text-3)">never (robust)</span> }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly double[] Factors = [0.5, 0.75, 1.25, 1.5];
+    private string? _studyId;
+    private TradeStudyDefinition _def = new();
+    private TradeResult? _result;
+    private IReadOnlyList<SensitivityCase> _sensitivity = [];
+    private IReadOnlyList<WeightThreshold> _thresholds = [];
+    private List<string> _valueNames = new();
+
+    private Element? Study => Ws.Model.Find(_studyId) is { Kind: ElementKind.TradeStudy } s ? s : null;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _studyId = Ws.Model.OfKind(ElementKind.TradeStudy).OrderBy(s => s.Name).FirstOrDefault()?.Id;
+        Recompute();
+    }
+
+    protected override void OnWorkspaceChanged() => Recompute();
+
+    private void Recompute()
+    {
+        if (Study is not { } s) { _result = null; return; }
+        _def = TradeStudyDefinition.Parse(s);
+        _result = TradeStudies.Evaluate(Ws.Model, _def);
+        _sensitivity = _def.Criteria.Count > 0 && _result.Rows.Count > 1 ? TradeStudies.Sensitivity(Ws.Model, _def, Factors) : [];
+        _thresholds = _def.Criteria.Count > 1 && _result.Rows.Count > 1 ? TradeStudies.Thresholds(Ws.Model, _def, 50) : [];
+        _valueNames = _def.Alternatives.Select(Ws.Model.Find).OfType<Element>().SelectMany(a => TradeStudies.ValueNames(Ws.Model, a)).Distinct().OrderBy(x => x).ToList();
+    }
+
+    private static string S(ChangeEventArgs e, string fallback = "") => e.Value?.ToString() ?? fallback;
+
+    private static double Num(object? v, double fallback) =>
+        double.TryParse(v?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && d >= 0 ? d : fallback;
+
+    private void SelectStudy(string id)
+    {
+        _studyId = id;
+        Recompute();
+        if (Study is { } s) Ws.Select(s);
+    }
+
+    private void Save(TradeStudyDefinition def)
+    {
+        if (Study is not { } s) return;
+        try { def.Save(Ws.Model, s); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+        Recompute();
+    }
+
+    private void NewStudy()
+    {
+        try
+        {
+            var owner = Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+            var configs = Ws.Model.OfKind(ElementKind.Configuration).ToList();
+            var def = new TradeStudyDefinition
+            {
+                Alternatives = configs.Count >= 2 ? configs.Select(c => c.Id).ToList() : [],
+                Criteria = configs.Count >= 2 ? [new TradeCriterion { Name = "cost", Direction = "minimize", Source = "tag" }] : [],
+            };
+            var s = TradeStudies.Create(Ws.Model, owner, Ws.Model.UniqueName(owner, ElementKind.TradeStudy), def);
+            SelectStudy(s.Id);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void SetAlternatives(IEnumerable<string> ids)
+    {
+        var def = _def.Clone();
+        def.Alternatives = ids.ToList();
+        Save(def);
+    }
+
+    private void Update(int index, Action<TradeCriterion> change)
+    {
+        var def = _def.Clone();
+        if (index >= def.Criteria.Count) return;
+        change(def.Criteria[index]);
+        Save(def);
+    }
+
+    private void AddCriterion()
+    {
+        var def = _def.Clone();
+        def.Criteria.Add(new TradeCriterion { Name = _valueNames.FirstOrDefault(n => def.Criteria.All(c => c.ValueName != n)) ?? $"criterion{def.Criteria.Count + 1}" });
+        Save(def);
+    }
+
+    private void Remove(int index)
+    {
+        var def = _def.Clone();
+        def.Criteria.RemoveAt(index);
+        Save(def);
+    }
+
+    private Task ExportCsv() => _result == null || Study == null ? Task.CompletedTask
+        : Shell.DownloadTextFile($"{Study.Name}.csv", "text/csv", TradeStudies.ToCsv(_result));
+}

@@ -43,7 +43,8 @@ public static class Parametrics
         }
     }
 
-    public static ParametricResult Solve(ModelRepository m, Element block)
+    /// <param name="overrides">Input values by value property id, replacing defaults (Monte Carlo samples, what-if runs).</param>
+    public static ParametricResult Solve(ModelRepository m, Element block, IReadOnlyDictionary<string, double>? overrides = null)
     {
         var problems = new List<string>();
         var known = new Dictionary<string, double>(StringComparer.Ordinal);   // variable key -> value
@@ -58,7 +59,8 @@ public static class Parametrics
         foreach (var p in block.OwnedElements.Where(p => p.Kind == ElementKind.Property && m.ResolveType(p)?.Kind != ElementKind.ConstraintBlock && m.ResolveType(p)?.Kind is not (ElementKind.Block or ElementKind.Class)))
         {
             names[p.Id] = (p, p.Name);
-            if (p.Get(FieldKeys.DefaultValue) is { Length: > 0 } dv)
+            if (overrides != null && overrides.TryGetValue(p.Id, out var ov)) known[p.Id] = ov;
+            else if (p.Get(FieldKeys.DefaultValue) is { Length: > 0 } dv)
             {
                 if (double.TryParse(dv, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) known[p.Id] = v;
                 else

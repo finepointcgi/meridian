@@ -29,6 +29,7 @@ public static class AutoLayout
         foreach (var e in d.Edges)
         {
             if (ReferenceEquals(e.Source, e.Target)) continue;
+            if (e.Relationship.Kind is ElementKind.Requires or ElementKind.Excludes) continue;   // cross-tree constraints do not shape the feature tree
             var st = Notation.StyleOf(e.Relationship);
             var targetAbove = st.TargetHead == ArrowHead.HollowTriangle || st.Dashed && e.Relationship.Kind is not ElementKind.ObjectFlow;
             pairs.Add(targetAbove ? (e.Target, e.Source) : (e.Source, e.Target));

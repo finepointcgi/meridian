@@ -1,103 +1,20 @@
-@using Meridian.Core.Analysis
 @inherits WorkspaceComponent
 
-<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
-    <MudSelect T="string" Label="Behavior" @bind-Value="_behaviorId" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:260px"
-               ToStringFunc="@(id => Ws.Model.Find(id)?.QualifiedName ?? "")">
-        @foreach (var b in Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Activity or ElementKind.StateMachine).OrderBy(e => e.Name))
-        {
-            <MudSelectItem Value="@b.Id">@b.DisplayName · @Metamodel.DisplayName(b.Kind)</MudSelectItem>
-        }
-    </MudSelect>
-    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="_behaviorId == null" OnClick="Start">@(_sim == null ? "Start" : "Restart")</MudButton>
-    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SkipNext" Disabled="@(_sim == null || _sim.Finished)" OnClick="Step">Step</MudButton>
-    @if (_sim is ActivitySimulator)
-    {
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FastForward" Disabled="_sim.Finished" OnClick="Run">Run to end</MudButton>
-    }
-    @if (_sim is StateMachineSimulator sm)
-    {
-        foreach (var t in sm.EnabledEvents)
-        {
-            var evt = t.Name;
-            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Outlined.Bolt" OnClick="() => Send(evt)">@evt</MudButton>
-        }
-    }
-    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Stop" Disabled="_sim == null" OnClick="Stop">Stop</MudButton>
-    @if (_sim != null)
-    {
-        <MudChip T="string" Size="Size.Small" Color="@(_sim.Finished ? Color.Success : Color.Info)" Variant="Variant.Outlined">@(_sim.Finished ? "finished" : "running") · @_sim.Steps steps</MudChip>
-    }
-</div>
-@if (_sim != null)
-{
-    <div style="display:grid; grid-template-columns: 260px 1fr; gap:12px; padding:0 12px 12px">
-        <div>
-            <div class="section-label" style="padding-left:0">Variables</div>
-            @foreach (var (name, value) in _sim.Variables.OrderBy(v => v.Key).ToList())
-            {
-                var n = name;
-                <div class="d-flex align-center gap-2" style="margin-bottom:4px">
-                    <span style="min-width:96px; font-size:12px; color:var(--text-2)">@n</span>
-                    <MudNumericField T="double" Value="value" ValueChanged="v => SetVar(n, v)" Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" Immediate="false" />
-                </div>
-            }
-            @if (_sim.Variables.Count == 0) { <div style="font-size:12px; color:var(--text-3)">No variables yet. Value properties of the owning block and variables assigned by actions/effects appear here.</div> }
-        </div>
-        <pre class="output" style="margin:0; max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:8px">@string.Join("\n", _sim.Log)</pre>
-    </div>
-}
-else
-{
-    <div style="padding:4px 14px 14px; color:var(--text-3); font-size:12.5px">
-        Pick an activity or state machine and press Start. Activities move tokens through control flows (decisions use guards, fork/join wait for all inputs);
-        action bodies such as <code>count = count + 1</code> update variables. State machines take completion transitions with Step and named transitions as events.
-        Active nodes glow on the diagram.
-    </div>
-}
+<MudTabs Elevation="0" Rounded="false" PanelClass="pt-1" @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="Step" Icon="@Icons.Material.Outlined.SkipNext">
+        <SimulationStepTab />
+    </MudTabPanel>
+    <MudTabPanel Text="Timed (discrete event)" Icon="@Icons.Material.Outlined.Timer">
+        <TimedSimTab />
+    </MudTabPanel>
+    <MudTabPanel Text="Monte Carlo" Icon="@Icons.Material.Outlined.Casino">
+        <MonteCarloTab />
+    </MudTabPanel>
+    <MudTabPanel Text="FMI import" Icon="@Icons.Material.Outlined.Extension">
+        <FmiTab />
+    </MudTabPanel>
+</MudTabs>
 
 @code {
-    private string? _behaviorId;
-    private Simulator? _sim;
-
-    protected override void OnInitialized()
-    {
-        base.OnInitialized();
-        _behaviorId ??= Ws.Model.AllElements.FirstOrDefault(e => e.Kind is ElementKind.StateMachine or ElementKind.Activity)?.Id;
-    }
-
-    private void Start()
-    {
-        if (Ws.Model.Find(_behaviorId) is not { } behavior) return;
-        _sim = behavior.Kind == ElementKind.Activity ? new ActivitySimulator(Ws.Model, behavior) : new StateMachineSimulator(Ws.Model, behavior);
-        Ws.DrillDown(behavior);
-        _sim.Start();
-        Sync();
-    }
-
-    private void Step() { _sim?.Step(); Sync(); }
-    private void Run() { _sim?.Run(); Sync(); }
-    private void Send(string e) { (_sim as StateMachineSimulator)?.Send(e); Sync(); }
-
-    private void Stop()
-    {
-        _sim = null;
-        Ws.SimHighlight.Clear();
-        Ws.Bump();
-    }
-
-    private void SetVar(string name, double value)
-    {
-        if (_sim == null) return;
-        _sim.Variables[name] = value;
-        _sim.Log.Add($"  (set {name} = {value})");
-        Sync();
-    }
-
-    private void Sync()
-    {
-        Ws.SimHighlight.Clear();
-        if (_sim != null) foreach (var e in _sim.Active) Ws.SimHighlight.Add(e.Id);
-        Ws.Bump();
-    }
+    private int _tab;
 }

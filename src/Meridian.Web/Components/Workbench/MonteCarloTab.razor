@@ -1,0 +1,117 @@
+@using Meridian.Core.Analysis
+@using System.Globalization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="Block" @bind-Value="_blockId" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:200px"
+               ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
+        @foreach (var b in Blocks()) { <MudSelectItem Value="@b.Id">@b.DisplayName</MudSelectItem> }
+    </MudSelect>
+    <MudNumericField T="int" Label="Samples" @bind-Value="_n" Min="10" Max="50000" Step="500" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" />
+    <MudNumericField T="int" Label="Seed" @bind-Value="_seed" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:100px" />
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Casino" Disabled="@(_blockId == null || _running)" OnClick="Run">@(_running ? "Running…" : "Run")</MudButton>
+    @if (Ws.Model.Find(_blockId) is { } block)
+    {
+        var inputs = MonteCarlo.Inputs(block);
+        <span style="font-size:12px; color:var(--text-3)">
+            @(inputs.Count == 0 ? "No inputs have a distribution yet — set one on a value property, e.g. normal(1450, 50)." : "Inputs: " + string.Join(", ", inputs.Select(i => $"{i.Property.Name} ~ {i.Distribution}")))
+        </span>
+    }
+</div>
+@if (_run is { } run)
+{
+    foreach (var p in run.Problems) { <div class="var-problem" style="margin:0 14px">⚠ @p</div> }
+    <div class="d-flex align-center gap-2 px-3 pb-2 flex-wrap">
+        <MudSelect T="string" Label="Output" @bind-Value="_output" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:180px">
+            @foreach (var o in run.Outputs) { <MudSelectItem Value="@o">@o</MudSelectItem> }
+        </MudSelect>
+        <MudSelect T="string" Label="Requirement" Value="_reqId" ValueChanged="PickRequirement" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:200px" Clearable="true"
+                   ToStringFunc="@(id => Ws.Model.Find(id) is { } r ? $"{r.Get(FieldKeys.RequirementId)} {r.Name}" : "")">
+            @foreach (var r in Ws.Model.OfKind(ElementKind.Requirement).OrderBy(r => r.Get(FieldKeys.RequirementId)))
+            {
+                <MudSelectItem Value="@r.Id">@r.Get(FieldKeys.RequirementId) @r.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="string" Label="Meets if" @bind-Value="_op" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:90px">
+            @foreach (var o in new[] { "<", "<=", ">", ">=" }) { <MudSelectItem Value="@o">@o</MudSelectItem> }
+        </MudSelect>
+        <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px" HideSpinButtons="true" />
+    </div>
+    @if (_output != null && run.Samples.TryGetValue(_output, out var xs))
+    {
+        var st = SampleStats.Of(xs);
+        var (edges, counts) = MonteCarlo.Histogram(xs, 24);
+        var op = _op;
+        <div style="display:grid; grid-template-columns: auto 1fr; gap:16px; padding:0 12px 12px; align-items:start">
+            @((MarkupString)SvgCharts.Histogram(edges, counts, _threshold, _threshold is { } th ? x => MonteCarlo.Meets(x, op, th) : null))
+            <table class="req-table" style="max-width:340px">
+                <tbody>
+                    <tr><td>Samples</td><td><b>@st.Count</b> of @run.Requested@(run.Failed > 0 ? $" ({run.Failed} failed)" : "")</td></tr>
+                    <tr><td>Mean</td><td><b>@G(st.Mean)</b></td></tr>
+                    <tr><td>Std deviation</td><td><b>@G(st.StdDev)</b></td></tr>
+                    <tr><td>Min / max</td><td>@G(st.Min) / @G(st.Max)</td></tr>
+                    <tr><td>P5 / P50 / P95</td><td>@G(st.P5) / @G(st.P50) / @G(st.P95)</td></tr>
+                    @if (_threshold is { } t)
+                    {
+                        var p = MonteCarlo.Probability(xs, op, t);
+                        <tr><td>P(@_output @op @G(t))</td><td><b style="color:@(p >= 0.95 ? "var(--ok)" : p >= 0.5 ? "var(--warn)" : "var(--danger)")">@p.ToString("P1", CultureInfo.InvariantCulture)</b></td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+else
+{
+    <div class="var-hint">
+        Give value properties a <b>distribution</b> in the inspector — <code>normal(mean, sd)</code>, <code>uniform(min, max)</code>,
+        <code>triangular(min, mode, max)</code> or <code>lognormal(mu, sigma)</code> — then run N samples through the block's parametric
+        constraints. Pick an output to see its histogram, mean, standard deviation and percentiles, and the probability of meeting a
+        requirement's threshold (read from the requirement text when possible).
+    </div>
+}
+
+@code {
+    private string? _blockId;
+    private int _n = 1000;
+    private int _seed = 12345;
+    private bool _running;
+    private MonteCarloRun? _run;
+    private string? _output;
+    private string? _reqId;
+    private string _op = "<=";
+    private double? _threshold;
+
+    private static string G(double v) => v.ToString("G5", CultureInfo.InvariantCulture);
+
+    private IEnumerable<Element> Blocks() =>
+        Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Block or ElementKind.Class && Parametrics.ConstraintUsages(Ws.Model, e).Any()).OrderBy(e => e.Name);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _blockId ??= Blocks().FirstOrDefault(b => MonteCarlo.Inputs(b).Count > 0)?.Id ?? Blocks().FirstOrDefault()?.Id;
+    }
+
+    private async Task Run()
+    {
+        if (Ws.Model.Find(_blockId) is not { } block) return;
+        _running = true;
+        var model = Ws.Model; var n = Math.Clamp(_n, 1, 50000); var seed = _seed;
+        try { _run = await Task.Run(() => MonteCarlo.Run(model, block, n, seed)); }
+        finally { _running = false; }
+        if (_output == null || !_run.Samples.ContainsKey(_output))
+            _output = _run.Outputs.FirstOrDefault(o => !block.OwnedElements.Any(p => p.Name == o && MonteCarlo.Inputs(block).Any(i => ReferenceEquals(i.Property, p)))) ?? _run.Outputs.FirstOrDefault();
+        Ws.SetStatus($"Monte Carlo: {_run.Samples.Values.FirstOrDefault()?.Count ?? 0} samples of {block.Name}");
+    }
+
+    private void PickRequirement(string? id)
+    {
+        _reqId = id;
+        if (Ws.Model.Find(id) is { } r && MonteCarlo.ParseThreshold(r.Get(FieldKeys.Text)) is { } t)
+        {
+            _op = t.Op;
+            _threshold = t.Value;
+        }
+    }
+}

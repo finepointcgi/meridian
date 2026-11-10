@@ -19,6 +19,8 @@ public static class UiKinds
         ElementKind.Package or ElementKind.Model => "#5b6577",
         ElementKind.Diagram => "#0b8a6a",
         ElementKind.Operation => "#8a5a00",
+        ElementKind.Feature or ElementKind.Configuration or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes => "#8e44ad",
+        ElementKind.TradeStudy => "#d35400",
         _ => "#6b7586",
     };
 
@@ -32,6 +34,7 @@ public static class UiKinds
         ElementKind.Action => "a", ElementKind.StateMachine => "SM", ElementKind.State => "S", ElementKind.Diagram => "D",
         ElementKind.Comment => "”", ElementKind.InitialNode or ElementKind.InitialState => "●", ElementKind.ActivityFinalNode or ElementKind.FinalState => "◉",
         ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬",
+        ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
     };
@@ -118,6 +121,12 @@ public static class UiKinds
         ElementKind.Generalization or ElementKind.Realization => MudBlazor.Icons.Material.Outlined.NorthEast,
         ElementKind.Composition or ElementKind.Aggregation => MudBlazor.Icons.Material.Outlined.Diamond,
         ElementKind.Include or ElementKind.Extend => MudBlazor.Icons.Material.Outlined.Login,
+        ElementKind.Feature => MudBlazor.Icons.Material.Outlined.ToggleOn,
+        ElementKind.Configuration => MudBlazor.Icons.Material.Outlined.Checklist,
+        ElementKind.TradeStudy => MudBlazor.Icons.Material.Outlined.Balance,
+        ElementKind.FeatureDecomposition => MudBlazor.Icons.Material.Outlined.AccountTree,
+        ElementKind.Requires => MudBlazor.Icons.Material.Outlined.Link,
+        ElementKind.Excludes => MudBlazor.Icons.Material.Outlined.LinkOff,
         _ => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
     };
 
@@ -176,6 +185,7 @@ public static class UiKinds
         DiagramType.ArchiMate => MudBlazor.Icons.Material.Outlined.Layers,
         DiagramType.Database => MudBlazor.Icons.Material.Outlined.Storage,
         DiagramType.Whiteboard => MudBlazor.Icons.Material.Outlined.Draw,
+        DiagramType.FeatureModel => MudBlazor.Icons.Material.Outlined.ToggleOn,
         _ => MudBlazor.Icons.Material.Outlined.Class,
     };
 

@@ -128,13 +128,16 @@ public static class XmiExchange
         FieldKeys.Behavior, FieldKeys.Represents, FieldKeys.Entry, FieldKeys.Exit, FieldKeys.DoActivity, FieldKeys.Metaclass,
         FieldKeys.TagType, FieldKeys.TagValues, FieldKeys.Color, FieldKeys.SqlType, FieldKeys.PrimaryKey, FieldKeys.Nullable,
         FieldKeys.Unique, FieldKeys.FkColumns, FieldKeys.RefColumns,
+        .. ExtFieldKeys.All,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
     private static bool NeedsKindMarker(ElementKind k) => k is ElementKind.BpmnPool or ElementKind.BpmnLane or ElementKind.BpmnNode
         or ElementKind.ArchiElement or ElementKind.Table or ElementKind.Column or ElementKind.TagDefinition
         or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.ForeignKey or ElementKind.Binding
-        or ElementKind.Shape or ElementKind.Line;
+        or ElementKind.Shape or ElementKind.Line
+        or ElementKind.Feature or ElementKind.Configuration or ElementKind.TradeStudy
+        or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes;
     private static XAttribute Type(string t) => new(Xmi + "type", "uml:" + t);
 
     private static void Emit(ModelRepository m, XElement parent, Element e, List<XElement> st, XElement ext)

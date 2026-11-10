@@ -31,6 +31,7 @@ public static class Notation
         ElementKind.BpmnFlow => Subtypes.BpmnFlowStyle(r.Get(FieldKeys.Subtype)),
         ElementKind.ArchiRelation => Subtypes.ArchiStyle(r.Get(FieldKeys.Subtype)),
         ElementKind.Line => Subtypes.LineStyle(r.Get(FieldKeys.Subtype)),
+        ElementKind.FeatureDecomposition => VariabilityNotation.DecompositionStyle(r),
         _ => Metamodel.Style(r.Kind),
     };
 
@@ -143,6 +144,7 @@ public static class Notation
         }
 
         if (ShapeOf(e) == NodeShape.Rectangle) AddTraceCompartments(model, e, comps);
+        VariabilityNotation.Decorate(model, e, ref keyword, comps);
         return new NodeContent(keyword, name, e.IsAbstract, comps);
     }
 

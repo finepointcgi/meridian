@@ -1,0 +1,278 @@
+@using Meridian.Core.Analysis
+@using Meridian.Core.Samples
+@using Meridian.Serialization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="Configuration" Value="_configId" ValueChanged="SelectConfig" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:220px"
+               ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
+        @foreach (var c in Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name))
+        {
+            <MudSelectItem Value="@c.Id">@c.DisplayName</MudSelectItem>
+        }
+    </MudSelect>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="@(Ws.ReadOnly || !_features.Any())" OnClick="NewConfig">New configuration</MudButton>
+    <MudCheckBox T="bool" @bind-Value="_propagate" Label="Auto-select parents, mandatory &amp; required" Size="Size.Small" Dense="true" />
+    <MudCheckBox T="bool" Value="_highlight" ValueChanged="SetHighlight" Label="Highlight excluded on diagrams" Size="Size.Small" Dense="true" />
+    <span style="flex:1"></span>
+    @if (!_features.Any())
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="Ws.ReadOnly" StartIcon="@Icons.Material.Outlined.AutoAwesome" OnClick="AddExample">Add example product line</MudButton>
+    }
+    else
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AccountTree" Disabled="Ws.ReadOnly" OnClick="GenerateDiagram">Feature diagram</MudButton>
+    }
+</div>
+
+@if (!_features.Any())
+{
+    <div class="var-hint">
+        Build a feature model with <b>Feature</b> elements (nest them in the model tree, or draw <b>Feature Decomposition</b> links on a
+        Feature Model diagram), set each feature's kind (mandatory / optional / alternative / or) and add <b>Requires</b> / <b>Excludes</b>
+        constraints. Give any element a <b>presence condition</b> such as <code>GPS and not Basic</code> in the inspector; a configuration then
+        resolves the 150% model into one variant.
+    </div>
+}
+else
+{
+    <div class="var-grid">
+        <div class="var-tree">
+            <div class="section-label" style="padding-left:0">Features @(_products is { } p ? $"· {p} valid product{(p == 1 ? "" : "s")}" : "")</div>
+            @foreach (var (f, depth) in Variability.Tree(Ws.Model))
+            {
+                var feature = f;
+                var on = _selected.Contains(feature);
+                <div class="var-feature" style="padding-left:@(depth * 16)px">
+                    <MudCheckBox T="bool" Value="on" ValueChanged="v => Toggle(feature, v)" Disabled="@(Config == null || Ws.ReadOnly)" Size="Size.Small" Dense="true" />
+                    <span class="link" @onclick="() => Ws.Select(feature)">@feature.DisplayName</span>
+                    <span class="var-kind">@(depth == 0 ? "root" : Variability.KindOf(feature))</span>
+                    @foreach (var r in Ws.Model.Outgoing(feature).Where(r => r.Kind is ElementKind.Requires or ElementKind.Excludes))
+                    {
+                        <span class="var-kind">@(r.Kind == ElementKind.Requires ? "requires" : "excludes") @r.Target.Name</span>
+                    }
+                </div>
+            }
+        </div>
+        <div>
+            @if (Config == null)
+            {
+                <div class="var-hint">Pick or create a configuration to select features.</div>
+            }
+            else
+            {
+                <div class="section-label" style="padding-left:0">
+                    @if (_problems.Count == 0) { <span style="color:var(--ok)">✓ Valid configuration</span> }
+                    else { <span style="color:var(--danger)">@_problems.Count problem@(_problems.Count == 1 ? "" : "s")</span> }
+                </div>
+                @foreach (var pr in _problems)
+                {
+                    var problem = pr;
+                    <div class="var-problem" @onclick="() => { if (problem.Feature != null) Ws.Select(problem.Feature); }">⚠ @problem.Message</div>
+                }
+                @if (_resolution is { } res)
+                {
+                    var conditional = Ws.Model.AllElements.Where(e => Variability.PresenceCondition(e).Length > 0).ToList();
+                    <div class="section-label" style="padding-left:0">
+                        Variant: @res.Included.Count(e => e is not Diagram) included · @res.Excluded.Count excluded · @conditional.Count with presence conditions
+                    </div>
+                    @foreach (var pr in res.Problems) { <div class="var-problem">⚠ @pr.Message</div> }
+                    <table class="req-table" style="margin-bottom:8px">
+                        <thead><tr><th>Element</th><th>Presence condition</th><th style="width:80px">In variant</th></tr></thead>
+                        <tbody>
+                            @foreach (var e in conditional.Concat(res.ExcludedRoots).Distinct().Take(200))
+                            {
+                                var el = e;
+                                <tr @onclick="() => Shell.Navigate(el)" style="cursor:pointer">
+                                    <td>@UiKinds.Label(Ws.Model, el)</td>
+                                    <td><code>@Variability.PresenceCondition(el)</code></td>
+                                    <td style="color:@(res.IsIncluded(el) ? "var(--ok)" : "var(--danger)")">@(res.IsIncluded(el) ? "yes" : "no")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.NoteAdd" Disabled="@(Ws.User == null)" OnClick="NewProject">New project from variant</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.FileCopy" Disabled="@(Ws.ReadOnly || TargetPackage == null)" OnClick="CopyPackage">
+                            Copy @(TargetPackage?.Name ?? "selected package") as variant
+                        </MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download" OnClick="ExportVariant">Export variant (.meridian)</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.TableView" OnClick="ExportCsv">Inclusion CSV</MudButton>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private string? _configId;
+    private bool _propagate = true;
+    private bool _highlight;
+    private HashSet<Element> _selected = new(ReferenceEqualityComparer.Instance);
+    private IReadOnlyList<ConfigurationProblem> _problems = [];
+    private VariantResolution? _resolution;
+    private int? _products;
+    private List<Element> _features = new();
+
+    private Element? Config => Ws.Model.Find(_configId) is { Kind: ElementKind.Configuration } c ? c : null;
+
+    /// <summary>The package to copy: the selection's package, else the first package that contains conditional elements.</summary>
+    private Element? TargetPackage =>
+        Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind == ElementKind.Package)
+        ?? Ws.Model.AllElements.Where(e => Variability.PresenceCondition(e).Length > 0)
+            .Select(e => e.AncestorsAndSelf().FirstOrDefault(a => a.Kind == ElementKind.Package)).FirstOrDefault(p => p != null);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        _configId = Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name).FirstOrDefault()?.Id;
+        Recompute();
+    }
+
+    protected override void OnWorkspaceChanged() => Recompute();
+
+    private void Recompute()
+    {
+        _features = Variability.Features(Ws.Model).ToList();
+        if (Config is { } c)
+        {
+            _selected = Variability.Selected(Ws.Model, c);
+            _problems = Variability.Validate(Ws.Model, c);
+            _resolution = Variability.Resolve(Ws.Model, _selected);
+        }
+        else { _selected = new(ReferenceEqualityComparer.Instance); _problems = []; _resolution = null; }
+        _products = _features.Count is > 0 and <= 22 ? Variability.EnumerateProducts(Ws.Model, 5000).Count : null;
+        if (_highlight) ApplyHighlight();
+    }
+
+    private void SelectConfig(string id)
+    {
+        _configId = id;
+        Recompute();
+        if (Config is { } c) Ws.Select(c);
+    }
+
+    private void NewConfig()
+    {
+        try
+        {
+            var owner = Variability.Roots(Ws.Model).FirstOrDefault()?.Owner is { } o && Metamodel.CanOwn(o.Kind, ElementKind.Configuration) ? o : Ws.Model.Root;
+            var c = Ws.Model.Create(owner, ElementKind.Configuration);
+            Ws.Model.Set(c, ExtFieldKeys.SelectedFeatures, Variability.Serialize(Variability.Propagate(Ws.Model, Variability.Roots(Ws.Model))));
+            SelectConfig(c.Id);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Toggle(Element feature, bool on)
+    {
+        if (Config is not { } c) return;
+        var set = new HashSet<Element>(_selected, ReferenceEqualityComparer.Instance);
+        if (on)
+        {
+            set.Add(feature);
+            if (_propagate)
+            {
+                // Picking an alternative deselects its siblings.
+                if (Variability.KindOf(feature) == "alternative" && Variability.Parent(Ws.Model, feature) is { } parent)
+                    foreach (var sib in Variability.Children(Ws.Model, parent).Where(s => !ReferenceEquals(s, feature) && Variability.KindOf(s) == "alternative")) RemoveSubtree(set, sib);
+                set = Variability.Propagate(Ws.Model, set);
+            }
+        }
+        else if (_propagate) RemoveSubtree(set, feature);
+        else set.Remove(feature);
+        try { Ws.Model.Set(c, ExtFieldKeys.SelectedFeatures, Variability.Serialize(Variability.Tree(Ws.Model).Select(t => t.Feature).Where(set.Contains))); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void RemoveSubtree(HashSet<Element> set, Element f)
+    {
+        set.Remove(f);
+        foreach (var c in Variability.Children(Ws.Model, f)) RemoveSubtree(set, c);
+    }
+
+    private void SetHighlight(bool on)
+    {
+        _highlight = on;
+        if (on) ApplyHighlight();
+        else { Ws.SimHighlight.Clear(); Ws.Bump(); }
+    }
+
+    private void ApplyHighlight()
+    {
+        Ws.SimHighlight.Clear();
+        if (_resolution != null) foreach (var e in _resolution.Excluded) Ws.SimHighlight.Add(e.Id);
+    }
+
+    private ModelRepository ResolvedCopy()
+    {
+        var copy = ProjectFile.Deserialize(ProjectFile.Serialize(Ws.Model));
+        Variability.ApplyTo(copy, _resolution!);
+        copy.History.Clear();
+        return copy;
+    }
+
+    private async Task NewProject()
+    {
+        if (_resolution == null || Config == null) return;
+        var name = $"{Ws.Model.Root.Name} — {Config.Name}";
+        await Shell.CreateProjectFromModel(ResolvedCopy(), name);
+        Ws.SetStatus($"Created project '{name}' from the variant");
+    }
+
+    private void CopyPackage()
+    {
+        if (_resolution == null || Config == null || TargetPackage is not { } pkg) return;
+        try
+        {
+            var copy = Variability.CopyPackageAsVariant(Ws.Model, pkg, _resolution, Config.Name);
+            Ws.Select(copy);
+            Ws.SetStatus($"Created '{copy.Name}' (diagrams are not copied)");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private Task ExportVariant() => _resolution == null || Config == null ? Task.CompletedTask
+        : Shell.DownloadTextFile($"{Ws.Model.Root.Name} - {Config.Name}.meridian", "application/json", ProjectFile.Serialize(ResolvedCopy()));
+
+    private Task ExportCsv() => _resolution == null || Config == null ? Task.CompletedTask
+        : Shell.DownloadTextFile($"{Config.Name} inclusion.csv", "text/csv", Variability.InclusionCsv(Ws.Model, _resolution));
+
+    private void AddExample()
+    {
+        try
+        {
+            var target = Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+            ProductLineSample.AddTo(Ws.Model, target);
+            _configId = Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name).FirstOrDefault()?.Id;
+            Recompute();
+            if (Ws.Model.Diagrams.LastOrDefault(d => d.DiagramType == DiagramType.FeatureModel) is { } d) Ws.Open(d);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void GenerateDiagram()
+    {
+        try
+        {
+            var owner = Variability.Roots(Ws.Model).FirstOrDefault()?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+            Diagram d;
+            using (Ws.Model.History.Transaction("Generate feature diagram"))
+            {
+                d = Ws.Model.CreateDiagram(owner, DiagramType.FeatureModel, "Feature model");
+                foreach (var (f, _) in Variability.Tree(Ws.Model)) Ws.Model.AddNode(d, f, new Bounds(0, 0, 140, 60));
+                ProductLineSample.EnsureDecompositionEdges(Ws.Model, d);
+                Ws.Model.SetBounds(d, AutoLayout.Layered(d), "Arrange");
+            }
+            Ws.Open(d);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    public override void Dispose()
+    {
+        if (_highlight) Ws.SimHighlight.Clear();
+        base.Dispose();
+    }
+}

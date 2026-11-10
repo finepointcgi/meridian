@@ -165,6 +165,7 @@
             <div class="ritems">
                 <button class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
                 <button class="rbtn @(_dockOpen && _dock == 6 ? "on" : "")" @onclick="() => ToggleDock(6)"><MudIcon Icon="@Icons.Material.Outlined.Functions" /><span class="t">Parametrics</span></button>
+                <button class="rbtn @(_dockOpen && _dock == 11 ? "on" : "")" @onclick="() => ToggleDock(11)"><MudIcon Icon="@Icons.Material.Outlined.Balance" /><span class="t">Variants</span></button>
             </div>
         </div>
         <div class="rgroup compact">
@@ -273,6 +274,7 @@
                     @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
+                    @DockTab(11, "Variants & trades", Icons.Material.Outlined.Balance, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -288,6 +290,7 @@
                             case 4: <ImpactPanel />; break;
                             case 5: <SimulationPanel />; break;
                             case 6: <ParametricsPanel />; break;
+                            case 11: <VariantsPanel />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>

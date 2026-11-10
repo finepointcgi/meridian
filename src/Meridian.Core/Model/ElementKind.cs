@@ -110,6 +110,14 @@ public enum ElementKind
 
     // Views
     Diagram,
+
+    // Variability / product lines and trade studies (appended: keep existing ordinals stable)
+    Feature,
+    Configuration,
+    TradeStudy,
+    FeatureDecomposition,   // parent feature -> child feature (tree edge on feature model diagrams)
+    Requires,               // cross-tree constraint: selecting the source requires the target
+    Excludes,               // cross-tree constraint: source and target may not both be selected
 }
 
 public enum DiagramType
@@ -128,6 +136,7 @@ public enum DiagramType
     ArchiMate,
     Database,
     Whiteboard,
+    FeatureModel,
 }
 
 public static class FieldKeys
