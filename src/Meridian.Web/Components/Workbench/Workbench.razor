@@ -25,12 +25,17 @@
                 </div>
             </ActivatorContent>
             <ChildContent>
+                <MudMenuItem Disabled="true" Class="menu-heading">Project</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects… <Key>⌘O</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.NoteAdd" OnClick="NewModel">New project…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))">Import file as project (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip)…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly">Import into this project (BPMN, ArchiMate, SQL, C#, MagicDraw re-import)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(Ws.Model.Root)">Rename model…</MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Disabled="true" Class="menu-heading">Import</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip">Open a file as a new project…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Badge" OnClick="AddUafProfile" Disabled="Ws.ReadOnly">Add UAF profile</MudMenuItem>
                 <MudDivider />
+                <MudMenuItem Disabled="true" Class="menu-heading">Versions &amp; team</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Commit" OnClick="Save" Disabled="Ws.ReadOnly">Commit version… <Key>⌘S</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory">Version history…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.CallSplit" OnClick="ShowBranches">Branches &amp; merge…</MudMenuItem>
@@ -40,6 +45,8 @@
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
                 }
                 <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => Dialogs.ShowAsync<IntegrationsDialog>("Integrations", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }))" Disabled="Ws.Session == null">Integrations (issue trackers, webhooks)…</MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Disabled="true" Class="menu-heading">Export</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="DownloadProject">Download .meridian file</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.FileDownload" OnClick="ExportXmi">Export XMI 2.5.1</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Code" OnClick="ExportSysML">Export SysML v2 text</MudMenuItem>
@@ -47,7 +54,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
                 <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(Ws.Model.Root)">Rename model…</MudMenuItem>
+                <MudMenuItem Disabled="true" Class="menu-heading">Help</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="StartTour">Take the guided tour</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
@@ -85,7 +92,7 @@
             <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
                 <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
             </MudTooltip>
-            <button class="btn-primary" @onclick="Save" disabled="@Ws.ReadOnly"><MudIcon Icon="@Icons.Material.Outlined.Commit" Style="font-size:16px" /> Commit</button>
+            <button class="btn-primary" @onclick="Save" disabled="@Ws.ReadOnly" title="Save a named version you can compare or restore later. Your work is already saved automatically as you go."><MudIcon Icon="@Icons.Material.Outlined.Commit" Style="font-size:16px" /> Commit</button>
             @if (Ws.User is { } me)
             {
                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
@@ -136,7 +143,7 @@
                     </MudTooltip>
                 }
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
-                    <ActivatorContent><button class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">More</span></button></ActivatorContent>
+                    <ActivatorContent><button title="More diagram types" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">More</span></button></ActivatorContent>
                     <ChildContent>
                         @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Package, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication })
                         {
@@ -151,10 +158,10 @@
         <div class="rgroup compact">
             <div class="rlabel">Requirements</div>
             <div class="ritems">
-                <button class="rbtn" @onclick="() => CreateFromRibbon(ElementKind.TestCase)"><MudIcon Icon="@UiKinds.Icon(ElementKind.TestCase)" Style="color:#3fbf7f" /><span class="t">Test case</span></button>
-                <button class="rbtn @(_dockOpen && _dock == 1 ? "on" : "")" @onclick="() => ToggleDock(1)"><MudIcon Icon="@Icons.Material.Outlined.TableRows" /><span class="t">Table</span></button>
+                <button title="New test case in the selection" class="rbtn" @onclick="() => CreateFromRibbon(ElementKind.TestCase)"><MudIcon Icon="@UiKinds.Icon(ElementKind.TestCase)" Style="color:#3fbf7f" /><span class="t">Test case</span></button>
+                <button title="Requirements table: every requirement with its attributes and coverage" class="rbtn @(_dockOpen && _dock == 1 ? "on" : "")" @onclick="() => ToggleDock(1)"><MudIcon Icon="@Icons.Material.Outlined.TableRows" /><span class="t">Table</span></button>
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
-                    <ActivatorContent><button class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.SwapVert" /><span class="t">Exchange</span></button></ActivatorContent>
+                    <ActivatorContent><button title="Import or export requirements (ReqIF, CSV, Excel)" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.SwapVert" /><span class="t">Exchange</span></button></ActivatorContent>
                     <ChildContent>
                         <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="ImportReqIfIntoSelection">Import ReqIF (.reqif / .reqifz)…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="ImportCsvIntoSelection">Import CSV…</MudMenuItem>
@@ -172,11 +179,11 @@
         <div class="rgroup compact">
             <div class="rlabel">Traceability</div>
             <div class="ritems">
-                <button class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
-                <MudTooltip Text="Traceability table: links, gaps and suspect links per requirement"><button class="rbtn @(_dockOpen && _dock == 7 ? "on" : "")" @onclick="() => ToggleDock(7)"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Trace table</span></button></MudTooltip>
-                <button class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
-                <button class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
-                <button class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
+                <button title="Traceability matrix: requirements against design elements" class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
+                <MudTooltip Text="Traceability table: links, gaps and suspect links per requirement"><button class="rbtn @(_dockOpen && _dock == 7 ? "on" : "")" @onclick="() => ToggleDock(7)"><MudIcon Icon="@Icons.Material.Outlined.Link" /><span class="t">Trace table</span></button></MudTooltip>
+                <button title="Impact analysis: what depends on the selected element" class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
+                <button title="Requirements coverage: how many are satisfied and verified" class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
+                <button title="Check the model for errors and warnings (F7)" class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
             </div>
         </div>
         <div class="rgroup compact">
@@ -185,34 +192,34 @@
                 <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request a review of the selection")">
                     <button class="rbtn" disabled="@(Ws.Session == null)" @onclick="() => RequestReview()"><MudIcon Icon="@Icons.Material.Outlined.RateReview" /><span class="t">Request</span></button>
                 </MudTooltip>
-                <button class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
+                <button title="Open reviews and approvals" class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
             </div>
         </div>
         <div class="rgroup compact">
             <div class="rlabel">Model views</div>
             <div class="ritems">
-                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Tables</span></button></MudTooltip>
+                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Custom table</span></button></MudTooltip>
                 <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
             </div>
         </div>
         <div class="rgroup compact">
             <div class="rlabel">Simulate</div>
             <div class="ritems">
-                <button class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
-                <button class="rbtn @(_dockOpen && _dock == 6 ? "on" : "")" @onclick="() => ToggleDock(6)"><MudIcon Icon="@Icons.Material.Outlined.Functions" /><span class="t">Parametrics</span></button>
-                <button class="rbtn @(_dockOpen && _dock == 11 ? "on" : "")" @onclick="() => ToggleDock(11)"><MudIcon Icon="@Icons.Material.Outlined.Balance" /><span class="t">Variants</span></button>
+                <button title="Step through activities and state machines, timed or Monte Carlo" class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
+                <button title="Solve parametric constraints" class="rbtn @(_dockOpen && _dock == 6 ? "on" : "")" @onclick="() => ToggleDock(6)"><MudIcon Icon="@Icons.Material.Outlined.Functions" /><span class="t">Parametrics</span></button>
+                <button title="Product variants and trade studies" class="rbtn @(_dockOpen && _dock == 11 ? "on" : "")" @onclick="() => ToggleDock(11)"><MudIcon Icon="@Icons.Material.Outlined.Balance" /><span class="t">Variants</span></button>
             </div>
         </div>
         <div class="rgroup compact">
             <div class="rlabel">Generate</div>
             <div class="ritems">
                 <MudTooltip Text="Generate a document (SRS, ICD, SDD, VCRM …) from a template as PDF, Word or HTML"><button class="rbtn" @onclick="ExportDocx"><MudIcon Icon="@Icons.Material.Outlined.Article" /><span class="t">Report</span></button></MudTooltip>
-                <button class="rbtn" @onclick="ExportSysML"><MudIcon Icon="@Icons.Material.Outlined.Code" /><span class="t">SysML v2</span></button>
+                <button title="Export the model as SysML v2 text" class="rbtn" @onclick="ExportSysML"><MudIcon Icon="@Icons.Material.Outlined.Code" /><span class="t">SysML v2</span></button>
                 <MudTooltip Text="Edit as SysML v2 text — the selected package, live-synced with the model"><button class="rbtn @(_dockOpen && _dock == 12 ? "on" : "")" @onclick="EditAsSysml"><MudIcon Icon="@Icons.Material.Outlined.EditNote" /><span class="t">Edit text</span></button></MudTooltip>
-                <button class="rbtn" @onclick="ExportXmi"><MudIcon Icon="@Icons.Material.Outlined.SwapHoriz" /><span class="t">XMI</span></button>
-                <button class="rbtn" @onclick="GenerateCode"><MudIcon Icon="@Icons.Material.Outlined.DataObject" /><span class="t">C#</span></button>
+                <button title="Export XMI 2.5.1 for other tools" class="rbtn" @onclick="ExportXmi"><MudIcon Icon="@Icons.Material.Outlined.SwapHoriz" /><span class="t">XMI</span></button>
+                <button title="Generate C# code from blocks" class="rbtn" @onclick="GenerateCode"><MudIcon Icon="@Icons.Material.Outlined.DataObject" /><span class="t">C#</span></button>
                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
-                    <ActivatorContent><button class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">Formats</span></button></ActivatorContent>
+                    <ActivatorContent><button title="More export formats: Word/PDF, BPMN, ArchiMate, ReqIF, SQL" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">Formats</span></button></ActivatorContent>
                     <ChildContent>
                         <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="ExportDocx">Word / PDF / HTML document from template…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.OpenInNew" OnClick="OpenReport">Quick HTML model report</MudMenuItem>
@@ -335,17 +342,17 @@
                 <div class="dock-tabs">
                     @{ var h = Ws.Health; }
                     @DockTab(0, "Validation", Icons.Material.Outlined.FactCheck, h.Errors + h.Warnings)
-                    @DockTab(1, "Requirements table", Icons.Material.Outlined.TableRows, null)
-                    @DockTab(2, "Traceability matrix", Icons.Material.Outlined.GridOn, null)
-                    @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
+                    @DockTab(1, "Requirements", Icons.Material.Outlined.TableRows, null, "Requirements table")
+                    @DockTab(2, "Matrix", Icons.Material.Outlined.GridOn, null, "Traceability matrix")
+                    @DockTab(4, "Impact", Icons.Material.Outlined.CallSplit, null, "Impact analysis")
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
-                    @DockTab(7, "Traceability table", Icons.Material.Outlined.FactCheck, null)
+                    @DockTab(7, "Trace table", Icons.Material.Outlined.Link, null, "Traceability table")
                     @DockTab(ReviewsDock, "Reviews", Icons.Material.Outlined.Checklist, null)
-                    @DockTab(10, "Script", Icons.Material.Outlined.DataObject, null)
-                    @DockTab(11, "Variants & trades", Icons.Material.Outlined.Balance, null)
-                    @DockTab(12, "SysML v2 text", Icons.Material.Outlined.Code, null)
-                    @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null)
+                    @DockTab(10, "Script", Icons.Material.Outlined.DataObject, null, "C# script console")
+                    @DockTab(11, "Variants", Icons.Material.Outlined.Balance, null, "Variants & trade studies")
+                    @DockTab(12, "SysML text", Icons.Material.Outlined.Code, null, "SysML v2 text editor")
+                    @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null, "AI assistant")
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -435,10 +442,10 @@
     };
 
 
-    private RenderFragment DockTab(int index, string label, string icon, int? count) => __builder =>
+    private RenderFragment DockTab(int index, string label, string icon, int? count, string? tip = null) => __builder =>
     {
-        <span class="dock-tab @(_dockOpen && _dock == index ? "on" : "")" @onclick="() => ToggleDock(index)">
-            <MudIcon Icon="@icon" />@label
+        <span class="dock-tab @(_dockOpen && _dock == index ? "on" : "")" @onclick="() => ToggleDock(index)" title="@(tip ?? label)">
+            <MudIcon Icon="@icon" /><span class="dl">@label</span>
             @if (count is > 0) { <span class="count">@count</span> }
         </span>
     };

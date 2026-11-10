@@ -180,7 +180,7 @@ public sealed class Workspace : IDisposable, ISessionClient
         var bdd = Model.Diagrams.FirstOrDefault(d => d.DiagramType == DiagramType.BlockDefinition) ?? Model.Diagrams.FirstOrDefault();
         if (bdd != null) Open(bdd, recordHistory: false);
         var top = Model.OfKind(ElementKind.Block).FirstOrDefault(b => b.Name == "Vehicle") ?? bdd?.Nodes.FirstOrDefault()?.Element;
-        if (top != null) Select(top);
+        if (top != null) Select(top, syncCanvas: false);   // shown in the inspector, not highlighted on the canvas
     }
 
     // ---------------------------------------------------------------- UI state
@@ -477,7 +477,7 @@ public sealed class ViewTab(ViewTabKind kind)
 
     public string Title => Element is { } e ? e.DisplayName : Kind switch
     {
-        ViewTabKind.Table => "New table",
+        ViewTabKind.Table => "New custom table",
         ViewTabKind.Query => "New query",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };

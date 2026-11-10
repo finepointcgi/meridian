@@ -35,7 +35,7 @@ public class ViewTabTests
         var t1 = ws.OpenView(ViewTabKind.Table);
         var t2 = ws.OpenView(ViewTabKind.Table);
         Assert.Same(t1, t2);
-        Assert.Equal("New table", t1.Title);
+        Assert.Equal("New custom table", t1.Title);
         ws.OpenView(ViewTabKind.Query);
         Assert.Equal(2, ws.OpenViews.Count);
 

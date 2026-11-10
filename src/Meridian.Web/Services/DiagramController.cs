@@ -196,7 +196,7 @@ public sealed class DiagramController
     public void ZoomToFit()
     {
         NeedsFit = false;
-        if (Diagram.Nodes.Count == 0) { Zoom = 1; PanX = 30; PanY = 40; return; }
+        if (Diagram.Nodes.Count == 0) { Zoom = 1; PanX = LeftInset + 30; PanY = 40; return; }   // frame title clear of the shapes panel
         var bs = Diagram.Nodes.Select(BoundsOf).ToList();
         var frame = Diagram.DiagramType == DiagramType.InternalBlock ? 50 : 0;
         double x0 = bs.Min(b => b.X) - 50 - frame, y0 = bs.Min(b => b.Y) - 90 - frame, x1 = bs.Max(b => b.Right) + 40 + frame, y1 = bs.Max(b => b.Bottom) + 30 + frame;

@@ -199,6 +199,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
   background: var(--panel); border: 1px solid var(--border-strong); color: var(--text-2); box-shadow: var(--shadow-sm); backdrop-filter: blur(16px); pointer-events: none; white-space: nowrap; }
 .selbar { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px 6px;
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow); backdrop-filter: blur(16px); }
+.selbar.below { top: auto; bottom: 12px; }
 .selbar .cnt { font-size: 11.5px; color: var(--text-2); padding: 0 8px 0 4px; white-space: nowrap; }
 .selbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
 .selbar .tool { width: 30px; height: 30px; }
@@ -209,6 +210,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .color-btn .mud-icon-root { margin-top: -4px; }
 .fmt-pop { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 10px; background: var(--panel-solid);
   border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); }
+.selbar.below .fmt-pop { top: auto; bottom: 38px; }   /* bar at the bottom: menus open upwards */
 .fmt-pop.shapes-grid { width: 220px; display: grid; }
 .fmt-pop.widths { padding: 6px; }
 .fmt-title { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
@@ -227,6 +229,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
   box-sizing: border-box; background: var(--panel-solid); color: var(--text); box-shadow: 0 0 0 4px rgba(79, 140, 255, .2); }
 .inline-editor textarea { height: 100%; resize: none; }
 .empty-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-3); pointer-events: none; }
+.empty-hint.beside-shapes { left: 236px; }   /* centred in the canvas area the shapes panel leaves free */
 .empty-hint h3 { color: var(--text); font-weight: 600; margin: 8px 0 4px; font-size: 16px; }
 
 .dock { border-top: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
@@ -327,6 +330,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .auth button { height: 42px; margin-top: 6px; border: none; border-radius: 9px; background: linear-gradient(135deg, #4f8cff, #3b6cf0 55%, #2dd4bf 140%); color: #fff; font: 600 14px Inter, sans-serif; cursor: pointer; box-shadow: 0 6px 18px rgba(79,140,255,.3); }
 .auth button:hover { filter: brightness(1.08); }
 .auth-error { background: rgba(255,107,107,.12); border: 1px solid rgba(255,107,107,.35); color: #ffb4b4; border-radius: 9px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+.auth-hint { font-size: 11.5px; color: var(--text-3, #8a94a7); margin: -6px 0 10px; }
 .auth-switch { margin-top: 20px; font-size: 13px; color: #a3aec4; text-align: center; }
 .auth-switch a { color: #7fb0ff; text-decoration: none; font-weight: 500; }
 
@@ -617,3 +621,16 @@ main.workbench > section.card.center, .diagram-host { overflow: clip; }
 .gt, .gt-query, .gt-qrow, .gt-scroll { min-width: 0; max-width: 100%; }
 .gt-help { overflow-wrap: anywhere; }
 .gt-qtext { min-width: 0; max-width: 100%; box-sizing: border-box; }
+
+/* Bottom panel tabs: when they don't all fit, inactive tabs show only their icon (the name is the tooltip). */
+.dock { container-type: inline-size; }
+@container (max-width: 1200px) {
+  .dock-tab:not(.on) .dl { display: none; }
+  .dock-tab:not(.on) { padding: 4px 8px; }
+}
+.req-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 16px; text-align: center; font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.req-empty .mud-icon-root { font-size: 30px; opacity: .5; }
+.req-empty b { color: var(--text-2); }
+/* Section headings inside menus (Project, Import, Export, Help…). */
+.mud-menu-item.menu-heading, .mud-list-item.menu-heading { min-height: 26px; padding-top: 6px; padding-bottom: 2px; opacity: 1 !important; cursor: default; }
+.menu-heading .mud-menu-item-text, .menu-heading .mud-list-item-text, .menu-heading { font-size: 10.5px !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3) !important; }

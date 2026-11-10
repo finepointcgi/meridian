@@ -7,8 +7,8 @@ This page maps the concepts, windows and menus of **Cameo Systems Modeler / Magi
 
 | From | How | Notes |
 | --- | --- | --- |
-| Cameo / MagicDraw | export the model as **UML 2.5 / SysML XMI**, then **Import file as project** | Blocks, parts, ports, value types, requirements (id and text), satisfy / verify / derive / refine / trace, multiplicities and primitive types map. Diagrams come across when the export includes UML Diagram Interchange. Check the import report for skipped elements. |
-| Enterprise Architect 16+ | open the `.qea` / `.qeax` file directly with **Import file as project** (or the desktop start screen) | Packages, elements, attributes, operations, connectors with SysML stereotypes, tagged values and diagram layouts are read straight from the repository. |
+| Cameo / MagicDraw | open the `.mdzip` (or `.mdxml`) file directly with **Open a file as a new project** (or double-click it with the desktop app installed). XMI exports work too. | Packages, blocks, value types, interface blocks, ports, part/reference/value properties, requirements (id and text) with satisfy / verify / refine / deriveReqt / trace / allocate, activities, state machines, interactions, use cases, constraint blocks, stereotypes and tagged values map, and diagrams keep their layout. Re-importing updates the project by element id. The import report lists anything approximated or skipped. |
+| Enterprise Architect 16+ | open the `.qea` / `.qeax` file directly with **Open a file as a new project** (or the desktop start screen) | Packages, elements, attributes, operations, connectors with SysML stereotypes, tagged values and diagram layouts are read straight from the repository. |
 | Older EA (`.eap`, Access) | convert to `.qea` in EA, or export XMI 2.5 from EA | |
 | DOORS, Polarion, Jama, Codebeamer | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
 

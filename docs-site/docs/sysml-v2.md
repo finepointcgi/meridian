@@ -76,6 +76,6 @@ by **Apply**.
 
 ## Files and the API
 
-- **Import file as project** accepts `.sysml` files, and the desktop app opens `.sysml` files directly.
+- **Open a file as a new project** accepts `.sysml` files, and the desktop app opens `.sysml` files directly.
 - A team server exposes a read-only subset of the OMG **Systems Modeling API** (SysML v2 REST) under `/api`: projects,
   commits, and the elements and root elements of a commit.

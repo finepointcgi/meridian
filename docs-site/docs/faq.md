@@ -12,7 +12,7 @@ Not for the desktop app's local workspace. A team server needs an account, creat
 administrator or through single sign-on.
 
 **Can I move a project from my computer to a team server?**
-Yes. **Download .meridian file** from the project menu in the local workspace, then **Import file as project** on the
+Yes. **Download .meridian file** from the project menu in the local workspace, then **Open a file as a new project** on the
 server. The file holds the whole model; version history, comments and reviews stay in the original workspace.
 
 **Which browsers work?**

@@ -42,12 +42,16 @@
         @if (!Settings.Sso.DisableLocalPasswords && (!Register || Settings.Security.AllowRegistration))
         {
         <form method="post" action="@(Register ? "/account/register" : "/account/login")">
-            <label>Username<input name="username" autocomplete="username" required autofocus /></label>
+            <label>Username<input name="username" autocomplete="username" required autofocus="@(string.IsNullOrEmpty(User))" value="@User" /></label>
             @if (Register)
             {
-                <label>Display name<input name="display" autocomplete="name" placeholder="Shown to collaborators" /></label>
+                <label>Display name<input name="display" autocomplete="name" placeholder="Shown to collaborators" value="@Display" /></label>
             }
-            <label>Password<input name="password" type="password" autocomplete="@(Register ? "new-password" : "current-password")" required minlength="@(Register ? 8 : 1)" /></label>
+            <label>Password<input name="password" type="password" autocomplete="@(Register ? "new-password" : "current-password")" required minlength="@(Register ? 8 : 1)" autofocus="@(!string.IsNullOrEmpty(User))" /></label>
+            @if (Register)
+            {
+                <div class="auth-hint">At least 8 characters.</div>
+            }
             <button type="submit">@(Register ? "Create account" : "Sign in")</button>
         </form>
         }
@@ -75,5 +79,7 @@
 @code {
     [SupplyParameterFromQuery] public string? Mode { get; set; }
     [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "user")] public string? User { get; set; }
+    [SupplyParameterFromQuery(Name = "display")] public string? Display { get; set; }
     private bool Register => Mode == "register";
 }

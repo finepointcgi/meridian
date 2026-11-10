@@ -181,7 +181,8 @@ public static class MeridianServer
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Redirect(Back("register", ex.Message));
+                // Keep what was typed (never the password) so the user only fixes the field that was wrong.
+                return Results.Redirect(Back("register", ex.Message) + "&user=" + Uri.EscapeDataString(form["username"].ToString()) + "&display=" + Uri.EscapeDataString(form["display"].ToString()));
             }
         }).RequireRateLimiting(AdminHosting.LoginRateLimit);
 

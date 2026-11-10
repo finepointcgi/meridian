@@ -4,8 +4,8 @@
 
 | Menu | What it does |
 | --- | --- |
-| Project menu → **Import file as project (.meridian, .xmi, .sysml, EA .qea)…** | creates a new project from a file |
-| Project menu → **Import into this project (BPMN, ArchiMate, SQL, C#)…** | adds the content of one or more files to the open project |
+| Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml) | creates a new project from a file |
+| Project menu → **Import into this project…** (BPMN, ArchiMate, SQL, C#, Cameo re-import) | adds the content of one or more files to the open project |
 | Project menu → **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG** | exports |
 | Ribbon **Requirements → Exchange** | ReqIF, CSV and Excel import and export, re-import with preview, renumbering |
 | Ribbon **Generate** | report, SysML v2, XMI, C# code, and **Formats** for Word / PDF, BPMN, ArchiMate, ReqIF and SQL DDL |

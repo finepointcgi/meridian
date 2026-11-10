@@ -82,7 +82,9 @@
         var nodes = C.SelectedNodes.Count > 0;
         var shapes = C.SelectedNodes.Where(n => n.Element.Kind == ElementKind.Shape).ToList();
         var line = C.SelectedEdge?.Relationship.Kind == ElementKind.Line;
-        <div class="selbar" @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+        // Near the top of the view the bar would cover what is selected: show it at the bottom instead.
+        var barBelow = C.SelectedNodes.Count > 0 && C.SelectedNodes.Min(n => C.ToScreen(new(C.BoundsOf(n).X, C.BoundsOf(n).Y)).Y) < 64;
+        <div class="selbar @(barBelow ? "below" : "")" @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
             @if (C.SelectedNodes.Count >= 2)
             {
                 <span class="cnt">@C.SelectedNodes.Count selected</span>
@@ -219,7 +221,7 @@
 
     @if (C.Diagram.Nodes.Count == 0)
     {
-        <div class="empty-hint">
+        <div class="empty-hint @(_shapesOpen && !Ws.ReadOnly ? "beside-shapes" : "")">
             <div class="empty-teach">
                 <MudIcon Icon="@UiKinds.DiagramIcon(C.Diagram.DiagramType)" Style="font-size:44px; opacity:.5" />
                 <h3>@Metamodel.DisplayName(C.Diagram.DiagramType) is empty</h3>

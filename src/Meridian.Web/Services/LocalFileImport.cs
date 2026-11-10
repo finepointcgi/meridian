@@ -19,7 +19,7 @@ public static class LocalFileImport
     public const string TokenHeader = "X-Meridian-Launch";
     public const long MaxBytes = 64 * 1024 * 1024;
 
-    /// <summary>Files the desktop app can open as a project (the same formats as "Import file as project").</summary>
+    /// <summary>Files the desktop app can open as a project (the same formats as "Open a file as a new project").</summary>
     public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml"];
 
     public static bool IsSupported(string path) =>

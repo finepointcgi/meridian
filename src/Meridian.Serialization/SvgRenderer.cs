@@ -124,7 +124,9 @@ public static partial class SvgRenderer
         var t = (theme ?? SvgTheme.Light) with { LinkAnchors = true };
         sb.Append(t.Defs);
         if (!transparent) sb.Append($"<rect x=\"{F(minX)}\" y=\"{F(minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" fill=\"{t.Background}\"/>");
-        sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
+        // Whiteboards are free drawing: no SysML diagram frame.
+        if (d.DiagramType != DiagramType.Whiteboard)
+            sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
         RenderHeader(sb, d, minX + 4, minY + 4, t);
         RenderBody(sb, model, d, bounds, null, t);
         sb.Append("</svg>");
@@ -134,6 +136,7 @@ public static partial class SvgRenderer
     /// <summary>The SysML diagram frame header ("bdd [Package] Structure [Vehicle Structure]").</summary>
     public static void RenderHeader(StringBuilder sb, Diagram d, double x, double y, SvgTheme? theme = null)
     {
+        if (d.DiagramType == DiagramType.Whiteboard) return;   // free drawing: no SysML frame header
         var t = theme ?? SvgTheme.Light;
         var header = HeaderText(d);
         var hw = header.Length * CharWidth + 16;

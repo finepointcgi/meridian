@@ -18,10 +18,22 @@
     </div>
 </div>
 <div class="card-body">
+    @{ var rows = Rows().ToList(); }
+    @if (rows.Count == 0)
+    {
+        <div class="req-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Assignment" />
+            <div><b>No requirements yet</b></div>
+            <div>Click <b>+</b> above to add one, or import a spreadsheet or ReqIF file from <i>Requirements → Exchange</i>.</div>
+            <div>Drag a requirement onto a block to show that the block satisfies it.</div>
+        </div>
+    }
+    else
+    {
     <table class="req-table">
         <thead><tr><th style="width:74px">Id</th><th>Requirement</th><th style="width:44px" title="Satisfied · Verified">S·V</th></tr></thead>
         <tbody>
-            @foreach (var r in Rows())
+            @foreach (var r in rows)
             {
                 var req = r.Element;
                 var leaf = !req.OwnedElements.Any(c => c.Kind == ElementKind.Requirement);
@@ -45,6 +57,7 @@
             }
         </tbody>
     </table>
+    }
 </div>
 
 @code {
