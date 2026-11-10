@@ -45,10 +45,13 @@ public static class ReportEngine
                                              CancellationToken ct = default, ResolveOptions? options = null) =>
         Task.Run(() => Generate(m, t, format, progress, ct, options), ct);
 
+    /// <summary>Budgets of the live preview, which runs on every edit (and whenever a saved template is opened).</summary>
+    public const int PreviewMaxIterations = 5_000, PreviewMaxNodes = 20_000;
+
     /// <summary>Fast HTML preview for the template editor: loops are capped and diagrams can be stubbed.</summary>
     public static string Preview(ModelRepository m, DocTemplate t, int loopLimit = 6, bool diagrams = true, CancellationToken ct = default)
     {
-        var doc = DocResolver.Resolve(m, t, new ResolveOptions { LoopLimit = loopLimit, RenderDiagrams = diagrams }, null, ct);
+        var doc = DocResolver.Resolve(m, t, new ResolveOptions { LoopLimit = loopLimit, RenderDiagrams = diagrams, MaxIterations = PreviewMaxIterations, MaxNodes = PreviewMaxNodes }, null, ct);
         return DocHtml.Write(doc, null, ct, preview: true);
     }
 

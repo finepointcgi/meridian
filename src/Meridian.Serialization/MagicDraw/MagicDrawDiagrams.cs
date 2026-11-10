@@ -137,16 +137,16 @@ public static partial class MagicDrawImporter
 
         private XElement? LoadContent(Stream s, string name)
         {
-            var ms = new MemoryStream();
-            s.CopyTo(ms);
-            var bytes = ms.ToArray();
             try
             {
+                var ms = new MemoryStream();
+                s.CopyTo(ms);
+                var bytes = ms.ToArray();
                 for (var depth = 0; depth < 3; depth++)
                 {
                     if (bytes.Length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B)
                     {
-                        using var gz = new GZipStream(new MemoryStream(bytes), CompressionMode.Decompress);
+                        using var gz = new SafeZip.LimitedStream(new GZipStream(new MemoryStream(bytes), CompressionMode.Decompress), MaxBinaryBytes, name);
                         var o = new MemoryStream(); gz.CopyTo(o); bytes = o.ToArray();
                         continue;
                     }
@@ -155,13 +155,13 @@ public static partial class MagicDrawImporter
                         using var z = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
                         var entry = z.Entries.FirstOrDefault(e => e.Length > 0);
                         if (entry == null) return null;
-                        using var es = entry.Open();
+                        using var es = SafeZip.Open(entry, MaxBinaryBytes);
                         var o = new MemoryStream(); es.CopyTo(o); bytes = o.ToArray();
                         continue;
                     }
                     break;
                 }
-                using var xr = XmlReader.Create(new MemoryStream(bytes), ReaderSettings);
+                using var xr = DepthLimitedXmlReader.Create(new MemoryStream(bytes), ReaderSettings);
                 return XDocument.Load(xr).Root;
             }
             catch (Exception ex) when (ex is XmlException or InvalidDataException)

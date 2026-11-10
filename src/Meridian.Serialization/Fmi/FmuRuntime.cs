@@ -47,7 +47,10 @@ public static class FmuArchive
                 total += e.Length;
                 if (total > maxBytes) throw new InvalidDataException($"The FMU expands to more than {maxBytes / (1024 * 1024)} MB");
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                e.ExtractToFile(target, overwrite: true);
+                // Don't trust the header's size: stop at the remaining budget while inflating.
+                using (var src = new SafeZip.LimitedStream(e.Open(), maxBytes - (total - e.Length), e.FullName))
+                using (var dst = File.Create(target))
+                    src.CopyTo(dst);
             }
             return dir;
         }
@@ -73,11 +76,18 @@ public static class FmuArchive
         return arm ? ["aarch64-linux", "linux-aarch64"] : ["x86_64-linux", "linux64"];
     }
 
+    public static bool IsCIdentifier(string? s) =>
+        s is { Length: > 0 and <= 256 } && (char.IsAsciiLetter(s[0]) || s[0] == '_') && s.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
     public static string LibraryExtension => OperatingSystem.IsWindows() ? ".dll" : OperatingSystem.IsMacOS() ? ".dylib" : ".so";
 
     /// <summary>The shared library implementing <paramref name="modelIdentifier"/> for this platform.</summary>
     public static string Binary(string dir, string modelIdentifier)
     {
+        // The FMI standard makes modelIdentifier a C identifier (it prefixes the exported functions); anything else could
+        // point outside binaries/ ("../../usr/lib/…").
+        if (!IsCIdentifier(modelIdentifier))
+            throw new CoSimException($"The FMU's modelIdentifier '{modelIdentifier}' is not a valid C identifier");
         foreach (var folder in PlatformFolders())
         {
             var p = Path.Combine(dir, "binaries", folder, modelIdentifier + LibraryExtension);
@@ -168,10 +178,10 @@ public sealed class FmuHostProcess : IDisposable
             try
             {
                 string? line;
-                while ((line = stdout.ReadLine()) != null)
+                while ((line = ReadBoundedLine(stdout, MaxLineChars)) != null)
                 {
                     if (line.StartsWith(Marker, StringComparison.Ordinal)) _responses.Add(line[Marker.Length..]);
-                    else if (line.Length > 0 && _log.Count < 5000) _log.Enqueue("[stdout] " + line);
+                    else if (line.Length > 0 && _log.Count < 5000) _log.Enqueue("[stdout] " + Clip(line));
                 }
             }
             catch (IOException) { }
@@ -184,13 +194,34 @@ public sealed class FmuHostProcess : IDisposable
             try
             {
                 string? line;
-                while ((line = stderr.ReadLine()) != null)
+                while ((line = ReadBoundedLine(stderr, 4096)) != null)
                     lock (_stderr) { _stderr.Enqueue(line); if (_stderr.Count > 40) _stderr.Dequeue(); }
             }
             catch (IOException) { }
             catch (ObjectDisposedException) { }
         }) { IsBackground = true, Name = "FmuHost stderr" }.Start();
     }
+
+    /// <summary>Longest line read from the host; FMU code can print anything, so longer lines are cut instead of buffered.</summary>
+    public const int MaxLineChars = 4 * 1024 * 1024;
+
+    /// <summary><see cref="TextReader.ReadLine"/> that keeps at most <paramref name="max"/> characters of a line (the rest is skipped).</summary>
+    internal static string? ReadBoundedLine(TextReader reader, int max)
+    {
+        var sb = new StringBuilder();
+        var any = false;
+        int c;
+        while ((c = reader.Read()) >= 0)
+        {
+            any = true;
+            if (c == '\n') break;
+            if (c == '\r') { if (reader.Peek() == '\n') reader.Read(); break; }
+            if (sb.Length < max) sb.Append((char)c);
+        }
+        return any ? sb.ToString() : null;
+    }
+
+    private static string Clip(string s) => s.Length <= 2000 ? s : s[..2000] + "…";
 
     public int ProcessId => _process.Id;
     public bool HasExited => _process.HasExited;
@@ -229,7 +260,7 @@ public sealed class FmuHostProcess : IDisposable
         try { resp = JsonNode.Parse(line!)?.AsObject() ?? throw new CoSimException("Empty response from the FMU host"); }
         catch (JsonException ex) { throw new CoSimException($"Garbled response from the FMU host: {ex.Message}"); }
         foreach (var l in resp["log"]?.AsArray() ?? [])
-            if (l != null && _log.Count < 5000) _log.Enqueue(l.GetValue<string>());
+            if (l != null && _log.Count < 5000) _log.Enqueue(Clip(l.GetValue<string>()));
         if (resp["ok"]?.GetValue<bool>() != true) throw new CoSimException(resp["error"]?.GetValue<string>() ?? "The FMU host reported an error");
         return resp;
     }

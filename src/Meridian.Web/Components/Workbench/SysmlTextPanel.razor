@@ -603,7 +603,7 @@
         Summarize(result);
         var who = Ws.User?.DisplayName ?? "Someone";
         var n = result.Changes.Count;
-        session.TextApplied(key, synced?.Revision ?? -1, State.Text, n == 0 ? $"{who} applied the text — no changes." : $"{who} applied {n} change{(n == 1 ? "" : "s")}.");
+        session.TextApplied(key, Ws.ParticipantId, synced?.Revision ?? -1, State.Text, n == 0 ? $"{who} applied the text — no changes." : $"{who} applied {n} change{(n == 1 ? "" : "s")}.");
         _problems.AddRange(result.Diagnostics.Where(d => d.Severity != SysmlSeverity.Info || result.Diagnostics.Count < 20));
         Count();
         await PushDiagnostics();
@@ -627,7 +627,14 @@
                 catch (JSException) { /* still sending: the reset below wins for everything that already arrived */ }
                 catch (JSDisconnectedException) { return; }
             }
-            _session!.ResetText(_textKey!, $"{Ws.User?.DisplayName ?? "Someone"} reloaded the text from the model.");
+            if (Ws.ReadOnly)
+            {
+                // Viewers can't discard the editors' unapplied edits: just resynchronise this tab with the shared text.
+                OnTextOutOfStep();
+                _summary = null;
+                return;
+            }
+            _session!.ResetText(_textKey!, Ws.ParticipantId, $"{Ws.User?.DisplayName ?? "Someone"} reloaded the text from the model.");
             _summary = null;
             return;
         }
@@ -639,7 +646,7 @@
 
     private void KeepEditing()
     {
-        if (Shared) _session!.DismissTextStale(_textKey!);
+        if (Shared) _session!.DismissTextStale(_textKey!, Ws.ParticipantId);
         State.Stale = false;
     }
 

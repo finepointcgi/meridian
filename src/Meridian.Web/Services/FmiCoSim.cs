@@ -11,12 +11,15 @@ namespace Meridian.Web.Services;
 /// <summary>
 /// FMI co-simulation settings. Co-simulation runs the FMU's native code on the machine that hosts Meridian (in a child
 /// process: crash isolation, not a sandbox), so on a team server it is off unless <c>Meridian:Fmi:Enabled</c> is true,
-/// and only project owners may run it. The desktop app (local mode) has it on by default. See docs/FMI.md.
+/// and only server administrators may run FMUs or attach .fmu files (<c>Meridian:Fmi:AllowProjectOwners=true</c> also lets
+/// the owner of the open project; any user can create and own a project). The desktop app (local mode) has it on by
+/// default. See docs/FMI.md.
 /// </summary>
 public sealed class FmiCoSimSettings
 {
     public bool Enabled { get; init; }
     public bool LocalMode { get; init; }
+    public bool AllowProjectOwners { get; init; }
     public required FmuStore Store { get; init; }
     public required FmuRuntimeOptions Runtime { get; init; }
 
@@ -31,6 +34,7 @@ public sealed class FmiCoSimSettings
         {
             Enabled = enabled,
             LocalMode = local,
+            AllowProjectOwners = string.Equals(c?["Meridian:Fmi:AllowProjectOwners"], "true", StringComparison.OrdinalIgnoreCase),
             Store = new FmuStore(store),
             Runtime = new FmuRuntimeOptions { HostPath = c?["Meridian:Fmi:HostPath"] is { Length: > 0 } hp ? hp : null, CallTimeout = TimeSpan.FromSeconds(timeout) },
         };
@@ -39,8 +43,17 @@ public sealed class FmiCoSimSettings
     /// <summary>Why this user cannot run FMUs here, or null when they can.</summary>
     public string? WhyNotAllowed(Workspace ws) =>
         !Enabled ? "Running FMUs is turned off on this server. An administrator can enable it with Meridian:Fmi:Enabled = true (it runs the FMUs' native code on the server; see docs/FMI.md)."
-        : ws.Role != ProjectRole.Owner ? "Only project owners can run FMUs (they execute native code on the server)."
-        : null;
+        : LocalMode ? (ws.Role != ProjectRole.Owner ? "Only project owners can run FMUs (they execute native code on this computer)." : null)
+        : ws.IsServerAdmin || AllowProjectOwners && ws.Role == ProjectRole.Owner ? null
+        : AllowProjectOwners ? "Only server administrators and project owners can run FMUs on this server (they execute native code on the server)."
+        : "Only server administrators can run FMUs on this server (they execute native code on the server).";
+
+    /// <summary>Re-reads the user's administrator state (it can change without a new sign-in) before a native-code action.</summary>
+    public async Task RefreshAdminAsync(Workspace ws, IServiceProvider services)
+    {
+        if (LocalMode || ws.User is not { } user || services.GetService(typeof(Admin.AdminAccess)) is not Admin.AdminAccess access) return;
+        ws.IsServerAdmin = await access.StateAsync(user.Id, fresh: true) is { IsAdmin: true, Disabled: false };
+    }
 
     /// <summary>The stored .fmu for an imported FMU block, or null.</summary>
     public string? FmuPath(Element block) => Store.Find(block.Get(FieldKeys.TagPrefix + "fmi.sha256"));

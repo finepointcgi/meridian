@@ -81,7 +81,7 @@ public static partial class MagicDrawImporter
 
         private void ScanProfiles(Func<Stream> open)
         {
-            using var r = XmlReader.Create(open(), ReaderSettings);
+            using var r = DepthLimitedXmlReader.Create(open(), ReaderSettings);
             MoveToFirstElement(r);
             if (r.NodeType != XmlNodeType.Element) throw new FormatException("The model part is empty.");
             if (IsUmlModel(r)) { CaptureRoot(r); return; }
@@ -169,7 +169,7 @@ public static partial class MagicDrawImporter
 
         private void ReadModel(Func<Stream> open)
         {
-            using var r = XmlReader.Create(open(), ReaderSettings);
+            using var r = DepthLimitedXmlReader.Create(open(), ReaderSettings);
             MoveToFirstElement(r);
             if (r.NodeType != XmlNodeType.Element) return;
             if (IsUmlModel(r)) { StreamContainer(r, _model.Root, ReaderAttr(r, "id", true)); return; }

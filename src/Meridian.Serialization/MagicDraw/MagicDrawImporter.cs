@@ -96,14 +96,20 @@ public static partial class MagicDrawImporter
         foreach (var e in entries) { byName.TryAdd(e.FullName, e); byName.TryAdd(e.Name, e); }
         Stream? OpenBinary(string id)
         {
-            if (byName.TryGetValue(id, out var e)) return e.Open();
+            if (byName.TryGetValue(id, out var e)) return SafeZip.Open(e, MaxBinaryBytes);
             var hit = entries.FirstOrDefault(x => x.FullName.EndsWith(id, StringComparison.OrdinalIgnoreCase));
-            return hit?.Open();
+            return hit == null ? null : SafeZip.Open(hit, MaxBinaryBytes);
         }
         var other = entries.Where(e => !models.Contains(e)).Select(e => e.FullName).ToList();
-        var source = new ProjectSource(models.Select(m => (Func<Stream>)m.Open).ToList(), OpenBinary, other);
+        var source = new ProjectSource(models.Select(m => (Func<Stream>)(() => SafeZip.Open(m, MaxModelPartBytes))).ToList(), OpenBinary, other);
         return new Builder(source).Run();
     }
+
+    /// <summary>Unpacked size limit of one model part (zip bomb guard; real projects are far smaller).</summary>
+    public const long MaxModelPartBytes = 1024L * 1024 * 1024;
+
+    /// <summary>Unpacked size limit of one diagram's symbol data, also after gzip / nested zip.</summary>
+    public const long MaxBinaryBytes = SafeZip.MaxEntryBytes;
 
     internal sealed record ProjectSource(IReadOnlyList<Func<Stream>> ModelParts, Func<string, Stream?> OpenBinary, IReadOnlyList<string> OtherEntries);
 

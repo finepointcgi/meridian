@@ -87,3 +87,60 @@ regression test named after its id (`SR01_…`, `SR03_…`).
 5. Add a full Content-Security-Policy for the app pages (Blazor Server works with `script-src 'self'`; MudBlazor and
    the Google Fonts stylesheet need `style-src` allowances) as defence in depth for SR-01-type bugs.
 6. Sign desktop installers and the checksum file.
+
+## Second pass
+
+Scope: code the first pass did not cover: the AI assistant (`src/Meridian.Assistant`, `AssistantServices`,
+`AssistantPanel`), FMI co-simulation (`src/Meridian.FmuHost`, `FmuRuntime`, `CoSimulation`, `CoSimTab`), collaborative
+SysML v2 text (`ProjectSession.SharedText`, `TextOperation`, `SysmlTextPanel`, `sysml-editor.js`), the MagicDraw
+.mdzip/.mdxml importer, report generation and the template editor, diagram images (`/_img/<sha>`), the deployment files
+(Dockerfile, `docker-compose.prod.yml`, `deploy/compose`, `deploy/helm/meridian`, `OperationsHosting`), the mobile shell
+and PWA manifest, view tabs and the desktop `open-url` bridge. Method as before: source review, local probing of the
+app in SQLite server mode (`curl`: health endpoints, `/_img`, request log), and a regression test per fix
+(`tests/Meridian.Tests/SecondPassSecurityTests.cs`, `tests/Meridian.Web.Tests/SecondPassSecurityTests.cs`). The real
+Anthropic API was never called (tests use a fake HTTP handler).
+
+| Id | Severity | Area | Finding | Resolution |
+| --- | --- | --- | --- | --- |
+| SR-25 | High | DoS / parsing | The MagicDraw importer (any signed-in user can import a project) walks the XML recursively: nested packages (`StreamContainer`), nested elements (`Handle` → `HandleChildren`) and diagram views (`ParseViews`). A small crafted .mdxml/.mdzip with deep nesting overflowed the stack, which ends the whole server process. Confirmed by test (the test host crashed with "Stack overflow"). | Fixed: every MagicDraw XML read goes through `DepthLimitedXmlReader` (256 levels), reported as the importer's normal "malformed" error (model) or a skipped-diagram warning (symbol data). DTDs stay prohibited, no resolver. |
+| SR-26 | Medium | DoS / parsing | MagicDraw archives were inflated without limits: model parts, diagram symbol entries, and gzip / nested-zip symbol data up to three levels deep (a multi-layer zip bomb). | Fixed: model parts are read through `SafeZip` (1 GB each), symbol data (also after gunzip / inner zip) through a 64 MB limit. |
+| SR-27 | Medium | DoS | Report templates are model data (any editor can save one) and loops nest without bound: a few nested `forEach` blocks over every element multiply into billions of iterations and an unbounded document, in the full report and in the template editor's live preview (which runs whenever a member opens the template). This could hold server threads and exhaust memory. | Fixed: `ResolveOptions.MaxIterations` (1 M loop iterations in all) and `MaxNodes` (500 k paragraphs/tables/figures); the preview uses 5 000 / 20 000. Exceeding a budget is reported as "The document is too large". |
+| SR-28 | Medium | Collaboration | Shared SysML text: (a) the document size and the operation history were unbounded, so an editor could grow server memory without limit (each history entry keeps its inserted text, and unapplied documents outlive their editors); (b) operation lengths from the browser were added without overflow checks; (c) a viewer could discard every editor's unapplied edits (Reload calls `ResetText`) and dismiss the "model changed" flag, and the session relied on the panel alone to refuse viewers' operations. | Fixed: client operations may not grow the text past 8 M characters; the history keeps the last 1 000 operations / 16 M inserted characters (older base revisions are refused and the client resynchronises); lengths use checked arithmetic and fractional components are rejected; the session refuses operations, resets, applies and stale-dismissals from participants without edit rights (a viewer's Reload only resynchronises their own tab). |
+| SR-29 | Medium (High when FMI is enabled) | Code execution | With `Meridian:Fmi:Enabled=true` on a server, running FMUs (native code in a child process, documented as not a sandbox) and attaching `.fmu` files were gated on "owner of the open project". Every account owns the projects it creates, so enabling FMI gave every user code execution on the server (the SR-04 pattern). | Fixed: on servers only server administrators may run or attach FMUs (admin state re-read before each run/attach); `Meridian:Fmi:AllowProjectOwners=true` restores the owner rule. The desktop app keeps the owner rule. `Enabled` still defaults to false on servers. docs/FMI.md updated. |
+| SR-30 | Low | FMI | `modelIdentifier` from the FMU's modelDescription was joined into the library path, so `../../…` could load a library outside `binaries/`; extraction trusted the zip header's sizes; host output lines were read without a length limit (an FMU printing a huge line without a newline grew server memory). | Fixed: the identifier must be a C identifier (as the standard requires); extraction counts inflated bytes against the 2 GB budget; host lines are cut at 4 MB, log lines at 2 000 characters. Zip-slip and the 64-hex hash check of the FMU store were verified (test). |
+| SR-31 | Low | AI assistant / cost | On servers the administrator's API key pays for every request, but a prompt (or pasted specification) and a conversation could grow without limit (each turn resends the whole history). `AssistantSettings.RemoveKey` lacked the local-mode check `SaveKey` has (the UI only offers it in local mode). | Fixed: prompts over 200 000 characters and conversations over 400 API messages are refused with a notice, before any request; `RemoveKey` is local-mode only. Output is already capped (`MaxTokens`, 24 tool rounds per turn). |
+| SR-32 | Low | Deployment | `.env.example` ships `POSTGRES_PASSWORD=change-me`; compose only checks that it is set. PostgreSQL is reachable only on the internal `backend` network. Plugins default to enabled in the production compose file and Helm values (the plugin folder is a read-only volume, empty unless an administrator adds assemblies). | Accepted. Recommendation: generate the password (`openssl rand -base64 24`) and set `MERIDIAN_PLUGINS_ENABLED=false` unless plugins are used. |
+| SR-33 | Low | FMI | The FMU store is server-wide and content-addressed; a project editor can point a block's `fmi.sha256` tag at any stored FMU (for example one an administrator attached in another project), which then runs when an administrator runs that system. | Accepted: only administrators can store and run FMUs (SR-29). |
+| SR-34 | Info | Telemetry | OpenTelemetry (opt-in) uses ASP.NET Core / HttpClient instrumentation 1.20, which redacts query-string values by default; `RecordException` records exception messages; `ExportLogs` (off by default) exports formatted log messages. The bundled collector config also drops `url.query`, cookie and authorization attributes. The assistant's SDK client has its own telemetry turned off. | Accepted. |
+| SR-35 | Info | Scripting UI | The script console and plugins dialog still said "owners only" after SR-04 made server scripting administrator-only. | Fixed (wording). |
+
+### Areas reviewed with no finding (second pass)
+
+- **AI assistant**: the key is read from configuration/environment on servers and only saved (Data Protection,
+  purpose `Meridian.Assistant.ApiKey.v1`) in local mode; it is never rendered (password input, no echo), logged or put
+  in error text, and the SDK's telemetry is off. The enabled/key checks are re-evaluated server-side on every turn.
+  Write tools only add proposals to a change set; nothing touches the model until the user clicks Apply on the review
+  card, and Apply checks the role (`Workspace.ReadOnly`, `History.ReadOnly`, element locks) while the session refuses
+  viewers' operations (SR-06), so prompt injection through element text can at most produce proposals the user sees.
+  Answers are parsed by `MarkdownLite` into a tree rendered by Blazor (no `MarkupString`); only http(s) links become
+  anchors (`noopener noreferrer`) and `el:` mentions resolve only to elements of the open model. Conversations are
+  keyed by user + project + branch on the server.
+- **Collaborative text**: caret updates are accepted only from participants that joined that text and are clamped to
+  the text; display names and colours are escaped / validated in `sysml-editor.js`.
+- **Reports**: every model string in the HTML writer is HTML-encoded, figures come from the SR-01-hardened SVG
+  renderer, the preview iframe has `sandbox="allow-same-origin"` (no scripts) and the generated report carries the SR-02
+  CSP. Template JSON import is limited to 4 MB and System.Text.Json's default depth of 64.
+- **Images**: data URIs must be PNG/JPEG/GIF/WebP/SVG under 2 MB; `/_img/<sha>` requires sign-in, is content-addressed
+  and serves with a `sandbox` CSP and `nosniff` (verified: anonymous requests are redirected to sign-in). SVG pictures
+  are only drawn through `<image>`.
+- **Deployment**: the image runs as a non-root user with a read-only root filesystem; compose drops all capabilities
+  and sets `no-new-privileges`; only Caddy publishes ports; Caddy's admin API is off and it does not log credentials;
+  Helm uses `runAsNonRoot`, `readOnlyRootFilesystem`, `drop: [ALL]`, `RuntimeDefault` seccomp, no service-account token,
+  secrets in a Secret (or an existing one) and `required` for the database password. Health endpoints answer only
+  `Healthy`/`Unhealthy` (readiness hides the exception); the request log writes method, path, status and duration only
+  (verified: query strings are not logged).
+- **Mobile shell and PWA**: the mobile components only navigate, select and comment; edit mode is refused for
+  viewers and every model change goes through the same workspace and session checks as the desktop UI. The manifest
+  has no service worker.
+- **View tabs and desktop bridge**: view tabs are per-circuit state (nothing crosses users); the desktop `open-url`
+  message opens only absolute http(s) URLs with a host through the shell.

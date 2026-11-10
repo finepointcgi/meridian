@@ -287,7 +287,8 @@ else
 
     private async Task Attach(Element block, InputFileChangeEventArgs e)
     {
-        if (AttachBlocked) return;
+        await Settings.RefreshAdminAsync(Ws, Services);
+        if (AttachBlocked) { Ws.SetStatus(NativeBlocked ?? "This project is view-only for you."); return; }
         try
         {
             await using var s = e.File.OpenReadStream(500L * 1024 * 1024);
@@ -312,6 +313,7 @@ else
     private async Task Run()
     {
         if (Ws.Model.Find(_targetId) is not { } target || _running) return;
+        await Settings.RefreshAdminAsync(Ws, Services);
         var plan = CoSimulation.Plan(Ws.Model, target);
         _plan = plan;
         if (plan.Parts.Any(p => p.Kind == CoSimPartKind.Fmu) && NativeBlocked is { } why) { Ws.SetStatus(why); return; }   // enforced here, on the server

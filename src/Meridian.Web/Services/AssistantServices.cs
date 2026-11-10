@@ -96,6 +96,7 @@ public sealed class AssistantSettings
 
     public void RemoveKey()
     {
+        if (!_host.LocalMode) throw new InvalidOperationException("On a server the API key is configured by the administrator (Meridian:AI:ApiKey).");
         lock (_gate)
         {
             _stored.ProtectedKey = null;
@@ -221,12 +222,27 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
         return RunAsync(new TurnRequest(prompt, Context(), AssistantEffort.High, label));
     }
 
+    /// <summary>Longest prompt one turn may send (pasted specifications included): requests are paid with the server's key.</summary>
+    public const int MaxPromptChars = 200_000;
+
+    /// <summary>Most API messages a conversation may hold; every turn resends the whole history.</summary>
+    public const int MaxHistoryMessages = 400;
+
     private async Task RunAsync(TurnRequest request)
     {
         if (UnavailableReason != null || Busy || !Acknowledged) return;
         var key = settings.ApiKey();
         if (key == null) return;
         var conversation = Conversation;
+        var tooLong = request.Prompt.Length > MaxPromptChars ? $"That request is too long ({request.Prompt.Length:N0} characters; at most {MaxPromptChars:N0}). Shorten it or split it up."
+            : conversation.History.Count >= MaxHistoryMessages ? "This conversation is too long to continue. Start a new chat."
+            : null;
+        if (tooLong != null)
+        {
+            conversation.Items.Add(new NoticeItem(NoticeKind.Warning, tooLong));
+            Changed?.Invoke();
+            return;
+        }
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var engine = new AssistantEngine(clients.Create(key), settings.Options);

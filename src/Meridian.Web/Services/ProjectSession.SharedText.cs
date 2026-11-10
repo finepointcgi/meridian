@@ -114,15 +114,24 @@ public sealed partial class ProjectSession
         lock (_gate) return _texts.TryGetValue(key, out var t) ? (t.Doc.Text, t.Doc.Revision, t.Status()) : null;
     }
 
-    /// <summary>An editor's operation, made against <paramref name="revision"/>.</summary>
+    /// <summary>True when the participant may change shared texts (not a viewer). Called under the session lock.</summary>
+    private bool CanEditText(string participantId) => _participants.TryGetValue(participantId, out var p) && p.Presence.CanEdit;
+
+    /// <summary>An editor's operation, made against <paramref name="revision"/>. Viewers' operations are refused here, not
+    /// only by their panel.</summary>
     public void SubmitText(string key, string participantId, int revision, TextOperation op)
     {
         lock (_gate)
         {
             if (!_texts.TryGetValue(key, out var t) || !t.Editors.TryGetValue(participantId, out var me)) return;
+            if (!CanEditText(participantId))
+            {
+                me.Client.TextReset(key, t.Doc.Text, t.Doc.Revision);
+                return;
+            }
             TextOperation applied;
             try { applied = t.Doc.Receive(revision, op); }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or OverflowException)
             {
                 _log.LogWarning("Shared text {Key}: rejected an operation from {Participant}: {Message}", key, participantId, ex.Message);
                 me.Client.TextReset(key, t.Doc.Text, t.Doc.Revision);
@@ -136,7 +145,7 @@ public sealed partial class ProjectSession
     private void ApplyServerText(SharedText t, TextOperation op)
     {
         if (op.IsNoop) return;
-        var applied = t.Doc.Receive(t.Doc.Revision, op);
+        var applied = t.Doc.Receive(t.Doc.Revision, op, fromClient: false);
         Distribute(t, applied, author: null);
     }
 
@@ -186,11 +195,16 @@ public sealed partial class ProjectSession
     /// model — after its model operations reached this session. Rewrites the shared text into the model's canonical form,
     /// keeping edits others made meanwhile, and tells every editor.
     /// </summary>
-    public void TextApplied(string key, int revision, string appliedText, string? notice)
+    public void TextApplied(string key, int revision, string appliedText, string? notice) =>
+        TextApplied(key, participantId: null, revision, appliedText, notice);
+
+    /// <inheritdoc cref="TextApplied(string, int, string, string?)"/>
+    public void TextApplied(string key, string? participantId, int revision, string appliedText, string? notice)
     {
         lock (_gate)
         {
             if (!_texts.TryGetValue(key, out var t)) return;
+            if (participantId != null && !CanEditText(participantId)) return;
             var canonical = CanonicalText(t.ScopeId, t.Ids);
             if (canonical == null) { t.Stale = true; SendStatus(t, notice); return; }
             TextOperation concurrent;
@@ -206,11 +220,15 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>Discards everyone's unapplied edits: the shared text becomes the model's canonical text again.</summary>
-    public void ResetText(string key, string? notice = null)
+    public void ResetText(string key, string? notice = null) => ResetText(key, participantId: null, notice);
+
+    /// <summary>A participant discards everyone's unapplied edits (editors only: a viewer must not wipe others' work).</summary>
+    public void ResetText(string key, string? participantId, string? notice)
     {
         lock (_gate)
         {
             if (!_texts.TryGetValue(key, out var t)) return;
+            if (participantId != null && !CanEditText(participantId)) return;
             var canonical = CanonicalText(t.ScopeId, t.Ids) ?? t.Baseline;
             ApplyServerText(t, TextOperation.Diff(t.Doc.Text, canonical));
             t.Baseline = canonical;
@@ -220,11 +238,12 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>Clears the "model changed" flag without touching the text (keep editing).</summary>
-    public void DismissTextStale(string key)
+    public void DismissTextStale(string key, string? participantId = null)
     {
         lock (_gate)
         {
             if (!_texts.TryGetValue(key, out var t) || !t.Stale) return;
+            if (participantId != null && !CanEditText(participantId)) return;
             t.Stale = false;
             SendStatus(t);
         }
