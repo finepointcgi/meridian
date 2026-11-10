@@ -56,4 +56,61 @@ public sealed class CollaborationTests(ServerFixture f) : E2ETest(f)
         await Expect(b.Nodes()).ToHaveCountAsync(0);
         await Ui.EventuallyAsync(async () => await a.CountsAsync() == await b.CountsAsync(), "both browsers should show the same model counts");
     }
+
+    [E2EFact]
+    public async Task Two_browsers_edit_the_same_SysML_text_and_one_apply_updates_both()
+    {
+        var alice = await OpenAsync(F.Alice);
+        var a = alice.Page;
+        var project = "Text collab " + Guid.NewGuid().ToString("N")[..6];
+        await a.NewProjectAsync("Blank project", project);
+        await a.Locator("header.titlebar button.rbtn", new() { HasTextString = "Share" }).ClickAsync();
+        var share = a.MudDialog();
+        await share.GetByPlaceholder("Username").FillAsync(F.Bob.Username);
+        await share.GetByRole(AriaRole.Button, new() { Name = "Invite" }).ClickAsync();
+        await Expect(share.GetByText(F.Bob.DisplayName)).ToBeVisibleAsync();
+        await share.GetByRole(AriaRole.Button, new() { Name = "Done" }).ClickAsync();
+
+        var bob = await OpenAsync(F.Bob);
+        var b = bob.Page;
+        await b.ProjectMenuAsync("Projects…");
+        await b.MudDialog().GetByText(project).First.ClickAsync();
+        await bob.WaitForWorkbenchAsync(project);
+
+        // Both open the shared text of the Structure package.
+        async Task<ILocator> OpenText(IPage p)
+        {
+            await p.Tree().GetByText("Structure", new() { Exact = true }).First.ClickAsync();
+            await p.RibbonAsync("Edit text");
+            var panel = p.DockBody().Locator(".sx-panel");
+            await Expect(panel.Locator(".sx-scope")).ToContainTextAsync("Structure");
+            return panel.Locator("textarea.sx-ta");
+        }
+        var ta = await OpenText(a);
+        var tb = await OpenText(b);
+
+        static string InsertInPackage(string text, string part)
+        {
+            var at = text.IndexOf('{', text.IndexOf("package Structure", StringComparison.Ordinal)) + 1;
+            return text[..at] + $"\n    part def {part} {{\n    }}\n" + text[at..];
+        }
+
+        // Alice types: Bob's editor shows it. Bob types too: Alice's editor shows both.
+        await ta.FillAsync(InsertInPackage(await ta.InputValueAsync(), "AliceUnit"));
+        await Expect(tb).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("AliceUnit"));
+        await tb.FillAsync(InsertInPackage(await tb.InputValueAsync(), "BobUnit"));
+        await Expect(ta).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("BobUnit"));
+        await Expect(ta).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("AliceUnit"));
+        Assert.Equal(await ta.InputValueAsync(), await tb.InputValueAsync());
+
+        // Alice applies once: both trees show both blocks and both editors are in sync.
+        await a.DockBody().Locator(".sx-panel button.sx-btn.primary").ClickAsync();
+        foreach (var p in new[] { a, b })
+        {
+            await Expect(p.Tree().GetByText("AliceUnit", new() { Exact = true })).ToBeVisibleAsync();
+            await Expect(p.Tree().GetByText("BobUnit", new() { Exact = true })).ToBeVisibleAsync();
+            await Expect(p.DockBody().Locator(".sx-panel .sx-state")).ToContainTextAsync("In sync with the model");
+        }
+        await Ui.EventuallyAsync(async () => await ta.InputValueAsync() == await tb.InputValueAsync(), "both editors should show the same text");
+    }
 }

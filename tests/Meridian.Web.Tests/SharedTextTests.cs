@@ -101,6 +101,43 @@ public class SharedTextTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Undo_After_Apply_And_Reload_Updates_The_Shared_Text()
+    {
+        var annWs = new Workspace { User = _ann };
+        Assert.True(await annWs.JoinAsync(_hub, _project, ProjectRole.Owner));
+        var session = annWs.Session!;
+        var structure = annWs.Model.Root.OwnedElements.Single(e => e.Name == "Structure");
+        var ann = new Editor(annWs);
+        ann.Open(structure.Id);
+
+        // apply a new part definition through the text
+        ann.Edit("part def BrakeSystem", "part def Turbocharger {\n    }\n    part def BrakeSystem");
+        DeliverAll(ann);
+        var result = SysMLv2Sync.Apply(annWs.Model, annWs.Model.Find(structure.Id)!, SysMLv2Parser.Parse(ann.Text));
+        Assert.True(result.Applied);
+        session.TextApplied(ann.Key, ann.Client.Revision, ann.Text, null);
+        DeliverAll(ann);
+        Assert.Contains("part def Turbocharger", ann.Text);
+
+        // type something broken, then reload: the broken text is discarded
+        ann.Edit("part def Turbocharger", "part def Turbocharger {{{");
+        DeliverAll(ann);
+        session.ResetText(ann.Key);
+        DeliverAll(ann);
+        Assert.Equal(Canonical(session, structure.Id), ann.Text);
+        Assert.False(ann.Status!.Dirty);
+
+        // undo the applied edit: the clean shared text follows the model
+        annWs.Model.History.Undo();
+        Assert.DoesNotContain(annWs.Model.OfKind(ElementKind.Block), b => b.Name == "Turbocharger");
+        session.RefreshSharedTexts();
+        DeliverAll(ann);
+        Assert.DoesNotContain("Turbocharger", ann.Text);
+        Assert.Equal(Canonical(session, structure.Id), ann.Text);
+        annWs.LeaveSession();
+    }
+
+    [Fact]
     public async Task Two_Editors_Merge_Concurrent_Edits_Apply_Once_And_Follow_The_Model()
     {
         var annWs = new Workspace { User = _ann };

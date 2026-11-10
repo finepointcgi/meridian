@@ -420,7 +420,8 @@
 
         public void TextOperation(string key, TextOperation op)
         {
-            var wire = op.ToWire();
+            // One argument: an object[] passed to a params object?[] parameter would be spread into separate arguments.
+            object wire = op.ToWire();
             Post(() => panel.ToEditor(key, "remoteOp", wire));
         }
 
@@ -617,6 +618,14 @@
             {
                 var ok = await Dialogs.ShowMessageBox("Discard unapplied edits", "This text is shared: reloading discards everyone's unapplied edits in it.", yesText: "Reload", cancelText: "Cancel");
                 if (ok != true) return;
+            }
+            // Let this tab's own typed edits reach the session first; otherwise they are replayed after the reset and the
+            // "discarded" text comes back.
+            if (_mod != null)
+            {
+                try { await _mod.InvokeAsync<SyncedText?>("syncedText", _host); }
+                catch (JSException) { /* still sending: the reset below wins for everything that already arrived */ }
+                catch (JSDisconnectedException) { return; }
             }
             _session!.ResetText(_textKey!, $"{Ws.User?.DisplayName ?? "Someone"} reloaded the text from the model.");
             _summary = null;
