@@ -1,0 +1,36 @@
+# Caddy reverse proxy for Meridian (docker-compose.prod.yml).
+#   MERIDIAN_DOMAIN  public host name, e.g. meridian.example.com (DNS must point here for Let's Encrypt)
+#   CADDY_TLS        an e-mail address for ACME (Let's Encrypt / ZeroSSL), or "internal" for Caddy's own CA (testing, intranets)
+#
+# Caddy trusts no incoming X-Forwarded-* headers (no trusted_proxies), so the values Meridian sees are always
+# Caddy's own: the real client IP, https, and the requested host.
+{
+	admin off
+}
+
+{$MERIDIAN_DOMAIN} {
+	tls {$CADDY_TLS}
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Large model imports and backup restores.
+	request_body {
+		max_size 512MB
+	}
+
+	# Blazor Server keeps one long-lived WebSocket per browser tab; Caddy proxies WebSockets with no extra settings.
+	reverse_proxy meridian:8080
+
+	log {
+		output stdout
+		format json
+	}
+}

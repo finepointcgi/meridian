@@ -32,7 +32,7 @@ public static class MeridianServer
     {
         var builder = WebApplication.CreateBuilder(options ?? new WebApplicationOptions { Args = args });
         customize?.Invoke(builder);
-
+        Hosting.OperationsHosting.AddMeridianOperations(builder);   // health, JSON/request logging, OpenTelemetry (docs/DEPLOYMENT.md)
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents()
@@ -73,6 +73,7 @@ public static class MeridianServer
         builder.AddMeridianAdmin(host); // SSO, lockout + rate limiting, audit log, backups (Admin/AdminHosting.cs)
 
         var app = builder.Build();
+        Hosting.OperationsHosting.UseMeridianRequestLogging(app);
 
         var meridianDb = app.Services.GetRequiredService<IMeridianStore>();
         await meridianDb.MigrateAsync();
@@ -127,6 +128,7 @@ public static class MeridianServer
         app.UseAntiforgery();
 
         app.MapStaticAssets();
+        Hosting.OperationsHosting.MapMeridianHealth(app);
         ImageCache.Map(app);
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
