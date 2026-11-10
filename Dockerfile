@@ -19,6 +19,7 @@ COPY src/Meridian.Serialization/Meridian.Serialization.csproj src/Meridian.Seria
 COPY src/Meridian.Data/Meridian.Data.csproj src/Meridian.Data/
 COPY src/Meridian.Scripting/Meridian.Scripting.csproj src/Meridian.Scripting/
 COPY src/Meridian.Web/Meridian.Web.csproj src/Meridian.Web/
+COPY src/Meridian.FmuHost/Meridian.FmuHost.csproj src/Meridian.FmuHost/
 RUN dotnet restore src/Meridian.Web/Meridian.Web.csproj
 COPY src/ src/
 # Declared after restore: build args become environment variables, and MSBuild reads $VERSION as the Version property.

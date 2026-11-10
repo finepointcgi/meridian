@@ -49,6 +49,8 @@ You can change the choice later from your avatar menu (**Switch workspace or ser
 - **Other languages**: BPMN 2.0, ArchiMate 3, ER/database diagrams (DDL in and out for PostgreSQL, MySQL,
   SQL Server and SQLite), C# reverse engineering, and a free-drawing whiteboard.
 - **Simulation**: step through activities and state machines.
+- **FMI co-simulation**: import FMI 2.0 / 3.0 FMUs as blocks, wire them with native parametric blocks in an IBD and run them
+  with a fixed-step master (plots, CSV, requirement checks). See [docs/FMI.md](docs/FMI.md).
 - **Exchange**
   - XMI 2.5.1 (with diagrams), SysML v2 text, ReqIF, BPMN XML and ArchiMate exchange files.
   - Enterprise Architect `.qea` import.

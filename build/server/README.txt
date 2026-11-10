@@ -20,3 +20,8 @@ survive restarts. A Dockerfile and docker-compose.yml are in the source reposito
 
 Production deployment (Docker Compose with Caddy, Helm, backups, monitoring):
 see docs/DEPLOYMENT.md in the source repository. Health endpoints: /healthz, /readyz.
+
+FMI co-simulation runs FMUs' native code on the server (in a separate
+Meridian.FmuHost process per FMU: crash isolation, not a sandbox). It is off on
+servers unless Meridian__Fmi__Enabled=true, and only project owners can run it.
+See docs/FMI.md in the source repository.

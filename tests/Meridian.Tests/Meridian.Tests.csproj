@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />
   </ItemGroup>
@@ -22,10 +23,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- C sources of the test FMUs and the vendored FMI headers (BSD-2-Clause, Modelica Association): compiled at test time. -->
+    <None Include="Fmi\native\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Meridian.Core\Meridian.Core.csproj" />
     <ProjectReference Include="..\..\src\Meridian.Serialization\Meridian.Serialization.csproj" />
     <ProjectReference Include="..\..\src\Meridian.Data\Meridian.Data.csproj" />
     <ProjectReference Include="..\..\src\Meridian.Scripting\Meridian.Scripting.csproj" />
+    <!-- The out-of-process FMU runner, copied next to the tests so co-simulation tests can start it. -->
+    <ProjectReference Include="..\..\src\Meridian.FmuHost\Meridian.FmuHost.csproj" />
     <!-- Built first so PluginTests can load it from samples/HelloPlugin/bin. -->
     <ProjectReference Include="..\..\samples\HelloPlugin\HelloPlugin.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
