@@ -1,13 +1,13 @@
 # Integrations
 
-Meridian connects to issue trackers, notifies other systems through webhooks, and exposes requirements to
-ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
+Meridian connects to issue trackers, notifies other systems through webhooks, follows code repositories, and
+exposes requirements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
 ## 1. Issue trackers
 
-Open the project menu → **Integrations (issue trackers, webhooks)…** → *Issue trackers* (project owners only).
+Open the project menu → **Integrations (issue trackers, webhooks, code)…** → *Issue trackers* (project owners only).
 
 | Tracker | Base URL | Project field | Credentials |
 |---|---|---|---|
@@ -139,8 +139,63 @@ avatar menu → **API tokens…** (server mode) to create (shown once) and revok
 * Tokens are 256-bit random values; only their SHA-256 hash and a 12-character display prefix are stored
   (`api_tokens` table); revoked tokens stop working immediately. A token has its owner's access to every project.
 
+## 5. Code repositories (code sync)
+
+A project can follow a GitHub or GitLab repository (cloud or self-hosted). When code is pushed to the chosen branch,
+Meridian reads the C# code at that commit, updates the model on a review branch, highlights what changed on the
+diagrams, and posts a `meridian/model` commit status back to the commit. Host code lives in
+`src/Meridian.Web/CodeSync/Hosts/`, the UI in `Components/Workbench/CodeRepositoriesPanel.razor`.
+
+### Connect a repository
+
+Project menu → **Integrations…** → *Code repositories* → **Add repository** (project owners only).
+
+| Field | GitHub | GitLab |
+|---|---|---|
+| Server URL | `https://api.github.com`, or `https://ghe.example.com/api/v3` | `https://gitlab.com`, or your server |
+| Repository | owner and repository name | project path (`group/project`) or numeric id |
+| Access token | fine-grained token: *Contents: read*, *Commit statuses: write* | project or personal token: `read_repository`, plus `api` to post statuses |
+
+* **Branch** (default `main`): pushes to other branches are ignored.
+* **Folders to include**: comma separated, e.g. `src/Domain, src/Shared`. Empty means the whole repository.
+* **Model package**: where the code goes. Defaults to the repository name.
+* **Sync on every push**: turn off to sync only with the sync button.
+* **Post a commit status**: `pending` while Meridian works, then `success` (no changes, or changes waiting on the
+  review branch, with a link to the review) or `failure`.
+
+**Test connection** checks the token, the repository and the branch. The sync button (⟳) fetches the branch head
+and syncs it straight away.
+
+### Set up the webhook
+
+Saving a new connection shows the **payload URL** (`https://<meridian>/api/code-sync/<connection id>/webhook`) and a
+**secret**. Copy the secret then: it is stored encrypted and not shown again (the webhook button can create a new one).
+
+* **GitHub**: *Settings → Webhooks → Add webhook*. Paste the URL, content type `application/json`, paste the secret,
+  choose *Just the push event*. GitHub signs each delivery with `X-Hub-Signature-256` (HMAC-SHA256).
+* **GitLab**: *Settings → Webhooks → Add new webhook*. Paste the URL, paste the secret as *Secret token*, tick
+  *Push events*. GitLab sends it back in `X-Gitlab-Token`.
+
+The endpoint answers `401` for a missing or wrong signature/token, `404` for an unknown connection, `200` to GitHub's
+`ping`, `202` for pushes it queued or ignored (other branch, deleted branch, other events, automatic sync off) and
+`429` when one connection sends more than 30 requests a minute. Set `Meridian:PublicUrl` so the URL shown and the
+review links in commit statuses use your public address. The desktop app cannot receive webhooks; use the sync button.
+
+### How a sync runs
+
+Webhooks never sync inside the request: the push is queued and a background worker runs syncs one at a time. If
+several pushes arrive for one connection while it waits, only the latest commit is synced (every sync reads a full
+snapshot). For each sync Meridian downloads the repository archive at the commit (GitHub tarball, GitLab
+`archive.tar.gz`), streams it without writing to disk, and keeps the C# files in the watched folders. Limits: 200 MB
+archive, 4 GB unpacked, 20,000 source files, 500 MB of source in total; source files over 2 MB are skipped.
+Archives with absolute or `..` paths are rejected; symlinks and hard links are ignored.
+
+All calls to the git host use the same address checks as issue trackers (see *Which addresses the server will
+call*): allow private networks for an on-premises GitHub Enterprise or GitLab. The access token and the webhook
+secret are encrypted like other integration secrets and never written to the log.
+
 ## Storage
 
 New tables (created by `MigrateAsync`, in the integrations migration block of each store):
-`project_integrations` (id, project, kind `issue-tracker`/`webhook`, name, config JSON, encrypted secret),
+`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`, name, config JSON, encrypted secret),
 `webhook_deliveries` (delivery log) and `api_tokens`.
