@@ -91,7 +91,7 @@
             <MudTooltip Text="Undo (⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Undo" Disabled="!Ws.Model.History.CanUndo" OnClick="Undo" /></MudTooltip>
             <MudTooltip Text="Redo (⇧⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Redo" Disabled="!Ws.Model.History.CanRedo" OnClick="Redo" /></MudTooltip>
             <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
-                <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
+                <MudIconButton Class="tb-theme" Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
             </MudTooltip>
             <MudTooltip Text="Settings (⌘,)"><MudIconButton Class="tb-settings" Size="Size.Small" Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()" aria-label="Settings" /></MudTooltip>
             <button class="btn-primary" @onclick="Save" disabled="@Ws.ReadOnly" title="Save a named version you can compare or restore later. Your work is already saved automatically as you go."><MudIcon Icon="@Icons.Material.Outlined.Commit" Style="font-size:16px" /> Commit</button>

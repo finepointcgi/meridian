@@ -145,3 +145,10 @@ body .mud-popover .mud-menu-item .mud-menu-item-text { color: inherit; }
   .settings-title { flex-wrap: wrap; }
   .settings-search { width: 100%; margin-left: 0; }
 }
+
+/* ---------------------------------------------------------------- light-mode contrast fixes for bright status colours */
+.app.light .pill.admin { color: #6b46c1; }
+.app.light .pill.ok, .app.light .pill.active { color: var(--ok); }
+.app.light .rv-dk.moved { color: #6b46c1; }
+body.m-theme-light .export-error { color: var(--danger); }
+.settings-tab { justify-content: flex-start; }

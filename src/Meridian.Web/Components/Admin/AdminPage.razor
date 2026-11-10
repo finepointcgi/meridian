@@ -4,6 +4,7 @@
 @using Meridian.Web.Admin
 @inject Workspace Ws
 @inject Meridian.Web.Settings.ThemeService Theme
+@implements IDisposable
 @inject IMeridianStore Db
 @inject AdminAccess Access
 @inject AuthenticationStateProvider Auth
@@ -76,6 +77,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Theme.Changed += OnThemeChanged;   // "Match system" follows the OS while this page is open
         var principal = (await Auth.GetAuthenticationStateAsync()).User;
         if (await Access.IsAdminAsync(principal) && MeridianAuth.UserId(principal) is { } id)
         {
@@ -93,4 +95,7 @@
         _stats = (users.Count, users.Count(u => u.IsAdmin), projects.Count, orgs.Count, projects.Sum(p => p.SizeBytes));
         StateHasChanged();
     }
+
+    private void OnThemeChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Theme.Changed -= OnThemeChanged;
 }
