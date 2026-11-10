@@ -7,6 +7,7 @@
     <ProjectReference Include="..\Meridian.Scripting\Meridian.Scripting.csproj" />
     <!-- Out-of-process FMU runner for co-simulation (docs/FMI.md): its output lands next to the server. -->
     <ProjectReference Include="..\Meridian.FmuHost\Meridian.FmuHost.csproj" />
+    <ProjectReference Include="..\Meridian.Assistant\Meridian.Assistant.csproj" />
   </ItemGroup>
 
   <ItemGroup>

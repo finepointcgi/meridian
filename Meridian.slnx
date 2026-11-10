@@ -3,6 +3,7 @@
     <Project Path="samples/HelloPlugin/HelloPlugin.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/Meridian.Assistant/Meridian.Assistant.csproj" />
     <Project Path="src/Meridian.Core/Meridian.Core.csproj" />
     <Project Path="src/Meridian.Data/Meridian.Data.csproj" />
     <Project Path="src/Meridian.Desktop/Meridian.Desktop.csproj" />

@@ -81,6 +81,7 @@ public partial class Workbench
         };
         list.AddRange(RequirementPaletteCommands());
         list.AddRange(ScriptingPaletteCommands());
+        list.AddRange(AssistantPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;

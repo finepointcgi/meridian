@@ -34,6 +34,7 @@
     <ProjectReference Include="..\..\src\Meridian.Scripting\Meridian.Scripting.csproj" />
     <!-- The out-of-process FMU runner, copied next to the tests so co-simulation tests can start it. -->
     <ProjectReference Include="..\..\src\Meridian.FmuHost\Meridian.FmuHost.csproj" />
+    <ProjectReference Include="..\..\src\Meridian.Assistant\Meridian.Assistant.csproj" />
     <!-- Built first so PluginTests can load it from samples/HelloPlugin/bin. -->
     <ProjectReference Include="..\..\samples\HelloPlugin\HelloPlugin.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>

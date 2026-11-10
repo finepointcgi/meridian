@@ -229,6 +229,12 @@
             </div>
         </div>
         <PluginsMenu @ref="_plugins" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
+        <div class="rgroup compact">
+            <div class="rlabel">AI</div>
+            <div class="ritems">
+                <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
+            </div>
+        </div>
         <RibbonOverflow />
     </nav>
 
@@ -320,6 +326,7 @@
                     @DockTab(8, "Tables", Icons.Material.Outlined.TableChart, null)
                     @DockTab(11, "Variants & trades", Icons.Material.Outlined.Balance, null)
                     @DockTab(12, "SysML v2 text", Icons.Material.Outlined.Code, null)
+                    @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -341,6 +348,7 @@
                             case 8: <TablesPanel Open="_tablesRequest" />; break;
                             case 11: <VariantsPanel />; break;
                             case 12: <SysmlTextPanel State="_sysml" />; break;
+                            case AssistantDock: <AssistantPanel Launcher="_assistant" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>
