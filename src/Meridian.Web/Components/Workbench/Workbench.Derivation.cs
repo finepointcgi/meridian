@@ -77,10 +77,19 @@ public partial class Workbench
     private IEnumerable<CommandPalette.Command> DerivationPaletteCommands()
     {
         if (Ws.ReadOnly) yield break;
-        foreach (var o in RibbonDerivations())
+        var seen = new HashSet<string>();
+        // The selection's and active diagram's offers first, then the model's use cases, activities and interactions,
+        // so "Create activity from use case" finds something even when nothing relevant is selected.
+        var model = Ws.Model.AllElements
+            .Where(e => e.Kind is ElementKind.UseCase or ElementKind.Activity or ElementKind.Interaction)
+            .Take(200)
+            .SelectMany(e => DiagramDerivation.Offers(Ws.Model, e));
+        foreach (var o in RibbonDerivations().Concat(model))
         {
             var offer = o;
-            yield return new($"{offer.Label} ({offer.Source.DisplayName})", "Command", Icons.Material.Outlined.AccountTree, () => DeriveAsync(offer));
+            var label = $"{offer.Label} ({offer.Source.DisplayName})";
+            if (!seen.Add(label) || seen.Count > 120) continue;
+            yield return new(label, "Command", Icons.Material.Outlined.AccountTree, () => DeriveAsync(offer));
         }
         if (Ws.Active?.Diagram is { } d && DiagramDerivation.IsStale(Ws.Model, d))
             yield return new($"Update “{d.Name}” from source", "Command", Icons.Material.Outlined.Sync, () => UpdateFromSource(d));
