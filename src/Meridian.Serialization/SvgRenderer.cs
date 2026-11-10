@@ -523,9 +523,29 @@ public static partial class SvgRenderer
                 break;
             case NodeShape.Folder:
             {
-                var tab = Math.Min(70, b.Width * 0.45);
-                sb.Append($"<path d=\"M{F(b.X)},{F(b.Y)} h{F(tab)} v18 H{F(b.Right)} V{F(b.Bottom)} H{F(b.X)} Z M{F(b.X)},{F(b.Y + 18)} h{F(tab)}\" fill=\"{fill}\" stroke=\"{stroke}\"/>");
-                Text(sb, b.Center.X, b.Y + 40, Trunc(c.Name, b.Width - 10), true, "middle", color: t.Text);
+                // UML package: a tabbed folder. With nested contents the name sits in the tab (UML 2.5 §12.3.5),
+                // otherwise in the body; the keyword («profile», stereotypes) goes with it.
+                const double tabH = 20;
+                var nested = ContainerLayout.IsContainer(d, n);
+                var name = nested ? Trunc(c.Name, b.Width * 0.7 - 16) : Trunc(c.Name, b.Width - 12);
+                var tab = nested ? Math.Clamp(name.Length * CharWidth + 20, 50, b.Width * 0.7) : Math.Clamp(b.Width * 0.38, 30, 80);
+                sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y + tabH)}\" width=\"{F(b.Width)}\" height=\"{F(Math.Max(0, b.Height - tabH))}\" fill=\"{fill}\" stroke=\"{stroke}\" filter=\"url(#msh)\"/>");
+                sb.Append($"<path d=\"M{F(b.X)},{F(b.Y + tabH)} V{F(b.Y + 3)} Q{F(b.X)},{F(b.Y)} {F(b.X + 3)},{F(b.Y)} H{F(b.X + tab - 3)} Q{F(b.X + tab)},{F(b.Y)} {F(b.X + tab)},{F(b.Y + 3)} V{F(b.Y + tabH)} Z\" fill=\"{header}\" stroke=\"{stroke}\"/>");
+                if (nested)
+                {
+                    Text(sb, b.X + 10, b.Y + 14.5, name, true, "start", color: t.Text);
+                    if (c.Keyword != null) Text(sb, b.X + 10, b.Y + tabH + 16, Trunc(c.Keyword, b.Width - 20), false, "start", size: 11, color: t.Muted);
+                }
+                else
+                {
+                    var cy = b.Y + tabH + (b.Height - tabH) / 2;
+                    if (c.Keyword != null)
+                    {
+                        Text(sb, b.Center.X, cy - 4, Trunc(c.Keyword, b.Width - 10), false, "middle", size: 11, color: t.Muted);
+                        Text(sb, b.Center.X, cy + 13, name, true, "middle", color: t.Text);
+                    }
+                    else Text(sb, b.Center.X, cy + 5, name, true, "middle", color: t.Text);
+                }
                 break;
             }
             case NodeShape.Note:

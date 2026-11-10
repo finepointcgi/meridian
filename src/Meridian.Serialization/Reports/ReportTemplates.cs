@@ -166,18 +166,37 @@ public static class ReportTemplates
         ],
     };
 
+    /// <summary>
+    /// SDD: package overview and block hierarchy, a section per design block with its internal structure (IBD) and behavior,
+    /// interfaces from ports and connectors, behavior views and requirement allocation. Every diagram is a numbered,
+    /// captioned figure; a diagram's documentation (the auto-diagrammer's one-line purpose) is printed above it.
+    /// </summary>
     public static DocTemplate Sdd() => new()
     {
         Name = "System Design Description",
-        Description = "SDD: architecture overview, design elements with features and internal structure, behavior, and requirement allocation.",
+        Description = "SDD: package overview and architecture, a section per design block with its internal structure and behavior, interfaces (ports and connectors), behavior views and requirement allocation.",
         Title = "{model.name}", Subtitle = "System Design Description", DocumentNumber = "SDD-001",
         Sections =
         [
-            Scope("SDD", "Section {ref:architecture} gives the architecture; {ref:design} describes each design element."),
+            Scope("SDD", "Section {ref:architecture} gives the architecture; {ref:design} describes each design element with its internal structure and behavior; " +
+                         "{ref:interfaces} the interfaces; {ref:behavior} the system behavior and {ref:allocation} the allocation of requirements to the design."),
             new DocSection
             {
                 Title = "System architecture", Ref = "architecture", PageBreakBefore = true,
-                Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.BlockDefinition, DiagramType.Package, DiagramType.Class], Caption = "{name}", Ref = "fig-{name}" }],
+                Blocks = [T("This section shows how the model is organised into packages and how the system decomposes into blocks.")],
+                Sections =
+                [
+                    new DocSection
+                    {
+                        Title = "Package overview",
+                        Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.Package], Caption = "{name}", Ref = "fig-{name}" }],
+                    },
+                    new DocSection
+                    {
+                        Title = "Structure",
+                        Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.BlockDefinition, DiagramType.Class], Caption = "{name}", Ref = "fig-{name}" }],
+                    },
+                ],
             },
             new DocSection
             {
@@ -197,16 +216,34 @@ public static class ReportTemplates
                                 Blocks = [new TableBlock { Caption = "{name} features", Query = "kind:Property,Port,Operation in:{id}",
                                                            Columns = [new("name"), new("kind"), new("type"), new("field:multiplicity", "Mult."), new("field:defaultValue", "Default")] }],
                             },
-                            new DiagramBlock { Query = "kind:Diagram in:{id}", Caption = "{name} ({block.name})" },
+                            new DiagramBlock { Query = "kind:Diagram in:{id}", DiagramTypes = [DiagramType.InternalBlock, DiagramType.Parametric], Caption = "{block.name} – internal structure: {name}" },
+                            new DiagramBlock { Query = "kind:Diagram in:{id}", DiagramTypes = [DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence], Caption = "{block.name} – behavior: {name}" },
                         ],
                     },
                 ],
             },
-            S("Behavior", new DiagramBlock { DiagramTypes = [DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence, DiagramType.UseCase], Caption = "{name}" }),
             new DocSection
             {
-                Title = "Requirements allocation", Landscape = true,
-                Blocks = [new TraceTableBlock { Caption = "Requirement allocation to design", Columns = [TraceColumn.SatisfiedBy, TraceColumn.AllocatedTo], ShowCoverage = false },
+                Title = "Interfaces", Ref = "interfaces",
+                Blocks =
+                [
+                    T("Interfaces are defined by interface blocks and realised by the ports of the design blocks; connectors join ports inside each internal block diagram."),
+                    new ElementListBlock { Query = "kind:InterfaceBlock,Interface", Format = "**{name}** — {documentation}", EmptyText = "_The model defines no interface blocks._" },
+                    new TableBlock { Caption = "Ports", Ref = "tbl-sdd-ports", Query = "kind:Port", SortBy = "owner",
+                                     Columns = [new("owner"), new("name"), new("type"), new("field:direction", "Direction"), new("field:portKind", "Port kind")] },
+                    new TableBlock { Caption = "Connectors", Query = "kind:Connector", Columns = [new("source"), new("target"), new("field:itemFlow", "Item flow"), new("owner")] },
+                ],
+            },
+            new DocSection
+            {
+                Title = "Behavior", Ref = "behavior",
+                Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.UseCase, DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence], Caption = "{name}" }],
+            },
+            new DocSection
+            {
+                Title = "Requirements allocation", Ref = "allocation", Landscape = true,
+                Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.Requirement], Caption = "{name}" },
+                          new TraceTableBlock { Caption = "Requirement allocation to design", Columns = [TraceColumn.SatisfiedBy, TraceColumn.AllocatedTo], ShowCoverage = false },
                           new TraceMatrixBlock { Caption = "Requirement × design matrix", RowQuery = "kind:Requirement", ColumnQuery = "kind:Block", RelationshipKinds = [ElementKind.Satisfy, ElementKind.Allocate, ElementKind.Refine] }],
             },
         ],

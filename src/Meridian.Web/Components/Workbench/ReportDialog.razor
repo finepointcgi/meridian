@@ -6,6 +6,7 @@
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
+@inject IServiceProvider Services
 
 <MudDialog>
     <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Description" /><MudText Typo="Typo.h6">Generate document</MudText></div></TitleContent>
@@ -52,6 +53,45 @@
                 <MudRadio Value="ReportFormat.Docx" Color="Color.Primary" Dense="true">Word (.docx)</MudRadio>
                 <MudRadio Value="ReportFormat.Html" Color="Color.Primary" Dense="true">HTML (single file)</MudRadio>
             </MudRadioGroup>
+            @if (_ai != null)
+            {
+                @* AI narrative: Claude drafts an overview and rationale per section; shown here for review and editing, never added silently. *@
+                <div class="section-title" style="margin-top:4px">AI narrative</div>
+                <MudSwitch T="bool" Value="_aiNarrative" ValueChanged="v => { _aiNarrative = v; }" Color="Color.Primary" Disabled="_busy || _drafting" Class="ai-narrative-switch"
+                           Label="Have Claude draft an overview and a rationale for each section (you review them first)" />
+                @if (_aiNarrative)
+                {
+                    @if (!_ai.Acknowledged)
+                    {
+                        <MudText Typo="Typo.caption" Style="color:var(--text-3)">Open the AI assistant once and accept its notice about sending model content to Anthropic first.</MudText>
+                    }
+                    else
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.AutoAwesome" Disabled="_busy || _drafting || _current == null" OnClick="DraftNarrative">
+                                @(_drafting ? "Drafting…" : _narrative == null ? "Draft narrative" : "Redraft")
+                            </MudButton>
+                            @if (_drafting) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                            <MudText Typo="Typo.caption" Style="color:var(--text-3)">Sends a summary of the model to Anthropic. Edit or untick anything before generating.</MudText>
+                        </div>
+                        @if (_narrativeError != null) { <MudText Typo="Typo.caption" Color="Color.Error">@_narrativeError</MudText> }
+                        @if (_narrative != null)
+                        {
+                            <div class="narrative-review" style="display:flex; flex-direction:column; gap:8px; max-height:38vh; overflow:auto; padding-right:4px">
+                                @foreach (var n in _narrative)
+                                {
+                                    var section = n;
+                                    <div style="border:1px solid var(--border); border-radius:8px; padding:8px">
+                                        <MudCheckBox T="bool" Value="section.Include" ValueChanged="v => section.Include = v" Dense="true" Color="Color.Primary" Label="@section.Title" />
+                                        <MudTextField T="string" Value="section.Overview" ValueChanged="v => section.Overview = v" Label="Overview" Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="!section.Include" />
+                                        <MudTextField T="string" Value="section.Rationale" ValueChanged="v => section.Rationale = v" Label="Rationale" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="!section.Include" />
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                }
+            }
             @if (_busy || _progressText.Length > 0)
             {
                 <div>
@@ -71,7 +111,7 @@
         {
             <MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton>
         }
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || _current == null" OnClick="Generate">@(_busy ? "Generating…" : "Generate")</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || _drafting || _current == null" OnClick="Generate">@(_busy ? "Generating…" : "Generate")</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -89,10 +129,46 @@
     private string _progressText = "";
     private CancellationTokenSource? _cts;
 
+    /// <summary>Name of a built-in template to select when the dialog opens (e.g. the SDD from "Generate SDD…").</summary>
+    [Parameter] public string? Preselect { get; set; }
+
+    private Meridian.Web.Services.AssistantService? _ai;
+    private bool _aiNarrative;
+    private bool _drafting;
+    private List<Meridian.Assistant.Engine.NarrativeSection>? _narrative;
+    private string? _narrativeError;
+    private CancellationTokenSource? _draftCts;
+
     protected override void OnInitialized()
     {
         Load();
-        Select(_entries.FirstOrDefault()?.Key ?? "");
+        var pre = Preselect is { Length: > 0 } name ? _entries.FirstOrDefault(e => e.Element == null && e.Template.Name == name)?.Key : null;
+        Select(pre ?? _entries.FirstOrDefault()?.Key ?? "");
+        // The assistant is optional (not registered in every host); the narrative needs it configured.
+        _ai = Services.GetService(typeof(Meridian.Web.Services.AssistantService)) as Meridian.Web.Services.AssistantService;
+        if (_ai?.UnavailableReason != null) _ai = null;
+    }
+
+    private async Task DraftNarrative()
+    {
+        if (_ai?.NarrativeWriter() is not { } writer) { _narrativeError = "The AI assistant is not available."; return; }
+        _drafting = true;
+        _narrativeError = null;
+        StateHasChanged();
+        _draftCts?.Dispose();
+        _draftCts = new CancellationTokenSource();
+        try
+        {
+            var t = Effective();
+            var result = await writer.DraftAsync(Ws.Model, DocResolverTitle(t, Ws.Model), t.Sections.Select(s => s.Title).ToList(), _draftCts.Token);
+            if (result.Ok) _narrative = result.Sections.ToList();
+            else _narrativeError = result.Error;
+        }
+        finally
+        {
+            _drafting = false;
+            StateHasChanged();
+        }
     }
 
     private void Load(string? select = null)
@@ -117,6 +193,8 @@
         _author = t.Author.Length > 0 ? t.Author : Ws.User?.DisplayName ?? "";
         _pageSize = t.PageSize;
         _progressText = "";
+        _narrative = null;   // a narrative belongs to the template it was drafted for
+        _narrativeError = null;
     }
 
     /// <summary>The selected template with this dialog's document properties applied.</summary>
@@ -139,6 +217,7 @@
         var ct = _cts.Token;
         var format = _format;
         var template = Effective();
+        if (_aiNarrative && _narrative != null) Meridian.Assistant.Engine.NarrativeWriter.ApplyTo(template, _narrative);
         try
         {
             var snapshot = ReportEngine.Snapshot(Ws.Model);   // UI thread: consistent copy, then work off-thread
@@ -248,6 +327,8 @@
 
     public void Dispose()
     {
+        _draftCts?.Cancel();
+        _draftCts?.Dispose();
         _cts?.Cancel();
         _cts?.Dispose();
     }

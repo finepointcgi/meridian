@@ -57,6 +57,7 @@ public partial class Workbench
         yield return new("Assistant: Generate requirements from text…", "Command", Icons.Material.Outlined.PlaylistAdd, () => { RunAssistant(QuickAction.GenerateRequirements); return Task.CompletedTask; });
         yield return new("Assistant: Suggest trace links", "Command", Icons.Material.Outlined.Link, () => { RunAssistant(QuickAction.SuggestTraceLinks); return Task.CompletedTask; });
         yield return new("Assistant: Review this model", "Command", Icons.Material.Outlined.Rule, () => { RunAssistant(QuickAction.ReviewModel); return Task.CompletedTask; });
+        yield return new("Assistant: Diagram my model", "Command", Icons.Material.Outlined.AccountTree, () => { RunAssistant(QuickAction.DiagramModel); return Task.CompletedTask; });
         yield return new("Assistant: Diagram from description…", "Command", Icons.Material.Outlined.Schema, () => { RunAssistant(QuickAction.DiagramFromDescription); return Task.CompletedTask; });
     }
 }

@@ -173,7 +173,7 @@ public sealed class AssistantConversations
 }
 
 /// <summary>Quick actions offered above the chat.</summary>
-public enum QuickAction { GenerateRequirements, SuggestTraceLinks, ReviewModel, DiagramFromDescription }
+public enum QuickAction { GenerateRequirements, SuggestTraceLinks, ReviewModel, DiagramFromDescription, DiagramModel }
 
 /// <summary>
 /// The assistant for one circuit: builds the workbench context, runs turns through <see cref="AssistantEngine"/> and
@@ -217,6 +217,7 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
             QuickAction.GenerateRequirements => (Prompts.GenerateRequirements(ws.Model, package, text ?? ""), $"Generate requirements in {package.DisplayName}"),
             QuickAction.SuggestTraceLinks => (Prompts.SuggestTraceLinks(scope), "Suggest trace links" + (scope is { Kind: ElementKind.Package } ? $" in {scope.DisplayName}" : "")),
             QuickAction.ReviewModel => (Prompts.ReviewModel(scope), "Review this model" + (scope is { Kind: ElementKind.Package } ? $" ({scope.DisplayName})" : "")),
+            QuickAction.DiagramModel => (Prompts.DiagramModel(scope), "Diagram my model" + (scope is { Kind: ElementKind.Package } ? $" ({scope.DisplayName})" : "")),
             _ => (Prompts.DiagramFromDescription(package, diagramKind ?? Prompts.DiagramKinds[0], text ?? ""), $"{diagramKind ?? Prompts.DiagramKinds[0]} from description"),
         };
         return RunAsync(new TurnRequest(prompt, Context(), AssistantEffort.High, label));
@@ -248,6 +249,13 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
         var engine = new AssistantEngine(clients.Create(key), settings.Options);
         await engine.RunTurnAsync(conversation, ws.Model, request, () => Changed?.Invoke(), _cts.Token);
     }
+
+    /// <summary>
+    /// A narrative writer for generated documents (the report dialog's "AI narrative"), or null when the assistant is off or
+    /// this user has not accepted the notice that model content is sent to Anthropic.
+    /// </summary>
+    public NarrativeWriter? NarrativeWriter() =>
+        UnavailableReason == null && Acknowledged && settings.ApiKey() is { } key ? new NarrativeWriter(clients.Create(key), settings.Options) : null;
 
     public ApplyResult Apply(ChangeSet set)
     {

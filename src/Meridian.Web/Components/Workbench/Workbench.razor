@@ -135,7 +135,7 @@
         <div class="rgroup">
             <div class="rlabel">Diagram</div>
             <div class="ritems">
-                @foreach (var t in new[] { DiagramType.Whiteboard, DiagramType.BlockDefinition, DiagramType.InternalBlock, DiagramType.Requirement, DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence, DiagramType.UseCase })
+                @foreach (var t in new[] { DiagramType.Whiteboard, DiagramType.BlockDefinition, DiagramType.InternalBlock, DiagramType.Requirement, DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence, DiagramType.UseCase, DiagramType.Package })
                 {
                     var type = t;
                     <MudTooltip Text="@($"New {Metamodel.DisplayName(type)} for the selection")">
@@ -145,7 +145,7 @@
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
                     <ActivatorContent><button title="More diagram types" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">More</span></button></ActivatorContent>
                     <ChildContent>
-                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Package, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication })
+                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication })
                         {
                             var type = t;
                             <MudMenuItem Icon="@UiKinds.DiagramIcon(type)" OnClick="() => NewDiagramSmart(type)">@Metamodel.DisplayName(type)</MudMenuItem>
@@ -153,6 +153,7 @@
                     </ChildContent>
                 </MudMenu>
                 <MudTooltip Text="Automatic layout"><button class="rbtn" disabled="@(Ws.Active == null)" @onclick="() => Ws.Active?.Arrange()"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" /><span class="t">Arrange</span></button></MudTooltip>
+                <MudTooltip Text="Diagram it all out: a package overview, structure, internal structure, requirements and behavior views, laid out automatically (⌘K “Diagram the whole model”)"><button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => AutoDiagram(Ws.Selected is { Kind: ElementKind.Package } p ? p : null)"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /><span class="t">Auto-diagram</span></button></MudTooltip>
             </div>
         </div>
         <div class="rgroup compact">
@@ -221,6 +222,7 @@
                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
                     <ActivatorContent><button title="More export formats: Word/PDF, BPMN, ArchiMate, ReqIF, SQL" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">Formats</span></button></ActivatorContent>
                     <ChildContent>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="GenerateSdd">Generate SDD (System Design Description)…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="ExportDocx">Word / PDF / HTML document from template…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.OpenInNew" OnClick="OpenReport">Quick HTML model report</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.AccountTree" OnClick="ExportBpmn" Disabled="@(Ws.Active?.Diagram.DiagramType != DiagramType.Bpmn)">BPMN 2.0 XML (active diagram)</MudMenuItem>

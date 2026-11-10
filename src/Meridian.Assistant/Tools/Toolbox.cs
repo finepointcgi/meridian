@@ -11,12 +11,14 @@ public static class Toolbox
         new GetTraceabilityTool(),
         new ValidateModelTool(),
         new GetSysmlTextTool(),
+        new PlanDiagramsTool(),
         new ReportFindingsTool(),
         new CreateElementTool(),
         new UpdateFieldsTool(),
         new CreateRelationshipTool(),
         new DeleteElementTool(),
         new CreateDiagramTool(),
+        new CreateDiagramsTool(),
         new ApplySysmlTextTool(),
     ];
 
