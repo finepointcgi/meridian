@@ -19,7 +19,7 @@
                 <code>```mermaid</code> blocks work too.
             </MudText>
             <textarea class="mmd-input" spellcheck="false" rows="12" aria-label="Mermaid text"
-                      placeholder="flowchart TD&#10;    A[Start] --> B{Ready?}&#10;    B -->|yes| C[Go]"
+                      placeholder="@Placeholder"
                       style="width:100%; min-height:220px; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12.5px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)"
                       value="@_text" @oninput="OnInput"></textarea>
 
@@ -70,6 +70,9 @@
 </MudDialog>
 
 @code {
+    // Razor encodes attribute text, so the newlines come from a C# string rather than &#10; entities.
+    private const string Placeholder = "flowchart TD\n    A[Start] --> B{Ready?}\n    B -->|yes| C[Go]";
+
     /// <summary>The dialog's answer: the text and how to import it.</summary>
     public sealed record Answer(string Text, MermaidImportOptions Options);
 
