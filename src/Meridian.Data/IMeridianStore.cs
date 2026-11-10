@@ -151,6 +151,20 @@ public interface IMeridianStore
     Task<long> CreateBaselineAsync(Guid projectId, long versionId, string name, string description, Guid? creator);
     Task<IReadOnlyList<BaselineInfo>> ListBaselinesAsync(Guid projectId);
     Task DeleteBaselineAsync(long baselineId);
+
+    // ---------------------------------------------------------------- per-user preferences & account (see Preferences.cs)
+    // One JSON document per user (theme, diagram defaults, editor options…) that follows the user across devices.
+
+    /// <summary>The user's preferences document (a JSON object), or null when none was saved yet.</summary>
+    Task<string?> GetUserPreferencesAsync(Guid userId);
+    /// <summary>Replaces the user's preferences document (a JSON object of at most <see cref="Preferences.MaxJsonLength"/> characters).</summary>
+    Task SaveUserPreferencesAsync(Guid userId, string json);
+    /// <summary>Changes the display name and colour shown to collaborators. Returns the updated account.</summary>
+    Task<UserAccount> UpdateUserProfileAsync(Guid userId, string displayName, string color);
+    /// <summary>"Sign out everywhere": sessions issued before now stop working.</summary>
+    Task RevokeUserSessionsAsync(Guid userId);
+    /// <summary>When the user last signed out everywhere (sessions issued earlier are invalid), or null.</summary>
+    Task<DateTime?> UserSessionsRevokedAtAsync(Guid userId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

@@ -62,6 +62,7 @@ public static class MeridianServer
         builder.Services.AddScoped<MobileUiState>();   // phone / tablet shell state (Components/Mobile)
         builder.Services.AddMeridianScripting(builder.Configuration, host);   // script console + plugins (docs/SCRIPTING.md, docs/PLUGINS.md)
         builder.Services.AddMeridianAssistant();   // AI assistant powered by Claude (docs/AI.md)
+        Settings.SettingsHosting.AddMeridianSettings(builder.Services, host);   // Settings page: preferences, theme, account
         builder.Services.AddHttpContextAccessor();
         Integrations.IntegrationsSetup.AddMeridianIntegrations(builder.Services);   // issue trackers, webhooks, API tokens, OSLC
 

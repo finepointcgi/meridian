@@ -113,7 +113,8 @@ public sealed class DiagramController
 
     public Pt ToModel(double sx, double sy) => new((sx - PanX) / Zoom, (sy - PanY) / Zoom);
     public Pt ToScreen(Pt p) => new(p.X * Zoom + PanX, p.Y * Zoom + PanY);
-    private static double Snap(double v) => Math.Round(v / Grid) * Grid;
+    /// <summary>Rounds to the grid unless the user turned snapping off (Settings ▸ Appearance).</summary>
+    private double Snap(double v) => _ws.Preferences.SnapToGrid ? Math.Round(v / Grid) * Grid : Math.Round(v);
 
     public Bounds BoundsOf(DiagramNode n) =>
         Notation.EffectiveBounds(Model, n, Diagram.DiagramType, _preview.TryGetValue(n, out var b) ? b : n.Bounds);
@@ -191,6 +192,17 @@ public sealed class DiagramController
         Zoom = z;
         PanX = cx - m.X * Zoom;
         PanY = cy - m.Y * Zoom;
+    }
+
+    /// <summary>The first view of a diagram: fit, or 100% from the top-left of its content (Settings ▸ Diagrams).</summary>
+    public void InitialZoom()
+    {
+        if (_ws.Preferences.DefaultZoom == Settings.DefaultZoom.Fit || Diagram.Nodes.Count == 0) { ZoomToFit(); return; }
+        NeedsFit = false;
+        var bs = Diagram.Nodes.Select(BoundsOf).ToList();
+        Zoom = 1;
+        PanX = LeftInset + 30 - bs.Min(b => b.X);
+        PanY = 60 - bs.Min(b => b.Y);
     }
 
     public void ZoomToFit()
@@ -938,6 +950,23 @@ public sealed class DiagramController
     {
         var els = _selNodes.Select(n => n.Element).ToList();
         if (SelectedEdge != null) els.Add(SelectedEdge.Relationship);
+        if (els.Count == 0) return;
+        if (_ws.Preferences.ConfirmDeleteFromModel && _ws.Confirm is { } confirm)
+        {
+            _ = ConfirmThenDeleteAsync(confirm, els);
+            return;
+        }
+        _selNodes.Clear();
+        SelectedEdge = null;
+        Model.Delete(els);
+        Notify();
+    }
+
+    private async Task ConfirmThenDeleteAsync(Func<string, string, Task<bool>> confirm, List<Element> els)
+    {
+        var what = els.Count == 1 ? els[0].DisplayName : $"{els.Count} elements";
+        if (!await confirm("Delete from model", $"Delete {what} from the model? It disappears from every diagram. You can undo this.")) return;
+        els = els.Where(Model.Contains).ToList();
         if (els.Count == 0) return;
         _selNodes.Clear();
         SelectedEdge = null;

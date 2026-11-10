@@ -1,86 +1,12 @@
-@using Meridian.Data
-@inject IMeridianStore Db
-@inject Workspace Ws
-@inject NavigationManager Nav
-@inject IJSRuntime JS
-
+@* Personal access tokens (also in Settings ▸ Account). *@
 <MudDialog>
     <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Key" /><MudText Typo="Typo.h6">API tokens</MudText></div></TitleContent>
     <DialogContent>
-        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.8">
-            Personal access tokens let scripts and tools (the SysML v2 API under /api, OSLC clients under /oslc) act as you.
-            Send one as <code>Authorization: Bearer &lt;token&gt;</code>. Tokens have your access to every project.
-        </MudText>
-        @if (_created != null)
-        {
-            <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">Copy your new token now — it won't be shown again.</MudAlert>
-            <div class="d-flex gap-1 align-center mb-3">
-                <MudTextField T="string" Value="_created" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="token-value" />
-                <MudTooltip Text="Copy"><MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" OnClick="Copy" /></MudTooltip>
-            </div>
-            <MudText Typo="Typo.caption" Style="opacity:.7">Try it: <code>curl -H "Authorization: Bearer @(_created[..12])…" @(Nav.BaseUri)api/projects</code></MudText>
-        }
-        <div class="d-flex gap-2 align-start mt-2">
-            <MudTextField T="string" @bind-Value="_name" Placeholder="Token name, e.g. DOORS Next link" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="string.IsNullOrWhiteSpace(_name)" OnClick="Create" Class="mt-1">Create token</MudButton>
-        </div>
-        <MudList T="string" Dense="true" Class="mt-2">
-            @foreach (var t in _tokens)
-            {
-                var token = t;
-                <MudListItem T="string">
-                    <div class="d-flex align-center gap-3">
-                        <MudIcon Icon="@Icons.Material.Outlined.VpnKey" Style="font-size:18px; opacity:.7" />
-                        <div style="flex:1">
-                            <div style="font-weight:600">@token.Name</div>
-                            <div style="font-size:11.5px; opacity:.65">@token.Prefix… · created @token.CreatedAt.ToLocalTime().ToString("MMM d, yyyy") · @(token.LastUsedAt is { } u ? $"last used {u.ToLocalTime():MMM d HH:mm}" : "never used")</div>
-                        </div>
-                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text" OnClick="() => Revoke(token)">Revoke</MudButton>
-                    </div>
-                </MudListItem>
-            }
-        </MudList>
-        @if (_tokens.Count == 0)
-        {
-            <MudText Typo="Typo.caption" Style="opacity:.65">You have no API tokens.</MudText>
-        }
+        <ApiTokensPanel />
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
 </MudDialog>
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-    private IReadOnlyList<ApiTokenInfo> _tokens = [];
-    private string? _name;
-    private string? _created;
-
-    protected override async Task OnInitializedAsync() => await Reload();
-
-    private async Task Reload()
-    {
-        if (Ws.User is null) return;
-        _tokens = await Db.ListApiTokensAsync(Ws.User.Id);
-    }
-
-    private async Task Create()
-    {
-        if (Ws.User is null || string.IsNullOrWhiteSpace(_name)) return;
-        var token = ApiTokens.Generate();
-        await Db.CreateApiTokenAsync(Ws.User.Id, _name, ApiTokens.Hash(token), ApiTokens.PrefixOf(token));
-        _created = token;
-        _name = null;
-        await Reload();
-    }
-
-    private async Task Copy()
-    {
-        if (_created != null) await JS.InvokeVoidAsync("navigator.clipboard.writeText", _created);
-    }
-
-    private async Task Revoke(ApiTokenInfo t)
-    {
-        if (Ws.User is null) return;
-        await Db.RevokeApiTokenAsync(Ws.User.Id, t.Id);
-        await Reload();
-    }
 }

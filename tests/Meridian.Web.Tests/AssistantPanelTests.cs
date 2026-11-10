@@ -35,6 +35,8 @@ public class AssistantPanelTests : TestContext
         Services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
         Services.AddMeridianAssistant();
         Services.AddSingleton<IAssistantClientFactory>(new AssistantClientFactory(new HttpClient(_api), maxRetries: 0));   // replaces the real one
+        Services.AddSingleton<Meridian.Data.IMeridianStore>(new Meridian.Data.SqliteStore(Path.Combine(_data, "prefs.db")));
+        Services.AddScoped<Meridian.Web.Settings.ThemeService>();
         Services.GetRequiredService<AssistantSettings>().ReadEnvironment = _ => null;
         var ws = Services.GetRequiredService<Workspace>();
         ws.UseLocalModel(SampleModels.Vehicle());
@@ -67,10 +69,15 @@ public class AssistantPanelTests : TestContext
         Setup(localMode: true);
         var cut = RenderComponent<AssistantPanel>();
         Assert.Contains("Add your Anthropic API key", cut.Markup);
-        cut.Find("input.ai-key").Input(TestKey);
-        cut.Find("button.ai-save-key").Click();
-        Assert.Contains("Review this model", cut.Markup);   // the assistant is on now
+        Assert.Empty(cut.FindAll("input.ai-key"));   // the key is entered in Settings ▸ AI assistant; the panel links there
+        Assert.NotEmpty(cut.FindAll("button.ai-open-settings"));
+
+        var settings = SettingsDialogTests.Open(this, Meridian.Web.Settings.SettingsSection.Assistant);
+        settings.Find("input.ai-key").Input(TestKey);
+        settings.Find("button.ai-save-key").Click();
+        cut.WaitForAssertion(() => Assert.Contains("Review this model", cut.Markup));   // the assistant is on now
         Assert.DoesNotContain(TestKey, cut.Markup);
+        Assert.DoesNotContain(TestKey, settings.Markup);
         var stored = File.ReadAllText(Path.Combine(_data, "assistant.json"));
         Assert.DoesNotContain(TestKey, stored);   // Data Protection, not plain text
         Assert.Equal(TestKey, Services.GetRequiredService<AssistantSettings>().ApiKey());

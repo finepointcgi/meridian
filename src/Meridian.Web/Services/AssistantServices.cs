@@ -189,7 +189,10 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
     public string Key => $"{ws.User?.Id ?? Guid.Empty}:{ws.Session?.ProjectId.ToString() ?? "local"}:{ws.BranchId?.ToString() ?? "main"}";
     public Conversation Conversation => conversations.Get(Key);
 
-    public string? UnavailableReason => settings.UnavailableReason;
+    public string? UnavailableReason => !ws.Preferences.AssistantEnabled ? "You turned the AI assistant off in Settings ▸ AI assistant." : settings.UnavailableReason;
+
+    /// <summary>The server's options with the model chosen in Settings ▸ AI assistant (the server's model when the user kept the default).</summary>
+    public AssistantOptions Options => ws.Preferences.AssistantModel is { } m && m != Meridian.Web.Settings.AssistantModels.Default ? settings.Options with { Model = m } : settings.Options;
     public bool Acknowledged => settings.HasAcknowledged(ws.User?.Id);
     public void Acknowledge() { settings.Acknowledge(ws.User?.Id); Changed?.Invoke(); }
     public bool CanApply => !ws.ReadOnly;
@@ -245,7 +248,7 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
         }
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
-        var engine = new AssistantEngine(clients.Create(key), settings.Options);
+        var engine = new AssistantEngine(clients.Create(key), Options);
         await engine.RunTurnAsync(conversation, ws.Model, request, () => Changed?.Invoke(), _cts.Token);
     }
 

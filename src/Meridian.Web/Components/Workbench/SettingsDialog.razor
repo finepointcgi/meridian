@@ -1,0 +1,525 @@
+@using Meridian.Web.Settings
+@implements IDisposable
+@inject ThemeService Theme
+@inject Workspace Ws
+@inject MeridianHostInfo Host
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject IDialogService Dialogs
+@inject IServiceProvider Services
+
+@* Settings (⌘, · gear in the title bar · avatar menu · ⌘K "Settings"). Changes apply at once; only secrets have a Save button. *@
+<MudDialog Class="settings-dialog" ContentClass="settings-dialog-content">
+    <TitleContent>
+        <div class="settings-title">
+            <MudIcon Icon="@Icons.Material.Outlined.Settings" />
+            <span>Settings</span>
+            <input class="settings-search" type="search" placeholder="Search settings" aria-label="Search settings"
+                   value="@_query" @oninput="e => _query = e.Value?.ToString() ?? string.Empty" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="settings">
+            <nav class="settings-nav" aria-label="Settings sections">
+                @foreach (var s in Sections)
+                {
+                    var section = s;
+                    <button class="settings-tab @(Searching ? "" : section == _section ? "on" : "")" data-section="@section" @onclick="() => { _section = section; _query = string.Empty; }">
+                        <MudIcon Icon="@Icon(section)" /><span>@Title(section)</span>
+                    </button>
+                }
+                <div class="settings-legend">
+                    <div><span class="scope user">You</span> follows your account to every device</div>
+                    <div><span class="scope device">This device</span> only on this browser or computer</div>
+                    @if (!Host.LocalMode) { <div><span class="scope server">Server</span> for everyone (administrators)</div> }
+                </div>
+            </nav>
+            <div class="settings-body">
+                @if (Searching)
+                {
+                    var hits = Rows().Where(Matches).ToList();
+                    if (hits.Count == 0)
+                    {
+                        <div class="settings-empty">No settings match “@_query”.</div>
+                    }
+                    foreach (var group in hits.GroupBy(r => r.Section))
+                    {
+                        <h3 class="settings-h">@Title(group.Key)</h3>
+                        foreach (var row in group) { @RowView(row) }
+                    }
+                }
+                else
+                {
+                    <div class="settings-head">
+                        <h3 class="settings-h">@Title(_section)</h3>
+                        @if (Resettable(_section))
+                        {
+                            <button class="settings-reset" @onclick="() => ResetAsync(_section)">Reset to defaults</button>
+                        }
+                    </div>
+                    @foreach (var row in Rows().Where(r => r.Section == _section)) { @RowView(row) }
+                }
+            </div>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    public const string TourAction = "tour", ShortcutsAction = "shortcuts";
+
+    public static readonly DialogOptions Options = new()
+    {
+        MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true, BackgroundClass = "settings-backdrop",
+    };
+
+    [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
+    /// <summary>Section to open (default: Appearance).</summary>
+    [Parameter] public SettingsSection? Section { get; set; }
+    /// <summary>Running inside the desktop app (shows Settings ▸ Desktop).</summary>
+    [Parameter] public bool Desktop { get; set; }
+
+    private SettingsSection _section = SettingsSection.Appearance;
+    private string _query = "";
+    private bool Searching => !string.IsNullOrWhiteSpace(_query);
+
+    public enum Scope { User, Device, Server }
+
+    /// <summary>One setting: where it lives, its name and help (searched), and its control.</summary>
+    public sealed record Row(SettingsSection Section, string Label, string? Hint, Scope Scope, RenderFragment Control, string Keywords = "", string? Id = null);
+
+    private UserPreferences P => Theme.Prefs;
+    private AssistantSettings? Ai => Services.GetService(typeof(AssistantSettings)) as AssistantSettings;
+    private AccountSettings? Account => Services.GetService(typeof(AccountSettings)) as AccountSettings;
+
+    protected override void OnInitialized()
+    {
+        if (Section is { } s && Sections.Contains(s)) _section = s;
+        Theme.Changed += OnChanged;
+        if (Ws.User is { } me) { _displayName = me.DisplayName; _color = me.Color; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Desktop) await LoadDesktopAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Theme.Changed -= OnChanged;
+
+    private IEnumerable<SettingsSection> Sections
+    {
+        get
+        {
+            yield return SettingsSection.Appearance;
+            yield return SettingsSection.Diagrams;
+            yield return SettingsSection.Editor;
+            yield return SettingsSection.Assistant;
+            if (!Host.LocalMode && Ws.User != null) yield return SettingsSection.Account;
+            if (Desktop) yield return SettingsSection.Desktop;
+            if (Ws.IsServerAdmin && !Host.LocalMode) yield return SettingsSection.Server;
+        }
+    }
+
+    public static string Title(SettingsSection s) => s switch
+    {
+        SettingsSection.Assistant => "AI assistant",
+        _ => s.ToString(),
+    };
+
+    private static string Icon(SettingsSection s) => s switch
+    {
+        SettingsSection.Appearance => Icons.Material.Outlined.Palette,
+        SettingsSection.Diagrams => Icons.Material.Outlined.Schema,
+        SettingsSection.Editor => Icons.Material.Outlined.EditNote,
+        SettingsSection.Assistant => Icons.Material.Outlined.AutoAwesome,
+        SettingsSection.Account => Icons.Material.Outlined.AccountCircle,
+        SettingsSection.Desktop => Icons.Material.Outlined.DesktopWindows,
+        _ => Icons.Material.Outlined.AdminPanelSettings,
+    };
+
+    private static bool Resettable(SettingsSection s) => s is SettingsSection.Appearance or SettingsSection.Diagrams or SettingsSection.Editor or SettingsSection.Assistant;
+
+    private bool Matches(Row r)
+    {
+        var words = _query.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var hay = $"{r.Label} {r.Hint} {r.Keywords} {Title(r.Section)}";
+        return words.All(w => hay.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task ResetAsync(SettingsSection s)
+    {
+        if (s == SettingsSection.Appearance) SetDevice(new DevicePreferences());
+        await Theme.UpdateAsync(p => p.ResetSection(s));
+    }
+
+    private Task Set(Action<UserPreferences> change) => Theme.UpdateAsync(change);
+
+    private void SetDevice(DevicePreferences d)
+    {
+        Theme.SetDevice(d);
+        _ = JS.InvokeVoidAsync("meridianSettings.setDevice", d.ToCookie()).AsTask().ContinueWith(_ => { });
+    }
+
+    // ================================================================ rows
+
+    private IEnumerable<Row> Rows()
+    {
+        // ---------------------------------------------------------------- appearance
+        yield return new(SettingsSection.Appearance, "Theme", "Light, dark, or follow your operating system's setting as it changes.", Scope.User,
+            Seg("theme", P.Theme, [(ThemeMode.Light, "Light"), (ThemeMode.Dark, "Dark"), (ThemeMode.System, "Match system")], v => Set(p => p.Theme = v)),
+            "dark mode light mode colour scheme appearance");
+        yield return new(SettingsSection.Appearance, "Accent colour", "Buttons, selection, links and focus rings.", Scope.User, AccentPicker, "color highlight primary");
+        yield return new(SettingsSection.Appearance, "Density", "Compact fits more on smaller screens.", Scope.Device,
+            Seg("density", Theme.Device.Density, [(Density.Comfortable, "Comfortable"), (Density.Compact, "Compact")], v => { SetDevice(Theme.Device with { Density = v }); return Task.CompletedTask; }),
+            "compact spacing padding");
+        yield return new(SettingsSection.Appearance, "Font size", "Scales the whole interface (the diagram canvas keeps its own zoom).", Scope.Device,
+            Seg("font", Theme.Device.FontScale, [(FontScale.Small, "Small"), (FontScale.Normal, "Normal"), (FontScale.Large, "Large")], v => { SetDevice(Theme.Device with { FontScale = v }); return Task.CompletedTask; }),
+            "text size zoom scale bigger smaller");
+        yield return new(SettingsSection.Appearance, "Background grid", "Show a grid behind diagrams.", Scope.User,
+            Toggle("grid", P.ShowGrid, v => Set(p => p.ShowGrid = v)), "canvas dots lines");
+        yield return new(SettingsSection.Appearance, "Grid style", null, Scope.User,
+            Seg("grid-style", P.GridStyle, [(GridStyle.Dots, "Dots"), (GridStyle.Lines, "Lines")], v => Set(p => p.GridStyle = v)), "canvas background dots lines");
+        yield return new(SettingsSection.Appearance, "Snap to grid", "Shapes, bend points and alignment land on a 10 px grid.", Scope.User,
+            Toggle("snap", P.SnapToGrid, v => Set(p => p.SnapToGrid = v)), "align move");
+        yield return new(SettingsSection.Appearance, "Diagram canvas", "Keep diagrams white in dark mode (also the default for copied and exported pictures).", Scope.User,
+            Seg("canvas", P.CanvasAlwaysLight, [(false, "Follow theme"), (true, "Always light")], v => Set(p => p.CanvasAlwaysLight = v)), "white background export dark");
+        yield return new(SettingsSection.Appearance, "Reduced motion", "Turn off animations and transitions.", Scope.User,
+            Toggle("motion", P.ReducedMotion, v => Set(p => p.ReducedMotion = v)), "animation accessibility");
+
+        // ---------------------------------------------------------------- diagrams
+        yield return new(SettingsSection.Diagrams, "Connector style for new diagrams", "Automatic routes connectors on most diagrams and draws straight lines on whiteboards.", Scope.User,
+            Seg("connector", P.ConnectorStyle, [(ConnectorDefault.Automatic, "Automatic"), (ConnectorDefault.Orthogonal, "Orthogonal"), (ConnectorDefault.Straight, "Straight"), (ConnectorDefault.Curved, "Curved")], v => Set(p => p.ConnectorStyle = v)),
+            "routing lines edges orthogonal straight curved");
+        yield return new(SettingsSection.Diagrams, "Line jumps", "New diagrams draw a hop where connectors cross.", Scope.User,
+            Toggle("jumps", P.LineJumps, v => Set(p => p.LineJumps = v)), "crossing hop bridge");
+        yield return new(SettingsSection.Diagrams, "Open diagrams as tabs", "Off: opening a diagram replaces the current tab.", Scope.User,
+            Toggle("tabs", P.OpenDiagramsAsTabs, v => Set(p => p.OpenDiagramsAsTabs = v)), "tab strip");
+        yield return new(SettingsSection.Diagrams, "Show the shapes panel", "Open the shapes panel when the workbench starts.", Scope.User,
+            Toggle("shapes", P.ShowShapesPanel, v => Set(p => p.ShowShapesPanel = v)), "palette toolbox");
+        yield return new(SettingsSection.Diagrams, "Zoom when a diagram opens", null, Scope.User,
+            Seg("zoom", P.DefaultZoom, [(DefaultZoom.Fit, "Fit to window"), (DefaultZoom.Actual, "100%")], v => Set(p => p.DefaultZoom = v)), "default zoom fit");
+
+        // ---------------------------------------------------------------- editor
+        yield return new(SettingsSection.Editor, "Confirm before deleting from the model", "Ask before Delete removes elements from the model (Backspace only removes them from the diagram).", Scope.User,
+            Toggle("confirm-delete", P.ConfirmDeleteFromModel, v => Set(p => p.ConfirmDeleteFromModel = v)), "delete warning undo");
+        yield return new(SettingsSection.Editor, "Guided tour", P.TourSeen ? "You have seen the tour." : "The tour shows on your next visit.", Scope.User, TourButton, "onboarding help introduction");
+        yield return new(SettingsSection.Editor, "Keyboard shortcuts", null, Scope.User, ShortcutTable, "keys hotkeys keyboard reference");
+
+        // ---------------------------------------------------------------- AI assistant
+        yield return new(SettingsSection.Assistant, "Use the AI assistant", "Off hides its answers for you; nothing is sent to Anthropic.", Scope.User,
+            Toggle("ai", P.AssistantEnabled, v => Set(p => p.AssistantEnabled = v)), "claude ai enable disable");
+        yield return new(SettingsSection.Assistant, "Model", "Which Claude model answers.", Scope.User, ModelPicker, "claude opus sonnet haiku fable");
+        if (Host.LocalMode)
+            yield return new(SettingsSection.Assistant, "Anthropic API key", "Stored encrypted on this computer; never shown again or sent to the browser.", Scope.Device, KeyForm, "secret token anthropic key", "api-key");
+        else
+            yield return new(SettingsSection.Assistant, "Anthropic API key", null, Scope.Server, ServerKeyStatus, "secret token anthropic key", "api-key");
+        yield return new(SettingsSection.Assistant, "Privacy", null, Scope.User, PrivacyNotice, "privacy data anthropic sent");
+
+        // ---------------------------------------------------------------- account
+        if (!Host.LocalMode && Ws.User != null)
+        {
+            yield return new(SettingsSection.Account, "Display name", "Shown to collaborators.", Scope.User, NameField, "name profile");
+            yield return new(SettingsSection.Account, "Colour", "Your avatar and cursor colour.", Scope.User, ColorPicker, "avatar profile");
+            if (Account is { PasswordsDisabled: false })
+                yield return new(SettingsSection.Account, "Change password", null, Scope.User, PasswordForm, "password security secret");
+            yield return new(SettingsSection.Account, "API tokens", null, Scope.User, b => { b.OpenComponent<ApiTokensPanel>(0); b.CloseComponent(); }, "token personal access api oslc");
+            yield return new(SettingsSection.Account, "Sign out everywhere", "Ends every session on every device, including this one.", Scope.User, SignOutEverywhere, "logout sessions security");
+        }
+
+        // ---------------------------------------------------------------- desktop
+        if (Desktop)
+        {
+            yield return new(SettingsSection.Desktop, "Open the last workspace automatically", "Skip the start screen when Meridian launches.", Scope.Device,
+                Toggle("auto-open", _desktopAutoOpen, v => { _desktopAutoOpen = v; Bridge("autoOpen", v); return Task.CompletedTask; }), "start launch");
+            yield return new(SettingsSection.Desktop, "Check for updates", "Look for a new release once a day.", Scope.Device,
+                Toggle("updates", _desktopUpdates, v => { _desktopUpdates = v; Bridge("updates", v); return Task.CompletedTask; }), "update release version");
+            yield return new(SettingsSection.Desktop, "Recent files", _desktopRecent == 0 ? "No recent files." : $"{_desktopRecent} recent file{(_desktopRecent == 1 ? "" : "s")} on the start screen.", Scope.Device,
+                ClearRecent, "history recent clear");
+        }
+
+        // ---------------------------------------------------------------- server
+        if (Ws.IsServerAdmin && !Host.LocalMode)
+            yield return new(SettingsSection.Server, "Administration", "Users, organizations, projects, backups and the audit log.", Scope.Server,
+                b => { b.AddMarkupContent(0, "<a class=\"settings-btn primary\" href=\"/admin\">Open the admin console</a>"); }, "admin users backup audit");
+    }
+
+    private RenderFragment RowView(Row r) => __builder =>
+    {
+        <div class="settings-row" data-setting="@(r.Id ?? r.Label)">
+            <div class="settings-label">
+                <div class="settings-name">@r.Label <span class="scope @r.Scope.ToString().ToLowerInvariant()">@ScopeText(r.Scope)</span></div>
+                @if (r.Hint != null) { <div class="settings-hint">@r.Hint</div> }
+            </div>
+            <div class="settings-control">@r.Control</div>
+        </div>
+    };
+
+    private string ScopeText(Scope s) => s switch
+    {
+        Scope.Device => Host.LocalMode || Desktop ? "This computer" : "This device",
+        Scope.Server => "Server",
+        _ => "You",
+    };
+
+    // ================================================================ controls
+
+    private RenderFragment Seg<T>(string name, T value, (T Value, string Label)[] options, Func<T, Task> set) => __builder =>
+    {
+        <div class="seg" role="radiogroup" data-name="@name">
+            @foreach (var o in options)
+            {
+                var opt = o;
+                var on = EqualityComparer<T>.Default.Equals(opt.Value, value);
+                <button role="radio" aria-checked="@(on ? "true" : "false")" class="@(on ? "on" : "")" @onclick="() => set(opt.Value)">@opt.Label</button>
+            }
+        </div>
+    };
+
+    private RenderFragment Toggle(string name, bool value, Func<bool, Task> set) => __builder =>
+    {
+        <label class="switch">
+            <input type="checkbox" role="switch" data-name="@name" checked="@value" @onchange="e => set(e.Value is true)" />
+            <span class="track"><span class="thumb"></span></span>
+        </label>
+    };
+
+    private RenderFragment AccentPicker => __builder =>
+    {
+        <div class="accent-picker">
+            @foreach (var (name, color) in AccentPresets.All)
+            {
+                var c = color;
+                var on = P.Accent == c;
+                <button class="accent-swatch @(on ? "on" : "")" style="background:@c" title="@name" aria-label="@name accent" aria-pressed="@(on ? "true" : "false")" @onclick="() => Set(p => p.Accent = c)"></button>
+            }
+            <label class="accent-custom" title="Custom colour">
+                <input type="color" aria-label="Custom accent colour" value="@P.Accent" @onchange="e => Set(p => p.Accent = e.Value?.ToString() ?? p.Accent)" />
+                <span>Custom</span>
+            </label>
+        </div>
+    };
+
+    private RenderFragment ModelPicker => __builder =>
+    {
+        <select class="settings-select" aria-label="Assistant model" value="@P.AssistantModel" @onchange="e => Set(p => p.AssistantModel = e.Value?.ToString() ?? AssistantModels.Default)">
+            @foreach (var m in AssistantModels.All)
+            {
+                <option value="@m.Id">@m.Name — @m.Note</option>
+            }
+        </select>
+    };
+
+    private RenderFragment TourButton => __builder =>
+    {
+        <button class="settings-btn" @onclick="ShowTourAgain">Show the tour again</button>
+    };
+
+    private async Task ShowTourAgain()
+    {
+        await Set(p => p.TourSeen = false);
+        try { await JS.InvokeVoidAsync("meridianSettings.forgetTour"); } catch (JSException) { }
+        MudDialog?.Close(DialogResult.Ok(TourAction));
+    }
+
+    public static readonly (string Keys, string What)[] Shortcuts =
+    [
+        ("⌘K", "Command palette: run a command, open a diagram, go to an element"),
+        ("⌘,", "Settings"),
+        ("⌘S", "Commit a version"),
+        ("⌘O", "Open a project"),
+        ("⌘Z / ⇧⌘Z", "Undo / redo"),
+        ("⌘F", "Find in the model"),
+        ("F7", "Validate the model"),
+        ("Delete", "Delete the selection from the model"),
+        ("Backspace", "Remove the selection from the diagram"),
+        ("F2 or type", "Rename the selected shape"),
+        ("⌘D / ⌘C / ⌘V", "Duplicate, copy, paste"),
+        ("Arrows (⇧ for 5×)", "Nudge the selection"),
+        ("⌘ + wheel", "Zoom the canvas"),
+        ("Space + drag", "Pan the canvas"),
+    ];
+
+    private RenderFragment ShortcutTable => __builder =>
+    {
+        <div>
+            <table class="settings-keys">
+                @foreach (var (keys, what) in Shortcuts)
+                {
+                    <tr><td><kbd>@keys</kbd></td><td>@what</td></tr>
+                }
+            </table>
+            <div class="settings-hint" style="margin-top:6px">On Windows and Linux, use Ctrl for ⌘.</div>
+        </div>
+    };
+
+    // ---------------------------------------------------------------- AI: key (local), status (server), privacy
+
+    private string _keyInput = "";
+    private string? _keyMessage;
+
+    private RenderFragment KeyForm => __builder =>
+    {
+        if (Ai is not { } ai) return;
+        if (ai.DisabledByAdmin) { <div class="settings-hint">The assistant is turned off for this installation.</div> return; }
+        <div class="settings-key">
+            @if (ai.HasSavedKey)
+            {
+                <div class="settings-hint"><MudIcon Icon="@Icons.Material.Outlined.Key" Style="font-size:14px; vertical-align:-2px" /> A key is saved on this computer.</div>
+            }
+            <div class="settings-inline">
+                <input class="settings-input ai-key" type="password" autocomplete="off" aria-label="Anthropic API key"
+                       placeholder="@(ai.HasSavedKey ? "Replace with a new key…" : "Anthropic API key (sk-ant-…)")" value="@_keyInput" @oninput="e => _keyInput = e.Value?.ToString() ?? string.Empty" />
+                <button class="settings-btn primary ai-save-key" disabled="@string.IsNullOrWhiteSpace(_keyInput)" @onclick="SaveKey">Save key</button>
+                @if (ai.HasSavedKey) { <button class="settings-btn danger" @onclick="RemoveKey">Remove key</button> }
+            </div>
+            @if (_keyMessage != null) { <div class="settings-hint" role="status">@_keyMessage</div> }
+        </div>
+    };
+
+    private void SaveKey()
+    {
+        try { Ai?.SaveKey(_keyInput.Trim()); _keyMessage = "Saved."; }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { _keyMessage = e.Message; }
+        _keyInput = "";
+        Ws.Bump();   // the assistant panel turns on
+    }
+
+    private void RemoveKey()
+    {
+        Ai?.RemoveKey();
+        _keyMessage = "Key removed.";
+        Ws.Bump();
+    }
+
+    private RenderFragment ServerKeyStatus => __builder =>
+    {
+        var ai = Ai;
+        <div class="settings-hint">
+            @(ai is null ? "Not available." : ai.DisabledByAdmin ? "The administrator has turned the assistant off on this server."
+                : ai.HasKey ? "Configured by the server administrator." : "Not configured. An administrator can set Meridian:AI:ApiKey on the server.")
+        </div>
+    };
+
+    public const string PrivacyText =
+        "To answer, the assistant sends your question, the selection, the active diagram, a project summary and whatever model content it looks up " +
+        "to Anthropic's API (Claude). Don't use it for content you may not share with that service.";
+
+    private RenderFragment PrivacyNotice => __builder =>
+    {
+        <div class="settings-privacy"><MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" /><div><b>Your model is sent to Anthropic.</b> @PrivacyText</div></div>
+    };
+
+    // ---------------------------------------------------------------- account
+
+    private string _displayName = "", _color = "#4f8cff";
+    private string? _profileMessage;
+    private string _pwCurrent = "", _pwNew = "", _pwRepeat = "";
+    private string? _pwMessage;
+    private bool _pwOk;
+
+    private RenderFragment NameField => __builder =>
+    {
+        <div class="settings-inline">
+            <input class="settings-input" aria-label="Display name" maxlength="80" value="@_displayName"
+                   @oninput="e => _displayName = e.Value?.ToString() ?? string.Empty" @onchange="SaveProfile" />
+            @if (_profileMessage != null) { <span class="settings-hint" role="status">@_profileMessage</span> }
+        </div>
+    };
+
+    private RenderFragment ColorPicker => __builder =>
+    {
+        <div class="accent-picker">
+            @foreach (var c in Meridian.Data.Accounts.Palette)
+            {
+                var color = c;
+                var on = string.Equals(_color, color, StringComparison.OrdinalIgnoreCase);
+                <button class="accent-swatch @(on ? "on" : "")" style="background:@color" aria-label="@($"Colour {color}")" aria-pressed="@(on ? "true" : "false")"
+                        @onclick="async () => { _color = color; await SaveProfile(); }"></button>
+            }
+            <span class="avatar me" style="background:@_color; margin-left:8px">@(Ws.User is { } u ? MembersDialog.Initials(u with { DisplayName = _displayName }) : "")</span>
+        </div>
+    };
+
+    private async Task SaveProfile()
+    {
+        if (Ws.User is not { } me || Account is not { } account) return;
+        try
+        {
+            var updated = await account.UpdateProfileAsync(me, _displayName, _color);
+            Ws.User = updated;
+            _displayName = updated.DisplayName;
+            _profileMessage = "Saved.";
+            Ws.Bump();
+        }
+        catch (InvalidOperationException e) { _profileMessage = e.Message; }
+    }
+
+    private RenderFragment PasswordForm => __builder =>
+    {
+        <form class="settings-password" @onsubmit="ChangePassword" @onsubmit:preventDefault="true">
+            <input class="settings-input" type="password" autocomplete="current-password" aria-label="Current password" placeholder="Current password" value="@_pwCurrent" @oninput="e => _pwCurrent = e.Value?.ToString() ?? string.Empty" />
+            <input class="settings-input" type="password" autocomplete="new-password" aria-label="New password" placeholder="New password (8+ characters)" value="@_pwNew" @oninput="e => _pwNew = e.Value?.ToString() ?? string.Empty" />
+            <input class="settings-input" type="password" autocomplete="new-password" aria-label="Repeat new password" placeholder="Repeat new password" value="@_pwRepeat" @oninput="e => _pwRepeat = e.Value?.ToString() ?? string.Empty" />
+            <div class="settings-inline">
+                <button type="submit" class="settings-btn primary" disabled="@(_pwCurrent.Length == 0 || _pwNew.Length == 0)">Change password</button>
+                @if (_pwMessage != null) { <span class="settings-hint @(_pwOk ? "ok" : "bad")" role="status">@_pwMessage</span> }
+            </div>
+        </form>
+    };
+
+    private async Task ChangePassword()
+    {
+        if (Ws.User is not { } me || Account is not { } account) return;
+        var problem = await account.ChangePasswordAsync(me, _pwCurrent, _pwNew, _pwRepeat);
+        _pwOk = problem is null;
+        _pwMessage = problem ?? "Password changed.";
+        _pwCurrent = _pwNew = _pwRepeat = "";
+    }
+
+    private RenderFragment SignOutEverywhere => __builder =>
+    {
+        <button class="settings-btn danger" @onclick="SignOutAll">Sign out everywhere</button>
+    };
+
+    private async Task SignOutAll()
+    {
+        if (Ws.User is not { } me || Account is not { } account) return;
+        if (await Dialogs.ShowMessageBox("Sign out everywhere", "End every Meridian session for your account, on every device (including this one)?", yesText: "Sign out everywhere", cancelText: "Cancel") != true) return;
+        await account.SignOutEverywhereAsync(me);
+        Nav.NavigateTo("/account/logout", forceLoad: true);
+    }
+
+    // ---------------------------------------------------------------- desktop (Photino bridge)
+
+    private bool _desktopAutoOpen, _desktopUpdates = true;
+    private int _desktopRecent;
+
+    public sealed record DesktopState(bool AutoOpen, bool CheckForUpdates, int RecentFiles);
+
+    private async Task LoadDesktopAsync()
+    {
+        try
+        {
+            if (await JS.InvokeAsync<DesktopState?>("meridianSettings.desktopSettings") is { } d)
+            {
+                (_desktopAutoOpen, _desktopUpdates, _desktopRecent) = (d.AutoOpen, d.CheckForUpdates, d.RecentFiles);
+                StateHasChanged();
+            }
+        }
+        catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException) { }
+    }
+
+    private void Bridge(string command, bool enabled) =>
+        _ = JS.InvokeVoidAsync("meridianSettings.desktop", command, new { enabled }).AsTask().ContinueWith(_ => { });
+
+    private void ClearRecentFiles()
+    {
+        _ = JS.InvokeVoidAsync("meridianSettings.desktop", "clearRecent", null).AsTask().ContinueWith(_ => { });
+        _desktopRecent = 0;
+    }
+
+    private RenderFragment ClearRecent => __builder =>
+    {
+        <button class="settings-btn" disabled="@(_desktopRecent == 0)" @onclick="ClearRecentFiles">Clear recent files</button>
+    };
+}

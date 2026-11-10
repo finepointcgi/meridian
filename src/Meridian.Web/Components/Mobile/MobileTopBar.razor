@@ -33,6 +33,7 @@
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects…</MudMenuItem>
                 <MudMenuItem Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="() => Shell?.ToggleDarkMode()">@(Ws.DarkMode ? "Light mode" : "Dark mode")</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => Shell?.OpenSettings()">Settings…</MudMenuItem>
                 @if (!Host.LocalMode)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="() => Shell?.SignOutOfMeridian()">Sign out</MudMenuItem>

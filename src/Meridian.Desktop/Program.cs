@@ -133,6 +133,18 @@ internal static class Program
                 _settings.Save();
                 if (_settings.CheckForUpdates) _ = CheckForUpdatesAsync();
                 break;
+            // Settings ▸ Desktop in the web app.
+            case "desktopSettings":
+                Post(new { type = "desktop-settings", autoOpen = _settings.AutoOpen, checkForUpdates = _settings.CheckForUpdates, recentFiles = _settings.RecentFiles.Count, lastMode = _settings.LastMode });
+                break;
+            case "autoOpen":
+                _settings.AutoOpen = (bool?)msg!["enabled"] ?? false;
+                _settings.Save();
+                break;
+            case "clearRecent":
+                _settings.RecentFiles.Clear();
+                _settings.Save();
+                break;
             case "hello":
                 // A page finished loading: tell it about a pending update so the web app can show its notice.
                 if ((_update ?? CachedUpdate()) is { } u) Post(new { type = "update", version = u.Version, url = u.PageUrl });

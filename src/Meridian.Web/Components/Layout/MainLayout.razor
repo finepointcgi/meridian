@@ -1,8 +1,10 @@
 @inherits LayoutComponentBase
 @implements IDisposable
-@inject Workspace Ws
+@inject Meridian.Web.Settings.ThemeService Theme
+@inject PersistentComponentState AppState
+@inject IJSRuntime JS
 
-<MudThemeProvider Theme="Themes.Meridian" IsDarkMode="Ws.DarkMode" />
+<MudThemeProvider Theme="Theme.MudTheme" IsDarkMode="Theme.IsDark" />
 <MudPopoverProvider />
 <MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseOnEscapeKey="true" />
 <MudSnackbarProvider />
@@ -16,8 +18,52 @@
 </div>
 
 @code {
-    private bool _dark;
-    protected override void OnInitialized() { _dark = Ws.DarkMode; Ws.Changed += OnChanged; }
-    private void OnChanged() { if (_dark != Ws.DarkMode) { _dark = Ws.DarkMode; _ = InvokeAsync(StateHasChanged); } }
-    public void Dispose() => Ws.Changed -= OnChanged;
+    private const string StateKey = "meridian.theme";
+    private PersistingComponentStateSubscription _persisting;
+    private DotNetObjectReference<MainLayout>? _self;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Theme.Changed += OnThemeChanged;
+        // Interactive render after the prerender: take what the prerender loaded, so the first paint already has the theme.
+        if (AppState.TryTakeFromJson<Meridian.Web.Settings.ThemeService.Snapshot>(StateKey, out var snapshot) && snapshot != null) Theme.Restore(snapshot);
+        else await Theme.EnsureLoadedAsync();
+        _persisting = AppState.RegisterOnPersisting(() =>
+        {
+            AppState.PersistAsJson(StateKey, Theme.TakeSnapshot());
+            return Task.CompletedTask;
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _self = DotNetObjectReference.Create(this);
+        Meridian.Web.Settings.BrowserInfo? info = null;
+        try { info = await JS.InvokeAsync<Meridian.Web.Settings.BrowserInfo?>("meridianSettings.init", _self); }
+        catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException or JSDisconnectedException) { }
+        if (info != null)
+        {
+            Theme.SetSystemDark(info.SystemDark);
+            if (info.Device is { Length: > 0 } d && Meridian.Web.Settings.DevicePreferences.FromCookie(d) is var device && device != Theme.Device) Theme.SetDevice(device);
+            await Theme.MigrateLegacyAsync(info.Legacy);
+        }
+        await Theme.PushAsync(JS);
+    }
+
+    [JSInvokable]
+    public void OnSystemSchemeChanged(bool dark) => _ = InvokeAsync(() => Theme.SetSystemDark(dark));
+
+    private void OnThemeChanged() => _ = InvokeAsync(async () =>
+    {
+        StateHasChanged();
+        await Theme.PushAsync(JS);
+    });
+
+    public void Dispose()
+    {
+        Theme.Changed -= OnThemeChanged;
+        _persisting.Dispose();
+        _self?.Dispose();
+    }
 }

@@ -15,9 +15,9 @@
             <div>
                 <div class="ai-off-title">AI assistant is off</div>
                 <div class="ai-off-text">@reason</div>
-                @if (Assistant.Settings.LocalMode && !Assistant.Settings.DisabledByAdmin)
+                @if ((Assistant.Settings.LocalMode && !Assistant.Settings.DisabledByAdmin) || !Ws.Preferences.AssistantEnabled)
                 {
-                    @KeyForm()
+                    <button class="ai-btn primary ai-open-settings" @onclick="OpenSettings"><MudIcon Icon="@Icons.Material.Outlined.Settings" />@(Ws.Preferences.AssistantEnabled ? "Add your key in Settings" : "Open Settings")</button>
                 }
             </div>
         </div>
@@ -35,16 +35,8 @@
                 <button class="ai-btn danger" @onclick="Assistant.Stop" title="Stop the answer"><MudIcon Icon="@Icons.Material.Outlined.StopCircle" />Stop</button>
             }
             <button class="ai-btn" disabled="@Assistant.Busy" @onclick="NewChat" title="Start a new conversation"><MudIcon Icon="@Icons.Material.Outlined.AddComment" />New chat</button>
-            @if (Assistant.Settings.LocalMode)
-            {
-                <button class="ai-btn icon" @onclick="() => _settingsOpen = !_settingsOpen" title="Assistant settings"><MudIcon Icon="@Icons.Material.Outlined.Settings" /></button>
-            }
+            <button class="ai-btn icon ai-open-settings" @onclick="OpenSettings" title="Assistant settings (model, API key, privacy)"><MudIcon Icon="@Icons.Material.Outlined.Settings" /></button>
         </div>
-
-        @if (_settingsOpen && Assistant.Settings.LocalMode)
-        {
-            <div class="ai-form">@KeyForm()</div>
-        }
 
         @if (_form is { } form)
         {
@@ -144,7 +136,7 @@
         </div>
         @if (Conversation.InputTokens + Conversation.OutputTokens > 0)
         {
-            <div class="ai-usage">@($"{Conversation.InputTokens:N0} input ({Conversation.CacheReadTokens:N0} cached) · {Conversation.OutputTokens:N0} output tokens in this chat · {Assistant.Settings.Options.Model}")</div>
+            <div class="ai-usage">@($"{Conversation.InputTokens:N0} input ({Conversation.CacheReadTokens:N0} cached) · {Conversation.OutputTokens:N0} output tokens in this chat · {Assistant.Options.Model}")</div>
         }
     }
 </div>
@@ -250,9 +242,6 @@
     private string _formText = "";
     private string _targetId = "";
     private string _diagramKind = Prompts.DiagramKinds[0];
-    private bool _settingsOpen;
-    private string _keyInput = "";
-    private string? _keyMessage;
     private DateTime _lastRender;
     private bool _renderQueued;
     private bool _scrollToEnd;
@@ -498,39 +487,9 @@
         </div>
     };
 
-    // ---------------------------------------------------------------- API key (local / desktop mode)
+    // ---------------------------------------------------------------- settings (the API key, model and on/off live in Settings ▸ AI assistant)
 
-    private RenderFragment KeyForm() => __builder =>
-    {
-        <div class="ai-form-row">
-            @if (Assistant.Settings.HasSavedKey)
-            {
-                <span class="ai-label"><MudIcon Icon="@Icons.Material.Outlined.Key" Style="font-size:14px; vertical-align:-2px" /> An API key is saved (encrypted on this computer).</span>
-                <button class="ai-btn" @onclick="RemoveKey">Remove key</button>
-            }
-            <input class="ai-key" type="password" autocomplete="off" placeholder="@(Assistant.Settings.HasSavedKey ? "Replace with a new key…" : "Anthropic API key (sk-ant-…)")" @bind="_keyInput" @bind:event="oninput" />
-            <button class="ai-btn primary ai-save-key" disabled="@string.IsNullOrWhiteSpace(_keyInput)" @onclick="SaveKey">Save key</button>
-            @if (_keyMessage != null) { <span class="ai-label">@_keyMessage</span> }
-        </div>
-    };
-
-    private void SaveKey()
-    {
-        try
-        {
-            Assistant.Settings.SaveKey(_keyInput);
-            _keyMessage = "Saved.";
-            _settingsOpen = false;
-        }
-        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { _keyMessage = e.Message; }
-        _keyInput = "";
-    }
-
-    private void RemoveKey()
-    {
-        Assistant.Settings.RemoveKey();
-        _keyMessage = "Key removed.";
-    }
+    private Task OpenSettings() => Shell?.OpenSettings(Meridian.Web.Settings.SettingsSection.Assistant) ?? Task.CompletedTask;
 
     public override void Dispose()
     {
