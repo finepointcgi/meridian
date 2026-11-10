@@ -435,6 +435,16 @@
         return JS.InvokeVoidAsync("meridian.focus", _canvas).AsTask();
     }
 
+    /// <summary>A Mermaid file (.mmd, .mermaid, .md) dropped on the canvas: imported into the diagram's package as one undo step.</summary>
+    [JSInvokable]
+    public void OnMermaidFile(string name, string text)
+    {
+        var options = new Meridian.Serialization.Mermaid.MermaidImportOptions { Markdown = Meridian.Serialization.Mermaid.MermaidImporter.IsMarkdownFile(name) };
+        var target = C.Diagram.Owner?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model);
+        MermaidImport.Apply(Ws, text, options, name, target);
+        StateHasChanged();
+    }
+
     [JSInvokable]
     public void OnImageError(string message)
     {

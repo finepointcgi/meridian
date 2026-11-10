@@ -4,13 +4,14 @@
 
 | Menu | What it does |
 | --- | --- |
-| Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml) | creates a new project from a file |
-| Project menu → **Import into this project…** (BPMN, ArchiMate, SQL, C#, Cameo re-import) | adds the content of one or more files to the open project |
-| Project menu → **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG** | exports |
+| Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml, Mermaid .mmd / .md) | creates a new project from a file |
+| Project menu → **Import into this project…** (BPMN, ArchiMate, SQL, C#, Mermaid, Cameo re-import) | adds the content of one or more files to the open project |
+| Project menu → **Paste Mermaid…** | imports Mermaid text, for example from an AI assistant, with a preview ([Mermaid](#mermaid)) |
+| Project menu → **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG / Mermaid**, **Copy diagram as Mermaid** | exports |
 | Ribbon **Requirements → Exchange** | ReqIF, CSV and Excel import and export, re-import with preview, renumbering |
 | Ribbon **Generate** | report, SysML v2, XMI, C# code, and **Formats** for Word / PDF, BPMN, ArchiMate, ReqIF and SQL DDL |
 
-The desktop app can also open `.meridian`, `.sysml`, `.xmi`, `.qea` and `.qeax` files from the start screen, from
+The desktop app can also open `.meridian`, `.sysml`, `.xmi`, `.qea`, `.qeax` and Mermaid (`.mmd`, `.mermaid`, `.md`) files from the start screen, from
 the operating system (double-click) or by passing the path on the command line.
 
 ## Meridian project files (.meridian)
@@ -105,6 +106,28 @@ diagrams, and reverse-engineer `.sql` / `.ddl` scripts (`CREATE TABLE`, `ALTER T
   interfaces, records, structs and enums become classifiers with their properties, fields and methods, inheritance and
   interface realization.
 - **Generate → C#** downloads a zip of C# source skeletons for the model's structural classifiers.
+
+## Mermaid
+
+Meridian imports [Mermaid](https://mermaid.js.org/) text: `.mmd` / `.mermaid` files, several diagrams in one file, and
+the ```` ```mermaid ```` blocks of Markdown files.
+
+- **Project menu → Paste Mermaid…** (or ⌘K "Paste Mermaid") shows a live preview of what each diagram will become,
+  lets you choose **create new** or **match by name** (reuse existing blocks and requirements), and imports everything
+  as one undo step. Text produced by any AI assistant can be pasted as is, Markdown fences included.
+- **Import into this project…** and **Open a file as a new project…** accept `.mmd`, `.mermaid` and `.md` files, and
+  dropping a `.mmd` file on the canvas imports it.
+- Flowcharts become activity diagrams (decisions, initial / final nodes, guards, subgraphs as swimlanes), class diagrams
+  block definition diagrams (blocks, interface blocks, enumerations, properties, operations, generalization,
+  composition with part properties, aggregation, association, dependency, realization), state diagrams state machines,
+  sequence diagrams interactions with messages and combined fragments, requirement diagrams requirements with
+  satisfy / verify / trace / derive / refine / copy, and ER and C4 diagrams blocks. Gantt charts, pie charts, mind maps
+  and other non-SysML types are skipped with a warning.
+- **Export diagram as Mermaid (.mmd)** and **Copy diagram as Mermaid** write activity, state machine, sequence, block
+  definition and requirement diagrams back out.
+
+The full mapping, with everything that is approximated or skipped, is in
+[docs/MERMAID.md](https://github.com/finepointcgi/meridian/blob/main/docs/MERMAID.md) in the repository.
 
 ## Images
 

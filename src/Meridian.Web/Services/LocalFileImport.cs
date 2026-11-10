@@ -20,7 +20,7 @@ public static class LocalFileImport
     public const long MaxBytes = 64 * 1024 * 1024;
 
     /// <summary>Files the desktop app can open as a project (the same formats as "Open a file as a new project").</summary>
-    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml"];
+    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md"];
 
     public static bool IsSupported(string path) =>
         Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
@@ -50,7 +50,7 @@ public static class LocalFileImport
             var path = body?.Path;
             if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || !IsSupported(path))
             {
-                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea or .mdzip/.mdxml files can be opened.");
+                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea, .mdzip/.mdxml or Mermaid (.mmd, .mermaid, .md) files can be opened.");
                 return;
             }
             var file = new FileInfo(path);
@@ -101,6 +101,13 @@ public static class LocalFileImport
             {
                 var (md, report) = MagicDrawImporter.Import(path);
                 return (md, report.ToImportReport());
+            }
+            case ".mmd" or ".mermaid" or ".md":
+            {
+                var (mm, report) = Meridian.Serialization.Mermaid.MermaidImporter.ImportAsNewProject(
+                    File.ReadAllText(path), Path.GetFileNameWithoutExtension(path), Meridian.Serialization.Mermaid.MermaidImporter.IsMarkdownFile(path));
+                if (!mm.Diagrams.Any()) throw new FormatException("the file contains no Mermaid diagram Meridian can import.");
+                return (mm, report);
             }
             default:
                 throw new ArgumentException("Unsupported file type.");
