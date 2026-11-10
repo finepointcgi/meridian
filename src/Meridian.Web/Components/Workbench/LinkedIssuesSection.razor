@@ -1,0 +1,224 @@
+@using Meridian.Data
+@using Meridian.Web.Integrations
+@inherits WorkspaceComponent
+@inject IntegrationService Integrations
+@inject NavigationManager Nav
+@inject IConfiguration Config
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@if (Ws.Session != null && Element != null && Element is not Diagram && Element is not Relationship)
+{
+    var e = Element;
+    var links = Shown(e);
+    <div class="section-title">Linked issues @(links.Count > 0 ? $"({links.Count})" : "") <span class="grow"></span>
+        @if (links.Count > 0)
+        {
+            <MudTooltip Text="Refresh status from the tracker">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => Refresh(e)" Class="issue-refresh" />
+            </MudTooltip>
+        }
+    </div>
+    @foreach (var l in links)
+    {
+        var link = l;
+        var conn = _trackers.FirstOrDefault(c => c.Id.ToString() == link.Connection);
+        <div class="issue-link @(link.Closed ? "closed" : "")">
+            <div class="d-flex align-center gap-2">
+                <a class="issue-key" href="@link.Url" target="_blank" rel="noopener noreferrer">@link.Key</a>
+                @if (link.Status is { Length: > 0 })
+                {
+                    <span class="issue-status @(link.Closed ? "done" : "")">@link.Status</span>
+                }
+                <span style="flex:1"></span>
+                @if (!Ws.ReadOnly)
+                {
+                    <MudTooltip Text="Unlink">
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Unlink(e, link)" />
+                    </MudTooltip>
+                }
+            </div>
+            <div class="issue-title">@(link.Title is { Length: > 0 } t ? t : "(title not loaded)")</div>
+            <div class="issue-meta">
+                @(link.Assignee is { Length: > 0 } a ? a : "Unassigned")
+                · @(conn?.Name ?? "connection removed")
+                @if (link.Synced is { } at) { <span> · @Ago(at)</span> }
+            </div>
+        </div>
+    }
+    @if (_error != null)
+    {
+        <div class="issue-error">@_error</div>
+    }
+    @if (_trackers.Count == 0)
+    {
+        <div style="color:var(--text-3); font-size:12px; margin-bottom:6px">Connect Jira, Azure DevOps or GitHub in the project menu › Integrations… to link issues.</div>
+    }
+    else if (!Ws.ReadOnly)
+    {
+        var tracker = Current!;
+        <div class="d-flex gap-2 align-start">
+            @if (_trackers.Count > 1)
+            {
+                <MudSelect T="Guid" Value="tracker!.Id" ValueChanged="id => _trackerId = id" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px">
+                    @foreach (var c in _trackers) { <MudSelectItem Value="c.Id">@c.Name</MudSelectItem> }
+                </MudSelect>
+            }
+            <MudAutocomplete @key="@(e.Id + tracker!.Id)" T="IssueInfo" Placeholder="Link issue: key, URL or text…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                             SearchFunc="(q, ct) => Search(tracker, q, ct)" ToStringFunc="@(i => i == null ? "" : $"{i.Key} {i.Title}")"
+                             ValueChanged="i => Link(e, tracker, i)" ResetValueOnEmptyText="true" DebounceInterval="450" MinCharacters="2"
+                             MaxItems="20" ShowProgressIndicator="true" />
+        </div>
+        <div class="d-flex gap-1 flex-wrap mt-1">
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AddTask" Disabled="_busy" OnClick="() => Create(e, tracker)">Create issue from this element</MudButton>
+            @if (e.Kind == ElementKind.Package || e.Kind == ElementKind.Model)
+            {
+                var count = e.Descendants().Count(x => x.Kind == ElementKind.Requirement);
+                @if (count > 0)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Publish" Disabled="_busy" OnClick="() => Push(e, tracker)">Push @count requirements as issues…</MudButton>
+                }
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Element? Element { get; set; }
+
+    private IReadOnlyList<IntegrationConnection> _trackers = [];
+    private Guid? _loadedProject;
+    private int _loadedSettings = -1;
+    private Guid? _trackerId;
+    private string? _error;
+    private bool _busy;
+    private string? _errorFor;
+    /// <summary>Fresh values fetched by viewers (who cannot write them into the model).</summary>
+    private readonly Dictionary<string, IReadOnlyList<IssueLink>> _overlay = new();
+
+    private IntegrationConnection? Current => _trackers.FirstOrDefault(c => c.Id == _trackerId) ?? _trackers.FirstOrDefault();
+
+    private IReadOnlyList<IssueLink> Shown(Element e) => _overlay.TryGetValue(e.Id, out var o) ? o : IssueLinks.Read(e);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_errorFor != Element?.Id) _error = null;
+        await LoadTrackers();
+    }
+
+    protected override void OnWorkspaceChanged() => _ = InvokeAsync(async () => { await LoadTrackers(); StateHasChanged(); });
+
+    private async Task LoadTrackers()
+    {
+        if (Ws.Session is null) { _trackers = []; return; }
+        if (_loadedProject == Ws.Session.ProjectId && _loadedSettings == Integrations.SettingsVersion) return;
+        _loadedProject = Ws.Session.ProjectId;
+        _loadedSettings = Integrations.SettingsVersion;
+        _trackers = await Integrations.ListAsync(Ws.Session.ProjectId, IntegrationKinds.IssueTracker);
+    }
+
+    private string BaseUri => Config["Meridian:PublicUrl"] is { Length: > 0 } p ? p : Nav.BaseUri;
+
+    private string BackLink(Element e) => DeepLink.For(BaseUri, Ws.Session!.ProjectId, e.Id);
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        return d.TotalMinutes < 1 ? "just now" : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min ago" : d.TotalDays < 1 ? $"{(int)d.TotalHours} h ago" : utc.ToLocalTime().ToString("MMM d");
+    }
+
+    private void Fail(Element e, string message)
+    {
+        _error = message;
+        _errorFor = e.Id;
+    }
+
+    private async Task<IEnumerable<IssueInfo>> Search(IntegrationConnection c, string? q, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(q)) return [];
+        try
+        {
+            _error = null;
+            return await Integrations.Tracker(c).SearchAsync(q, ct);
+        }
+        catch (IssueTrackerException ex) { _error = ex.Message; _errorFor = Element?.Id; _ = InvokeAsync(StateHasChanged); return []; }
+        catch (OperationCanceledException) { return []; }
+    }
+
+    private void Link(Element e, IntegrationConnection c, IssueInfo? issue)
+    {
+        if (issue is null || !Ws.Model.Contains(e)) return;
+        try
+        {
+            IssueLinks.Add(Ws.Model, e, IssueLink.From(c.Id, issue));
+            Ws.SetStatus($"Linked {issue.Key} to {e.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Fail(e, ex.Message); }
+    }
+
+    private void Unlink(Element e, IssueLink link)
+    {
+        try { IssueLinks.Remove(Ws.Model, e, link); }
+        catch (InvalidOperationException ex) { Fail(e, ex.Message); }
+    }
+
+    private async Task Create(Element e, IntegrationConnection c)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var link = await Integrations.CreateIssueAsync(Ws.Model, e, c, BackLink(e));
+            Snackbar.Add($"Created {link.Key} in {c.Name}", Severity.Success);
+            Ws.Log($"Created issue {link.Key} for {e.QualifiedName}");
+        }
+        catch (Exception ex) when (ex is IssueTrackerException or InvalidOperationException) { Fail(e, ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task Push(Element package, IntegrationConnection c)
+    {
+        var count = package.Descendants().Count(x => x.Kind == ElementKind.Requirement);
+        var ok = await Dialogs.ShowMessageBox("Push requirements",
+            $"Create an issue in “{c.Name}” for each of the {count} requirements under {package.DisplayName} that isn't linked to it yet?",
+            yesText: "Create issues", cancelText: "Cancel");
+        if (ok != true) return;
+        _busy = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            IssueBatchResult result;
+            using (Ws.Model.History.Transaction("Push requirements as issues"))
+                result = await Integrations.PushRequirementsAsync(Ws.Model, package, c, BackLink);
+            Snackbar.Add(result.Summary("Created"), result.Errors.Count > 0 ? Severity.Warning : Severity.Success);
+            Ws.Log($"Pushed requirements of {package.QualifiedName} to {c.Name}: {result.Summary("created")}");
+            foreach (var err in result.Errors) Ws.Log("  " + err);
+        }
+        catch (Exception ex) when (ex is IssueTrackerException or InvalidOperationException) { Fail(package, ex.Message); }
+        finally { _busy = false; }
+    }
+
+    private async Task Refresh(Element e)
+    {
+        if (Ws.Session is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            if (Ws.ReadOnly)
+            {
+                var (links, result) = await Integrations.FetchAsync(Ws.Session.ProjectId, [e]);
+                if (links.TryGetValue(e, out var l)) _overlay[e.Id] = l;
+                if (result.Errors.Count > 0) Fail(e, result.Errors[0]);
+            }
+            else
+            {
+                var result = await Integrations.SyncAsync(Ws.Model, Ws.Session.ProjectId, [e]);
+                if (result.Errors.Count > 0) Fail(e, result.Errors[0]);
+            }
+        }
+        catch (Exception ex) when (ex is IssueTrackerException or InvalidOperationException) { Fail(e, ex.Message); }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,354 @@
+@using Meridian.Data
+@using Meridian.Web.Integrations
+@inject IntegrationService Integrations
+@inject WebhookDispatcher Webhooks
+@inject Workspace Ws
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><MudText Typo="Typo.h6">Integrations — @Ws.Session?.Name</MudText></div></TitleContent>
+    <DialogContent>
+        @if (!_canManage)
+        {
+            <MudText Typo="Typo.caption" Style="opacity:.7">Only project owners can change integrations.</MudText>
+        }
+        <MudTabs Elevation="0" Rounded="true" PanelClass="pt-3" @bind-ActivePanelIndex="_tab">
+            @* ------------------------------------------------------------ issue trackers *@
+            <MudTabPanel Text="Issue trackers">
+                @if (_trackerForm is null)
+                {
+                    @foreach (var c in _trackers)
+                    {
+                        var conn = c;
+                        var cfg = IssueTrackerConfig.Parse(conn.ConfigJson);
+                        <div class="integration-row">
+                            <MudIcon Icon="@Icons.Material.Outlined.BugReport" Style="font-size:18px; color:var(--accent-2)" />
+                            <div style="flex:1; min-width:0">
+                                <div style="font-weight:600">@conn.Name <span class="integration-type">@TrackerTypes.Display(cfg.Type)</span></div>
+                                <div class="integration-sub">@cfg.BaseUrl · @cfg.Project · token @(conn.ProtectedSecret != null ? "••• set" : "not set")</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditTracker(conn)" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                            }
+                        </div>
+                    }
+                    @if (_trackers.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Style="opacity:.7">No issue tracker connected. Add Jira, Azure DevOps or GitHub to link and create issues from model elements.</MudText>
+                    }
+                    <div class="d-flex gap-2 mt-3 align-center">
+                        @if (_canManage)
+                        {
+                            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTracker">Add connection</MudButton>
+                        }
+                        <span style="flex:1"></span>
+                        @if (_trackers.Count > 0)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Sync" Disabled="_busy || Ws.ReadOnly" OnClick="SyncAll">
+                                Sync status (@_linkedCount linked)
+                            </MudButton>
+                        }
+                    </div>
+                }
+                else
+                {
+                    var f = _trackerForm;
+                    <div class="d-flex flex-column gap-2">
+                        <MudSelect T="string" Label="Tracker" Value="f.Type" ValueChanged="t => f.Type = t" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var t in TrackerTypes.All) { <MudSelectItem Value="t">@TrackerTypes.Display(t)</MudSelectItem> }
+                        </MudSelect>
+                        <MudTextField T="string" Label="Name" @bind-Value="_trackerName" Placeholder="@TrackerTypes.Display(f.Type)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudTextField T="string" Label="Base URL" @bind-Value="f.BaseUrl" Placeholder="@TrackerTypes.BaseUrlHint(f.Type)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <MudTextField T="string" Label="@TrackerTypes.ProjectLabel(f.Type)" @bind-Value="f.Project" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        @if (TrackerTypes.NeedsUser(f.Type))
+                        {
+                            <MudTextField T="string" Label="Atlassian account email" @bind-Value="f.User" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        }
+                        @if (f.Type != TrackerTypes.GitHub)
+                        {
+                            <MudTextField T="string" Label="Issue / work item type for new issues" @bind-Value="f.IssueType" Placeholder="Task" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        }
+                        <MudTextField T="string" Label="@TokenLabel(f.Type)" @bind-Value="_secret" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Placeholder="@(_secretSet ? "••• set (leave empty to keep)" : "")" HelperText="Stored encrypted; never shown again after saving." autocomplete="new-password" />
+                        @if (_message != null)
+                        {
+                            <MudAlert Severity="@(_messageOk ? Severity.Success : Severity.Error)" Dense="true">@_message</MudAlert>
+                        }
+                        <div class="d-flex gap-2">
+                            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.NetworkCheck" Disabled="_busy" OnClick="TestTracker">Test connection</MudButton>
+                            <span style="flex:1"></span>
+                            <MudButton OnClick="() => { _trackerForm = null; _message = null; }">Cancel</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="SaveTracker">Save</MudButton>
+                        </div>
+                    </div>
+                }
+            </MudTabPanel>
+
+            @* ------------------------------------------------------------ webhooks *@
+            <MudTabPanel Text="Webhooks">
+                @if (_hookForm is null)
+                {
+                    @foreach (var h in _hooks)
+                    {
+                        var hook = h;
+                        var cfg = WebhookConfig.Parse(hook.ConfigJson);
+                        <div class="integration-row">
+                            <MudIcon Icon="@Icons.Material.Outlined.Webhook" Style="@($"font-size:18px; color:{(cfg.Enabled ? "var(--accent-2)" : "var(--text-3)")}")" />
+                            <div style="flex:1; min-width:0">
+                                <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis">@cfg.Url @(cfg.Enabled ? "" : "(disabled)")</div>
+                                <div class="integration-sub">@(cfg.Events.Count == 0 ? "All events" : string.Join(", ", cfg.Events)) · secret @(hook.ProtectedSecret != null ? "••• set" : "not set")</div>
+                            </div>
+                            @if (_canManage)
+                            {
+                                <MudTooltip Text="Send a test ping"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Send" Disabled="_busy" OnClick="() => Ping(hook)" /></MudTooltip>
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditHook(hook)" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(hook)" />
+                            }
+                        </div>
+                    }
+                    @if (_hooks.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Style="opacity:.7">No webhooks. Meridian can POST signed JSON to your URL when versions are committed, elements change or comments are posted.</MudText>
+                    }
+                    @if (_canManage)
+                    {
+                        <MudButton Class="mt-3" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewHook">Add webhook</MudButton>
+                    }
+                    <div class="d-flex align-center mt-4">
+                        <MudText Typo="Typo.subtitle2">Recent deliveries</MudText>
+                        <span style="flex:1"></span>
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+                    </div>
+                    @if (_deliveries.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Style="opacity:.7">Nothing delivered yet.</MudText>
+                    }
+                    else
+                    {
+                        <div class="delivery-log">
+                            <table>
+                                <thead><tr><th>Time</th><th>Event</th><th>Webhook</th><th>Try</th><th>Result</th></tr></thead>
+                                <tbody>
+                                    @foreach (var d in _deliveries)
+                                    {
+                                        <tr class="@(d.Success ? "ok" : "fail")">
+                                            <td>@d.CreatedAt.ToLocalTime().ToString("MMM d HH:mm:ss")</td>
+                                            <td>@d.Event</td>
+                                            <td>@HookHost(d.HookId)</td>
+                                            <td>@d.Attempt</td>
+                                            <td>@(d.StatusCode?.ToString() ?? "—") @(d.Success ? "OK" : d.Error)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+                else
+                {
+                    var f = _hookForm;
+                    <div class="d-flex flex-column gap-2">
+                        <MudTextField T="string" Label="Payload URL" @bind-Value="f.Url" Placeholder="https://example.com/hooks/meridian" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        <div class="d-flex gap-1 align-end">
+                            <MudTextField T="string" Label="Secret (HMAC-SHA256)" @bind-Value="_secret" InputType="@(_showSecret ? InputType.Text : InputType.Password)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                          Placeholder="@(_secretSet ? "••• set (leave empty to keep)" : "")" HelperText="Copy it now — it is stored encrypted and never shown again." autocomplete="new-password" />
+                            <MudButton Variant="Variant.Text" OnClick="() => { _secret = WebhookSignature.NewSecret(); _showSecret = true; }">Generate</MudButton>
+                        </div>
+                        <MudText Typo="Typo.caption">Events (none selected = all)</MudText>
+                        @foreach (var ev in WebhookEvents.All)
+                        {
+                            var name = ev;
+                            <MudCheckBox T="bool" Value="f.Events.Contains(name)" ValueChanged="v => { if (v) f.Events.Add(name); else f.Events.Remove(name); }" Dense="true"
+                                         Label="@($"{WebhookEvents.Display(name)} ({name})")" />
+                        }
+                        <MudSwitch T="bool" @bind-Value="f.Enabled" Label="Enabled" Color="Color.Primary" />
+                        @if (_message != null)
+                        {
+                            <MudAlert Severity="@(_messageOk ? Severity.Success : Severity.Error)" Dense="true">@_message</MudAlert>
+                        }
+                        <div class="d-flex gap-2">
+                            <span style="flex:1"></span>
+                            <MudButton OnClick="() => { _hookForm = null; _message = null; }">Cancel</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="SaveHook">Save</MudButton>
+                        </div>
+                    </div>
+                }
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int InitialTab { get; set; }
+
+    private int _tab;
+    private bool _canManage;
+    private bool _busy;
+    private IReadOnlyList<IntegrationConnection> _trackers = [];
+    private IReadOnlyList<IntegrationConnection> _hooks = [];
+    private IReadOnlyList<WebhookDelivery> _deliveries = [];
+    private int _linkedCount;
+
+    // edit forms (one at a time)
+    private Guid? _editId;
+    private IssueTrackerConfig? _trackerForm;
+    private string? _trackerName;
+    private WebhookConfig? _hookForm;
+    private string? _secret;
+    private bool _secretSet;
+    private bool _showSecret;
+    private string? _message;
+    private bool _messageOk;
+
+    private Guid ProjectId => Ws.Session!.ProjectId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tab = InitialTab;
+        _canManage = Ws.Role == ProjectRole.Owner;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.Session is null) return;
+        _trackers = await Integrations.ListAsync(ProjectId, IntegrationKinds.IssueTracker);
+        _hooks = await Integrations.ListAsync(ProjectId, IntegrationKinds.Webhook);
+        _deliveries = await Integrations.DeliveriesAsync(ProjectId);
+        _linkedCount = IssueLinks.Linked(Ws.Model).Sum(e => IssueLinks.Read(e).Count);
+    }
+
+    private static string TokenLabel(string type) => type switch
+    {
+        TrackerTypes.JiraCloud => "API token",
+        TrackerTypes.JiraServer => "Personal access token",
+        TrackerTypes.AzureDevOps => "Personal access token (Work Items read & write)",
+        _ => "Token (fine-grained: Issues read & write)",
+    };
+
+    private string HookHost(Guid hookId) =>
+        _hooks.FirstOrDefault(h => h.Id == hookId) is { } h && Uri.TryCreate(WebhookConfig.Parse(h.ConfigJson).Url, UriKind.Absolute, out var u) ? u.Host : "(deleted)";
+
+    private void ResetForm(Guid? id, bool secretSet)
+    {
+        _editId = id;
+        _secret = null;
+        _secretSet = secretSet;
+        _showSecret = false;
+        _message = null;
+    }
+
+    // ---------------------------------------------------------------- trackers
+
+    private void NewTracker()
+    {
+        ResetForm(null, false);
+        _trackerForm = new IssueTrackerConfig();
+        _trackerName = null;
+    }
+
+    private void EditTracker(IntegrationConnection c)
+    {
+        ResetForm(c.Id, c.ProtectedSecret != null);
+        _trackerForm = IssueTrackerConfig.Parse(c.ConfigJson);
+        _trackerName = c.Name;
+    }
+
+    private async Task TestTracker()
+    {
+        _busy = true;
+        try
+        {
+            _message = await Integrations.TestAsync(ProjectId, _trackerForm!, _secret, _editId);
+            _messageOk = true;
+        }
+        catch (IssueTrackerException ex) { _message = ex.Message; _messageOk = false; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveTracker()
+    {
+        if (!_canManage) return;
+        var f = _trackerForm!;
+        f.BaseUrl = f.BaseUrl.Trim().TrimEnd('/');
+        f.Project = f.Project.Trim();
+        if (f.Validate() is { } err) { _message = err; _messageOk = false; return; }
+        if (string.IsNullOrEmpty(_secret) && !_secretSet) { _message = "Enter the token."; _messageOk = false; return; }
+        if (!TrackerTypes.NeedsUser(f.Type)) f.User = null;
+        await Integrations.SaveAsync(ProjectId, _editId, IntegrationKinds.IssueTracker, _trackerName is { Length: > 0 } n ? n : TrackerTypes.Display(f.Type), f.ToJson(), _secret);
+        _secret = null;
+        _trackerForm = null;
+        Snackbar.Add("Issue tracker saved", Severity.Success);
+        await Reload();
+    }
+
+    private async Task SyncAll()
+    {
+        if (Ws.Session is null) return;
+        _busy = true;
+        try
+        {
+            var result = await Integrations.SyncAsync(Ws.Model, ProjectId);
+            Snackbar.Add(result.Summary("Refreshed"), result.Errors.Count > 0 ? Severity.Warning : Severity.Success);
+            Ws.Log($"Issue status sync: {result.Summary("refreshed")}");
+            foreach (var e in result.Errors) Ws.Log("  " + e);
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    // ---------------------------------------------------------------- webhooks
+
+    private void NewHook()
+    {
+        ResetForm(null, false);
+        _hookForm = new WebhookConfig();
+        _secret = WebhookSignature.NewSecret();
+        _showSecret = true;
+    }
+
+    private void EditHook(IntegrationConnection h)
+    {
+        ResetForm(h.Id, h.ProtectedSecret != null);
+        _hookForm = WebhookConfig.Parse(h.ConfigJson);
+    }
+
+    private async Task SaveHook()
+    {
+        if (!_canManage) return;
+        var f = _hookForm!;
+        f.Url = f.Url.Trim();
+        if (f.Validate() is { } err) { _message = err; _messageOk = false; return; }
+        if (string.IsNullOrEmpty(_secret) && !_secretSet) { _message = "Enter or generate a secret."; _messageOk = false; return; }
+        var host = new Uri(f.Url).Host;
+        await Integrations.SaveAsync(ProjectId, _editId, IntegrationKinds.Webhook, host, f.ToJson(), _secret);
+        _secret = null;
+        _hookForm = null;
+        Snackbar.Add("Webhook saved", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Ping(IntegrationConnection hook)
+    {
+        if (!_canManage) return;
+        _busy = true;
+        try
+        {
+            var (status, error) = await Webhooks.PingAsync(hook, Ws.Session?.Name ?? "");
+            Snackbar.Add(status is >= 200 and < 300 ? $"Ping delivered ({status})" : $"Ping failed: {status?.ToString() ?? ""} {error}", status is >= 200 and < 300 ? Severity.Success : Severity.Error);
+            await Reload();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Delete(IntegrationConnection c)
+    {
+        if (!_canManage) return;
+        await Integrations.DeleteAsync(ProjectId, c.Id);
+        await Reload();
+    }
+}

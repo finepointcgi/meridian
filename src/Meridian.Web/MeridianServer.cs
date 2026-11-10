@@ -46,6 +46,7 @@ public static class MeridianServer
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddHttpContextAccessor();
+        Integrations.IntegrationsSetup.AddMeridianIntegrations(builder.Services);   // issue trackers, webhooks, API tokens, OSLC
 
         // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.
         if ((builder.Configuration["Meridian:KeysPath"] is { Length: > 0 } kp ? kp : host.LocalMode ? Path.Combine(host.DataPath, "keys") : null) is { } keysPath)
@@ -187,6 +188,7 @@ public static class MeridianServer
         {
             if (http.User.Identity?.IsAuthenticated == true && Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
                 return new UserAccount(id, http.User.Identity.Name ?? "", http.User.FindFirstValue("display_name") ?? "", http.User.FindFirstValue("color") ?? "");
+            if (await Integrations.ApiAuth.TokenUserAsync(http, db) is { } tokenUser) return tokenUser;   // personal access token (Bearer)
             var header = http.Request.Headers.Authorization.ToString();
             if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) return null;
             try
@@ -259,6 +261,8 @@ public static class MeridianServer
             if (error != null) return error;
             return model!.Find(elementId) is { } e ? Results.Content(SysMLv2Json.Element(model, e).ToJsonString(), "application/json") : Results.NotFound();
         });
+
+        Integrations.IntegrationsSetup.MapMeridianIntegrations(app);
 
         app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<CollaborationHub>().FlushAllAsync().GetAwaiter().GetResult());
 
