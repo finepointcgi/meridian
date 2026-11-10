@@ -16,9 +16,25 @@ Open the project menu → **Integrations (issue trackers, webhooks, code)…** �
 | Jira Server / Data Center (REST v2) | `https://jira.example.com` | project key | personal access token (Bearer) |
 | Azure DevOps (work items) | `https://dev.azure.com/your-org` | project name | PAT with *Work Items: read & write* (Basic, empty user) |
 | GitHub Issues | `https://api.github.com` or `https://ghe.example.com/api/v3` | `owner/repo` | fine-grained token with *Issues: read & write* (Bearer) |
+| GitLab Issues (REST v4) | `https://gitlab.com` or `https://gitlab.example.com` (the `/api/v4` suffix is optional) | `group/subgroup/project` or numeric project id | project, group or personal access token with `api` (`PRIVATE-TOKEN`), or an OAuth access token (Bearer, tick the option) |
 
 Optionally set the issue / work item type for new issues (default `Task`). **Test connection** checks the
 credentials and that the project/repository is reachable. Base URLs must be `https://`.
+
+**GitLab Issues** (gitlab.com and self-managed, `GitLabTracker` in `IssueTrackers.cs`):
+
+- Setup: in the project, *Settings ▸ Access tokens ▸ Add new token* with role Reporter (Developer to close issues
+  from GitLab itself) and scope `api`, or a personal access token with `api`. The project is its full path as in the
+  browser address (`acme/vehicles/car`) or the numeric *Project ID* from the project overview.
+- Keys are `#<iid>`. **Link issue** accepts `#12`, `12`, the browser address (`…/-/issues/12`, `…/-/work_items/12`,
+  the older `…/issues/12`) or the API address, on the configured GitLab host only.
+- Search uses `GET /projects/:id/issues?search=…&in=title,description&scope=all`, newest first, up to 50 results
+  over pages of 20. Paging follows GitLab's `x-next-page` header, or a `Link: rel="next"` address on the same scheme,
+  host and port (a next link to another host is ignored, so the token never leaves the GitLab instance).
+- Created issues get the description, the deep link back to Meridian and the configured **labels**
+  (comma-separated); set the issue type to `issue`, `incident`, `test_case` or `task` if you need one.
+- Status is GitLab's `opened` / `closed`; the assignee is every assignee's username; labels are shown under the linked
+  issue and refreshed by **Sync status**. Bulk *Create issues for requirements* works as for the other trackers.
 
 ### Secrets
 
@@ -34,8 +50,8 @@ Tracker base URLs and webhook URLs are chosen by project owners, so on a team se
 connection (redirects included) against the address it actually connects to. Link-local addresses (169.254.0.0/16,
 fe80::/10 — where cloud metadata services live), known metadata addresses, unspecified and multicast addresses are
 always refused. Loopback and private networks (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are refused unless
-an administrator sets `Meridian:Integrations:AllowPrivateNetworks=true` — needed for an on-premises Jira or GitHub
-Enterprise. The desktop app's local mode does not restrict addresses.
+an administrator sets `Meridian:Integrations:AllowPrivateNetworks=true` — needed for an on-premises Jira, GitHub
+Enterprise or a self-managed GitLab. The desktop app's local mode does not restrict addresses.
 
 ### Linked issues on elements
 

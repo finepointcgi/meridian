@@ -47,6 +47,28 @@ gh attestation verify oci://ghcr.io/finepointcgi/meridian:0.6.0 --repo finepoint
 The repository is private, so pulling needs `docker login ghcr.io` with a token that has `read:packages`
 (or a Kubernetes `imagePullSecret`).
 
+#### From the GitLab Container Registry
+
+When Meridian is built on GitLab, the `container` job of `.gitlab-ci.yml` publishes the same multi-arch image, with
+an SBOM and SLSA provenance, to the project's registry: `registry.gitlab.com/<group>/<project>:<version>`, or
+`<your-registry-host>/<group>/<project>` on self-managed GitLab. Tags are `X.Y.Z`, `X.Y`, `X` (not for 0.x),
+`latest` (not for pre-releases) and the commit SHA. On GitLab.com it is signed with cosign keyless through GitLab's
+OIDC token:
+
+```bash
+cosign verify registry.gitlab.com/<group>/<project>:0.6.0 \
+  --certificate-identity "https://gitlab.com/<group>/<project>//.gitlab-ci.yml@refs/tags/v0.6.0" \
+  --certificate-oidc-issuer https://gitlab.com
+```
+
+To use it:
+
+- **Compose:** set `MERIDIAN_IMAGE=registry.gitlab.com/<group>/<project>` in `.env`, and run `docker login
+  registry.gitlab.com` with a deploy token or personal access token that has `read_registry`.
+- **Helm:** `--set image.repository=registry.gitlab.com/<group>/<project>` and an `imagePullSecrets` entry for a
+  `kubernetes.io/dockerconfigjson` Secret created from a deploy token
+  (`kubectl create secret docker-registry gitlab-registry --docker-server=registry.gitlab.com --docker-username=<token name> --docker-password=<token>`).
+
 What the image provides:
 
 - Ubuntu 24.04 ASP.NET 10 runtime with fontconfig and DejaVu fonts for PDF/Word export, and nothing else added.

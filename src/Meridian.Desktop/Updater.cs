@@ -111,9 +111,9 @@ public readonly record struct SemVersion(int Major, int Minor, int Patch, string
 }
 
 /// <summary>
-/// Checks an update source (GitHub releases, GitHub with a token, or a self-hosted manifest) for a newer Meridian, picks the
+/// Checks an update source (GitHub releases, GitHub with a token, GitLab releases, or a self-hosted manifest) for a newer Meridian, picks the
 /// package for this OS and architecture (installer, or the portable archive as a fallback), downloads it and verifies its SHA-256
-/// (SHA256SUMS.txt for GitHub releases, the manifest's sha256 otherwise). Nothing unverified is ever returned.
+/// (SHA256SUMS.txt for GitHub and GitLab releases, the manifest's sha256 otherwise). Nothing unverified is ever returned.
 /// </summary>
 public sealed class Updater
 {

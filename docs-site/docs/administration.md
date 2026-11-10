@@ -49,7 +49,8 @@ the redirect URI `https://<server>/signin-oidc-<name>`, then configure the provi
         "ClaimMappings": { "Username": "preferred_username", "DisplayName": "name", "Email": "email",
                            "AdminClaim": "roles", "AdminValue": "Meridian.Admin" } },
       { "Name": "okta", "Authority": "https://<org>.okta.com/oauth2/default", "ClientId": "…", "ClientSecret": "…" },
-      { "Name": "keycloak", "Authority": "https://sso.example.com/realms/<realm>", "ClientId": "…", "ClientSecret": "…" }
+      { "Name": "keycloak", "Authority": "https://sso.example.com/realms/<realm>", "ClientId": "…", "ClientSecret": "…" },
+      { "Name": "gitlab", "Authority": "https://gitlab.com", "ClientId": "<application-id>", "ClientSecret": "…" }
     ]
   }
 }
@@ -59,6 +60,12 @@ the redirect URI `https://<server>/signin-oidc-<name>`, then configure the provi
 - A first sign-in creates a Meridian account linked by issuer and subject; it is never matched to an existing account
   by name or e-mail. Set `AutoProvision: false` on a provider to refuse unknown identities.
 - `AdminClaim` / `AdminValue` make users with that claim value administrators.
+- **GitLab** (gitlab.com or self-managed): a provider named `gitlab`, or one with `"Preset": "gitlab"`, defaults to
+  the authority `https://gitlab.com`, the scopes `openid profile email`, the button text *GitLab*, and the GitLab
+  username from `preferred_username` (or `nickname`). For a self-managed GitLab, set `Authority` to its root address.
+  Create the application in GitLab under *User settings* (or *Group settings*, or *Admin area*) ▸ *Applications*, with
+  the redirect URI `https://<server>/signin-oidc-gitlab` and the scopes `openid`, `profile` and `email`. To make a GitLab
+  group's members administrators, use `"AdminClaim": "groups", "AdminValue": "<group path>"`.
 - `DisableLocalPasswords` turns off password sign-in, registration and HTTP Basic API authentication.
 - SSO needs HTTPS. Behind a TLS-terminating reverse proxy, set `Meridian:Security:TrustForwardedHeaders` to `true`.
 - Keep client secrets out of files, for example `Meridian__Sso__Providers__0__ClientSecret=…`.

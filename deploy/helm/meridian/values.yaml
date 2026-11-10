@@ -10,6 +10,7 @@
 replicaCount: 1
 
 image:
+  # GitLab builds publish the same image to registry.gitlab.com/<group>/<project> (add an imagePullSecret).
   repository: ghcr.io/finepointcgi/meridian
   # Defaults to the chart appVersion. Pin a digest in production with `digest: sha256:...`.
   tag: ""
