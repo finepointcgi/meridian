@@ -12,12 +12,16 @@ namespace Meridian.Serialization;
 /// </summary>
 public static partial class SysMLv2Parser
 {
-    public static SysmlDocument Parse(string text)
+    public static SysmlDocument Parse(string text) => Parse(text, lint: true);
+
+    /// <summary>Parses; with <paramref name="lint"/> also checks units in quantity literals against the standard library.</summary>
+    internal static SysmlDocument Parse(string text, bool lint)
     {
         var doc = new SysmlDocument { Text = text ?? "" };
         var lexer = new Lexer(doc.Text, doc.Diagnostics);
         var p = new Parser(doc, lexer.Tokenize());
         p.ParseTop();
+        if (lint) SysMLv2Library.CheckUnits(doc);
         return doc;
     }
 
@@ -147,8 +151,12 @@ public static partial class SysMLv2Parser
         "case", "view", "viewpoint", "rendering", "metadata", "concern", "stakeholder", "actor", "ref", "abstract", "public", "private",
         "protected", "in", "out", "inout", "accept", "send", "assert", "return", "individual", "snapshot", "timeslice", "event",
         "variation", "variant", "end", "readonly", "derived", "constant", "frame", "expose", "filter", "if", "else", "assign", "loop",
-        "while", "until", "for", "terminate", "occurrence",
+        "while", "until", "for", "terminate", "do", "render", "rep", "language",
     };
+
+    /// <summary>Statements inside action bodies that Meridian keeps as action nodes with verbatim text.</summary>
+    internal static readonly HashSet<string> ActionBodyKeywords = new(StringComparer.Ordinal)
+        { "accept", "send", "assign", "if", "while", "loop", "for", "terminate" };
 
     /// <summary>Words that continue a declaration header and therefore can't be its name.</summary>
     private static readonly HashSet<string> HeaderWords = new(StringComparer.Ordinal)
@@ -166,7 +174,7 @@ public static partial class SysMLv2Parser
     };
 
     private static readonly HashSet<string> ExpressionContexts = new(StringComparer.Ordinal)
-        { "constraint", "calc", "analysis", "require", "assume", "assert", "case" };
+        { "constraint", "calc", "analysis", "require", "assume", "assert", "case", "requirement", "concern", "verification", "viewpoint" };
 
     private sealed class Parser(SysmlDocument doc, List<Token> toks)
     {
@@ -334,7 +342,9 @@ public static partial class SysMLv2Parser
             public string? Previous;      // last action / state / node for "then" shorthand
             public string? LastDecision;  // last decide / merge for "if … then" shorthand
             public int Decisions, Forks;
+            public readonly Dictionary<string, int> Counters = new(StringComparer.Ordinal);
             public bool Expressions => Owner != null && ExpressionContexts.Contains(Owner.Keyword);
+            public bool IsMetadata => Owner?.Keyword == "metadata";
             public bool IsEnum => Owner is { Keyword: "enum", IsDef: true };
             public bool IsState => Owner?.Keyword is "state" or "exhibit state";
         }
@@ -438,15 +448,17 @@ public static partial class SysMLv2Parser
 
             // prefixes
             string? direction = null; var isAbstract = false; var tags = new List<string>(); string? prefixKeyword = null;
+            var modifiers = new List<string>();
             while (true)
             {
                 if (Is("public") || Is("private") || Is("protected") || Is("readonly") || Is("derived") || Is("constant") || Is("end")
-                    || Is("ordered") || Is("nonunique") || Is("variation") || Is("individual")) { Next(); continue; }
-                if (Is("abstract")) { Next(); isAbstract = true; continue; }
+                    || Is("ordered") || Is("nonunique") || Is("variation") || Is("variant") || Is("individual")) { modifiers.Add(Next().Text); continue; }
+                if (Is("abstract")) { Next(); isAbstract = true; modifiers.Add("abstract"); continue; }
                 if (Is("in") || Is("out") || Is("inout")) { direction = Next().Text; continue; }
-                if (Is("#")) { Next(); tags.Add(ReadRef("a metadata name").Simple); continue; }
-                if (Is("ref") && PeekTok() is { Kind: Tk.Ident } p && DeclKeywords.Contains(p.Text)) { Next(); continue; }
-                if (Is("perform") || Is("exhibit") || Is("snapshot") || Is("timeslice") || Is("variant") || Is("event"))
+                if (Is("#")) { Next(); tags.Add(ReadRef("a metadata name").Text); continue; }
+                if (Is("ref") && PeekTok() is { Kind: Tk.Ident } p && (DeclKeywords.Contains(p.Text) || p.Text is "use" or "analysis" or "verification"))
+                { Next(); modifiers.Add("ref"); continue; }
+                if (Is("perform") || Is("exhibit") || Is("snapshot") || Is("timeslice") || Is("event"))
                 {
                     prefixKeyword ??= Cur.Text;
                     Next();
@@ -456,7 +468,12 @@ public static partial class SysMLv2Parser
             }
 
             if (Cur.Kind == Tk.Eof || Is("}")) throw Error($"Expected a declaration but found {Describe(Cur)}");
-            var kw = Cur.Kind == Tk.Ident ? Cur.Text : null;
+            var kw = Cur.Kind == Tk.Ident ? Cur.Text : Cur.Kind == Tk.Sym && Cur.Text == "@" ? "@" : null;
+
+            SysmlDecl NewDecl(string keyword, string keywordText) => new SysmlDecl
+            {
+                Keyword = keyword, KeywordText = keywordText, IsAbstract = isAbstract, Direction = direction,
+            }.With(tags, modifiers);
 
             switch (kw)
             {
@@ -487,15 +504,30 @@ public static partial class SysMLv2Parser
                     into.Add(c);
                     return;
                 }
+                case "rep" or "language":
+                {   // textual representation: rep [name] language "ocl" /* … */
+                    Next();
+                    if (kw == "rep")
+                    {
+                        if (IsName && !Is("language")) Next();
+                        Expect("language", "in 'rep … language \"…\"'");
+                    }
+                    if (Cur.Kind != Tk.String) throw MissingAfterLast($"Expected a language name string but found {Describe(Cur)}");
+                    Next();
+                    var body = TakeComment() ?? throw MissingAfterLast("Expected a /* body */ after the language name");
+                    Accept(";");
+                    into.Add(new SysmlUnsupported { Keyword = "rep", Span = TextSpan.Cover(start.Span, body.Span) });
+                    return;
+                }
                 case "import":
                 {
                     Next();
                     Accept("all");
                     var r = ReadRef("an imported namespace");
                     var target = r.Text;
-                    if (Accept("::")) { target += "::" + Next().Text; if (Is("**")) target += Next().Text; }
+                    while (Is("::") && PeekTok() is { Kind: Tk.Sym, Text: "*" or "**" }) { Next(); target += "::" + Next().Text; }
                     if (Is("[")) ReadExpr(true);   // filter condition
-                    var imp = new SysmlImport { Target = target };
+                    var imp = new SysmlImport { Target = target, Namespace = r };
                     Terminate(imp, start, allowBody: true);
                     into.Add(imp);
                     return;
@@ -503,7 +535,8 @@ public static partial class SysMLv2Parser
                 case "alias":
                 {
                     Next();
-                    var u = new SysmlUnsupported { Keyword = "alias" };
+                    if (Is("<")) { Next(); ReadName("a short name"); Expect(">", "to close the short name"); }
+                    var u = new SysmlUnsupported { Keyword = "alias", Name = Cur.Kind is Tk.Ident or Tk.Name ? Cur.Text : null };
                     ReadExpr(false);
                     Terminate(u, start);
                     into.Add(u);
@@ -511,41 +544,43 @@ public static partial class SysMLv2Parser
                 }
                 case "library" or "standard" or "package":
                 {
-                    while (Accept("standard") || Accept("library")) { }
+                    while (Is("standard") || Is("library")) modifiers.Add(Next().Text);
                     Expect("package", "after 'library'");
-                    var d = new SysmlDecl { Keyword = "package" };
+                    var d = NewDecl("package", "package");
                     ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                     return;
                 }
                 case "satisfy" or "verify":
                 {
                     Next();
-                    Accept("requirement");
-                    if (Is("not")) Next();
+                    var complex = Accept("requirement");
+                    if (Is("not")) { Next(); complex = true; }
                     var target = ReadRef("a requirement");
-                    if (Accept(":")) target = ReadRef("a requirement");
+                    if (Accept(":")) { target = ReadRef("a requirement"); complex = true; }
                     SysmlRef? by = null;
                     if (Accept("by")) by = ReadRef("the satisfying element");
-                    var rel = new SysmlRelation { Keyword = kw, Source = by, Target = target };
+                    complex |= Is("{");
+                    var rel = new SysmlRelation { Keyword = kw, Source = by, Target = target, Complex = complex };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
                 }
                 case "assert":
-                {
                     Next();
-                    if (Accept("not")) { }
-                    if (Is("satisfy")) { ParseStatement(into, ctx); return; }
                     SkipUnsupported(into, start, "assert");
                     return;
-                }
                 case "allocate":
                 {
                     Next();
+                    if (Is("("))
+                    {
+                        SkipUnsupported(into, start, "allocate");
+                        return;
+                    }
                     var a = ReadRef("an allocated element");
                     Expect("to", "in 'allocate … to …'");
                     var b = ReadRef("an allocation target");
-                    var rel = new SysmlRelation { Keyword = "allocate", Source = a, Target = b };
+                    var rel = new SysmlRelation { Keyword = "allocate", Source = a, Target = b, Complex = Is("{") };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
@@ -561,12 +596,13 @@ public static partial class SysMLv2Parser
                     var targets = ReadRefList("a supplier element");
                     var tag = tags.FirstOrDefault(t => t is "derivation" or "refinement" or "trace" or "extend" or "derive" or "refine");
                     var keyword = tag switch { "derive" => "derivation", "refine" => "refinement", null => "dependency", _ => tag };
+                    var complex = Is("{") || tags.Count > (tag == null ? 0 : 1) || sources.Count * targets.Count > 1;
                     var first = true;
                     foreach (var s in sources)
                         foreach (var t in targets)
                         {
-                            var rel = new SysmlRelation { Keyword = keyword, Name = name, Source = s, Target = t };
-                            if (first) { Terminate(rel, start); first = false; }
+                            var rel = new SysmlRelation { Keyword = keyword, Name = name, Source = s, Target = t, Complex = complex };
+                            if (first) { Terminate(rel, start, allowBody: true); first = false; }
                             else rel.Span = TextSpan.Cover(start.Span, LastTok.Span);
                             into.Add(rel);
                         }
@@ -577,7 +613,10 @@ public static partial class SysMLv2Parser
                     Next();
                     Accept("use"); Accept("case");
                     var target = ReadRef("a use case");
-                    var rel = new SysmlRelation { Keyword = "include", Target = target };
+                    var complex = false;
+                    if (Accept(":")) { target = ReadRef("a use case definition"); complex = true; }
+                    complex |= Is("{");
+                    var rel = new SysmlRelation { Keyword = "include", Target = target, Complex = complex };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
@@ -586,15 +625,17 @@ public static partial class SysMLv2Parser
                 {
                     Next();
                     string? name = null; string? item = null;
+                    var complex = false;
                     if (IsName && !Is("from") && !Is("of")) name = Next().Text;
-                    if (Accept(":")) ReadRef("a message type");
-                    if (Accept("of")) item = ReadRef("a message payload").Text;
+                    if (Accept(":")) { ReadRef("a message type"); complex = true; }
+                    if (Accept("of")) { item = ReadRef("a message payload").Text; if (Accept(":")) { ReadRef("a payload type"); complex = true; } }
+                    if (!Is("from")) { SkipUnsupported(into, start, "message"); return; }
                     Expect("from", "in 'message … from … to …'");
                     var a = ReadRef("the sending lifeline");
                     Expect("to", "in 'message … from … to …'");
                     var b = ReadRef("the receiving lifeline");
                     var sort = tags.Contains("reply") ? "reply" : tags.Contains("async") ? "asynchCall" : "synchCall";
-                    var rel = new SysmlRelation { Keyword = "message", Name = name, Source = a, Target = b, Detail = sort };
+                    var rel = new SysmlRelation { Keyword = "message", Name = name, Source = a, Target = b, Detail = sort, Complex = complex || item != null || Is("{") };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
@@ -602,10 +643,11 @@ public static partial class SysMLv2Parser
                 case "connect":
                 {
                     Next();
+                    if (Is("(")) { SkipUnsupported(into, start, "connect"); return; }
                     var a = ReadRef("a connector end");
                     Expect("to", "in 'connect … to …'");
                     var b = ReadRef("a connector end");
-                    var rel = new SysmlRelation { Keyword = "connect", Source = a, Target = b };
+                    var rel = new SysmlRelation { Keyword = "connect", Source = a, Target = b, Complex = Is("{") };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
@@ -616,27 +658,18 @@ public static partial class SysMLv2Parser
                     var a = ReadRef("a bound feature");
                     Expect("=", "in 'bind … = …'");
                     var b = ReadRef("a bound feature");
-                    var rel = new SysmlRelation { Keyword = "bind", Source = a, Target = b };
+                    var rel = new SysmlRelation { Keyword = "bind", Source = a, Target = b, Complex = Is("{") };
                     Terminate(rel, start, allowBody: true);
                     into.Add(rel);
                     return;
                 }
-                case "flow" when !(PeekTok() is { Kind: Tk.Ident, Text: "def" }):
-                {
+                case "succession" when PeekTok() is { Kind: Tk.Ident, Text: "flow" } && PeekTok(2) is not { Kind: Tk.Ident, Text: "def" }:
                     Next();
-                    string? name = null, item = null;
-                    if (IsName && !Is("of") && !Is("from") && PeekTok() is not { Kind: Tk.Sym, Text: "." or "::" }) name = Next().Text;
-                    if (Accept(":")) ReadRef("a flow type");
-                    if (Accept("of")) { item = ReadRef("the conveyed item").Text; if (Accept(":")) item = ReadRef("the conveyed item type").Text; }
-                    Accept("from");
-                    var a = ReadRef("a flow source");
-                    Expect("to", "in 'flow … to …'");
-                    var b = ReadRef("a flow target");
-                    var rel = new SysmlRelation { Keyword = "flow", Name = name, Source = a, Target = b, Detail = item };
-                    Terminate(rel, start, allowBody: true);
-                    into.Add(rel);
+                    ParseFlow(into, start, complex: true);
                     return;
-                }
+                case "flow" when !(PeekTok() is { Kind: Tk.Ident, Text: "def" }):
+                    ParseFlow(into, start, complex: false);
+                    return;
                 case "succession" when !(PeekTok() is { Kind: Tk.Ident, Text: "def" or "flow" }):
                 {
                     Next();
@@ -662,20 +695,28 @@ public static partial class SysMLv2Parser
                 case "then":
                 {
                     Next();
-                    if (Cur.Kind == Tk.Ident && (DeclKeywords.Contains(Cur.Text) || Cur.Text is "decide" or "merge" or "fork" or "join" or "done"))
+                    if (Cur.Kind == Tk.Ident && (DeclKeywords.Contains(Cur.Text) || ActionBodyKeywords.Contains(Cur.Text) && !(ctx.IsState && Cur.Text == "accept")
+                        || Cur.Text is "decide" or "merge" or "fork" or "join" or "done" or "use" or "perform" or "exhibit" or "ref" or "event" or "include"
+                            or "snapshot" or "timeslice" or "analysis" or "verification" or "private" or "public" or "protected" or "abstract"))
                     {
                         if (Is("done"))
                         {
                             var r = ReadRef();
                             AddSuccession(into, ctx, start, r, null);
-                            Accept(";");
+                            Terminate(into[^1], start);
                             return;
                         }
                         var from = ctx.Previous;
                         var before = into.Count;
                         ParseStatement(into, ctx);
                         if (into.Skip(before).OfType<SysmlDecl>().FirstOrDefault() is { } target && target.EffectiveName is { } tn)
-                            into.Add(new SysmlSuccession { IsTransition = ctx.IsState, First = from == null ? null : Ref(from, start), Then = Ref(tn, start, target.NameSpan), Span = start.Span });
+                            into.Add(new SysmlSuccession
+                            {
+                                IsTransition = ctx.IsState, First = from == null ? null : Ref(from, start), Then = Ref(tn, start, target.NameSpan),
+                                Span = TextSpan.Cover(start.Span, LastTok.Span), Shorthand = target,
+                            });
+                        else if (into.Count > before)
+                            into[before].Span = TextSpan.Cover(start.Span, into[before].Span);   // "then include …": keep the 'then' with it
                         return;
                     }
                     var to = ReadRef("a successor");
@@ -685,8 +726,13 @@ public static partial class SysMLv2Parser
                 }
                 case "if" when !ctx.Expressions:
                 {
-                    Next();
-                    var guard = ReadExpr(false, "then");
+                    var kwTok = Next();
+                    var guard = ReadExpr(true, "then");
+                    if (Is("{"))
+                    {   // structured "if c { … } else { … }" action
+                        ParseActionNode(into, ctx, start, startIndex, leadingId, kwTok, "if", NewDecl("if", "if"));
+                        return;
+                    }
                     Expect("then", "after the guard");
                     var to = ReadRef("a successor");
                     AddSuccession(into, ctx, start, to, guard, fromDecision: true);
@@ -701,23 +747,38 @@ public static partial class SysMLv2Parser
                     Terminate(into[^1], start);
                     return;
                 }
-                case "entry":
+                case "entry" or "do" or "exit":
                 {
-                    Next();
-                    ctx.Previous = "start";
+                    var kwTok = Next();
+                    if (kw == "entry") ctx.Previous = "start";
                     if (Accept(";")) return;
-                    SkipUnsupported(into, start, "entry");
+                    var d = NewDecl(kw, kw);
+                    ParseActionNode(into, ctx, start, startIndex, leadingId, kwTok, kw, d, updatePrevious: false);
                     return;
                 }
-                case "exit" or "do" or "send" or "return" or "require" or "assume" or "frame" or "expose" or "filter" or "assign"
-                    or "loop" or "while" or "for" or "terminate" or "until":
+                case "accept" or "send" or "assign" or "while" or "loop" or "for" or "terminate":
+                {
+                    var kwTok = Next();
+                    ParseActionNode(into, ctx, start, startIndex, leadingId, kwTok, kw, NewDecl(kw, kw));
+                    return;
+                }
+                case "require" or "assume" or "frame" or "expose" or "filter" or "until" or "render":
                     Next();
                     SkipUnsupported(into, start, kw);
                     return;
+                case "return":
+                {
+                    Next();
+                    var d = Cur.Kind == Tk.Ident && DeclKeywords.Contains(Cur.Text)
+                        ? NewDecl("return", "return " + Next().Text)
+                        : NewDecl("return", "return");
+                    ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
+                    return;
+                }
                 case "decide" or "merge" or "fork" or "join":
                 {
                     Next();
-                    var d = new SysmlDecl { Keyword = kw };
+                    var d = NewDecl(kw, kw);
                     if (IsName) { var (n, sp) = ReadName("a name"); d.Name = n; d.NameSpan = sp; }
                     else
                     {
@@ -737,33 +798,52 @@ public static partial class SysMLv2Parser
                 {
                     Next();
                     Expect("case", "after 'use'");
-                    var d = new SysmlDecl { Keyword = "use case", IsAbstract = isAbstract, Direction = direction };
-                    d.Tags.AddRange(tags);
+                    var d = NewDecl("use case", prefixKeyword != null ? prefixKeyword + " use case" : "use case");
                     ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                     return;
                 }
+                case "analysis" or "verification":
+                {
+                    Next();
+                    var text = Accept("case") ? kw + " case" : kw;
+                    var d = NewDecl(kw, prefixKeyword != null ? prefixKeyword + " " + text : text);
+                    ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
+                    return;
+                }
+                case "@":
+                    ParseAnnotation(into, start);
+                    return;
             }
 
             if (kw != null && (DeclKeywords.Contains(kw) || kw == "ref"))
             {
                 Next();
-                var d = new SysmlDecl { Keyword = prefixKeyword != null ? prefixKeyword + " " + kw : kw, IsAbstract = isAbstract, Direction = direction };
-                d.Tags.AddRange(tags);
+                var k = prefixKeyword != null ? prefixKeyword + " " + kw : kw;
+                var d = NewDecl(k, k);
+                ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
+                return;
+            }
+
+            if (prefixKeyword is "snapshot" or "timeslice" or "event" && Cur.Kind is Tk.Ident or Tk.Name)
+            {   // "snapshot s : S;" without a usage keyword
+                var d = NewDecl(prefixKeyword, prefixKeyword);
                 ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                 return;
             }
 
             if (prefixKeyword != null && (Cur.Kind is Tk.Ident or Tk.Name))
             {   // "perform x;" / "exhibit s;" referencing an existing usage
-                ReadRef();
-                SkipUnsupported(into, start, prefixKeyword);
+                var target = ReadRef();
+                var rel = new SysmlRelation { Keyword = prefixKeyword, Target = target, Complex = Is("{") || tags.Count > 0 || modifiers.Count > 0 };
+                Terminate(rel, start, allowBody: true);
+                into.Add(rel);
                 return;
             }
 
             // ":>> mass = 10;" — a redefinition without a keyword
             if (Is(":>>") || Is("redefines"))
             {
-                var d = new SysmlDecl { Keyword = "ref", Direction = direction };
+                var d = NewDecl("ref", "");
                 ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                 return;
             }
@@ -771,7 +851,7 @@ public static partial class SysMLv2Parser
             // "in x : Real;" — a directed parameter without a usage keyword
             if (direction != null && Cur.Kind is Tk.Ident or Tk.Name)
             {
-                var d = new SysmlDecl { Keyword = "ref", Direction = direction };
+                var d = NewDecl("ref", "");
                 ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                 return;
             }
@@ -779,7 +859,15 @@ public static partial class SysMLv2Parser
             // enum literal shorthand: "red;" inside an enum def
             if (ctx.IsEnum && Cur.Kind is Tk.Ident or Tk.Name)
             {
-                var d = new SysmlDecl { Keyword = "enum" };
+                var d = NewDecl("enum", "");
+                ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
+                return;
+            }
+
+            // "isMandatory = true;" inside metadata
+            if (ctx.IsMetadata && Cur.Kind is Tk.Ident or Tk.Name && PeekTok() is { Kind: Tk.Sym, Text: "=" or ":=" or ":" or ":>" or ";" })
+            {
+                var d = NewDecl("ref", "");
                 ParseDeclRest(d, start, startIndex, leadingId, into, ctx);
                 return;
             }
@@ -788,7 +876,7 @@ public static partial class SysMLv2Parser
             {
                 var text = ReadExpr(false);
                 if (text == null) throw Error($"Unexpected {Describe(Cur)}");
-                var ex = new SysmlExpression { Text = text, Span = TextSpan.Cover(start.Span, LastTok.Span) };
+                var ex = new SysmlExpression { Text = Dedent(text, start.Start), Span = TextSpan.Cover(start.Span, LastTok.Span) };
                 Accept(";");
                 into.Add(ex);
                 return;
@@ -797,6 +885,123 @@ public static partial class SysMLv2Parser
             throw Error(Cur.Kind == Tk.Ident && !StatementKeywords.Contains(Cur.Text)
                 ? $"Unexpected {Describe(Cur)}: expected a declaration (part, attribute, port …) or a relationship"
                 : $"Unexpected {Describe(Cur)}");
+        }
+
+        private void ParseFlow(List<SysmlMember> into, Token start, bool complex)
+        {
+            Expect("flow", "");
+            string? name = null, item = null;
+            if (IsName && !Is("of") && !Is("from") && PeekTok() is not { Kind: Tk.Sym, Text: "." or "::" }) name = Next().Text;
+            if (Accept(":")) { ReadRef("a flow type"); complex = true; }
+            if (Accept("of")) { item = ReadRef("the conveyed item").Text; if (Accept(":")) item = ReadRef("the conveyed item type").Text; }
+            Accept("from");
+            var a = ReadRef("a flow source");
+            Expect("to", "in 'flow … to …'");
+            var b = ReadRef("a flow target");
+            var rel = new SysmlRelation { Keyword = "flow", Name = name, Source = a, Target = b, Detail = item, Complex = complex || Is("{") };
+            Terminate(rel, start, allowBody: true);
+            into.Add(rel);
+        }
+
+        /// <summary><c>@Safety { isMandatory = true; }</c> / <c>@Safety about x;</c></summary>
+        private void ParseAnnotation(List<SysmlMember> into, Token start)
+        {
+            Next();
+            var md = new SysmlMetadata { Type = ReadRef("a metadata definition") };
+            if (Accept(":")) { ReadRef("a metadata definition"); md.Complex = true; }
+            if (Accept("about")) { ReadRefList("an annotated element"); md.Complex = true; }
+            if (Is("{"))
+            {
+                var open = Next();
+                var owner = new SysmlDecl { Keyword = "metadata", HasBody = true };
+                ParseBody(owner.Body, new BodyContext(owner), top: false, opener: open);
+                foreach (var x in owner.Body)
+                {
+                    if (x is SysmlDecl { ImplicitKeyword: true, HasBody: false, Types.Count: 0, Value: { } v } d && d.EffectiveName is { } n
+                        && (d.Name != null ^ d.Redefines.Count == 1) && d.Modifiers.Count == 0 && d.ValueOp == "=" && !v.Contains('\n'))
+                        md.Values.Add((n, v));
+                    else md.Complex = true;
+                }
+            }
+            else if (!Accept(";")) throw MissingAfterLast($"Expected ';' or '{{' after the metadata annotation but found {Describe(Cur)}");
+            md.Span = TextSpan.Cover(start.Span, LastTok.Span);
+            into.Add(md);
+        }
+
+        /// <summary>An action-body statement (accept, send, assign, if, while, for, terminate) or a state action (entry, do, exit):
+        /// the text after the keyword is kept verbatim in <see cref="SysmlDecl.Raw"/>.</summary>
+        private void ParseActionNode(List<SysmlMember> into, BodyContext ctx, Token start, int startIndex, string? leadingId, Token kwTok,
+                                     string kw, SysmlDecl d, bool updatePrevious = true)
+        {
+            var rawEnd = ConsumeRawStatement(kw);
+            var raw = _src[kwTok.End..Math.Max(kwTok.End, rawEnd)].Trim();
+            d.Raw = raw.Length == 0 ? null : Dedent(raw, kwTok.Start);
+            if (updatePrevious)
+            {
+                ctx.Counters.TryGetValue(kw, out var n);
+                ctx.Counters[kw] = ++n;
+                if (d.Name == null) d.SyntheticName = kw + n;
+            }
+            if (d.Name == null) d.NameSpan = kwTok.Span;
+            d.Id = TakeIdBetween(startIndex) ?? leadingId;
+            d.Span = TextSpan.Cover(start.Span, LastTok.Span);
+            d.HeaderSpan = TextSpan.Cover(start.Span, kwTok.Span);
+            into.Add(d);
+            if (updatePrevious && d.EffectiveName is { } en) ctx.Previous = en;
+        }
+
+        /// <summary>Removes the indentation of the line holding offset <paramref name="at"/> from every continuation line of <paramref name="text"/>.</summary>
+        private string Dedent(string text, int at)
+        {
+            var lineStart = at == 0 ? 0 : _src.LastIndexOf('\n', at - 1) + 1;
+            var indent = 0;
+            while (lineStart + indent < _src.Length && _src[lineStart + indent] is ' ' or '\t') indent++;
+            return SysMLv2Parser.Dedent(text, indent);
+        }
+
+        private static readonly HashSet<string> RawStops = new(StringComparer.Ordinal)
+        {
+            "part", "port", "attribute", "item", "action", "state", "first", "then", "transition", "succession", "import", "doc", "comment",
+            "accept", "send", "assign", "entry", "exit", "decide", "merge", "fork", "join", "perform", "exhibit", "requirement", "constraint",
+        };
+
+        /// <summary>Consumes a statement to its ';' (or the end of its block, continuing over else / until). Returns the end offset of its text.</summary>
+        private int ConsumeRawStatement(string kw)
+        {
+            var depth = 0;
+            var consumed = false;
+            while (Cur.Kind != Tk.Eof)
+            {
+                if (depth == 0)
+                {
+                    if (Is(";")) { var end = Cur.Start; Next(); return end; }
+                    if (Is("}")) throw MissingAfterLast($"Expected ';' after '{kw}' but found {Describe(Cur)}");
+                    if (consumed && Cur.Kind == Tk.Ident && RawStops.Contains(Cur.Text) && IsStatementStartOnNewLine())
+                        throw MissingAfterLast($"Expected ';' after '{kw}' but found {Describe(Cur)}");
+                }
+                if (Is("{") || Is("(") || Is("["))
+                {
+                    depth++;
+                    Next();
+                    consumed = true;
+                    continue;
+                }
+                if (Is("}") || Is(")") || Is("]"))
+                {
+                    depth--;
+                    var t = Next();
+                    consumed = true;
+                    if (depth == 0 && t.Text == "}")
+                    {
+                        if (Is("else") || Is("until")) continue;
+                        return t.End;
+                    }
+                    continue;
+                }
+                Next();
+                consumed = true;
+            }
+            return LastTok.End;
         }
 
         private SysmlRef Ref(string name, Token at, TextSpan? span = null) =>
@@ -829,7 +1034,7 @@ public static partial class SysMLv2Parser
                     if (depth == 0) break;
                     depth--;
                     Next();
-                    if (depth == 0 && !Is("then") && !Is(";")) break;
+                    if (depth == 0 && !Is(";")) break;
                     continue;
                 }
                 Next();
@@ -844,11 +1049,7 @@ public static partial class SysMLv2Parser
             if (Accept("first")) from = ReadRef("the source of the succession");
             else if (ctx.Previous != null) from = Ref(ctx.Previous, start);
             string? trigger = null, guard = null, effect = null;
-            if (Accept("accept"))
-            {
-                trigger = ReadExpr(false, "if", "do", "then", "via");
-                if (Accept("via")) ReadRef("a port");
-            }
+            if (Accept("accept")) trigger = ReadExpr(false, "if", "do", "then");
             if (Accept("if")) guard = ReadExpr(false, "do", "then");
             if (Accept("do")) effect = ReadExpr(false, "then");
             if (!Accept("then"))
@@ -857,6 +1058,7 @@ public static partial class SysMLv2Parser
                 if (!transition && from != null && trigger == null && guard == null && effect == null && Accept(";"))
                 {
                     ctx.Previous = from.Simple;
+                    into.Add(new SysmlUnsupported { Keyword = "first", Span = TextSpan.Cover(start.Span, LastTok.Span) });
                     return;
                 }
                 throw MissingAfterLast($"Expected 'then' in the {(transition ? "transition" : "succession")} but found {Describe(Cur)}");
@@ -882,9 +1084,8 @@ public static partial class SysMLv2Parser
 
         private void ParseDeclRest(SysmlDecl d, Token start, int startIndex, string? leadingId, List<SysmlMember> into, BodyContext ctx)
         {
-            var def = Accept("def");
-            d = def ? new SysmlDecl { Keyword = d.Keyword, IsDef = true, IsAbstract = d.IsAbstract, Direction = d.Direction }.WithTags(d.Tags) : d;
-            if (d.Keyword == "package" && def) throw Error("'package' cannot be followed by 'def'");
+            if (Accept("def")) d.IsDef = true;
+            if (d.Keyword == "package" && d.IsDef) throw Error("'package' cannot be followed by 'def'");
 
             if (Is("<"))
             {
@@ -921,40 +1122,62 @@ public static partial class SysMLv2Parser
                     d.Redefines.AddRange(ReadRefList("a redefined feature"));
                     continue;
                 }
-                if (Is("::>") || Is("references")) { Next(); ReadRef(); continue; }
+                if (Is("::>") || Is("references")) { Next(); d.References.AddRange(ReadRefList("a referenced feature")); continue; }
                 if (Is("["))
                 {
                     var open = Next();
-                    var sb = new StringBuilder();
-                    while (!Is("]") && !Is(";") && !Is("{") && Cur.Kind != Tk.Eof) sb.Append(Next().Text);
-                    if (!Accept("]")) throw new ParseError("Missing ']' to close the multiplicity", open.Span);
-                    d.Multiplicity = sb.ToString();
-                    while (Accept("ordered") || Accept("nonunique")) { }
+                    var depth = 1;
+                    var from = Cur.Start;
+                    while (Cur.Kind != Tk.Eof && !Is(";") && !Is("{"))
+                    {
+                        if (Is("[")) depth++;
+                        else if (Is("]") && --depth == 0) break;
+                        Next();
+                    }
+                    if (!Is("]")) throw new ParseError("Missing ']' to close the multiplicity", open.Span);
+                    d.Multiplicity = string.Join(" ", _src[from..Cur.Start].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                    Next();
                     continue;
                 }
                 if (Is("=") || Is(":=") || Is("default"))
                 {
-                    if (Accept("default")) { if (!Accept("=")) Accept(":="); }
-                    else Next();
-                    d.Value = ReadExpr(true) ?? throw MissingAfterLast("Expected a value after '='");
+                    var op = Next().Text;
+                    if (op == "default" && (Is("=") || Is(":="))) op += " " + Next().Text;
+                    d.ValueOp = op;
+                    var vstart = Cur;
+                    var v = ReadExpr(true) ?? throw MissingAfterLast("Expected a value after '='");
+                    d.Value = Dedent(v, vstart.Start);
+                    d.ValueSpan = TextSpan.Cover(vstart.Span, LastTok.Span);
                     continue;
                 }
                 if (Is("connect") && !d.IsDef)
                 {
                     Next();
+                    if (Is("(")) { d.OpaqueHeader = true; ReadExpr(true); continue; }
                     var a = ReadRef("a connector end");
                     Expect("to", "in 'connect … to …'");
                     d.Connect = (a, ReadRef("a connector end"));
                     continue;
                 }
-                if (Is("parallel") || Is("ordered") || Is("nonunique")) { Next(); continue; }
-                if (Is("allocate") || Is("from") || Is("of") || Is("about") || Is("via"))
-                {   // allocation / flow usages and annotations: keep the declaration, skip the clause
+                if (Is("parallel") || Is("ordered") || Is("nonunique")) { d.Flags.Add(Next().Text); continue; }
+                if (Is("allocate") || Is("from") || Is("of") || Is("about") || Is("via") || Is("to") || Is("chains") || Is("inverse")
+                    || Is("crosses") || Is("=>") || Is("conjugates") || Is("~"))
+                {   // allocation / flow usages, annotations …: the declaration is kept verbatim
                     Next();
-                    ReadExpr(true);
+                    ReadExpr(true, "to", "from", "via", "of", "about");
+                    d.OpaqueHeader = true;
                     continue;
                 }
                 break;
+            }
+
+            // "action trigger accept s : Signal via port;" — a named action-body statement
+            if (d.Keyword == "action" && !d.IsDef && Cur.Kind == Tk.Ident && ActionBodyKeywords.Contains(Cur.Text) && d.Types.Count == 0)
+            {
+                var kwTok = Next();
+                d.Keyword = d.KeywordText = kwTok.Text;
+                ParseActionNode(into, ctx, start, startIndex, leadingId, kwTok, kwTok.Text, d);
+                return;
             }
 
             d.Id = TakeIdBetween(startIndex) ?? leadingId;
@@ -995,9 +1218,24 @@ public static partial class SysMLv2Parser
         }
     }
 
-    private static SysmlDecl WithTags(this SysmlDecl d, IEnumerable<string> tags)
+    /// <summary>Removes up to <paramref name="indent"/> leading spaces / tabs from every line after the first.</summary>
+    internal static string Dedent(string text, int indent)
+    {
+        if (!text.Contains('\n')) return text;
+        var lines = text.Replace("\r", "").Split('\n');
+        for (var k = 1; k < lines.Length; k++)
+        {
+            var n = 0;
+            while (n < indent && n < lines[k].Length && lines[k][n] is ' ' or '\t') n++;
+            lines[k] = lines[k][n..].TrimEnd();
+        }
+        return string.Join("\n", lines);
+    }
+
+    private static SysmlDecl With(this SysmlDecl d, IEnumerable<string> tags, IEnumerable<string> modifiers)
     {
         d.Tags.AddRange(tags);
+        d.Modifiers.AddRange(modifiers);
         return d;
     }
 }

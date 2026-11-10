@@ -140,6 +140,7 @@ public sealed partial class ProjectSession : IDisposable
         {
             _participants.Remove(participantId);
             ReleaseLocksOf(participantId);   // element locks end when their holder leaves
+            LeaveTexts(participantId);       // and so does their place in shared SysML v2 texts
             BroadcastPresence();
             empty = _participants.Count == 0;
         }
@@ -161,6 +162,7 @@ public sealed partial class ProjectSession : IDisposable
         {
             if (!AllowEdit(participantId, userId, op)) return;   // element locks (ProjectSession.Locks.cs)
             _master.ApplyRemote(op);
+            ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
             Events?.OperationApplied(ProjectId, Name, userId, op, _master);
             Sequence++;
             MarkDirty();
@@ -187,6 +189,7 @@ public sealed partial class ProjectSession : IDisposable
         lock (_gate)
         {
             _master = ProjectFile.Deserialize(modelJson);
+            ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
@@ -283,5 +286,9 @@ public sealed partial class ProjectSession : IDisposable
         finally { Volatile.Write(ref _persisting, 0); }
     }
 
-    public void Dispose() => _persistTimer.Dispose();
+    public void Dispose()
+    {
+        _persistTimer.Dispose();
+        _textRefresh?.Dispose();
+    }
 }

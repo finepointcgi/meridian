@@ -40,6 +40,10 @@ internal sealed class SysmlNameIndex
         if (!string.IsNullOrEmpty(e.Name)) return e.Name;
         if (e.Kind is ElementKind.DecisionNode or ElementKind.ForkNode && e.Owner is { } o)
             return (e.Kind == ElementKind.DecisionNode ? "decision" : "fork") + (o.OwnedElements.Where(c => c.Kind == e.Kind).ToList().IndexOf(e) + 1);
+        // anonymous accept / send / assign / if … nodes: keyword + position among their kind, as the parser numbers them
+        if (e.Kind == ElementKind.Action && e.Owner is { } owner && e.Get(SysMLv2Text.KeywordField) is { Length: > 0 } kw
+            && SysMLv2Parser.ActionBodyKeywords.Contains(kw))
+            return kw + (owner.OwnedElements.Where(c => c.Kind == ElementKind.Action && c.Get(SysMLv2Text.KeywordField) == kw).ToList().IndexOf(e) + 1);
         return "";
     }
 

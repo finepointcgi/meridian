@@ -1,4 +1,6 @@
 @using Meridian.Serialization
+@using Meridian.Core.Collaboration
+@using System.Text.Json
 @inherits WorkspaceComponent
 @implements IAsyncDisposable
 
@@ -27,11 +29,20 @@
         </span>
         @if (_errors > 0) { <span class="sx-chip">@_errors error@(_errors == 1 ? "" : "s")</span> }
         @if (_warnings > 0) { <span class="sx-chip warn">@_warnings warning@(_warnings == 1 ? "" : "s")</span> }
+        @if (_remote.Count > 0)
+        {
+            <span class="sx-people" title="Also editing this text">
+                @foreach (var c in _remote)
+                {
+                    <span class="sx-person" style="background:@SafeColor(c.Color)" title="@c.Name">@Initials(c.Name)</span>
+                }
+            </span>
+        }
         <span style="flex:1"></span>
         <MudTooltip Text="Write element ids as /* @@id */ comments so renames and moves keep identity, diagrams and links">
             <label class="sx-toggle"><input type="checkbox" checked="@State.ShowIds" @onchange="ToggleIds" /> Ids</label>
         </MudTooltip>
-        <MudTooltip Text="Discard edits and reload the text from the model">
+        <MudTooltip Text="@(Shared ? "Discard everyone's unapplied edits and reload the text from the model" : "Discard edits and reload the text from the model")">
             <button class="sx-btn" @onclick="Reload" disabled="@(!State.Dirty && !State.Stale)"><MudIcon Icon="@Icons.Material.Outlined.Refresh" />Reload</button>
         </MudTooltip>
         <MudTooltip Text="Parse and apply the changes to the model (one undo step)">
@@ -45,9 +56,9 @@
     {
         <div class="sx-notice">
             <MudIcon Icon="@Icons.Material.Outlined.Sync" />
-            <span>The model changed since you started editing. Applying now overwrites those changes within this scope.</span>
+            <span>The model changed @(Shared ? "where this text has unapplied edits" : "since you started editing"). Applying now overwrites those changes within this scope.</span>
             <a @onclick="Reload">Reload</a>
-            <a @onclick="() => State.Stale = false" style="color:var(--text-3)">Keep editing</a>
+            <a @onclick="KeepEditing" style="color:var(--text-3)">Keep editing</a>
         </div>
     }
     @if (Ws.ReadOnly)
@@ -86,7 +97,9 @@
         public bool ShowIds { get; set; } = true;
         public bool Stale { get; set; }
         public bool Expanded { get; set; }
-        public bool Dirty => Text != Baseline;
+        /// <summary>For a shared (collaborative) text, whether anyone has unapplied edits — as the server says.</summary>
+        public bool? SharedDirty { get; set; }
+        public bool Dirty => SharedDirty ?? Text != Baseline;
         internal ModelRepository? Model { get; set; }
         internal int Request { get; private set; }
         internal int Handled { get; set; }
@@ -99,6 +112,9 @@
             Request++;
         }
     }
+
+    /// <summary>The text and its server revision, once the browser has no edits in flight.</summary>
+    public sealed record SyncedText(string Text, int Revision);
 
     [Parameter, EditorRequired] public EditorState State { get; set; } = default!;
     [Inject] private IJSRuntime JS { get; set; } = default!;
@@ -115,6 +131,16 @@
     private bool _applying, _refreshQueued, _mac = true;
     private Element? _lastSelected;
 
+    // collaborative mode: the text is a shared document of the project session (ProjectSession.SharedText.cs)
+    private ProjectSession? _session;
+    private string? _textKey;
+    private int _openRevision;
+    private SharedTextEvents? _client;
+    private bool _jsReady, _holdForReset;
+    private readonly List<Action> _beforeJs = new();
+    private IReadOnlyList<TextCursor> _remote = [];
+    private bool Shared => _textKey != null && _session != null;
+
     private Element Scope => State.ScopeId != null && Ws.Model.Find(State.ScopeId) is { } s ? s : Ws.Model.Root;
 
     private Element? SelectionPackage() =>
@@ -125,12 +151,20 @@
         base.OnInitialized();
         Attach();
         _lastSelected = Ws.Selected;
-        if (State.Request != State.Handled && !State.Dirty)
+        if (State.Request != State.Handled && (!State.Dirty || Ws.Session != null))
         {   // opened through "Edit as SysML v2 text": take the requested scope
             State.ScopeId = State.RequestedScopeId is { } rid && Ws.Model.Find(rid) is { Kind: not ElementKind.Model } rs ? rs.Id : null;
             State.Model = null;
         }
         State.Handled = State.Request;
+        if (State.ScopeId != null && Ws.Model.Find(State.ScopeId) == null) State.ScopeId = null;
+        if (Ws.Session != null)
+        {
+            OpenShared();
+            Reparse();
+            return;
+        }
+        State.SharedDirty = null;
         // Fresh baseline if nothing is being edited; otherwise keep the buffer and flag a changed model.
         var fresh = ExportScope();
         if (!ReferenceEquals(State.Model, Ws.Model) || !State.Dirty || State.ScopeId != null && Ws.Model.Find(State.ScopeId) == null) Load(fresh);
@@ -156,7 +190,10 @@
             _mod = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sysml-editor.js");
             _self = DotNetObjectReference.Create(this);
             _mac = await _mod.InvokeAsync<bool>("isMac");
-            await _mod.InvokeVoidAsync("create", _host, _self, State.Text, Ws.ReadOnly);
+            await _mod.InvokeVoidAsync("create", _host, _self, State.Text, Ws.ReadOnly, Shared ? new { revision = _openRevision } : null);
+            _jsReady = true;
+            _holdForReset = false;
+            FlushToEditor();   // shared-text events that arrived before the editor existed, in order
             await PushDiagnostics();
             if (Ws.Selected != null) await RevealElement(Ws.Selected, focus: false);
             StateHasChanged();
@@ -187,7 +224,8 @@
 
     private void OnModelChanged(object? sender, ModelChange change)
     {
-        if (_applying || change.Kind == ChangeKind.DiagramChanged || _refreshQueued) return;
+        // A shared text follows the model on the server (it knows whether anyone has unapplied edits).
+        if (Shared || _applying || change.Kind == ChangeKind.DiagramChanged || _refreshQueued) return;
         _refreshQueued = true;
         _ = InvokeAsync(async () =>
         {
@@ -199,6 +237,7 @@
 
     private async Task RefreshFromModel()
     {
+        if (Shared) return;
         var fresh = ExportScope();
         if (fresh == State.Baseline) return;
         if (!State.Dirty)
@@ -214,12 +253,27 @@
     protected override void OnWorkspaceChanged()
     {
         if (!ReferenceEquals(_model, Ws.Model))
-        {   // another project was opened
+        {
+            var sameSession = Shared && ReferenceEquals(_session, Ws.Session);
             Attach();
-            State.ScopeId = null;
-            Load(ExportScope());
-            Reparse();
-            _ = InvokeAsync(() => PushText(keepView: false));
+            if (!sameSession)
+            {   // another project (or branch) was opened
+                CloseShared();
+                State.ScopeId = null;
+                if (Ws.Session != null)
+                {
+                    OpenShared();
+                    Reparse();
+                    _ = InvokeAsync(ResetEditor);
+                }
+                else
+                {
+                    State.SharedDirty = null;
+                    Load(ExportScope());
+                    Reparse();
+                    _ = InvokeAsync(() => PushText(keepView: false));
+                }
+            }
         }
         if (!ReferenceEquals(_lastSelected, Ws.Selected))
         {
@@ -278,6 +332,136 @@
             }
     }
 
+    // ------------------------------------------------------------------ shared text
+
+    private void OpenShared()
+    {
+        if (Ws.Session is not { } session) return;
+        _client ??= new SharedTextEvents(this);
+        // Events can arrive while OpenText runs: accept them for this text, and hold them back from an existing browser
+        // editor until it has been reset to the snapshot.
+        _session = session;
+        _textKey = ProjectSession.TextKey(State.ScopeId, State.ShowIds);
+        _holdForReset = _jsReady;
+        _remote = [];
+        var snap = session.OpenText(Ws.ParticipantId, State.ScopeId, State.ShowIds, _client);
+        _textKey = snap.Key;
+        _openRevision = snap.Revision;
+        State.Model = Ws.Model;
+        State.Text = State.Baseline = snap.Text;
+        State.SharedDirty = snap.Status.Dirty;
+        State.Stale = snap.Status.Stale;
+    }
+
+    private void CloseShared()
+    {
+        if (_session != null && _textKey != null) _session.CloseText(_textKey, Ws.ParticipantId);
+        _session = null;
+        _textKey = null;
+        _remote = [];
+    }
+
+    /// <summary>Points the browser editor at the (newly opened) shared text, or the private buffer.</summary>
+    private async Task ResetEditor()
+    {
+        if (_mod == null) return;
+        try
+        {
+            if (Shared)
+            {
+                var reset = _mod.InvokeVoidAsync("resetShared", _host, State.Text, _openRevision);
+                _holdForReset = false;
+                FlushToEditor();   // events that arrived after the snapshot, now in order after the reset
+                await reset;
+            }
+            else await _mod.InvokeVoidAsync("setText", _host, State.Text, false);
+            await PushDiagnostics();
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private void FlushToEditor()
+    {
+        var pending = _beforeJs.ToList();
+        _beforeJs.Clear();
+        foreach (var a in pending) a();
+    }
+
+    /// <summary>Runs a browser call for a shared-text event now, or once the editor exists (keeping the order).</summary>
+    private void ToEditor(string key, string fn, params object?[] args)
+    {
+        if (key != _textKey) return;
+        void Call()
+        {
+            if (_mod == null) return;
+            _ = _mod.InvokeVoidAsync(fn, [_host, .. args]).AsTask().ContinueWith(_ => { }, TaskScheduler.Default);
+        }
+        if (_jsReady && !_holdForReset) Call(); else _beforeJs.Add(Call);
+    }
+
+    /// <summary>Receives the session's shared-text events and hands them to the circuit, in order.</summary>
+    /// <remarks>The session calls these under its lock, in server order. They are queued and drained on the circuit: Blazor runs
+    /// InvokeAsync inline when already on the circuit, so posting each event separately could let an acknowledgement of our own
+    /// edit overtake a remote operation queued before it.</remarks>
+    private sealed class SharedTextEvents(SysmlTextPanel panel) : ISharedTextClient
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _queue = new();
+
+        private void Post(Action a)
+        {
+            _queue.Enqueue(a);
+            _ = panel.InvokeAsync(Drain);
+        }
+
+        private void Drain()
+        {
+            while (_queue.TryDequeue(out var a)) a();
+        }
+
+        public void TextOperation(string key, TextOperation op)
+        {
+            var wire = op.ToWire();
+            Post(() => panel.ToEditor(key, "remoteOp", wire));
+        }
+
+        public void TextAck(string key) => Post(() => panel.ToEditor(key, "ack"));
+
+        public void TextCursors(string key, int revision, IReadOnlyList<TextCursor> cursors) => Post(() =>
+        {
+            if (key != panel._textKey) return;
+            var others = cursors.Where(c => c.ParticipantId != panel.Ws.ParticipantId).ToList();
+            var people = others.Select(c => c.Name).ToList();
+            var changed = !people.SequenceEqual(panel._remote.Select(c => c.Name));
+            panel._remote = others;
+            panel.ToEditor(key, "setCursors", revision, others.Where(c => c.Head >= 0).Select(c => new { name = c.Name, color = c.Color, anchor = c.Anchor, head = c.Head }).ToArray());
+            if (changed) panel.StateHasChanged();
+        });
+
+        public void TextStatus(string key, SharedTextStatus status) => Post(() =>
+        {
+            if (key != panel._textKey) return;
+            panel.State.SharedDirty = status.Dirty;
+            panel.State.Stale = status.Stale;
+            if (status.Notice != null) { panel._summary = status.Notice; panel._summaryDetail = null; }
+            panel.StateHasChanged();
+        });
+
+        public void TextReset(string key, string text, int revision) => Post(() =>
+        {
+            if (key != panel._textKey) return;
+            panel.State.Text = text;
+            panel._openRevision = revision;
+            panel.Reparse();
+            panel.ToEditor(key, "resetShared", text, revision);
+            panel.StateHasChanged();
+        });
+    }
+
+    private static string SafeColor(string c) => System.Text.RegularExpressions.Regex.IsMatch(c ?? "", "^#[0-9a-fA-F]{3,8}$") ? c! : "#4f8cff";
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
     // ------------------------------------------------------------------ JS callbacks
 
     [JSInvokable]
@@ -290,9 +474,35 @@
         StateHasChanged();
     }
 
+    /// <summary>A local edit of the shared text, made against <paramref name="revision"/>.</summary>
+    [JSInvokable]
+    public void OnTextOp(int revision, JsonElement ops)
+    {
+        if (!Shared || Ws.ReadOnly) return;
+        TextOperation op;
+        try { op = TextOperation.FromJson(ops); }
+        catch (Exception ex) when (ex is FormatException or InvalidOperationException or OverflowException) { OnTextOutOfStep(); return; }
+        _session!.SubmitText(_textKey!, Ws.ParticipantId, revision, op);
+    }
+
+    [JSInvokable]
+    public void OnCursor(int revision, int anchor, int head)
+    {
+        if (Shared) _session!.UpdateTextCursor(_textKey!, Ws.ParticipantId, revision, anchor, head);
+    }
+
+    /// <summary>The browser could not apply a server operation: start over from the server's text.</summary>
+    [JSInvokable]
+    public void OnTextOutOfStep()
+    {
+        if (!Shared || _session!.TextState(_textKey!) is not { } s) return;
+        _client!.TextReset(_textKey!, s.Text, s.Revision);
+    }
+
     [JSInvokable]
     public async Task OnApplyShortcut(string text)
     {
+        if (Shared) { await ApplyShared(); return; }
         State.Text = text;
         await Apply();
     }
@@ -315,6 +525,7 @@
 
     private async Task ApplyClicked()
     {
+        if (Shared) { await ApplyShared(); return; }
         if (_mod != null)
         {
             try { State.Text = await _mod.InvokeAsync<string?>("getText", _host) ?? State.Text; }
@@ -323,7 +534,8 @@
         await Apply();
     }
 
-    private async Task Apply()
+    /// <summary>Parses and maps the text; returns the result, or null when it has errors (which are shown).</summary>
+    private async Task<SysmlSyncResult?> ApplyText()
     {
         Reparse();
         if (_doc!.HasErrors)
@@ -334,27 +546,34 @@
             Ws.SetStatus(_summary);
             if (_problems.FirstOrDefault(p => p.IsError) is { } first) await GoTo(first);
             StateHasChanged();
-            return;
+            return null;
         }
-        if (Ws.ReadOnly) return;
-        SysmlSyncResult result;
+        if (Ws.ReadOnly) return null;
         _applying = true;
-        try { result = SysMLv2Sync.Apply(Ws.Model, Scope, _doc); }
+        try { return SysMLv2Sync.Apply(Ws.Model, Scope, _doc); }
         catch (InvalidOperationException ex)
         {
             _summary = "Could not apply: " + ex.Message;
             StateHasChanged();
-            return;
+            return null;
         }
         finally { _applying = false; }
+    }
 
+    private void Summarize(SysmlSyncResult result)
+    {
         var n = result.Changes.Count;
         _summary = n == 0 ? "Applied — no changes." : $"Applied {n} change{(n == 1 ? "" : "s")} (one undo step): " +
             string.Join(" · ", result.Changes.Take(4).Select(c => c.Description)) + (n > 4 ? $" · +{n - 4} more" : "");
         _summaryDetail = string.Join("\n", result.Changes.Select(c => c.Description));
         foreach (var c in result.Changes) Ws.Log("SysML v2 text: " + c.Description);
         Ws.SetStatus(n == 0 ? "SysML v2 text applied — model already up to date" : $"Applied {n} change{(n == 1 ? "" : "s")} from SysML v2 text");
+    }
 
+    private async Task Apply()
+    {
+        if (await ApplyText() is not { } result) return;
+        Summarize(result);
         // Canonical text from the model; mapping warnings stay listed (their positions refer to the applied text).
         Load(ExportScope());
         Reparse();
@@ -364,16 +583,68 @@
         Ws.Bump();
     }
 
+    /// <summary>Applies the shared text once, here; the model operations replicate to everyone and the session rewrites the
+    /// shared text into the model's canonical form for all editors.</summary>
+    private async Task ApplyShared()
+    {
+        if (Ws.ReadOnly || !Shared) return;
+        SyncedText? synced = null;
+        if (_mod != null)
+        {
+            try { synced = await _mod.InvokeAsync<SyncedText?>("syncedText", _host); }
+            catch (JSException) { _summary = "Your last edits are still being sent — try again in a moment."; StateHasChanged(); return; }
+            catch (JSDisconnectedException) { return; }
+        }
+        var key = _textKey!;
+        var session = _session!;
+        State.Text = synced?.Text ?? State.Text;
+        if (await ApplyText() is not { } result) return;
+        Summarize(result);
+        var who = Ws.User?.DisplayName ?? "Someone";
+        var n = result.Changes.Count;
+        session.TextApplied(key, synced?.Revision ?? -1, State.Text, n == 0 ? $"{who} applied the text — no changes." : $"{who} applied {n} change{(n == 1 ? "" : "s")}.");
+        _problems.AddRange(result.Diagnostics.Where(d => d.Severity != SysmlSeverity.Info || result.Diagnostics.Count < 20));
+        Count();
+        await PushDiagnostics();
+        Ws.Bump();
+    }
+
     private async Task Reload()
     {
+        if (Shared)
+        {
+            if (_remote.Count > 0)
+            {
+                var ok = await Dialogs.ShowMessageBox("Discard unapplied edits", "This text is shared: reloading discards everyone's unapplied edits in it.", yesText: "Reload", cancelText: "Cancel");
+                if (ok != true) return;
+            }
+            _session!.ResetText(_textKey!, $"{Ws.User?.DisplayName ?? "Someone"} reloaded the text from the model.");
+            _summary = null;
+            return;
+        }
         Load(ExportScope());
         Reparse();
         _summary = null;
         await PushText(keepView: true);
     }
 
+    private void KeepEditing()
+    {
+        if (Shared) _session!.DismissTextStale(_textKey!);
+        State.Stale = false;
+    }
+
     private async Task ToggleIds(ChangeEventArgs e)
     {
+        if (Shared)
+        {   // id comments on / off is another shared text of the same scope
+            State.ShowIds = e.Value is true;
+            CloseShared();
+            OpenShared();
+            Reparse();
+            await ResetEditor();
+            return;
+        }
         var wasDirty = State.Dirty;
         State.ShowIds = e.Value is true;
         if (!wasDirty) await Reload();
@@ -382,7 +653,19 @@
 
     private async Task SwitchScope(Element scope)
     {
-        if (ReferenceEquals(scope, Scope) && State.Model == Ws.Model) { await RevealSelectionLater(); return; }
+        if (ReferenceEquals(scope, Scope) && State.Model == Ws.Model && (Shared || Ws.Session == null)) { await RevealSelectionLater(); return; }
+        if (Shared || Ws.Session != null)
+        {   // unapplied edits stay in the shared text of the old scope
+            CloseShared();
+            State.ScopeId = scope.Kind == ElementKind.Model ? null : scope.Id;
+            OpenShared();
+            Reparse();
+            _summary = null;
+            await ResetEditor();
+            await RevealSelectionLater();
+            StateHasChanged();
+            return;
+        }
         if (State.Dirty)
         {
             var ok = await Dialogs.ShowMessageBox("Unapplied SysML v2 edits", "Switching the scope discards the text edits you haven't applied.", yesText: "Discard", cancelText: "Keep editing");
@@ -410,11 +693,12 @@
     {
         base.Dispose();
         if (_model != null) _model.Changed -= OnModelChanged;
+        CloseShared();
         if (_mod != null)
         {
             try
             {
-                State.Text = await _mod.InvokeAsync<string?>("getText", _host) ?? State.Text;
+                if (State.SharedDirty == null) State.Text = await _mod.InvokeAsync<string?>("getText", _host) ?? State.Text;
                 await _mod.InvokeVoidAsync("dispose", _host);
                 await _mod.DisposeAsync();
             }

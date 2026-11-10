@@ -74,3 +74,14 @@
 .sx-problem .mud-icon-root { font-size: 14px; align-self: center; }
 .sx-problem .pos { font: 11px "JetBrains Mono", Menlo, monospace; color: var(--text-3); white-space: nowrap; }
 .sx-summary { padding: 4px 12px; font-size: 11.5px; color: var(--text-3); border-top: 1px solid var(--border); flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* collaborative editing: other editors' carets, selections and presence chips */
+.sx-cursors { position: absolute; top: 0; left: 0; pointer-events: none; }
+.sx-rsel { position: absolute; opacity: .22; border-radius: 2px; }
+.sx-rcaret { position: absolute; width: 0; border-left: 2px solid; margin-left: -1px; }
+.sx-rname { position: absolute; left: -1px; bottom: 100%; padding: 0 5px; border-radius: 4px 4px 4px 0; color: #fff; white-space: nowrap;
+  font: 600 10px/15px Inter, sans-serif; opacity: .92; }
+.sx-rname.below { bottom: auto; top: 100%; border-radius: 0 4px 4px 4px; }
+.sx-people { display: inline-flex; align-items: center; gap: 3px; }
+.sx-person { width: 20px; height: 20px; border-radius: 50%; color: #fff; font: 600 10px/20px Inter, sans-serif; text-align: center;
+  box-shadow: 0 0 0 2px var(--panel-solid); cursor: default; }

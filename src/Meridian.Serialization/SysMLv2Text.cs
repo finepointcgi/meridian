@@ -27,6 +27,34 @@ public static class SysMLv2Text
     /// <summary>Field holding a requirement's subject declaration (<c>subject v : Vehicle</c>).</summary>
     public const string SubjectField = "subject";
 
+    /// <summary>SysML v2 text with no Meridian model equivalent, kept verbatim on its owner (after its mapped members) so the
+    /// exporter re-emits it: imports, aliases, views, calc results, requirement constraints, unresolved relationships …</summary>
+    public const string UnmappedField = "sysml:unmapped";
+
+    /// <summary>Like <see cref="UnmappedField"/>, for text that came before the owner's first mapped declaration (imports …).</summary>
+    public const string UnmappedHeadField = "sysml:unmappedHead";
+
+    // Header details of mapped declarations that Meridian doesn't model, so export reproduces what was written.
+    internal const string KeywordField = "sysml:keyword";            // keyword as written when the exporter's choice differs
+    internal const string PrefixField = "sysml:prefix";              // readonly derived end ref variation individual …
+    internal const string ShortNameField = "sysml:shortName";
+    internal const string TypeField = "sysml:type";                  // typing text of non-feature elements (requirement r : R)
+    internal const string ConjugatedField = "sysml:conjugated";      // ~ on the type
+    internal const string SubsetsField = "sysml:subsets";            // :> on usages
+    internal const string SpecializesField = "sysml:specializes";    // :> targets that aren't model elements (library types)
+    internal const string RedefinesField = "sysml:redefines";
+    internal const string UnnamedField = "sysml:unnamed";            // ":>> mass" without a name of its own
+    internal const string ReferencesField = "sysml:references";
+    internal const string FlagsField = "sysml:flags";                // ordered nonunique parallel
+    internal const string MultiplicityField = "sysml:multiplicity";  // on elements without a multiplicity field
+    internal const string ValueField = "sysml:value";                // on elements without a default value field
+    internal const string ValueOpField = "sysml:valueOp";            // := / default / default := …
+    internal const string RawField = "sysml:raw";                    // action-body statements: text after the keyword
+    internal const string MetadataField = "sysml:metadata";          // stereotypes written as @Name { k = v; }: "Name:k1,k2;Other:"
+    internal const string ViaField = "sysml:via";                    // allocations written as perform / exhibit
+    internal const string UsageField = "sysml:usage";                // the usage name of "perform action x : X"
+    internal const string NoKeyword = "(none)";
+
     // ======================================================================= export
 
     public static string Export(ModelRepository model) => Export(model, new SysMLv2ExportOptions());
@@ -41,6 +69,32 @@ public static class SysMLv2Text
         return w.Sb.ToString();
     }
 
+    /// <summary>The keyword the exporter writes for an element when no other was recorded.</summary>
+    internal static string DefaultKeyword(ModelRepository m, Element e) => e.Kind switch
+    {
+        ElementKind.Package or ElementKind.Model => "package",
+        ElementKind.Property => m.ResolveType(e)?.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Actor ? "part"
+                              : m.ResolveType(e)?.Kind is ElementKind.InterfaceBlock ? "port" : "attribute",
+        ElementKind.Port => "port",
+        ElementKind.Lifeline => "part",
+        ElementKind.EnumerationLiteral => "enum",
+        ElementKind.Action => "action",
+        ElementKind.State => "state",
+        ElementKind.DecisionNode => "decide",
+        ElementKind.ForkNode => "fork",
+        _ => Keyword(e.Kind) ?? "",
+    };
+
+    /// <summary>Tagged-value keys written inside <c>@Name { … }</c> annotations of an element.</summary>
+    internal static IEnumerable<string> AnnotationKeys(Element e) =>
+        Annotations(e).SelectMany(a => a.Keys);
+
+    internal static List<(string Name, List<string> Keys)> Annotations(Element e) =>
+        e.Get(MetadataField).Split(';', StringSplitOptions.RemoveEmptyEntries)
+         .Select(a => a.Split(':', 2))
+         .Select(p => (p[0], p.Length > 1 ? p[1].Split(',', StringSplitOptions.RemoveEmptyEntries).ToList() : new List<string>()))
+         .ToList();
+
     private sealed class Writer(ModelRepository m, SysMLv2ExportOptions o)
     {
         public readonly StringBuilder Sb = new();
@@ -52,20 +106,91 @@ public static class SysMLv2Text
 
         public void WritePackage(Element pkg, int depth)
         {
-            Line(depth, $"package {N(pkg.Name)}{Id(pkg)} {{");
-            Doc(depth + 1, pkg.Documentation);
+            Line(depth, Header(pkg, pkg.Name) + Id(pkg) + " {");
+            Head(pkg, depth + 1, pkg.Documentation);
             foreach (var c in pkg.OwnedElements) WriteMember(c, depth + 1);
             // Cross-cutting relationships of this namespace
             foreach (var r in pkg.OwnedElements.OfType<Relationship>()) WriteRelationship(r, pkg, depth + 1);
+            Tail(pkg, depth + 1);
             Line(depth, "}");
         }
 
-        /// <summary>Writes "header;" or "header { doc }" for leaf declarations that may carry documentation.</summary>
+        // ------------------------------------------------------------------ headers
+
+        private string KeywordOf(Element e) => e.Get(KeywordField) switch
+        {
+            NoKeyword => "",
+            { Length: > 0 } k => k,
+            _ => DefaultKeyword(m, e),
+        };
+
+        /// <summary>visibility, direction, prefixes, #metadata, keyword, short name and name.</summary>
+        private string Header(Element e, string name, string? keyword = null)
+        {
+            var parts = new List<string>();
+            var vis = e.Get(FieldKeys.Visibility);
+            if (vis is "private" or "protected") parts.Add(vis);
+            if (e.Kind is ElementKind.Port or ElementKind.Property && e.Get(FieldKeys.Direction) is { Length: > 0 } dir) parts.Add(dir);
+            if (Metamodel.IsClassifier(e.Kind) && e.Kind is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype) && e.IsAbstract) parts.Add("abstract");
+            if (e.Get(PrefixField) is { Length: > 0 } prefix) parts.Add(prefix);
+            if (e.Kind == ElementKind.Actor) parts.Add("#actor");
+            var annotated = Annotations(e).Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
+            foreach (var s in e.Stereotypes.Where(s => !annotated.Contains(s))) parts.Add("#" + QName(s));
+            var kw = keyword ?? KeywordOf(e);
+            if (kw.Length > 0) parts.Add(kw);
+            if (e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } rid) parts.Add($"<'{Q(rid)}'>");
+            else if (e.Get(ShortNameField) is { Length: > 0 } sn) parts.Add($"<{N(sn)}>");
+            if (e.Get(UnnamedField) != "true") parts.Add(N(name));
+            else if (e.Get(RedefinesField) is { Length: > 0 } red) parts.Add(":>> " + red);   // "attribute :>> mass = 1;"
+            return string.Join(" ", parts);
+        }
+
+        /// <summary>Multiplicity, flags, subsetting, redefinition, references and value written after the type.</summary>
+        private string Clauses(Element e, bool isDef = false)
+        {
+            var sb = new StringBuilder();
+            if (e.Kind is ElementKind.Property or ElementKind.Port) sb.Append(Mult(e));
+            else if (e.Get(MultiplicityField) is { Length: > 0 } mu) sb.Append($"[{mu}]");
+            if (e.Get(FlagsField) is { Length: > 0 } flags) sb.Append(' ').Append(flags);
+            if (e.Get(SubsetsField) is { Length: > 0 } sub) sb.Append(" :> ").Append(sub);
+            if (e.Get(RedefinesField) is { Length: > 0 } red && e.Get(UnnamedField) != "true") sb.Append(" :>> ").Append(red);
+            if (e.Get(ReferencesField) is { Length: > 0 } refs) sb.Append(" ::> ").Append(refs);
+            var value = e.Kind == ElementKind.Property ? e.Get(FieldKeys.DefaultValue) : e.Get(ValueField);
+            if (value.Length > 0) sb.Append(' ').Append(e.Get(ValueOpField) is { Length: > 0 } op ? op : "=").Append(' ').Append(value);
+            return sb.ToString();
+        }
+
+        private bool HasExtras(Element e) =>
+            !string.IsNullOrWhiteSpace(e.Documentation) || e.Get(UnmappedField).Length > 0 || e.Get(UnmappedHeadField).Length > 0
+            || e.Get(MetadataField).Length > 0;
+
+        /// <summary>Doc, metadata annotations and leading verbatim text of a body.</summary>
+        private void Head(Element e, int d, string doc)
+        {
+            Doc(d, doc);
+            foreach (var (name, keys) in Annotations(e))
+            {
+                var values = keys.Select(k => (k, v: e.Get(FieldKeys.TagPrefix + k))).Where(x => x.v.Length > 0).ToList();
+                Line(d, values.Count == 0 ? $"@{QName(name)};" : $"@{QName(name)} {{ {string.Join(" ", values.Select(x => $"{N(x.k)} = {x.v};"))} }}");
+            }
+            Verbatim(d, e.Get(UnmappedHeadField));
+        }
+
+        private void Tail(Element e, int d) => Verbatim(d, e.Get(UnmappedField));
+
+        private void Verbatim(int d, string text)
+        {
+            if (text.Length == 0) return;
+            foreach (var l in text.Replace("\r", "").Split('\n')) Line(d, l);
+        }
+
+        /// <summary>Writes "header;" or "header { doc … }" for leaf declarations that may carry documentation or verbatim text.</summary>
         private void Leaf(int d, string header, Element e)
         {
-            if (string.IsNullOrWhiteSpace(e.Documentation)) { Line(d, header + Id(e) + ";"); return; }
+            if (!HasExtras(e)) { Line(d, header + Id(e) + ";"); return; }
             Line(d, header + Id(e) + " {");
-            Doc(d + 1, e.Documentation);
+            Head(e, d + 1, e.Documentation);
+            Tail(e, d + 1);
             Line(d, "}");
         }
 
@@ -76,74 +201,82 @@ public static class SysMLv2Text
             {
                 case ElementKind.Package: WritePackage(e, d); return;
                 case ElementKind.Comment: Line(d, $"comment /* {Esc(e.Get(FieldKeys.Body))} */"); return;
-                case ElementKind.Property:
-                {
-                    var t = m.ResolveType(e);
-                    var kw = t?.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Component ? "part"
-                           : t?.Kind is ElementKind.InterfaceBlock ? "port"
-                           : "attribute";
-                    Leaf(d, $"{kw} {N(e.Name)}{TypeSuffix(e)}{Mult(e)}{Default(e)}", e);
+                case ElementKind.Property or ElementKind.Port or ElementKind.Lifeline or ElementKind.EnumerationLiteral:
+                    Leaf(d, Header(e, e.Name) + (e.Kind == ElementKind.EnumerationLiteral ? "" : TypeSuffix(e)) + Clauses(e), e);
                     return;
-                }
-                case ElementKind.Port:
-                {
-                    var dir = e.Get(FieldKeys.Direction) is { Length: > 0 } dd ? dd + " " : "";
-                    Leaf(d, $"{dir}port {N(e.Name)}{TypeSuffix(e)}{Mult(e)}", e);
-                    return;
-                }
                 case ElementKind.Operation:
                     Line(d, $"// operation {e.Name}{e.Get(FieldKeys.Signature)}");
-                    return;
-                case ElementKind.Lifeline:
-                    Leaf(d, $"part {N(e.Name)}{TypeSuffix(e)}", e);
                     return;
                 case ElementKind.CombinedFragment:
                     Line(d, $"// {e.Get(FieldKeys.Operator)}{(e.Get(FieldKeys.Guard) is { Length: > 0 } g ? $" [{g}]" : "")}");
                     return;
-                case ElementKind.EnumerationLiteral:
-                    Leaf(d, $"enum {N(e.Name)}", e);
-                    return;
                 case ElementKind.Action:
                 {
-                    var behavior = m.Find(e.Get(FieldKeys.Behavior)) is { Kind: ElementKind.Activity } b ? " : " + Ref(b, e.Owner!, x => x.Kind == ElementKind.Activity) : "";
-                    Leaf(d, $"action {N(e.Name)}{behavior}", e);
+                    if (KeywordOf(e) is var kw && SysMLv2Parser.ActionBodyKeywords.Contains(kw))
+                    {   // accept / send / assign / if / while / for … kept verbatim
+                        var raw = e.Get(RawField);
+                        var head = (string.IsNullOrEmpty(e.Name) ? "" : $"action {N(e.Name)} ") + kw;
+                        var lines = raw.Replace("\r", "").Split('\n');
+                        var end = raw.EndsWith('}') ? "" : ";";
+                        if (lines.Length == 1) { Line(d, $"{head}{(raw.Length > 0 ? " " : "")}{raw}{Id(e)}{end}"); return; }
+                        Line(d, $"{head} {lines[0]}{Id(e)}");
+                        for (var k = 1; k < lines.Length; k++) Line(d, lines[k] + (k == lines.Length - 1 ? end : ""));
+                        return;
+                    }
+                    var behavior = m.Find(e.Get(FieldKeys.Behavior)) is { Kind: ElementKind.Activity } b ? " : " + Ref(b, e.Owner!, x => x.Kind == ElementKind.Activity)
+                                 : e.Get(TypeField) is { Length: > 0 } tt ? " : " + tt : "";
+                    Leaf(d, Header(e, e.Name) + behavior + Clauses(e), e);
                     return;
                 }
                 case ElementKind.State:
-                    if (e.OwnedElements.Count == 0 && string.IsNullOrWhiteSpace(e.Documentation)) { Line(d, $"state {N(e.Name)}{Id(e)};"); return; }
-                    Line(d, $"state {N(e.Name)}{Id(e)} {{");
-                    Doc(d + 1, e.Documentation);
+                    if (e.OwnedElements.Count == 0 && !HasExtras(e) && !HasStateActions(e)) { Line(d, Header(e, e.Name) + TypeText(e) + Clauses(e) + Id(e) + ";"); return; }
+                    Line(d, Header(e, e.Name) + TypeText(e) + Clauses(e) + Id(e) + " {");
+                    Head(e, d + 1, e.Documentation);
+                    StateActions(e, d + 1);
                     WriteBehaviorBody(e, d + 1);
+                    Tail(e, d + 1);
                     Line(d, "}");
                     return;
                 case ElementKind.InitialNode or ElementKind.InitialState or ElementKind.ActivityFinalNode or ElementKind.FinalState
                     or ElementKind.DecisionNode or ElementKind.ForkNode:
-                    var kw2 = e.Kind switch { ElementKind.DecisionNode => "decide", ElementKind.ForkNode => "fork", _ => null };
-                    if (kw2 != null) Line(d, $"{kw2} {N(SysmlNameIndex.ExportName(e))}{Id(e)};");
+                    if (e.Kind is ElementKind.DecisionNode or ElementKind.ForkNode)
+                    {
+                        var kw2 = e.Get(KeywordField) is { Length: > 0 } k2 ? k2 : e.Kind == ElementKind.DecisionNode ? "decide" : "fork";
+                        Line(d, $"{kw2} {N(SysmlNameIndex.ExportName(e))}{Id(e)};");
+                    }
                     return;
             }
 
-            var keyword = Keyword(e.Kind);
-            if (keyword == null) return;
+            if (Keyword(e.Kind) == null) return;
 
-            var header = new StringBuilder();
-            if (e.IsAbstract) header.Append("abstract ");
-            if (e.Kind == ElementKind.Actor) header.Append("#actor ");
-            header.Append(keyword).Append(' ');
-            if (e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } rid) header.Append($"<'{Q(rid)}'> ");
-            header.Append(N(e.Name));
+            var keyword = KeywordOf(e);
+            var usage = !keyword.EndsWith(" def", StringComparison.Ordinal) && keyword != "def";
+            var header = new StringBuilder(Header(e, e.Name, keyword));
             var supers = m.General(e).Select(g => Ref(g, e.Owner ?? m.Root, x => Metamodel.IsClassifier(x.Kind))).ToList();
-            if (supers.Count > 0) header.Append(" :> ").Append(string.Join(", ", supers));
+            if (usage)
+            {   // a usage mapped to a definition-like element (part vehicle : Vehicle at package level, requirement r : R …)
+                var types = supers.Concat(e.Get(TypeField) is { Length: > 0 } tt ? [tt] : []).ToList();
+                if (types.Count > 0) header.Append(" : ").Append(string.Join(", ", types));
+                header.Append(Clauses(e));
+                if (e.Get(SpecializesField) is { Length: > 0 } sp) header.Append(" :> ").Append(sp);
+            }
+            else
+            {
+                if (e.Get(TypeField) is { Length: > 0 } tt) header.Append(" : ").Append(tt);
+                if (e.Get(SpecializesField) is { Length: > 0 } sp) supers.Add(sp);
+                header.Append(Clauses(e));
+                if (supers.Count > 0) header.Append(" :> ").Append(string.Join(", ", supers));
+            }
             header.Append(Id(e));
 
-            var hasBody = e.OwnedElements.Any(c => c is not Diagram) || !string.IsNullOrWhiteSpace(e.Documentation) ||
+            var hasBody = e.OwnedElements.Any(c => c is not Diagram) || HasExtras(e) || HasStateActions(e) ||
                           e.Kind == ElementKind.Requirement || (e.Kind == ElementKind.ConstraintBlock && e.Get(FieldKeys.Body).Length > 0) ||
                           (e.Kind == ElementKind.TestCase && m.Outgoing(e, ElementKind.Verify).Any()) ||
                           m.Outgoing(e).Any(r => r.Kind is ElementKind.Include or ElementKind.Extend);
             if (!hasBody) { Line(d, header + ";"); return; }
 
             Line(d, header + " {");
-            Doc(d + 1, e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.Text) : e.Documentation);
+            Head(e, d + 1, e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.Text) : e.Documentation);
             if (e.Kind == ElementKind.Requirement && !string.IsNullOrWhiteSpace(e.Documentation)) Line(d + 1, $"comment /* {Esc(e.Documentation)} */");
             if (e.Kind == ElementKind.Requirement && e.Get(SubjectField) is { Length: > 0 } subject) Line(d + 1, $"subject {subject};");
             if (e.Kind == ElementKind.TestCase)
@@ -151,13 +284,31 @@ public static class SysMLv2Text
                     Line(d + 1, $"objective {{ verify {Ref(v.Target, e)}; }}");
             foreach (var inc in m.Outgoing(e).Where(r => r.Kind is ElementKind.Include or ElementKind.Extend))
                 Line(d + 1, inc.Kind == ElementKind.Include ? $"include use case {Ref(inc.Target, e)};" : $"#extend dependency from {Ref(e, e)} to {Ref(inc.Target, e)};");
+            if (e.Kind is ElementKind.StateMachine) StateActions(e, d + 1);
             if (e.Kind is ElementKind.Activity or ElementKind.StateMachine) WriteBehaviorBody(e, d + 1);
             else foreach (var c in e.OwnedElements) WriteMember(c, d + 1);
             foreach (var r in e.OwnedElements.OfType<Relationship>().Where(r => r.Kind != ElementKind.Verify)) WriteRelationship(r, e, d + 1);
+            Tail(e, d + 1);
             // A constraint's expression comes last, as SysML v2 requires.
             if (e.Kind == ElementKind.ConstraintBlock && e.Get(FieldKeys.Body) is { Length: > 0 } body)
-                foreach (var l in body.Replace("\r", "").Split('\n')) Line(d + 1, l.Trim());
+                foreach (var l in body.Replace("\r", "").Split('\n')) Line(d + 1, l.TrimEnd());
             Line(d, "}");
+        }
+
+        private string TypeText(Element e) => e.Get(TypeField) is { Length: > 0 } tt ? " : " + tt : "";
+
+        private static bool HasStateActions(Element e) =>
+            e.Get(FieldKeys.Entry).Length > 0 || e.Get(FieldKeys.DoActivity).Length > 0 || e.Get(FieldKeys.Exit).Length > 0;
+
+        private void StateActions(Element e, int d)
+        {
+            foreach (var (kw, key) in new[] { ("entry", FieldKeys.Entry), ("do", FieldKeys.DoActivity), ("exit", FieldKeys.Exit) })
+            {
+                if (e.Get(key) is not { Length: > 0 } raw) continue;
+                var lines = raw.Replace("\r", "").Split('\n');
+                var end = raw.EndsWith('}') ? "" : ";";
+                for (var k = 0; k < lines.Length; k++) Line(d, (k == 0 ? kw + " " : "") + lines[k] + (k == lines.Length - 1 ? end : ""));
+            }
         }
 
         private void WriteBehaviorBody(Element owner, int d)
@@ -201,12 +352,22 @@ public static class SysMLv2Text
             switch (r.Kind)
             {
                 case ElementKind.Satisfy: Line(d, $"satisfy {T()} by {S()};"); break;
-                case ElementKind.Allocate: Line(d, $"allocate {S()} to {T()};"); break;
+                case ElementKind.Allocate:
+                    if (r.Get(ViaField) is "perform" or "exhibit" && ReferenceEquals(r.Target, context))
+                    {
+                        var via = r.Get(ViaField);
+                        var usage = r.Get(UsageField);
+                        if (usage.Length > 0) Line(d, $"{(via == "perform" ? "perform action" : "exhibit state")} {N(usage)} : {S()};");
+                        else Line(d, $"{via} {S()};");
+                        break;
+                    }
+                    Line(d, $"allocate {S()} to {T()};");
+                    break;
                 case ElementKind.Dependency: Line(d, $"dependency from {S()} to {T()};"); break;
                 case ElementKind.DeriveReqt: Line(d, $"#derivation dependency from {S()} to {T()};"); break;
                 case ElementKind.Refine: Line(d, $"#refinement dependency from {S()} to {T()};"); break;
                 case ElementKind.Trace: Line(d, $"#trace dependency from {S()} to {T()};"); break;
-                case ElementKind.Verify: Line(d, $"// {S()} verifies {T()}"); break;
+                case ElementKind.Verify when r.Source.Kind != ElementKind.TestCase: Line(d, $"// {S()} verifies {T()}"); break;
                 case ElementKind.Message:
                 {
                     var tag = r.Get(FieldKeys.MessageSort) switch { "reply" => "#reply ", "asynchCall" => "#async ", _ => "" };
@@ -238,14 +399,14 @@ public static class SysMLv2Text
 
         private string TypeSuffix(Element e)
         {
-            if (m.ResolveType(e) is { } t) return " : " + Ref(t, e.Owner ?? m.Root, x => Metamodel.IsClassifier(x.Kind));
+            var conj = e.Get(ConjugatedField) == "true" ? "~" : "";
+            if (m.ResolveType(e) is { } t) return " : " + conj + Ref(t, e.Owner ?? m.Root, x => Metamodel.IsClassifier(x.Kind));
             var raw = e.TypeRef;
             if (string.IsNullOrEmpty(raw)) return "";
-            return " : " + (Metamodel.PrimitiveTypes.Contains(raw) ? "ScalarValues::" + raw : QName(raw));
+            return " : " + conj + (Metamodel.PrimitiveTypes.Contains(raw) ? "ScalarValues::" + raw : QName(raw));
         }
 
         private static string Mult(Element e) => string.IsNullOrEmpty(e.Multiplicity) || e.Multiplicity == "1" ? "" : $"[{e.Multiplicity}]";
-        private static string Default(Element e) => e.Get(FieldKeys.DefaultValue) is { Length: > 0 } v ? $" = {v}" : "";
 
         private void Doc(int d, string text)
         {
@@ -253,7 +414,11 @@ public static class SysMLv2Text
             Line(d, $"doc /* {Esc(text)} */");
         }
 
-        private void Line(int depth, string s) => Sb.Append(' ', depth * 4).AppendLine(s);
+        private void Line(int depth, string s)
+        {
+            if (s.Length == 0) { Sb.AppendLine(); return; }
+            Sb.Append(' ', depth * 4).AppendLine(s);
+        }
     }
 
     internal static string? Keyword(ElementKind k) => k switch
