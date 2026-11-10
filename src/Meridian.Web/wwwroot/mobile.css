@@ -1,10 +1,10 @@
 /* ============================================================ Meridian on phones and tablets
    Phone  (< 900px):      top bar + full-screen views + bottom navigation (Components/Mobile/MobileShell.razor).
-   Tablet (900–1279px):   desktop layout, side panels as drawers over the canvas, icon-only ribbon with an overflow menu.
+   Tablet (900–1279px):   desktop layout, side panels as drawers over the canvas, tabbed ribbon (every group one tab away).
    Markup state comes from .m-shell's data-* attributes (read with :has) so the desktop markup stays untouched. */
 
 .m-shell { display: contents; }
-.t-drawer-btns, .r-overflow, .t-canvas-tools { display: none; }
+.t-drawer-btns, .t-canvas-tools { display: none; }
 
 /* Touch on the canvas is handled in js/mobile.js; keep the browser from scrolling, zooming or showing callouts. */
 .diagram-host .canvas { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -267,16 +267,8 @@
 
 /* ============================================================ tablets */
 @media (min-width: 900px) and (max-width: 1279.98px) {
-  /* Ribbon: icon groups, scrollable, rarely used groups behind "More". */
-  .ribbon { height: 50px; padding: 4px 6px; scroll-snap-type: x proximity; }
-  .ribbon .rlabel { display: none; }
-  .ribbon .rgroup { justify-content: center; scroll-snap-align: start; }
-  .ribbon .rgroup .rbtn { min-width: 38px; height: 38px; justify-content: center; }
-  .ribbon .rgroup .rbtn .t { display: none; }
-  .ribbon > .rgroup:nth-child(n+6):not(.r-overflow) { display: none; }   /* Model views, Simulate, Generate, Extend */
-  .ribbon > .r-overflow { display: flex; position: sticky; right: 0; margin-left: auto; background: var(--panel-solid); border-left: 1px solid var(--border);
-    border-right: none; }
-  .app > .workbench { top: 98px; grid-template-columns: minmax(0, 1fr) !important; }
+  /* Ribbon: tabbed as on desktop (app.css); captions go where a group would not fit. */
+  .app > .workbench { grid-template-columns: minmax(0, 1fr) !important; }
 
   /* Title bar: drawer toggles, a shorter search box. */
   .t-drawer-btns { display: inline-flex; gap: 2px; }
@@ -300,23 +292,19 @@
   .app > .workbench > aside.stack > .card { background: var(--panel-solid); }
   .app:has(.m-shell[data-left="open"]) > .workbench > section.card:first-child,
   .app:has(.m-shell[data-right="open"]) > .workbench > aside.stack { transform: none; visibility: visible; transition: transform .22s ease; }
-  .t-scrim { position: absolute; z-index: 34; top: 98px; left: 0; right: 0; bottom: 28px; background: rgba(5, 9, 18, .3); animation: m-fade .15s ease-out; }
+  .t-scrim { position: absolute; z-index: 34; top: 106px; left: 0; right: 0; bottom: 28px; background: rgba(5, 9, 18, .3); animation: m-fade .15s ease-out; }
 }
 
 /* Touch tablets: big ribbon targets and the View only / Edit toggle over the canvas. */
 @media (min-width: 900px) and (max-width: 1279.98px) and (pointer: coarse) {
-  .ribbon { height: 54px; }
-  .ribbon .rgroup .rbtn { min-width: 44px; height: 44px; }
-  .app > .workbench { top: 102px; }
-  .t-scrim { top: 102px; }
+  .ribbon { height: 80px; grid-template-rows: 30px minmax(0, 1fr); }
+  .ribbon .rtab { padding: 0 12px; font-size: 12px; }
+  .ribbon .rgroup .rbtn { min-width: 44px; height: 44px; justify-content: center; }
+  .app > .workbench { top: 128px; }
+  .t-scrim { top: 128px; }
   .t-canvas-tools { display: block; position: absolute; z-index: 30; left: 50%; transform: translateX(-50%); bottom: 88px; }
   .tab, .dock-tab, .crumbs .mud-icon-button { min-height: 40px; }
   .app:has(.m-shell[data-mode="view"]) .diagram-host :is(.toolbox, .selbar, .quickadd) { display: none !important; }
 }
 
-/* ============================================================ narrow desktop windows (1280–1500px) */
-/* Every group no longer fits: Generate and Extend (8th and 9th groups) move into the "More" menu, so AI stays in view. */
-@media (min-width: 1280px) and (max-width: 1499.98px) {
-  .ribbon > .rgroup:nth-child(8):not(.r-overflow), .ribbon > .rgroup:nth-child(9):not(.r-overflow) { display: none; }
-  .ribbon > .r-overflow { display: flex; }
 }

@@ -5,7 +5,7 @@
 @if (Shell.ShowDatabaseTools)
 {
     var diagram = Ws.Active is { Diagram.DiagramType: DiagramType.Database } a ? a.Diagram : null;
-    <div class="rgroup compact" data-testid="ribbon-database">
+    <div class="rgroup compact @(Active ? "active" : "")" data-tab="database" data-testid="ribbon-database">
         <div class="rlabel">Database</div>
         <div class="ritems">
             <MudTooltip Text="New table in the selected schema (shown on the active database diagram)">
@@ -52,6 +52,9 @@
 }
 
 @code {
+    /// <summary>True when the tabbed ribbon shows the Database tab (passed in so the group re-renders on tab changes).</summary>
+    [Parameter] public bool Active { get; set; }
+
     protected override void OnInitialized()
     {
         base.OnInitialized();

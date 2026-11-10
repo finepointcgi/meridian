@@ -144,6 +144,7 @@ public partial class Workbench
         await JS.InvokeVoidAsync("meridian.splitter", _rightSplitter, "--right", "right", 240, 640);
         await JS.InvokeVoidAsync("meridian.splitter", _bottomSplitter, "--bottom", "bottom", 90, 700);
         if (await JS.InvokeAsync<bool>("meridian.isDesktop")) { _desktop = true; StateHasChanged(); }
+        await RestoreRibbonTabAsync();
         if (Ws.Session != null || Ws.User is null) return;
 
         // Reopen the project this browser last worked on, else the most recent one, else offer the project list.

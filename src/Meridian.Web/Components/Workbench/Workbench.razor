@@ -130,7 +130,14 @@
 
     @* ================================================================ context toolbar *@
     <nav class="ribbon">
-        <div class="rgroup compact-md">
+        <div class="rtabs" role="tablist" aria-label="Ribbon">
+            @foreach (var (id, label) in RibbonTabs())
+            {
+                var tabId = id;
+                <button role="tab" class="rtab @RibbonGroupClass(tabId)" data-tab="@tabId" aria-selected="@(ActiveRibbonTab == tabId ? "true" : "false")" @onclick="() => SelectRibbonTab(tabId)">@label</button>
+            }
+        </div>
+        <div class="rgroup compact-md @RibbonGroupClass("create")" data-tab="create">
             <div class="rlabel">Create</div>
             <div class="ritems">
                 @foreach (var k in new[] { ElementKind.Package, ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.Requirement, ElementKind.Actor, ElementKind.UseCase })
@@ -142,14 +149,14 @@
                 }
             </div>
         </div>
-        <div class="rgroup">
+        <div class="rgroup @RibbonGroupClass("diagram")" data-tab="diagram">
             <div class="rlabel">Diagram</div>
             <div class="ritems">
                 @foreach (var t in new[] { DiagramType.Whiteboard, DiagramType.BlockDefinition, DiagramType.InternalBlock, DiagramType.Requirement, DiagramType.Activity, DiagramType.StateMachine, DiagramType.Sequence, DiagramType.UseCase, DiagramType.Package })
                 {
                     var type = t;
                     <MudTooltip Text="@($"New {Metamodel.DisplayName(type)} for the selection")">
-                        <button class="rbtn" @onclick="() => NewDiagramSmart(type)"><MudIcon Icon="@UiKinds.DiagramIcon(type)" /><span class="t">@Metamodel.DiagramAbbreviation(type).ToUpperInvariant()</span></button>
+                        <button class="rbtn dtype" @onclick="() => NewDiagramSmart(type)"><MudIcon Icon="@UiKinds.DiagramIcon(type)" /><span class="t">@Metamodel.DiagramAbbreviation(type).ToUpperInvariant()</span></button>
                     </MudTooltip>
                 }
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
@@ -180,7 +187,7 @@
                 </MudMenu>
             </div>
         </div>
-        <div class="rgroup compact">
+        <div class="rgroup compact @RibbonGroupClass("requirements")" data-tab="requirements">
             <div class="rlabel">Requirements</div>
             <div class="ritems">
                 <button title="New test case in the selection" class="rbtn" @onclick="() => CreateFromRibbon(ElementKind.TestCase)"><MudIcon Icon="@UiKinds.Icon(ElementKind.TestCase)" Style="color:#3fbf7f" /><span class="t">Test case</span></button>
@@ -201,7 +208,7 @@
                 </MudMenu>
             </div>
         </div>
-        <div class="rgroup compact">
+        <div class="rgroup compact @RibbonGroupClass("trace")" data-tab="trace">
             <div class="rlabel">Traceability</div>
             <div class="ritems">
                 <button title="Traceability matrix: requirements against design elements" class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
@@ -211,7 +218,7 @@
                 <button title="Check the model for errors and warnings (F7)" class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
             </div>
         </div>
-        <div class="rgroup compact">
+        <div class="rgroup compact @RibbonGroupClass("review")" data-tab="review">
             <div class="rlabel">Review</div>
             <div class="ritems">
                 <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request a review of the selection")">
@@ -220,15 +227,15 @@
                 <button title="Open reviews and approvals" class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
             </div>
         </div>
-        <Meridian.Web.Components.Workbench.Database.DatabaseRibbonGroup />
-        <div class="rgroup compact">
+        <Meridian.Web.Components.Workbench.Database.DatabaseRibbonGroup Active="@(ActiveRibbonTab == "database")" />
+        <div class="rgroup compact @RibbonGroupClass("views")" data-tab="views">
             <div class="rlabel">Model views</div>
             <div class="ritems">
                 <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Custom table</span></button></MudTooltip>
                 <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
             </div>
         </div>
-        <div class="rgroup compact">
+        <div class="rgroup compact @RibbonGroupClass("simulate")" data-tab="simulate">
             <div class="rlabel">Simulate</div>
             <div class="ritems">
                 <button title="Step through activities and state machines, timed or Monte Carlo" class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
@@ -237,7 +244,7 @@
                 <button title="Verify requirements: evaluate their criteria with parametrics, Monte Carlo, timed simulation or co-simulation" class="rbtn @(_dockOpen && _dock == VerificationDock ? "on" : "")" disabled="@Ws.Verification.Running" @onclick="VerifyRequirements"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Verify</span></button>
             </div>
         </div>
-        <div class="rgroup compact">
+        <div class="rgroup compact @RibbonGroupClass("generate")" data-tab="generate">
             <div class="rlabel">Generate</div>
             <div class="ritems">
                 <MudTooltip Text="Generate a document (SRS, ICD, SDD, VCRM …) from a template as PDF, Word or HTML"><button class="rbtn" @onclick="ExportDocx"><MudIcon Icon="@Icons.Material.Outlined.Article" /><span class="t">Report</span></button></MudTooltip>
@@ -265,8 +272,8 @@
                 </MudMenu>
             </div>
         </div>
-        <PluginsMenu @ref="_plugins" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
-        <div class="rgroup compact">
+        <PluginsMenu @ref="_plugins" Active="@(ActiveRibbonTab == "extend")" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
+        <div class="rgroup compact @RibbonGroupClass("ai")" data-tab="ai">
             <div class="rlabel">AI</div>
             <div class="ritems">
                 <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" data-tour="assistant" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
@@ -274,7 +281,7 @@
         </div>
         @if (Ws.CodeChanges is not null || HasArchitecture)
         {
-            <div class="rgroup compact" data-tour="code-group">
+            <div class="rgroup compact @RibbonGroupClass("code")" data-tab="code" data-tour="code-group">
                 <div class="rlabel">Code</div>
                 <div class="ritems">
                     @if (Ws.CodeChanges is not null)
@@ -289,7 +296,6 @@
                 </div>
             </div>
         }
-        <RibbonOverflow />
     </nav>
 
     @* ================================================================ workspace *@
@@ -449,7 +455,7 @@
 
     <ContextMenu Entries="_menu" X="_menuX" Y="_menuY" OnClose="() => _menu = null" />
     <CommandPalette @ref="_palette" Source="PaletteCommands" />
-    <OnboardingTour @ref="_tour" />
+    <OnboardingTour @ref="_tour" OnReveal="RevealForTour" />
 
     <div style="display:none">
         <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml,.mmd,.mermaid,.md" OnChange="OnOpenFile" />

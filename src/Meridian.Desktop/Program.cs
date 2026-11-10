@@ -666,9 +666,14 @@ internal static class Program
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });
-        var target = await tcs.Task;
-        if (string.IsNullOrEmpty(target)) return;
-        if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
-        await File.WriteAllBytesAsync(target, bytes);
+        try
+        {
+            var target = await tcs.Task;
+            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
+            if (string.IsNullOrEmpty(target)) return;
+            if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
+            await File.WriteAllBytesAsync(target, bytes);
+        }
+        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
     }
 }

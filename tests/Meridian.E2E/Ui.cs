@@ -36,9 +36,22 @@ public static class Ui
         await p.Locator(".mud-popover-open .mud-menu-item").Filter(new() { HasTextString = item }).First.ClickAsync();
     }
 
-    /// <summary>Clicks a ribbon button by its caption (e.g. "Trace table").</summary>
-    public static Task RibbonAsync(this IPage p, string caption) =>
-        p.Locator("nav.ribbon button.rbtn").Filter(new() { Has = p.Locator("span.t", new() { HasTextRegex = new Regex("^" + Regex.Escape(caption) + "$") }) }).First.ClickAsync();
+    /// <summary>Clicks a ribbon button by its caption (e.g. "Trace table"), first switching to the ribbon tab that holds it.</summary>
+    public static async Task RibbonAsync(this IPage p, string caption)
+    {
+        var button = p.Locator("nav.ribbon button.rbtn").Filter(new() { Has = p.Locator("span.t", new() { HasTextRegex = new Regex("^" + Regex.Escape(caption) + "$") }) }).First;
+        await p.RibbonTabAsync(await button.EvaluateAsync<string>("b => b.closest('.rgroup')?.dataset.tab ?? ''"));
+        await button.ClickAsync();
+    }
+
+    /// <summary>Shows a ribbon tab by its id (create, diagram, requirements, trace, review, views, simulate, generate, extend, ai, database, code).</summary>
+    public static async Task RibbonTabAsync(this IPage p, string tab)
+    {
+        if (tab.Length == 0) return;
+        var t = p.Locator($"nav.ribbon .rtab[data-tab={tab}]");
+        if (await t.GetAttributeAsync("aria-selected") != "true") await t.ClickAsync();
+        await Expect(p.Locator($"nav.ribbon .rgroup[data-tab={tab}]")).ToBeVisibleAsync();
+    }
 
     /// <summary>Clicks a dock tab by its label.</summary>
     public static Task DockTabAsync(this IPage p, string label) =>

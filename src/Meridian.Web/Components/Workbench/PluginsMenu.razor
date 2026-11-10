@@ -6,7 +6,7 @@
 @inject IDialogService Dialogs
 
 @* Ribbon group: plugin commands, exporters, importers, the script console and the loaded-plugins dialog. *@
-<div class="rgroup compact">
+<div class="rgroup compact @(Active ? "active" : "")" data-tab="extend">
     <div class="rlabel">Extend</div>
     <div class="ritems">
         <button class="rbtn @(ScriptOpen ? "on" : "")" @onclick="OnScript" title="C# script console"><MudIcon Icon="@Icons.Material.Outlined.Terminal" /><span class="t">Script</span></button>
@@ -51,6 +51,9 @@
     private const long MaxUpload = 64 * 1024 * 1024;
     private PluginImporter? _importer;
     private int _logged;
+
+    /// <summary>True while the ribbon's Extend tab is showing (the CSS hides the group otherwise).</summary>
+    [Parameter] public bool Active { get; set; }
 
     /// <summary>True while the script dock is showing (drives the button's "on" state).</summary>
     [Parameter] public bool ScriptOpen { get; set; }

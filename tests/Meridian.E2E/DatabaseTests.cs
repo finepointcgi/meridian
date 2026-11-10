@@ -70,6 +70,7 @@ public sealed class DatabaseTests(ServerFixture f) : E2ETest(f)
         await Expect(p.Nodes()).ToHaveCountAsync(2);
         await Expect(Table(p, "customer")).ToBeVisibleAsync();
         await Expect(p.Locator(".diagram-host svg.main g.db-row")).Not.ToHaveCountAsync(0);   // column rows
+        await p.RibbonTabAsync("database");   // the tabbed ribbon shows one group at a time
         await Expect(p.Locator("[data-testid=ribbon-database]")).ToBeVisibleAsync();
         await p.Tabs().Filter(new() { HasTextString = "sales – tables" }).ClickAsync();
         await Expect(p.Nodes()).ToHaveCountAsync(3);   // orders, order_line and the view
@@ -100,6 +101,7 @@ public sealed class DatabaseTests(ServerFixture f) : E2ETest(f)
         await p.Keyboard.DownAsync("Shift");
         await p.Mouse.ClickAsync(ax, ay);
         await p.Keyboard.UpAsync("Shift");
+        await p.RibbonTabAsync("database");
         await p.Locator("[data-testid=ribbon-add-to-group]").ClickAsync();
         var dlg = p.MudDialog();
         await dlg.Locator("[data-testid=db-new-group-name] input, input[data-testid=db-new-group-name]").First.FillAsync("CRM");
@@ -118,6 +120,7 @@ public sealed class DatabaseTests(ServerFixture f) : E2ETest(f)
         // On the sales diagram, filtering by the area hides the tables outside it.
         await p.Tabs().Filter(new() { HasTextString = "sales – tables" }).ClickAsync();
         await Expect(p.Nodes()).ToHaveCountAsync(3);
+        await p.RibbonTabAsync("database");
         await p.Locator("[data-testid=ribbon-groups]").ClickAsync();
         await p.Locator(".mud-popover-open .mud-menu-item[data-group=CRM]").ClickAsync();
         await Expect(p.Nodes()).ToHaveCountAsync(0);
