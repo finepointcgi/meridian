@@ -84,6 +84,7 @@
         if (Ws.Session is null || Ws.User is null) return;
         await Ws.Session.PersistAsync();
         var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, _message!.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
+        Ws.Session.NotifyVersionCommitted(n, _message!.Trim(), Ws.User);
         Snackbar.Add($"Committed version {n}", Severity.Success);
         _message = null;
         await Reload();

@@ -124,11 +124,11 @@ public partial class Workbench
         // Reopen the project this browser last worked on, else the most recent one, else offer the project list.
         var projects = await Db.ListProjectsAsync(Ws.User.Id);
         var last = await JS.InvokeAsync<string?>("meridian.getLast");
-        // The desktop host opens a just-imported file with ?project=<id>.
-        var requested = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query).TryGetValue("project", out var rq) ? rq.ToString() : null;
-        var pick = projects.FirstOrDefault(p => p.Id.ToString() == requested) ?? projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
+        var deep = Integrations.DeepLink.Parse(Nav.Uri);   // ?project=…&element=… links from issue trackers / OSLC
+        var pick = projects.FirstOrDefault(p => p.Id == deep?.Project) ?? projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
         if (pick != null) await OpenProject(pick.Id);
         else await OpenProjects();
+        if (deep?.Element is { } deepElement && Ws.Model.Find(deepElement) is { } target) Navigate(target);
         StateHasChanged();
     }
 
@@ -883,6 +883,7 @@ public partial class Workbench
         if (string.IsNullOrWhiteSpace(message)) return;
         await Ws.Session.PersistAsync();
         var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, message.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
+        Ws.Session.NotifyVersionCommitted(n, message.Trim(), Ws.User);
         Snackbar.Add($"Committed version {n}", Severity.Success);
         Ws.Log($"Committed version {n}: {message}");
     }

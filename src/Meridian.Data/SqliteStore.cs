@@ -105,6 +105,7 @@ public sealed partial class SqliteStore : IMeridianStore
             create index if not exists members_user on project_members(user_id);
             """);
         await MigrateReviewsAsync();
+        await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (SqliteStore.Integrations.cs)
     }
 
     // =============================================================== users

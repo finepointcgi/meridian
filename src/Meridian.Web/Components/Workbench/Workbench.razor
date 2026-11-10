@@ -36,6 +36,7 @@
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
                 }
+                <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => Dialogs.ShowAsync<IntegrationsDialog>("Integrations", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }))" Disabled="Ws.Session == null">Integrations (issue trackers, webhooks)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="DownloadProject">Download .meridian file</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.FileDownload" OnClick="ExportXmi">Export XMI 2.5.1</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Code" OnClick="ExportSysML">Export SysML v2 text</MudMenuItem>
@@ -93,6 +94,7 @@
                         }
                         @if (!Host.LocalMode)
                         {
+                            <MudMenuItem Icon="@Icons.Material.Outlined.Key" OnClick="@(() => Dialogs.ShowAsync<ApiTokensDialog>("API tokens", new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }))">API tokens…</MudMenuItem>
                             <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="SignOut">Sign out</MudMenuItem>
                         }
                     </ChildContent>

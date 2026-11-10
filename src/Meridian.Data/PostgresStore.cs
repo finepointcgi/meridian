@@ -69,6 +69,7 @@ public sealed partial class PostgresStore : IMeridianStore
             """);
         await cmd.ExecuteNonQueryAsync();
         await MigrateReviewsAsync();
+        await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (PostgresStore.Integrations.cs)
     }
 
     // =============================================================== users

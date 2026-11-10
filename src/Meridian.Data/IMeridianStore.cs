@@ -72,6 +72,20 @@ public interface IMeridianStore
     Task<int> UnreadNotificationCountAsync(Guid userId);
     Task MarkNotificationReadAsync(long notificationId, Guid userId);
     Task MarkAllNotificationsReadAsync(Guid userId);
+    // ---------------------------------------------------------------- integrations (issue trackers, webhooks) and API tokens
+
+    Task<IReadOnlyList<IntegrationConnection>> ListIntegrationsAsync(Guid projectId);
+    Task<IntegrationConnection?> FindIntegrationAsync(Guid id);
+    /// <summary>Inserts or updates by id. The secret must already be encrypted by the caller.</summary>
+    Task SaveIntegrationAsync(IntegrationConnection connection);
+    Task DeleteIntegrationAsync(Guid id);
+    Task AddWebhookDeliveryAsync(WebhookDelivery delivery);
+    Task<IReadOnlyList<WebhookDelivery>> ListWebhookDeliveriesAsync(Guid projectId, int limit = 50);
+    Task<ApiTokenInfo> CreateApiTokenAsync(Guid userId, string name, string tokenHash, string prefix);
+    Task<IReadOnlyList<ApiTokenInfo>> ListApiTokensAsync(Guid userId);
+    Task RevokeApiTokenAsync(Guid userId, Guid tokenId);
+    /// <summary>The owner of an unrevoked token with this hash (and records its use), or null.</summary>
+    Task<UserAccount?> FindUserByApiTokenAsync(string tokenHash);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

@@ -12,7 +12,7 @@ public sealed record Presence(string ParticipantId, UserAccount User, string? Se
 /// browser tab keeps a replica, submits its operations here, and receives everyone else's in a single global order.
 /// The authoritative model is persisted to PostgreSQL shortly after changes.
 /// </summary>
-public sealed partial class CollaborationHub(IMeridianStore db, ILogger<CollaborationHub> log)
+public sealed partial class CollaborationHub(IMeridianStore db, ILogger<CollaborationHub> log, Integrations.ProjectEvents? events = null)
 {
     private readonly ConcurrentDictionary<Guid, ProjectSession> _sessions = new();
     private readonly SemaphoreSlim _openGate = new(1, 1);
@@ -26,7 +26,7 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
             {
                 var row = await db.LoadProjectAsync(projectId);
                 if (row is null) return null;
-                session = new ProjectSession(projectId, row.Value.Name, ProjectFile.Deserialize(row.Value.ModelJson), db, log, () => _sessions.TryRemove(projectId, out _));
+                session = new ProjectSession(projectId, row.Value.Name, ProjectFile.Deserialize(row.Value.ModelJson), db, log, () => _sessions.TryRemove(projectId, out _)) { Events = events };
                 _sessions[projectId] = session;
             }
             session.Join(me, client);
@@ -80,6 +80,8 @@ public sealed class ProjectSession : IDisposable
     }
 
     public Guid ProjectId { get; }
+    /// <summary>Webhook event sink (integrations); null when not configured.</summary>
+    internal Integrations.ProjectEvents? Events { get; init; }
     public string Name { get; set; }
     public long Sequence { get; private set; }
     public DateTime? LastPersisted { get; private set; }
@@ -129,6 +131,7 @@ public sealed class ProjectSession : IDisposable
         lock (_gate)
         {
             _master.ApplyRemote(op);
+            Events?.OperationApplied(ProjectId, Name, userId, op, _master);
             Sequence++;
             _dirty = true;
             _lastEditor = userId;
@@ -161,8 +164,12 @@ public sealed class ProjectSession : IDisposable
         }
     }
 
+    /// <summary>Tells integrations (webhooks) that a version was committed.</summary>
+    public void NotifyVersionCommitted(int number, string message, UserAccount? author) => Events?.VersionCommitted(ProjectId, Name, number, message, author);
+
     public void NotifyComments()
     {
+        Events?.CommentsChanged(ProjectId, Name);
         lock (_gate)
             foreach (var p in _participants.Values) p.Client.CommentsChanged();
     }
