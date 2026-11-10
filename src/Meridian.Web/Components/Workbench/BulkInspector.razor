@@ -1,0 +1,154 @@
+@using System.Globalization
+@inject Workspace Ws
+@inject IDialogService Dialogs
+
+@* Properties of a multi-selection on a diagram: the format shared by every selected shape and connector ("Mixed" where they
+   differ), stereotypes, fields shared by elements of one kind, and bulk actions. Every change is one undo step. *@
+<div class="bulk-insp" data-testid="bulk-inspector">
+    <div class="insp-head">
+        <MudIcon Icon="@Icons.Material.Outlined.SelectAll" Style="font-size:22px; color:var(--accent)" />
+        <div style="min-width:0">
+            <div class="title" data-testid="bulk-count">@C.SelectionCount selected</div>
+            <div class="sub">@Breakdown()</div>
+        </div>
+    </div>
+
+    @if (!Ws.ReadOnly)
+    {
+        <div class="section-title">Appearance <span class="grow"></span></div>
+        @if (C.SelectedNodes.Count > 0) { @ColorRow("fill", "Fill") }
+        @ColorRow("stroke", "Line colour")
+        @ColorRow("text", "Text colour")
+        <div class="bulk-grid">
+            @StyleSelect("dash", "Line style", [("", "Default"), ("solid", "Solid"), ("dashed", "Dashed"), ("dotted", "Dotted")])
+            @StyleSelect("width", "Line width", [("", "Default"), ("1", "1 px"), ("2", "2 px"), ("3", "3 px"), ("4.5", "4.5 px"), ("6", "6 px")])
+            @StyleSelect("fontSize", "Font size", [("", "Default"), ("10", "10"), ("12", "12"), ("14", "14"), ("16", "16"), ("20", "20"), ("24", "24")])
+        </div>
+        <div class="d-flex gap-1 mt-1">
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.FormatClear" OnClick="C.ClearFormat">Reset look</MudButton>
+        </div>
+
+        var (all, some) = C.SelectionStereotypes();
+        <div class="section-title">Stereotypes <span class="grow"></span></div>
+        <div>
+            @foreach (var name in all)
+            {
+                var n = name;
+                <span class="pill"><span class="t">«@n»</span>
+                    <span class="rm" title="Remove from all" @onclick="() => C.RemoveStereotype(n)"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                </span>
+            }
+            @foreach (var name in some)
+            {
+                var n = name;
+                <span class="pill mixed" title="Applied to some of the selection">
+                    <span class="t">«@n» · some</span>
+                    <span class="rm" title="Apply to all" @onclick="() => C.ApplyStereotype(n)"><MudIcon Icon="@Icons.Material.Filled.Add" Style="font-size:14px" /></span>
+                    <span class="rm" title="Remove from all" @onclick="() => C.RemoveStereotype(n)"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                </span>
+            }
+        </div>
+        <MudAutocomplete @key="@("bulk-st" + C.SelectionCount)" T="string" Placeholder="+ apply stereotype to all…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" CoerceValue="true" ResetValueOnEmptyText="true"
+                         SearchFunc="@((q, ct) => Task.FromResult(StereotypeNames(q)))"
+                         ValueChanged="@(v => { if (!string.IsNullOrWhiteSpace(v)) C.ApplyStereotype(v); })" />
+
+        var fields = C.SharedFields();
+        if (fields.Count > 0)
+        {
+            <div class="section-title">Shared fields · @Metamodel.DisplayName(C.CommonKind!.Value) <span class="grow"></span></div>
+            foreach (var f in fields)
+            {
+                var key = f;
+                var shared = C.SharedValue(key);
+                var multi = key is FieldKeys.Documentation or FieldKeys.Text or FieldKeys.Body;
+                <MudTextField @key="@("bulk-" + key + (shared ?? "\u0001"))" T="string" Label="@Label(key)" Value="@shared" ValueChanged="v => C.SetSharedField(key, v)"
+                              Placeholder="@(shared == null ? "Mixed" : null)" HelperText="@(shared == null ? "Mixed: typing sets every selected element" : null)"
+                              Lines="@(multi ? 3 : 1)" AutoGrow="multi" MaxLines="8" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            }
+        }
+
+        <div class="section-title">Actions <span class="grow"></span></div>
+        <div class="bulk-actions">
+            @if (C.LinkableSelection.Count > 0)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.AddLink" OnClick="LinkTo" data-testid="bulk-link-to">Link to…</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Rule" OnClick="TraceTo">Trace to requirement…</MudButton>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.HideSource" OnClick="C.RemoveSelectionFromDiagram">Remove from diagram</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Outlined.Delete" OnClick="C.DeleteSelectionFromModel">Delete from model</MudButton>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DiagramController C { get; set; } = default!;
+
+    private static readonly string[] Colors =
+    [
+        "#ffffff", "#dae8fc", "#d5e8d4", "#ffe6cc", "#fff2cc", "#f8cecc", "#e1d5e7",
+        "#1e293b", "#475569", "#4f8cff", "#2dd4bf", "#3fbf7f", "#f0b429", "#ff6b6b", "#a78bfa",
+    ];
+
+    private string Breakdown()
+    {
+        var parts = C.SelectedNodes.GroupBy(n => n.Element.Kind).OrderByDescending(g => g.Count())
+            .Select(g => $"{g.Count()} {Plural(Metamodel.DisplayName(g.Key), g.Count())}").ToList();
+        if (C.SelectedEdges.Count > 0) parts.Add($"{C.SelectedEdges.Count} {Plural("connector", C.SelectedEdges.Count)}");
+        return string.Join(", ", parts);
+    }
+
+    private static string Plural(string word, int n) => n == 1 ? word.ToLowerInvariant() : word.ToLowerInvariant() + (word.EndsWith('s') ? "es" : "s");
+
+    private bool Applies(string key) =>
+        C.SelectedNodes.Count > 0 && DiagramController.NodeStyleKeys.Contains(key) || C.SelectedEdges.Count > 0 && DiagramController.EdgeStyleKeys.Contains(key);
+
+    private RenderFragment ColorRow(string key, string label) => __builder =>
+    {
+        if (!Applies(key)) return;
+        var mixed = C.IsMixedStyle(key);
+        var current = C.SelectionStyle(key);
+        <div class="bulk-row" data-testid="@("bulk-" + key)">
+            <span class="lbl">@label</span>
+            <span class="val">@(mixed ? "Mixed" : current ?? "Default")</span>
+        </div>
+        <div class="swatches">
+            @foreach (var c in Colors)
+            {
+                var color = c;
+                <span class="swatch @(!mixed && string.Equals(current, color, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@color" title="@color"
+                      data-color="@color" @onclick="() => C.SetSelectionStyle(key, color)"></span>
+            }
+            <span class="swatch none @(!mixed && current == null ? "on" : "")" title="Default" @onclick="() => C.SetSelectionStyle(key, null)">⨯</span>
+        </div>
+    };
+
+    private RenderFragment StyleSelect(string key, string label, (string Value, string Text)[] options) => __builder =>
+    {
+        if (!Applies(key)) return;
+        var mixed = C.IsMixedStyle(key);
+        var current = mixed ? "\u0001" : C.SelectionStyle(key) ?? "";
+        <MudSelect @key="@("bulk-sel-" + key + current)" T="string" Label="@label" Value="@current" ValueChanged="v => C.SetSelectionStyle(key, string.IsNullOrEmpty(v) ? null : v)"
+                   Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" ToStringFunc="@(v => v == "\u0001" ? "Mixed" : options.FirstOrDefault(o => o.Value == v).Text ?? v)">
+            @if (mixed) { <MudSelectItem Value="@("\u0001")" Disabled="true">Mixed</MudSelectItem> }
+            @foreach (var (v, t) in options) { <MudSelectItem Value="@v">@t</MudSelectItem> }
+        </MudSelect>
+    };
+
+    private IEnumerable<string> StereotypeNames(string? q)
+    {
+        var kinds = C.SelectedElements.Select(e => e.Kind.ToString()).ToHashSet();
+        return Ws.Model.OfKind(ElementKind.Stereotype)
+            .Where(s => s.Get(FieldKeys.Metaclass).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is var meta && (meta.Length == 0 || kinds.All(meta.Contains)))
+            .Select(s => s.Name).Where(n => string.IsNullOrEmpty(q) || n.Contains(q, StringComparison.OrdinalIgnoreCase)).Distinct().OrderBy(n => n);
+    }
+
+    private static string Label(string key) => key switch
+    {
+        FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity", FieldKeys.DefaultValue => "Default value",
+        FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
+        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? key,
+    };
+
+    private Task LinkTo() => BulkLinkDialog.ShowAsync(Dialogs, Ws, C);
+    private Task TraceTo() => BulkLinkDialog.ShowAsync(Dialogs, Ws, C, requirementsOnly: true);
+}

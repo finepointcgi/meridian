@@ -104,8 +104,10 @@ function onDown(e) {
   if (editMode && pointers.size === 0 && passthroughId === null) {
     passthroughId = e.pointerId;
     passthroughPos = { x: e.clientX, y: e.clientY };
+    armPassthroughLongPress(canvas, e);
     return;
   }
+  cancelPassthroughLongPress();
 
   swallow(e);
   try { canvas.setPointerCapture(e.pointerId); } catch { }
@@ -128,6 +130,29 @@ function onDown(e) {
 
 let passthroughPos = { x: 0, y: 0 };
 
+// Edit mode: holding one finger still on a shape or connector adds it to (or takes it out of) the selection.
+let passthroughTimer = 0, passthroughStartX = 0, passthroughStartY = 0;
+function armPassthroughLongPress(canvas, e) {
+  cancelPassthroughLongPress();
+  const start = { x: e.clientX, y: e.clientY };
+  passthroughStartX = start.x;
+  passthroughStartY = start.y;
+  passthroughTimer = setTimeout(async () => {
+    passthroughTimer = 0;
+    if (passthroughId === null || !dotnet || pointers.size > 0) return;
+    if (Math.hypot(passthroughPos.x - start.x, passthroughPos.y - start.y) > TAP_SLOP) return;
+    const r = canvas.getBoundingClientRect();
+    try {
+      const hit = await dotnet.invokeMethodAsync("TouchLongPressAdd", start.x - r.left, start.y - r.top);
+      if (hit) navigator.vibrate?.(12);
+    } catch { }
+  }, LONG_PRESS_MS);
+}
+
+function cancelPassthroughLongPress() {
+  if (passthroughTimer) { clearTimeout(passthroughTimer); passthroughTimer = 0; }
+}
+
 function armLongPress() {
   cancelLongPress();
   gesture.timer = setTimeout(async () => {
@@ -149,6 +174,8 @@ function onMove(e) {
   if (e.pointerType !== "touch") return;
   if (e.pointerId === passthroughId) {
     passthroughPos = { x: e.clientX, y: e.clientY };
+    // Moving the finger is a drag (move, connect, rubber band), not a long press.
+    if (passthroughTimer && Math.hypot(e.clientX - passthroughStartX, e.clientY - passthroughStartY) > TAP_SLOP) cancelPassthroughLongPress();
     if (!pointers.has(e.pointerId)) return;      // Blazor still owns it
   }
   if (!gesture || !pointers.has(e.pointerId)) return;
@@ -180,6 +207,7 @@ function onUp(e) {
   if (e.pointerType !== "touch") return;
   const owned = pointers.has(e.pointerId);
   if (e.pointerId === passthroughId) {
+    cancelPassthroughLongPress();
     passthroughId = null;
     pointers.delete(e.pointerId);
     // Let Blazor see the end of the finger it started with, so its own gesture finishes.

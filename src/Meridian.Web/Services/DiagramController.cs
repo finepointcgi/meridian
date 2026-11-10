@@ -11,7 +11,7 @@ public enum Mods { None = 0, Shift = 1, Ctrl = 2, Alt = 4, Meta = 8 }
 /// UI-independent diagram editing logic: selection, move, resize, connect, waypoints, marquee, pan and zoom.
 /// The Blazor component only translates browser events into calls on this class.
 /// </summary>
-public sealed class DiagramController
+public sealed partial class DiagramController
 {
     public const double Grid = 10;
     public const double HandleSize = 8;
@@ -23,6 +23,8 @@ public sealed class DiagramController
 
     private readonly Workspace _ws;
     private readonly HashSet<DiagramNode> _selNodes = new();
+    private readonly HashSet<DiagramEdge> _selEdges = new();
+    private (List<DiagramNode> Nodes, List<DiagramEdge> Edges) _selAtPress = ([], []);
     private readonly Dictionary<DiagramNode, Bounds> _preview = new();
     private Dictionary<DiagramNode, Bounds> _origin = new();
     private Pt _pressScreen;
@@ -75,7 +77,23 @@ public sealed class DiagramController
     public DiagramNode? ConnectFrom { get; private set; }
     public IReadOnlyList<Pt>? WaypointPreview { get; private set; }
     public IReadOnlyCollection<DiagramNode> SelectedNodes => _selNodes;
-    public DiagramEdge? SelectedEdge { get; private set; }
+
+    /// <summary>Every selected connector (Shift/⌘-click, rubber band, ⌘A).</summary>
+    public IReadOnlyCollection<DiagramEdge> SelectedEdges => _selEdges;
+
+    /// <summary>The connector when it is the only thing selected (bends, routing, label editing), else null. Setting it selects just that connector's edges set.</summary>
+    public DiagramEdge? SelectedEdge
+    {
+        get => _selNodes.Count == 0 && _selEdges.Count == 1 ? _selEdges.First() : null;
+        private set { _selEdges.Clear(); if (value != null) _selEdges.Add(value); }
+    }
+
+    /// <summary>Shapes plus connectors selected.</summary>
+    public int SelectionCount => _selNodes.Count + _selEdges.Count;
+
+    /// <summary>The model elements behind the selection: shapes' elements, then connectors' relationships.</summary>
+    public IReadOnlyList<Element> SelectedElements =>
+        _selNodes.Select(n => n.Element).Concat(_selEdges.Select(e => (Element)e.Relationship)).Distinct().ToList();
 
     /// <summary>Set by input handling when the user asks to open an element's sub-diagram.</summary>
     public Element? DrillRequest { get; set; }
@@ -107,7 +125,7 @@ public sealed class DiagramController
 
     public IReadOnlyList<Guide> Guides => _guides;
 
-    public Element? PrimarySelection => SelectedEdge?.Relationship ?? (_selNodes.Count == 1 ? _selNodes.First().Element : null);
+    public Element? PrimarySelection => SelectionCount != 1 ? null : SelectedEdge?.Relationship ?? _selNodes.First().Element;
 
     // ---------------------------------------------------------------- coordinates & geometry
 
@@ -119,7 +137,7 @@ public sealed class DiagramController
     public Bounds BoundsOf(DiagramNode n) =>
         Notation.EffectiveBounds(Model, n, Diagram.DiagramType, _preview.TryGetValue(n, out var b) ? b : n.Bounds);
 
-    public IReadOnlyList<Pt>? WaypointsFor(DiagramEdge e) => ReferenceEquals(e, SelectedEdge) ? WaypointPreview : null;
+    public IReadOnlyList<Pt>? WaypointsFor(DiagramEdge e) => WaypointPreview != null && ReferenceEquals(e, SelectedEdge) ? WaypointPreview : null;
 
     // ---------------------------------------------------------------- selection
 
@@ -133,9 +151,65 @@ public sealed class DiagramController
 
     public void SelectAll()
     {
-        SelectedEdge = null;
         foreach (var n in Diagram.Nodes.Where(Pickable)) _selNodes.Add(n);
+        foreach (var e in Diagram.Edges.Where(Pickable)) _selEdges.Add(e);
         Notify();
+    }
+
+    /// <summary>Selects exactly these elements' shapes and connectors on this diagram.</summary>
+    public void SelectElements(IEnumerable<Element> elements)
+    {
+        ClearSelection();
+        foreach (var e in elements)
+        {
+            if (e is Relationship r && Diagram.EdgeFor(r) is { } edge && Pickable(edge)) _selEdges.Add(edge);
+            else if (Diagram.NodeFor(e) is { } node && Pickable(node)) _selNodes.Add(node);
+        }
+        Notify();
+    }
+
+    public void ClearSelection()
+    {
+        _selNodes.Clear();
+        _selEdges.Clear();
+    }
+
+    public bool IsSelected(DiagramEdge e) => _selEdges.Contains(e);
+
+    /// <summary>Adds a shape to the selection, or takes it out if it is already in.</summary>
+    public void Toggle(DiagramNode n)
+    {
+        if (!_selNodes.Remove(n) && Pickable(n)) _selNodes.Add(n);
+        Notify();
+    }
+
+    /// <summary>Adds a connector to the selection, or takes it out if it is already in.</summary>
+    public void Toggle(DiagramEdge e)
+    {
+        if (!_selEdges.Remove(e) && Pickable(e)) _selEdges.Add(e);
+        Notify();
+    }
+
+    /// <summary>
+    /// Touch long-press while editing: the press already went through <see cref="PointerDown"/>, which may have replaced the
+    /// selection. Puts back what was selected before the press, then adds (or removes) the shape or connector held.
+    /// Returns false when nothing is there.
+    /// </summary>
+    public bool LongPressToggle(double sx, double sy)
+    {
+        var p = ToModel(sx, sy);
+        var n = HitNode(p);
+        var e = n == null ? HitEdge(p) : null;
+        if (n == null && e == null) return false;
+        Current = Gesture.None;
+        _preview.Clear();
+        WaypointPreview = null;
+        _dragEdge = null;
+        ClearSelection();
+        foreach (var x in _selAtPress.Nodes.Where(Diagram.Nodes.Contains)) _selNodes.Add(x);
+        foreach (var x in _selAtPress.Edges.Where(Diagram.Edges.Contains)) _selEdges.Add(x);
+        if (n != null) Toggle(n); else Toggle(e!);
+        return true;
     }
 
     // ---------------------------------------------------------------- layers
@@ -150,10 +224,10 @@ public sealed class DiagramController
     /// <summary>Puts the selected shapes and connector on a layer.</summary>
     public void MoveSelectionToLayer(string layerId)
     {
-        if (_ws.ReadOnly || (_selNodes.Count == 0 && SelectedEdge == null)) return;
+        if (_ws.ReadOnly || SelectionCount == 0) return;
         try
         {
-            Model.MoveToLayer(Diagram, _selNodes.ToList(), SelectedEdge != null ? [SelectedEdge] : [], layerId);
+            Model.MoveToLayer(Diagram, _selNodes.ToList(), _selEdges.ToList(), layerId);
             var name = DiagramExtras.FindLayer(Diagram, layerId)?.Name ?? "Default";
             _ws.SetStatus($"Moved to layer “{name}”");
             ClearInvalidSelection();
@@ -165,14 +239,14 @@ public sealed class DiagramController
     /// <summary>The selection's layer when it is the same for everything selected.</summary>
     public string? SelectionLayer()
     {
-        var ids = _selNodes.Select(DiagramExtras.LayerIdOf).Concat(SelectedEdge != null ? [DiagramExtras.LayerIdOf(SelectedEdge)] : []).Distinct().ToList();
+        var ids = _selNodes.Select(DiagramExtras.LayerIdOf).Concat(_selEdges.Select(DiagramExtras.LayerIdOf)).Distinct().ToList();
         return ids.Count == 1 ? ids[0] : null;
     }
 
     public void ClearInvalidSelection()
     {
         _selNodes.RemoveWhere(n => !Diagram.Nodes.Contains(n) || !Pickable(n));
-        if (SelectedEdge != null && (!Diagram.Edges.Contains(SelectedEdge) || !Pickable(SelectedEdge))) SelectedEdge = null;
+        _selEdges.RemoveWhere(e => !Diagram.Edges.Contains(e) || !Pickable(e));
         if (DiagramExtras.FindLayer(Diagram, ActiveLayerId) == null) ActiveLayerId = DiagramExtras.DefaultLayerId;
         if (Editing != null && !Diagram.Nodes.Contains(Editing)) Editing = null;
         if (EditingEdge != null && !Diagram.Edges.Contains(EditingEdge)) EditingEdge = null;
@@ -513,6 +587,7 @@ public sealed class DiagramController
     {
         _pressScreen = new Pt(sx, sy);
         _pressModel = ToModel(sx, sy);
+        _selAtPress = (_selNodes.ToList(), _selEdges.ToList());
         CurrentModel = _pressModel;
         Editing = null;
         EditingEdge = null;
@@ -530,9 +605,10 @@ public sealed class DiagramController
         {
             var n = HitNode(_pressModel);
             var ed = n == null ? HitEdge(_pressModel) : null;
-            if (n != null && !_selNodes.Contains(n)) { _selNodes.Clear(); SelectedEdge = null; _selNodes.Add(n); }
-            if (ed != null) { _selNodes.Clear(); SelectedEdge = ed; }
-            if (n == null && ed == null) { _selNodes.Clear(); SelectedEdge = null; }
+            // Right-clicking something already selected keeps the whole selection, so the menu acts on all of it.
+            if (n != null && !_selNodes.Contains(n)) { ClearSelection(); _selNodes.Add(n); }
+            if (ed != null && !_selEdges.Contains(ed)) { ClearSelection(); _selEdges.Add(ed); }
+            if (n == null && ed == null) ClearSelection();
             Notify();
             return true;
         }
@@ -615,9 +691,8 @@ public sealed class DiagramController
         var node = HitNode(_pressModel);
         if (node != null)
         {
-            SelectedEdge = null;
             if (additive) { if (!_selNodes.Remove(node)) _selNodes.Add(node); }
-            else if (!_selNodes.Contains(node)) { _selNodes.Clear(); _selNodes.Add(node); }
+            else if (!_selNodes.Contains(node)) { ClearSelection(); _selNodes.Add(node); }
             Current = Gesture.Move;
             _origin = _selNodes.SelectMany(n => Diagram.DescendantsOf(n).Prepend(n)).Distinct().ToDictionary(n => n, n => n.Bounds);
             Notify();
@@ -625,6 +700,12 @@ public sealed class DiagramController
         }
 
         var edge = HitEdge(_pressModel);
+        if (edge != null && additive)
+        {
+            if (!_selEdges.Remove(edge)) _selEdges.Add(edge);
+            Notify();
+            return false;
+        }
         if (edge != null)
         {
             _selNodes.Clear();
@@ -781,6 +862,13 @@ public sealed class DiagramController
                             var b = BoundsOf(n);
                             if (r.Contains(new Pt(b.X, b.Y)) && r.Contains(new Pt(b.Right, b.Bottom))) _selNodes.Add(n);
                         }
+                    // Connectors whose whole path lies inside the box.
+                    if (r.Width > 2 && r.Height > 2)
+                    {
+                        var routes = EdgeRouter.RouteAll(DiagramExtras.VisibleView(Diagram), BoundsOf);
+                        foreach (var e in Diagram.Edges.Where(Pickable))
+                            if (routes.TryGetValue(e, out var pts) && pts.Count > 0 && pts.All(r.Contains)) _selEdges.Add(e);
+                    }
                     Notify();
                     break;
                 }
@@ -948,8 +1036,7 @@ public sealed class DiagramController
 
     public void DeleteSelectionFromModel()
     {
-        var els = _selNodes.Select(n => n.Element).ToList();
-        if (SelectedEdge != null) els.Add(SelectedEdge.Relationship);
+        var els = SelectedElements.ToList();
         if (els.Count == 0) return;
         if (_ws.Preferences.ConfirmDeleteFromModel && _ws.Confirm is { } confirm)
         {
@@ -976,12 +1063,11 @@ public sealed class DiagramController
 
     public void RemoveSelectionFromDiagram()
     {
-        if (_selNodes.Count == 0 && SelectedEdge == null) return;
+        if (SelectionCount == 0) return;
         var nodes = _selNodes.ToList();
-        var edge = SelectedEdge;
-        _selNodes.Clear();
-        SelectedEdge = null;
-        Model.RemoveFromDiagram(Diagram, nodes, edge != null ? [edge] : null);
+        var edges = _selEdges.ToList();
+        ClearSelection();
+        Model.RemoveFromDiagram(Diagram, nodes, edges.Count > 0 ? edges : null);
         Notify();
     }
 
@@ -1054,10 +1140,25 @@ public sealed class DiagramController
     /// <summary>Style value shared by the selection, or null when unset or mixed.</summary>
     public string? SelectionStyle(string key)
     {
-        var values = _selNodes.Select(n => n.Style.GetValueOrDefault(key))
-            .Concat(SelectedEdge != null ? [SelectedEdge.Style.GetValueOrDefault(key)] : []).Distinct().ToList();
+        var values = StyleValues(key);
         return values.Count == 1 ? values[0] : null;
     }
+
+    /// <summary>The distinct values of a style key across the selected items it applies to (null = default).</summary>
+    public IReadOnlyList<string?> StyleValues(string key) =>
+        // Connectors don't count for shape-only formats (fill), so a selection with lines isn't "Mixed" because of them.
+        _selNodes.Select(n => n.Style.GetValueOrDefault(key))
+            .Concat(_selEdges.Where(_ => EdgeStyleKeys.Contains(key) || !NodeStyleKeys.Contains(key)).Select(e => e.Style.GetValueOrDefault(key)))
+            .Distinct().ToList();
+
+    /// <summary>Do the selected items disagree on a style (shown as "Mixed")?</summary>
+    public bool IsMixedStyle(string key) => StyleValues(key).Count > 1;
+
+    /// <summary>Format keys shapes take: fill, line colour, text colour, line width, line pattern, font size.</summary>
+    public static readonly IReadOnlySet<string> NodeStyleKeys = new HashSet<string> { "fill", "stroke", "text", "width", "dash", "fontSize" };
+
+    /// <summary>Format keys connectors take: line colour, width and pattern, and their label's colour and size.</summary>
+    public static readonly IReadOnlySet<string> EdgeStyleKeys = new HashSet<string> { "stroke", "width", "dash", "text", "fontSize" };
 
     /// <summary>Sets a style key on every selected shape (fill / stroke / text) and connector (stroke / width).</summary>
     public void SetSelectionStyle(string key, string? value)
@@ -1065,12 +1166,15 @@ public sealed class DiagramController
         if (_ws.ReadOnly) return;
         using (Model.History.Transaction("Format"))
         {
-            foreach (var n in _selNodes)
-            {
-                Model.SetNodeStyle(Diagram, n, key, value);
-                if (key == "fill") AutoTextColor(n, value);
-            }
-            if (SelectedEdge != null && key is "stroke" or "width") Model.SetEdgeStyle(Diagram, SelectedEdge, key, value);
+            if (NodeStyleKeys.Contains(key))
+                foreach (var n in _selNodes)
+                {
+                    Model.SetNodeStyle(Diagram, n, key, value);
+                    if (key == "fill") AutoTextColor(n, value);
+                    if (key == "text") Model.SetNodeStyle(Diagram, n, "textAuto", null);
+                }
+            if (EdgeStyleKeys.Contains(key))
+                foreach (var e in _selEdges) Model.SetEdgeStyle(Diagram, e, key, value);
         }
     }
 
@@ -1095,7 +1199,7 @@ public sealed class DiagramController
         if (_ws.ReadOnly) return;
         using (Model.History.Transaction("Change style"))
         {
-            foreach (var e in _selNodes.Select(n => n.Element).Append(SelectedEdge?.Relationship).OfType<Element>().Where(e => e.Kind == kind))
+            foreach (var e in SelectedElements.Where(e => e.Kind == kind))
                 Model.Set(e, FieldKeys.Subtype, subtype);
         }
     }
@@ -1173,7 +1277,7 @@ public sealed class DiagramController
 
     public void CopyFormat()
     {
-        var src = (IReadOnlyDictionary<string, string>?)_selNodes.FirstOrDefault()?.Style ?? SelectedEdge?.Style;
+        var src = (IReadOnlyDictionary<string, string>?)_selNodes.FirstOrDefault()?.Style ?? _selEdges.FirstOrDefault()?.Style;
         _formatClipboard = src?.ToDictionary(kv => kv.Key, kv => kv.Value) ?? new();
         _ws.SetStatus("Format copied: select shapes and choose Paste format");
     }
@@ -1183,10 +1287,10 @@ public sealed class DiagramController
         if (_formatClipboard is not { } f || _ws.ReadOnly) return;
         using (Model.History.Transaction("Paste format"))
         {
-            foreach (var key in new[] { "fill", "stroke", "text", "textAuto" })
+            foreach (var key in NodeStyleKeys.Append("textAuto"))
                 foreach (var n in _selNodes) Model.SetNodeStyle(Diagram, n, key, f.GetValueOrDefault(key));
-            if (SelectedEdge != null)
-                foreach (var key in new[] { "stroke", "width" }) Model.SetEdgeStyle(Diagram, SelectedEdge, key, f.GetValueOrDefault(key));
+            foreach (var key in EdgeStyleKeys)
+                foreach (var e in _selEdges) Model.SetEdgeStyle(Diagram, e, key, f.GetValueOrDefault(key));
         }
     }
 
@@ -1197,7 +1301,7 @@ public sealed class DiagramController
             // Links and layers aren't "looks": keep them.
             static bool Look(string key) => key is not (DiagramExtras.LinkStyle or DiagramExtras.LayerStyle);
             foreach (var n in _selNodes) foreach (var key in n.Style.Keys.Where(Look).ToList()) Model.SetNodeStyle(Diagram, n, key, null);
-            if (SelectedEdge != null) foreach (var key in SelectedEdge.Style.Keys.Where(Look).ToList()) Model.SetEdgeStyle(Diagram, SelectedEdge, key, null);
+            foreach (var e in _selEdges) foreach (var key in e.Style.Keys.Where(Look).ToList()) Model.SetEdgeStyle(Diagram, e, key, null);
         }
     }
 

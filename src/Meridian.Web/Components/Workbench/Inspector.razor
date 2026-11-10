@@ -12,7 +12,11 @@
     }
 </div>
 <div class="card-body inspector">
-    @if (E is null)
+    @if (Ws.Active is { SelectionCount: > 1 } multiSel)
+    {
+        <BulkInspector C="multiSel" />
+    }
+    else if (E is null)
     {
         <div style="color:var(--text-3); padding:24px 4px; text-align:center">
             <MudIcon Icon="@Icons.Material.Outlined.AdsClick" Style="font-size:36px; opacity:.5" />

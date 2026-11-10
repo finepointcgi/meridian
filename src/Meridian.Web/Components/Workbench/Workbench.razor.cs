@@ -401,6 +401,8 @@ public partial class Workbench
     private void ShowCanvasMenu((double X, double Y, DiagramNode? Node, DiagramEdge? Edge) r)
     {
         if (Ws.Active is not { } c) return;
+        // Right-click on part of a multi-selection: actions on the whole selection.
+        if (c.SelectionCount > 1 && (r.Node != null || r.Edge != null)) { OpenMenu(MultiSelectionMenu(c), r.X, r.Y); return; }
         var m = new List<MenuEntry>();
         if (r.Node is { } n)
         {

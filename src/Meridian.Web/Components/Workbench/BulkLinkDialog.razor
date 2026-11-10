@@ -1,0 +1,88 @@
+@inject Workspace Ws
+
+@* "Link to…" for a multi-selection: pick one target element and a relationship kind valid for every selected element;
+   one relationship per selected element is created and drawn, in one undo step. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@(RequirementsOnly ? Icons.Material.Outlined.Rule : Icons.Material.Outlined.AddLink)" />
+            <MudText Typo="Typo.h6">@(RequirementsOnly ? "Trace to requirement" : "Link to…")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="link-dlg bulk-link">
+            <div class="link-hint">@C.LinkableSelection.Count selected element@(C.LinkableSelection.Count == 1 ? "" : "s") will each get one relationship to the target.</div>
+            <input class="link-search" data-testid="bulk-link-search" placeholder="@(RequirementsOnly ? "Search requirements…" : "Search target elements…")" value="@_query" @oninput="e => _query = e.Value?.ToString()" />
+            <div class="link-list">
+                @foreach (var e in Matches())
+                {
+                    var el = e;
+                    <div class="link-item @(ReferenceEquals(el, _target) ? "on" : "")" data-testid="bulk-link-target" @onclick="() => Pick(el)" @ondblclick="() => { Pick(el); Ok(); }">
+                        <MudIcon Icon="@UiKinds.Icon(el.Kind)" Style="@($"font-size:16px; color:{UiKinds.Accent(el.Kind)}")" />
+                        <span class="nm">@(el.Kind == ElementKind.Requirement ? $"{el.Get(FieldKeys.RequirementId)} {el.Name}".Trim() : el.DisplayName)</span>
+                        <span class="kd">@UiKinds.KindName(el)@(C.Diagram.Shows(el) ? "" : " · not on diagram")</span>
+                    </div>
+                }
+                @if (!Matches().Any()) { <div class="link-empty">Nothing can be linked to the whole selection</div> }
+            </div>
+            @if (_target != null)
+            {
+                var options = C.BulkLinkOptions(_target);
+                <div class="bulk-kinds" data-testid="bulk-link-kinds">
+                    @foreach (var o in options)
+                    {
+                        var opt = o;
+                        <button class="chip @(opt == _option ? "on" : "")" title="@(opt.SelectionIsSource ? $"selection {opt.Keyword} {_target.DisplayName}" : $"{_target.DisplayName} {opt.Keyword} selection")"
+                                @onclick="() => _option = opt">@opt.Keyword @(opt.SelectionIsSource ? "→" : "←")</button>
+                    }
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_target == null || _option == null)" OnClick="Ok" data-testid="bulk-link-ok">
+            @(_option == null ? "Link" : $"Create {C.LinkableSelection.Count} × {_option.Keyword}")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public DiagramController C { get; set; } = default!;
+    [Parameter] public bool RequirementsOnly { get; set; }
+
+    private string? _query;
+    private Element? _target;
+    private BulkLinkOption? _option;
+
+    private IEnumerable<Element> Matches() => C.BulkLinkCandidates(_query, RequirementsOnly).Take(80);
+
+    private void Pick(Element el)
+    {
+        _target = el;
+        var options = C.BulkLinkOptions(el);
+        // Requirements: «satisfy» first (design elements satisfy requirements), else «trace»; anything else: the first valid kind.
+        _option = (RequirementsOnly ? options.FirstOrDefault(o => o.Kind == ElementKind.Satisfy) ?? options.FirstOrDefault(o => o.Kind == ElementKind.Trace) : null)
+                  ?? options.FirstOrDefault();
+    }
+
+    private void Ok()
+    {
+        if (_target == null || _option == null) return;
+        C.BulkLink(_option.Kind, _target, _option.SelectionIsSource);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    /// <summary>Opens "Link to…" (or "Trace to requirement…") for the active diagram's selection.</summary>
+    public static async Task ShowAsync(IDialogService dialogs, Workspace ws, DiagramController c, bool requirementsOnly = false)
+    {
+        if (ws.ReadOnly) return;
+        if (c.LinkableSelection.Count == 0) { ws.SetStatus("Select the elements to link first"); return; }
+        var parameters = new DialogParameters<BulkLinkDialog> { { x => x.C, c }, { x => x.RequirementsOnly, requirementsOnly } };
+        var dlg = await dialogs.ShowAsync<BulkLinkDialog>(requirementsOnly ? "Trace to requirement" : "Link to", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+        await dlg.Result;
+    }
+}

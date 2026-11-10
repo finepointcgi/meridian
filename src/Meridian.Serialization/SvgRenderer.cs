@@ -99,6 +99,28 @@ public static partial class SvgRenderer
     [System.Text.RegularExpressions.GeneratedRegex(@"^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,32}|(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/+-]{1,48}\))$")]
     private static partial System.Text.RegularExpressions.Regex SafeColorPattern();
 
+    /// <summary>Text scale of the shape being drawn (its "fontSize" style relative to the 12 px default); 0 means 1.</summary>
+    [ThreadStatic] private static double _fontScale;
+
+    /// <summary>Line pattern a "dash" style asks for (dashed, dotted), or null (solid, or the notation's own).</summary>
+    public static string? DashArray(string? dash) => dash switch { "dashed" => "6,4", "dotted" => "2,3", _ => null };
+
+    /// <summary>A numeric style ("width", "fontSize") clamped to sane bounds, or null when unset or not a number.</summary>
+    public static double? StyleNumber(IReadOnlyDictionary<string, string> style, string key, double min, double max) =>
+        style.TryGetValue(key, out var v) && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) && double.IsFinite(x)
+            ? Math.Clamp(x, min, max) : null;
+
+    private static double FontScaleOf(IReadOnlyDictionary<string, string> style) => StyleNumber(style, "fontSize", 6, 48) is { } fs ? fs / 12 : 1;
+
+    /// <summary>Line width and pattern of a shape, inherited by the outline parts that don't set their own.</summary>
+    private static string LineStyleAttrs(IReadOnlyDictionary<string, string> style)
+    {
+        var a = "";
+        if (StyleNumber(style, "width", 0.5, 12) is { } w) a += $" stroke-width=\"{F(w)}\"";
+        if (DashArray(style.GetValueOrDefault("dash")) is { } da) a += $" stroke-dasharray=\"{da}\"";
+        return a;
+    }
+
     /// <summary>A colour style of a shape (fill, stroke, text), sanitised by <see cref="SafeColor"/>.</summary>
     private static string? StyleColor(DiagramNode n, string key) => n.Style.TryGetValue(key, out var v) ? SafeColor(v) : null;
 
@@ -270,7 +292,9 @@ public static partial class SvgRenderer
     {
         var style = Notation.StyleOf(e.Relationship);
         if (e.Style.TryGetValue("stroke", out var ec) && SafeColor(ec) is { } edgeColor) t = t with { Edge = edgeColor };
-        var width = e.Style.TryGetValue("width", out var ew) && double.TryParse(ew, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var wv) ? wv : 1.3;
+        var width = StyleNumber(e.Style, "width", 0.5, 12) ?? 1.3;
+        var labelSize = StyleNumber(e.Style, "fontSize", 6, 48) ?? 11;
+        if (e.Style.TryGetValue("text", out var etc) && SafeColor(etc) is { } labelColor) t = t with { Muted = labelColor };
         if (e.Relationship.Kind == ElementKind.Message)
             style = e.Relationship.Get(FieldKeys.MessageSort) switch
             {
@@ -279,6 +303,7 @@ public static partial class SvgRenderer
                 _ => style,
             };
         var dash = style.Dotted ? " stroke-dasharray=\"2,3\"" : style.Dashed ? " stroke-dasharray=\"6,4\"" : "";
+        if (e.Style.GetValueOrDefault("dash") is { } ds) dash = DashArray(ds) is { } da ? $" stroke-dasharray=\"{da}\"" : ds == "solid" ? "" : dash;
         var hops = jumps is { Count: > 0 } ? EdgeRouter.Hops(pts, jumps) : null;
         if (hops is { Count: > 0 })
             sb.Append($"<path d=\"{JumpPath(pts, hops)}\" fill=\"none\" stroke=\"{t.Edge}\" stroke-width=\"{F(width)}\"{dash}/>");
@@ -314,13 +339,14 @@ public static partial class SvgRenderer
         if (label != null && ReferenceEquals(e.Source, e.Target) && pts.Count >= 2)
         {
             // Self loops: label beside the loop, not on top of it.
-            sb.Append($"<text x=\"{F(pts.Max(p => p.X) + 6)}\" y=\"{F(pts[0].Y + 15)}\" font-size=\"11\" font-style=\"italic\" fill=\"{t.Muted}\">{E(label)}</text>");
+            sb.Append($"<text x=\"{F(pts.Max(p => p.X) + 6)}\" y=\"{F(pts[0].Y + 15)}\" font-size=\"{F(labelSize)}\" font-style=\"italic\" fill=\"{t.Muted}\">{E(label)}</text>");
         }
         else if (label != null)
         {
-            var w = label.Length * 5.9 + 6;
-            sb.Append($"<rect x=\"{F(mid.X - w / 2)}\" y=\"{F(mid.Y - 17)}\" width=\"{F(w)}\" height=\"14\" rx=\"3\" fill=\"{t.LabelBg}\" fill-opacity=\"0.85\"/>");
-            sb.Append($"<text x=\"{F(mid.X)}\" y=\"{F(mid.Y - 6)}\" text-anchor=\"middle\" font-size=\"11\" font-style=\"italic\" fill=\"{t.Muted}\">{E(label)}</text>");
+            var ls = labelSize / 11;
+            var w = label.Length * 5.9 * ls + 6;
+            sb.Append($"<rect x=\"{F(mid.X - w / 2)}\" y=\"{F(mid.Y - 3 - 14 * ls)}\" width=\"{F(w)}\" height=\"{F(14 * ls)}\" rx=\"3\" fill=\"{t.LabelBg}\" fill-opacity=\"0.85\"/>");
+            sb.Append($"<text x=\"{F(mid.X)}\" y=\"{F(mid.Y - 6)}\" text-anchor=\"middle\" font-size=\"{F(labelSize)}\" font-style=\"italic\" fill=\"{t.Muted}\">{E(label)}</text>");
         }
         if (e.Relationship.Kind is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation && pts.Count >= 2 && !string.IsNullOrEmpty(e.Relationship.Multiplicity))
             sb.Append($"<text x=\"{F(pts[^1].X + 6)}\" y=\"{F(pts[^1].Y - 6)}\" font-size=\"11\" fill=\"{t.Muted}\">{E(e.Relationship.Multiplicity)}</text>");
@@ -448,7 +474,10 @@ public static partial class SvgRenderer
         var href = t.LinkAnchors && DiagramExtras.IsExternalLink(link) ? DiagramExtras.NormalizeLink(link) : null;
         var anchor = href != null;
         if (anchor) sb.Append($"<a href=\"{E(href!)}\" target=\"_blank\" rel=\"noopener noreferrer\">");
-        RenderNodeCore(sb, m, d, n, b, t);
+        var scale = _fontScale;
+        _fontScale = FontScaleOf(n.Style);
+        try { RenderNodeCore(sb, m, d, n, b, t); }
+        finally { _fontScale = scale; }
         if (link != null) LinkBadge(sb, b, link, t);
         if (anchor) sb.Append("</a>");
     }
@@ -481,7 +510,7 @@ public static partial class SvgRenderer
         var header = HeaderColor(m, n, t);
         var stroke = t.Stroke;
         var ink = t.Ink;
-        sb.Append($"<g data-node=\"{E(n.Id)}\">");
+        sb.Append($"<g data-node=\"{E(n.Id)}\"{LineStyleAttrs(n.Style)}>");
         if (n.Element.Kind == ElementKind.Shape)
         {
             RenderFreeShape(sb, n, b, c.Name, t);
@@ -923,7 +952,7 @@ public static partial class SvgRenderer
     }
 
     private static void Text(StringBuilder sb, double x, double y, string s, bool bold, string anchor, bool italic = false, double size = 12, string color = "#25303f") =>
-        sb.Append($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\" font-size=\"{F(size)}\" fill=\"{color}\"{(bold ? " font-weight=\"600\"" : "")}{(italic ? " font-style=\"italic\"" : "")}>{E(s)}</text>");
+        sb.Append($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\" font-size=\"{F(size * (_fontScale > 0 ? _fontScale : 1))}\" fill=\"{color}\"{(bold ? " font-weight=\"600\"" : "")}{(italic ? " font-style=\"italic\"" : "")}>{E(s)}</text>");
 
     private static void Wrapped(StringBuilder sb, double x, double y, double width, double bottom, string s, string color)
     {

@@ -76,18 +76,22 @@
         }
     </div>
 
-    @if (!Ws.ReadOnly && C.Tool == null && C.Current == DiagramController.Gesture.None && (C.SelectedNodes.Count > 0 || C.SelectedEdge != null)
+    @if (!Ws.ReadOnly && C.Tool == null && C.Current == DiagramController.Gesture.None && C.SelectionCount > 0
          && C.Editing == null && C.EditingEdge == null)
     {
         var nodes = C.SelectedNodes.Count > 0;
+        var edges = C.SelectedEdges.Count > 0;
         var shapes = C.SelectedNodes.Where(n => n.Element.Kind == ElementKind.Shape).ToList();
-        var line = C.SelectedEdge?.Relationship.Kind == ElementKind.Line;
+        var line = C.SelectedEdges.Any(x => x.Relationship.Kind == ElementKind.Line);
         // Near the top of the view the bar would cover what is selected: show it at the bottom instead.
         var barBelow = C.SelectedNodes.Count > 0 && C.SelectedNodes.Min(n => C.ToScreen(new(C.BoundsOf(n).X, C.BoundsOf(n).Y)).Y) < 64;
         <div class="selbar @(barBelow ? "below" : "")" @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+            @if (C.SelectionCount >= 2)
+            {
+                <span class="cnt" data-testid="selection-count">@C.SelectionCount selected</span>
+            }
             @if (C.SelectedNodes.Count >= 2)
             {
-                <span class="cnt">@C.SelectedNodes.Count selected</span>
                 @SelBtn("left", Icons.Material.Outlined.AlignHorizontalLeft, "Align left")
                 @SelBtn("center", Icons.Material.Outlined.AlignHorizontalCenter, "Align centers")
                 @SelBtn("right", Icons.Material.Outlined.AlignHorizontalRight, "Align right")
@@ -101,7 +105,7 @@
                 <span class="sep"></span>
             }
             @if (nodes) { @ColorBtn("fill", "Fill", Icons.Material.Outlined.FormatColorFill) }
-            @ColorBtn("stroke", nodes ? "Line color" : "Connector color", Icons.Material.Outlined.BorderColor)
+            @ColorBtn("stroke", nodes ? "Line color" : edges && C.SelectedEdges.Count > 1 ? "Connector colors" : "Connector color", Icons.Material.Outlined.BorderColor)
             @if (nodes) { @ColorBtn("text", "Text color", Icons.Material.Outlined.FormatColorText) }
             @if (nodes && C.SelectionHasContainer)
             {
@@ -129,8 +133,25 @@
                     }
                 </span>
             }
-            @if (C.SelectedEdge != null && !nodes)
+            @if (nodes || edges)
             {
+                <span class="fmt-wrap">
+                    <MudTooltip Text="Line pattern"><button class="tool @(_fmtMenu == "dash" ? "on" : "")" @onclick='() => ToggleFmt("dash")'><MudIcon Icon="@Icons.Material.Outlined.LineStyle" /></button></MudTooltip>
+                    @if (_fmtMenu == "dash")
+                    {
+                        var dashNow = C.SelectionStyle("dash");
+                        <div class="fmt-pop widths">
+                            @foreach (var (value, array) in new (string?, string?)[] { (null, null), ("solid", null), ("dashed", "6,4"), ("dotted", "2,3") })
+                            {
+                                var v = value;
+                                <div class="@(dashNow == v ? "wopt on" : "wopt")" title="@(v ?? "Default")" @onclick='() => SetFmt("dash", v)'>
+                                    @if (v == null) { <span style="font-size:11px">Default</span> }
+                                    else { <svg width="60" height="14"><line x1="4" y1="7" x2="56" y2="7" stroke="currentColor" stroke-width="2" stroke-dasharray="@array" /></svg> }
+                                </div>
+                            }
+                        </div>
+                    }
+                </span>
                 <span class="fmt-wrap">
                     <MudTooltip Text="Line width"><button class="tool @(_fmtMenu == "width" ? "on" : "")" @onclick='() => ToggleFmt("width")'><MudIcon Icon="@Icons.Material.Outlined.LineWeight" /></button></MudTooltip>
                     @if (_fmtMenu == "width")
@@ -847,10 +868,14 @@
                 $"<path d=\"M{F(bb.X + bb.Width * .28)},{F(bb.Y + bb.Height * .28)} h{F(bb.Width * .3)} v{F(bb.Height * .3)} h-{F(bb.Width * .3)} Z M{F(bb.X + bb.Width * .42)},{F(bb.Y + bb.Height * .42)} h{F(bb.Width * .3)} v{F(bb.Height * .3)} h-{F(bb.Width * .3)} Z\" fill=\"none\" stroke=\"#2dd4bf\" stroke-width=\"{F(1.2 * zi)}\"/></g>");
         }
 
+        // Selected connectors: a translucent halo along the whole path (every one of a multi-selection).
+        foreach (var se in C.SelectedEdges)
+        {
+            var pts = Notation.RouteIn(C.Diagram, se, C.BoundsOf, C.WaypointsFor(se));
+            builder.AddMarkupContent(seq++, $"<polyline class=\"edge-sel\" data-edge-sel=\"{System.Net.WebUtility.HtmlEncode(se.Id)}\" points=\"{SvgRenderer.Points(pts)}\" fill=\"none\" stroke=\"{sel}\" stroke-opacity=\"0.5\" stroke-width=\"{F(6 * zi)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>");
+        }
         if (C.SelectedEdge is { } edge)
         {
-            var pts = Notation.RouteIn(C.Diagram, edge, C.BoundsOf, C.WaypointsFor(edge));
-            builder.AddMarkupContent(seq++, $"<polyline points=\"{SvgRenderer.Points(pts)}\" fill=\"none\" stroke=\"{sel}\" stroke-opacity=\"0.5\" stroke-width=\"{F(6 * zi)}\" stroke-linecap=\"round\"/>");
             foreach (var wp in C.WaypointPreview ?? edge.Waypoints)
             {
                 var p = C.HandlePoint(edge, wp);
