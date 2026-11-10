@@ -1,0 +1,80 @@
+/* Simulation-driven verification (VerificationPanel, results on diagrams) and variant management (feature model editor,
+   configuration states, comparison, "Show variant" chip). */
+
+.dv-legends { position: absolute; right: 14px; top: 56px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.dv-chip { display: flex; align-items: center; gap: 8px; padding: 4px 10px; white-space: nowrap; border-radius: 20px; background: var(--panel-solid);
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm); font-size: 11.5px; color: var(--text-2); }
+.dv-select { font: inherit; font-size: 11.5px; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 1px 4px; }
+.dv-count { color: var(--text-3); }
+.dv-btn { all: unset; cursor: pointer; color: var(--accent); font-weight: 600; padding: 0 2px; }
+.dv-btn.on { color: var(--text); text-decoration: underline; }
+.dv-btn:hover { text-decoration: underline; }
+.dv-chip .vs { font-weight: 700; }
+.dv-chip .vs.pass { color: var(--ok); }
+.dv-chip .vs.fail { color: var(--danger); }
+.dv-chip .vs.inconclusive { color: var(--warn); }
+.dv-chip .vs.stale { color: var(--text-3); font-weight: 600; }
+
+.verdict.stale { opacity: .6; text-decoration: line-through dotted; }
+.verdict.none { background: transparent; color: var(--text-3); border: 1px dashed var(--border); }
+
+.vfy-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; flex-wrap: wrap; }
+.vfy-summary { display: flex; gap: 8px; align-items: center; font-size: 12.5px; }
+.vfy-summary .n { font-weight: 700; font-size: 15px; }
+.vfy-summary .pass .n { color: var(--ok); }
+.vfy-summary .fail .n { color: var(--danger); }
+.vfy-summary .inconclusive .n { color: var(--warn); }
+.vfy-summary .stale .n, .vfy-summary .none .n { color: var(--text-3); }
+.vfy-summary > span { display: inline-flex; gap: 4px; align-items: baseline; padding: 2px 8px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; }
+.vfy-summary > span.on { border-color: var(--accent); }
+.vfy-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; width: 160px; background: var(--panel-3); }
+.vfy-bar i { display: block; height: 100%; }
+.vfy-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.vfy-table th { text-align: left; font-weight: 600; color: var(--text-3); padding: 4px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel-solid); }
+.vfy-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.vfy-table tr.row { cursor: pointer; }
+.vfy-table tr.row:hover { background: rgba(127, 127, 127, .06); }
+.vfy-table tr.detail td { background: var(--panel-3); font-size: 12px; }
+.vfy-table code { font-size: 11.5px; }
+.vfy-detail { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
+.vfy-detail b { color: var(--text-3); font-weight: 600; }
+.vfy-run { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 4px 12px 10px; align-items: end; }
+.vfy-run label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-3); }
+.vfy-run input, .vfy-run select, .vfy-run textarea { font: inherit; font-size: 12.5px; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+.vfy-crit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.vfy-crit.bad { border-color: var(--danger) !important; }
+.vfy-err { color: var(--danger); font-size: 11px; }
+.vfy-empty { padding: 10px 14px; color: var(--text-3); font-size: 12.5px; }
+
+/* Feature model editor */
+.fm-tree { padding: 4px 12px 12px; }
+.fm-row { display: flex; align-items: center; gap: 6px; min-height: 30px; font-size: 12.5px; border-radius: 6px; }
+.fm-row:hover { background: rgba(127, 127, 127, .06); }
+.fm-row.sel { background: var(--sel); }
+.fm-row input.fm-name { font: inherit; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 1px 4px; min-width: 120px; }
+.fm-row input.fm-name:hover, .fm-row input.fm-name:focus { border-color: var(--border); }
+.fm-row select { font: inherit; font-size: 11.5px; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 1px 4px; }
+.fm-glyph { width: 12px; height: 12px; border-radius: 6px; border: 2px solid var(--text-2); display: inline-block; flex: none; box-sizing: border-box; }
+.fm-glyph.mandatory { background: var(--text-2); }
+.fm-glyph.alternative { border-radius: 2px; transform: rotate(45deg); width: 9px; height: 9px; }
+.fm-glyph.or { border-radius: 2px; background: var(--text-2); transform: rotate(45deg); width: 9px; height: 9px; }
+.fm-glyph.root { border-color: var(--accent); background: var(--accent); }
+.fm-cons { font-size: 11px; color: var(--text-3); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; display: inline-flex; gap: 4px; align-items: center; }
+.fm-cons.excludes { color: var(--danger); }
+.fm-cons button, .fm-row .fm-act { all: unset; cursor: pointer; color: var(--text-3); padding: 0 2px; }
+.fm-cons button:hover, .fm-row .fm-act:hover { color: var(--accent); }
+.fm-facts { display: flex; gap: 12px; flex-wrap: wrap; padding: 0 12px 6px; font-size: 12px; color: var(--text-3); }
+
+/* Configuration states from propagation */
+.var-feature.implied .link { font-style: italic; }
+.var-feature.excluded .link { color: var(--text-3); text-decoration: line-through; }
+.var-state { font-size: 10.5px; border-radius: 8px; padding: 0 6px; }
+.var-state.implied { color: var(--accent); border: 1px solid var(--accent); }
+.var-state.excluded { color: var(--text-3); border: 1px dashed var(--border-strong); }
+
+/* Variant comparison */
+.vcmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 12px 12px; font-size: 12.5px; }
+.vcmp h4 { margin: 6px 0 4px; font-size: 12px; color: var(--text-3); font-weight: 600; }
+.vcmp ul { margin: 0; padding-left: 18px; }
+.vcmp .only-a { color: #2f6fd6; }
+.vcmp .only-b { color: #b25c00; }

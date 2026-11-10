@@ -288,7 +288,15 @@ public static partial class SvgRenderer
         Text(sb, x0 + 12, y0 + 18, $"«block» {d.Owner.Name}", true, "start", size: 12.5, color: t.Text);
     }
 
+    /// <summary>Each connector in a group tagged with its edge id (so overlays such as the variant view can style it).</summary>
     private static void RenderEdge(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps)
+    {
+        sb.Append($"<g data-edge=\"{E(e.Id)}\">");
+        RenderEdgeShape(sb, d, e, pts, t, jumps);
+        sb.Append("</g>");
+    }
+
+    private static void RenderEdgeShape(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps)
     {
         var style = Notation.StyleOf(e.Relationship);
         if (e.Style.TryGetValue("stroke", out var ec) && SafeColor(ec) is { } edgeColor) t = t with { Edge = edgeColor };

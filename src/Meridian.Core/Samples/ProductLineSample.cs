@@ -90,6 +90,11 @@ public static class ProductLineSample
         foreach (var r in m.Relationships.Where(r => r.Kind is ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes)) m.AddEdge(fm, r);
         EnsureDecompositionEdges(m, fm);
         m.SetBounds(fm, AutoLayout.Layered(fm), "Arrange");
+
+        // The 150% structure on a diagram, to see a variant greyed / hidden ("Show variant").
+        var bdd = m.CreateDiagram(structure, DiagramType.BlockDefinition, "Variant structure");
+        foreach (var b in new[] { vehicle, battery, tank, nav, hitch }) m.AddNode(bdd, b, new Bounds(0, 0, 160, 80));
+        m.SetBounds(bdd, AutoLayout.Layered(bdd), "Arrange");
         return pl;
     }
 

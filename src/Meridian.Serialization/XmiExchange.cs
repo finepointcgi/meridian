@@ -146,6 +146,8 @@ public static class XmiExchange
         // Requirement management attributes and test verdicts.
         ReqFields.Priority, ReqFields.Status, ReqFields.Owner, ReqFields.Rationale, ReqFields.VerificationMethod, ReqFields.Risk,
         ReqFields.Verdict, ReqFields.SourceFingerprint, ReqFields.TargetFingerprint,
+        // Simulation-driven verification: criteria, run settings and recorded results.
+        Core.Analysis.VerificationKeys.Criterion, .. Core.Analysis.VerificationKeys.RunKeys, .. Core.Analysis.VerificationKeys.ResultKeys,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>

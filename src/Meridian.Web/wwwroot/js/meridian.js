@@ -85,7 +85,7 @@ window.meridian = (() => {
       el.addEventListener("contextmenu", e => e.preventDefault());
       el.addEventListener("pointerdown", e => {
         el._typed = "";
-        if (e.target.closest?.(".inline-editor, .toolbox, .minimap, .selbar, .quickadd, .conn-chip")) return;
+        if (e.target.closest?.(".inline-editor, .toolbox, .minimap, .selbar, .quickadd, .conn-chip, .dv-legends")) return;
         try { el.setPointerCapture(e.pointerId); } catch { }
         if (e.button === 1) e.preventDefault();
       });

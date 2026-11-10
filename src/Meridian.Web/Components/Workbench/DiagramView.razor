@@ -38,6 +38,8 @@
         </div>
     }
 
+    <DiagramLegends Diagram="C.Diagram" />
+
     @* Shapes panel (draw.io style): search, sections, click to insert, drag to place. Collapses to an icon strip. *@
     <div class="toolbox @(_shapesOpen ? "open" : "")" style="@(Ws.ReadOnly ? "display:none" : "")"
          @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true" @onkeydown:stopPropagation="true">
@@ -916,6 +918,10 @@
             var sb2 = C.BoundsOf(sn);
             builder.AddMarkupContent(seq++, $"<rect x=\"{F(sb2.X - 5 * zi)}\" y=\"{F(sb2.Y - 5 * zi)}\" width=\"{F(sb2.Width + 10 * zi)}\" height=\"{F(sb2.Height + 10 * zi)}\" rx=\"{F(10 * zi)}\" fill=\"#3fbf7f\" fill-opacity=\"0.12\" stroke=\"#3fbf7f\" stroke-width=\"{F(3 * zi)}\"><animate attributeName=\"stroke-opacity\" values=\"1;0.35;1\" dur=\"1.4s\" repeatCount=\"indefinite\"/></rect>");
         }
+
+        // Variant view (grey / hide what the configuration leaves out) and requirement verification results.
+        if (Ws.VariantView.StyleFor(C.Diagram) is { Length: > 0 } variantCss) builder.AddMarkupContent(seq++, variantCss);
+        if (Ws.Verification.Overlay(C.Diagram, C.BoundsOf, zi) is { Length: > 0 } verified) builder.AddMarkupContent(seq++, verified);
 
         // Collaborators: their current selection, in their colour, with a name tag.
         foreach (var p in Ws.Others.Where(o => o.SelectedId != null))

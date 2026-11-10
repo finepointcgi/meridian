@@ -83,6 +83,7 @@ public partial class Workbench
             C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
         };
         list.AddRange(RequirementPaletteCommands());
+        list.AddRange(VerificationPaletteCommands());   // Workbench.Verification.cs
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
