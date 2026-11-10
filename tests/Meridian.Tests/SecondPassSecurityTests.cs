@@ -88,9 +88,10 @@ public class SecondPassSecurityTests
                     using (var s = zip.CreateEntry(name).Open()) s.Write(bomb.ToArray());
             }
 
-            var before = GC.GetTotalAllocatedBytes(precise: true);
+            // This thread only: the whole-process counter also sees other tests running in parallel.
+            var before = GC.GetAllocatedBytesForCurrentThread();
             var (_, report) = MagicDrawImporter.Import(path);
-            var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.Contains(report.Warnings, w => w.Contains("larger than", StringComparison.OrdinalIgnoreCase));
             Assert.True(allocated < 6L * 200 * 1024 * 1024, $"allocated {allocated / (1024 * 1024)} MB");
         }
