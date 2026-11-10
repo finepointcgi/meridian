@@ -144,13 +144,28 @@ public static class ModelMerge
         public required string RootId { get; init; }
         public required Dictionary<string, FElement> Elements { get; init; }
 
+        /// <summary>
+        /// Ids the model refers to but doesn't contain: used-project (library) elements and missing references
+        /// (docs/LIBRARIES.md). References to them survive the merge instead of being dropped as dangling.
+        /// </summary>
+        public HashSet<string> External { get; } = new(StringComparer.Ordinal);
+
         public FElement? this[string? id] => id != null && Elements.TryGetValue(id, out var e) ? e : null;
 
         public static Snapshot Of(ModelRepository m)
         {
             var map = new Dictionary<string, FElement>(m.Count, StringComparer.Ordinal);
+            var external = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var x in m.MissingReferences) external.Add(x.Id);
             void Walk(Element e)
             {
+                if (m.HasLibraries && m.IsLibraryRoot(e))
+                {
+                    // A used project's content is not the project's to merge: only references to it are.
+                    external.Add(e.Id);
+                    foreach (var inside in e.Descendants()) external.Add(inside.Id);
+                    return;
+                }
                 var fields = new Dictionary<string, string>(e.Fields, StringComparer.Ordinal);
                 if (e is Relationship r) { fields[SourceKey] = r.Source.Id; fields[TargetKey] = r.Target.Id; }
                 var f = new FElement
@@ -158,7 +173,8 @@ public static class ModelMerge
                     Id = e.Id, Kind = e.Kind, Owner = e.Owner?.Id, Fields = fields, DiagramType = (e as Diagram)?.DiagramType,
                     Label = Label(e), Path = e.Owner?.QualifiedName ?? "",
                 };
-                foreach (var c in e.OwnedElements) f.Children.Add(c.Id);
+                foreach (var c in e.OwnedElements)
+                    if (!m.HasLibraries || !m.IsLibraryRoot(c)) f.Children.Add(c.Id);
                 if (e is Diagram d)
                 {
                     foreach (var n in d.Nodes)
@@ -176,7 +192,9 @@ public static class ModelMerge
                 foreach (var c in e.OwnedElements) Walk(c);
             }
             Walk(m.Root);
-            return new Snapshot { RootId = m.Root.Id, Elements = map };
+            var snapshot = new Snapshot { RootId = m.Root.Id, Elements = map };
+            snapshot.External.UnionWith(external);
+            return snapshot;
         }
 
         public bool IsInSubtree(string id, string rootId)
@@ -656,6 +674,15 @@ public static class ModelMerge
                 childrenOf[owner] = ordered;
             }
 
+            // References to used-project elements and missing references are kept (docs/LIBRARIES.md).
+            var external = new HashSet<string>(b.External, StringComparer.Ordinal);
+            external.UnionWith(o.External);
+            external.UnionWith(t.External);
+            external.ExceptWith(_out.Keys);
+            var stand = new Dictionary<string, Element>(StringComparer.Ordinal);
+            Element? Stand(string id) => !external.Contains(id) ? null
+                : stand.TryGetValue(id, out var x) ? x : stand[id] = Libraries.MissingReference.Element(id);
+
             // Reachable from the root; relationships only when both ends survive (repeat until stable, since ends may be relationships).
             var alive = new HashSet<string>(StringComparer.Ordinal);
             bool changed;
@@ -670,7 +697,8 @@ public static class ModelMerge
                     if (!_out.TryGetValue(id, out var m) || !reach.Add(id)) continue;
                     if (Metamodel.IsRelationship(m.Kind) &&
                         (!m.Fields.TryGetValue(SourceKey, out var s) || !m.Fields.TryGetValue(TargetKey, out var tg) ||
-                         (alive.Count > 0 && (!alive.Contains(s) || !alive.Contains(tg))) || !_out.ContainsKey(s) || !_out.ContainsKey(tg)))
+                         (alive.Count > 0 && ((!alive.Contains(s) && !external.Contains(s)) || (!alive.Contains(tg) && !external.Contains(tg))))
+                         || (!_out.ContainsKey(s) && !external.Contains(s)) || (!_out.ContainsKey(tg) && !external.Contains(tg))))
                     { reach.Remove(id); continue; }
                     foreach (var c in childrenOf.GetValueOrDefault(id) ?? []) stack.Push(c);
                 }
@@ -693,7 +721,9 @@ public static class ModelMerge
                 foreach (var id in pending)
                 {
                     var m = _out[id];
-                    if (!made.TryGetValue(m.Fields[SourceKey], out var s) || !made.TryGetValue(m.Fields[TargetKey], out var tg)) { remaining.Add(id); continue; }
+                    var s = made.GetValueOrDefault(m.Fields[SourceKey]) ?? Stand(m.Fields[SourceKey]);
+                    var tg = made.GetValueOrDefault(m.Fields[TargetKey]) ?? Stand(m.Fields[TargetKey]);
+                    if (s is null || tg is null) { remaining.Add(id); continue; }
                     var r = new Relationship(m.Kind, s, tg, id);
                     foreach (var (k, v) in m.Fields) if (k is not (SourceKey or TargetKey)) r.SetRaw(k, v);
                     made[id] = r;
@@ -722,7 +752,7 @@ public static class ModelMerge
                 var nodes = new Dictionary<string, DiagramNode>(StringComparer.Ordinal);
                 foreach (var n in m.Nodes)
                 {
-                    if (model.Find(n.ElementId) is not { } el) continue;
+                    if ((model.Find(n.ElementId) ?? Stand(n.ElementId)) is not { } el) continue;
                     var node = new DiagramNode(el, n.Bounds, n.Id);
                     foreach (var (k, v) in n.Style) node.Style[k] = v;
                     nodes[n.Id] = node;
@@ -732,12 +762,17 @@ public static class ModelMerge
                     if (nodes.TryGetValue(n.Id, out var node) && n.ParentId != null && nodes.ContainsKey(n.ParentId)) node.ParentId = n.ParentId;
                 foreach (var x in m.Edges)
                 {
-                    if (model.Find(x.RelationshipId) is not Relationship r || !nodes.TryGetValue(x.SourceNodeId, out var sn) || !nodes.TryGetValue(x.TargetNodeId, out var tn)) continue;
+                    if (!nodes.TryGetValue(x.SourceNodeId, out var sn) || !nodes.TryGetValue(x.TargetNodeId, out var tn)) continue;
+                    Relationship r;
+                    if (model.Find(x.RelationshipId) is Relationship known) r = known;
+                    else if (external.Contains(x.RelationshipId)) stand[x.RelationshipId] = r = Libraries.MissingReference.Relationship(x.RelationshipId, sn.Element, tn.Element);
+                    else continue;
                     var edge = new DiagramEdge(r, sn, tn, x.Id) { Waypoints = x.Waypoints.ToList() };
                     foreach (var (k, v) in x.Style) edge.Style[k] = v;
                     model.AddEdgeForLoad(d, edge);
                 }
             }
+            foreach (var x in stand.Values) model.RegisterMissing(x);
             return model;
         }
     }

@@ -330,6 +330,37 @@ public class LibraryTests
     }
 
     [Fact]
+    public void Branch_Merges_Keep_References_To_Library_Elements()
+    {
+        var (src, pkg, wheel, load) = PartsLibrary();
+        var lib = Payload(src, pkg);
+        var baseJson = ProjectFile.Serialize(SampleModels.Vehicle());
+        var branch = ProjectFile.Deserialize(baseJson, [lib]);
+        var part = branch.Create(branch.OfKind(ElementKind.Block).Single(b => b.Name == "Vehicle"), ElementKind.Property, "frontLeft");
+        branch.Set(part, FieldKeys.Type, wheel.Id);
+        var sat = branch.Connect(ElementKind.Satisfy, branch.OfKind(ElementKind.Block).Single(b => b.Name == "Vehicle"), branch.Find(load.Id)!);
+        var json = ProjectFile.Serialize(branch);
+
+        // Stored versions have no library content: the merge sees the references as external ids, not as dangling ends.
+        var @base = ProjectFile.Deserialize(baseJson);
+        var theirs = ProjectFile.Deserialize(json);
+        var ours = ProjectFile.Deserialize(ProjectFile.Serialize(@base));
+        var merged = ModelMerge.Merge(@base, ours, theirs).Model;
+        var mergedJson = ProjectFile.Serialize(merged);
+        Assert.Contains(sat.Id, mergedJson);
+        Assert.Equal(wheel.Id, merged.Find(part.Id)!.TypeRef);
+        var again = ProjectFile.Deserialize(mergedJson, [lib]);
+        Assert.Equal(load.Id, ((Relationship)again.Find(sat.Id)!).Target.Id);
+        Assert.True(again.IsLibraryElement(((Relationship)again.Find(sat.Id)!).Target));
+
+        // A model with its libraries mounted merges its own content only.
+        var live = ProjectFile.Deserialize(json, [lib]);
+        var fromLive = ModelMerge.Merge(@base, ours, live).Model;
+        Assert.DoesNotContain("Standard parts", ProjectFile.Serialize(fromLive));
+        Assert.Contains(sat.Id, ProjectFile.Serialize(fromLive));
+    }
+
+    [Fact]
     public void Models_Without_Libraries_Are_Unchanged()
     {
         var m = SampleModels.Vehicle();
