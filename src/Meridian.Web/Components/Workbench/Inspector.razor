@@ -152,6 +152,12 @@
                 case FieldKeys.TagType:
                     @Choice(e, key, "Value type", ("", "String"), ("Integer", "Integer"), ("Real", "Real"), ("Boolean", "Boolean"), ("Enum", "Enumeration (literals below)"))
                     break;
+                case EdgeRouter.DiagramKey:
+                    @Choice(e, key, "Connector style", ("", "Classic"), ("orthogonal", "Orthogonal (routed around shapes)"), ("straight", "Straight"), ("curved", "Curved"))
+                    break;
+                case EdgeRouter.LineJumpsKey:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Line jumps where connectors cross" />
+                    break;
                 case FieldKeys.Legend:
                     <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Show legend" />
                     break;
@@ -208,7 +214,7 @@
                     }
                     break;
                 default:
-                    var multi = key is FieldKeys.Documentation or FieldKeys.Text or FieldKeys.Body or Meridian.Core.Analysis.ViewFields.Query or Meridian.Core.Analysis.ViewFields.Message;
+                    var multi = key is FieldKeys.Documentation or FieldKeys.Text or FieldKeys.Body or Meridian.Core.Analysis.ViewFields.Query or Meridian.Core.Analysis.ViewFields.Message or InteractionNotation.Sequence or InteractionNotation.Messages;
                     <MudTextField @key="@(e.Id + key)" T="string" Label="@Label(key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
                                   Lines="@(multi ? 3 : 1)" AutoGrow="multi" MaxLines="12" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Help(key)" />
                     break;
@@ -329,7 +335,7 @@
     }
 
     private static IEnumerable<string> Fields(Element e) =>
-        e is Diagram ? [FieldKeys.Name, FieldKeys.Legend, FieldKeys.Documentation] : Metamodel.EditableFields(e.Kind);
+        e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation] : Metamodel.EditableFields(e.Kind);
 
     private void Set(Element e, string key, string? value)
     {
@@ -479,7 +485,7 @@
         FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity",
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
-        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => ExtFieldKeys.Label(key) ?? key,
+        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? key,
     };
 
     private static string? Help(string key) => key switch
@@ -489,6 +495,6 @@
         FieldKeys.Stereotypes => "Comma separated",
         Meridian.Core.Analysis.ViewFields.Query => "e.g. kind:Block in:Structure where mass > 50 and not has:satisfy",
         Meridian.Core.Analysis.ViewFields.Message => "Placeholders: {name}, {owner}, {mass} …",
-        _ => ExtFieldKeys.Help(key),
+        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key),
     };
 }

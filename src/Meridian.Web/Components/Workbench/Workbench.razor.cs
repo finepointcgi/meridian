@@ -61,6 +61,7 @@ public partial class Workbench
             C("Toggle light / dark mode", Icons.Material.Outlined.DarkMode, ToggleTheme),
             C("Arrange active diagram", Icons.Material.Outlined.AutoAwesomeMosaic, () => Ws.Active?.Arrange()),
             C("Zoom to fit", Icons.Material.Outlined.FitScreen, () => Ws.Active?.ZoomToFit()),
+            C("Fit diagram frames to contents", Icons.Material.Outlined.FitScreen, () => Ws.Active?.FitFrameToContents()),
             CA("Open HTML report", Icons.Material.Outlined.Article, OpenReport),
             CA("Generate document from template (PDF / Word / HTML)", Icons.Material.Outlined.Description, ExportDocx),
             CA("Export XMI", Icons.Material.Outlined.SwapHoriz, ExportXmi),
@@ -583,15 +584,16 @@ public partial class Workbench
                     owner = context.AncestorsAndSelf().FirstOrDefault(a => Metamodel.IsValidDiagramContext(type, a.Kind))
                             ?? throw new InvalidOperationException("Select a block first — an internal block diagram shows a block's parts and ports.");
                     break;
-                case DiagramType.Activity or DiagramType.StateMachine or DiagramType.Sequence:
+                case DiagramType.Activity or DiagramType.StateMachine or DiagramType.Sequence
+                    or DiagramType.Timing or DiagramType.Communication or DiagramType.InteractionOverview:
                 {
-                    var behaviorKind = type switch { DiagramType.Activity => ElementKind.Activity, DiagramType.StateMachine => ElementKind.StateMachine, _ => ElementKind.Interaction };
+                    var behaviorKind = type switch { DiagramType.Activity or DiagramType.InteractionOverview => ElementKind.Activity, DiagramType.StateMachine => ElementKind.StateMachine, _ => ElementKind.Interaction };
                     var existing = context.AncestorsAndSelf().FirstOrDefault(a => a.Kind == behaviorKind);
                     if (existing != null) { owner = existing; break; }
                     var host = Ws.Model.DefaultOwnerFor(context, behaviorKind);
                     using (Ws.Model.History.Transaction($"New {Metamodel.DisplayName(type)}"))
                     {
-                        owner = Ws.Model.Create(host, behaviorKind, host.Kind is ElementKind.Package or ElementKind.Model ? null : $"{host.Name} {type switch { DiagramType.Activity => "Behavior", DiagramType.StateMachine => "States", _ => "Interaction" }}");
+                        owner = Ws.Model.Create(host, behaviorKind, host.Kind is ElementKind.Package or ElementKind.Model ? null : $"{host.Name} {type switch { DiagramType.Activity or DiagramType.InteractionOverview => "Behavior", DiagramType.StateMachine => "States", _ => "Interaction" }}");
                         CreateDiagram(owner, type);
                     }
                     return;

@@ -124,6 +124,14 @@ public static class Notation
             name = string.IsNullOrEmpty(e.Get(FieldKeys.Operator)) ? "alt" : e.Get(FieldKeys.Operator);
             keyword = null;
         }
+        else if (e.Kind == ElementKind.InteractionUse)
+        {
+            name = InteractionNotation.RefName(model, e);
+        }
+        else if (e.Kind is ElementKind.DurationConstraint or ElementKind.TimeConstraint)
+        {
+            name = e.Get(InteractionNotation.Constraint) is { Length: > 0 } c ? c : e.Kind == ElementKind.TimeConstraint ? "{t..t+3}" : "{d..3*d}";
+        }
         else if (e.Kind == ElementKind.Comment)
         {
             name = e.Get(FieldKeys.Body);
@@ -230,6 +238,7 @@ public static class Notation
         var style = StyleOf(r);
         var parts = new List<string>();
         if (style.Keyword != null) parts.Add($"«{style.Keyword}»");
+        foreach (var st in r.Stereotypes) parts.Add($"«{st}»");
         if (!string.IsNullOrEmpty(r.Name)) parts.Add(r.Name);
         if (r.Kind == ElementKind.Message && r.Get(FieldKeys.Signature) is { Length: > 0 } sig) parts.Add(sig);
         if (r.Kind is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow)
@@ -347,6 +356,8 @@ public static class Notation
     public static IReadOnlyList<Pt> RouteIn(Diagram d, DiagramEdge e, Func<DiagramNode, Bounds>? boundsOf = null, IReadOnlyList<Pt>? waypoints = null)
     {
         boundsOf ??= n => n.Bounds;
+        // Diagrams with a routing style (new diagrams, or chosen in their properties) use the edge router.
+        if (EdgeRouter.TryRoute(d, e, boundsOf, waypoints) is { } routed) return routed;
         var wps = waypoints ?? e.Waypoints;
         if (wps.Count > 0 || e.Relationship.Kind == ElementKind.Message || ReferenceEquals(e.Source, e.Target) || !UsesOrthogonal(e))
             return Route(e, boundsOf, waypoints);

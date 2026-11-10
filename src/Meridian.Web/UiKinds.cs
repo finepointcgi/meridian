@@ -132,6 +132,13 @@ public static class UiKinds
         ElementKind.FeatureDecomposition => MudBlazor.Icons.Material.Outlined.AccountTree,
         ElementKind.Requires => MudBlazor.Icons.Material.Outlined.Link,
         ElementKind.Excludes => MudBlazor.Icons.Material.Outlined.LinkOff,
+        ElementKind.TimingLifeline => MudBlazor.Icons.Material.Outlined.Timeline,
+        ElementKind.DurationConstraint => MudBlazor.Icons.Material.Outlined.Straighten,
+        ElementKind.TimeConstraint => MudBlazor.Icons.Material.Outlined.Schedule,
+        ElementKind.InteractionUse => MudBlazor.Icons.Material.Outlined.CropFree,
+        ElementKind.InlineInteraction => MudBlazor.Icons.Material.Outlined.SwapVert,
+        ElementKind.CommunicationLifeline => MudBlazor.Icons.Material.Outlined.CropSquare,
+        ElementKind.CommunicationLink => MudBlazor.Icons.Material.Outlined.HorizontalRule,
         _ => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
     };
 
@@ -191,6 +198,10 @@ public static class UiKinds
         DiagramType.Database => MudBlazor.Icons.Material.Outlined.Storage,
         DiagramType.Whiteboard => MudBlazor.Icons.Material.Outlined.Draw,
         DiagramType.FeatureModel => MudBlazor.Icons.Material.Outlined.ToggleOn,
+        DiagramType.Timing => MudBlazor.Icons.Material.Outlined.Timeline,
+        DiagramType.InteractionOverview => MudBlazor.Icons.Material.Outlined.Schema,
+        DiagramType.Communication => MudBlazor.Icons.Material.Outlined.Hub,
+        _ when UafViewpoints.IsUaf(t) => MudBlazor.Icons.Material.Outlined.Widgets,
         _ => MudBlazor.Icons.Material.Outlined.Class,
     };
 

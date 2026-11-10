@@ -64,6 +64,8 @@ public static class XmiExchange
         var x = new XElement(UmlDi + "UMLDiagram", new XAttribute(Xmi + "id", d.Id), new XAttribute("name", d.Name),
             new XAttribute("modelElement", d.Owner?.Id ?? ""), new XAttribute(Meridian + "diagramType", d.DiagramType.ToString()));
         if (!string.IsNullOrEmpty(d.Documentation)) x.Add(new XAttribute(Meridian + "documentation", d.Documentation));
+        foreach (var key in DiagramFields)
+            if (d.Get(key) is { Length: > 0 } dv) x.Add(new XAttribute(Meridian + key, dv));
         foreach (var n in d.Nodes)
         {
             var shape = new XElement("ownedElement", new XAttribute(Xmi + "type", "umldi:UMLShape"), new XAttribute(Xmi + "id", n.Id), new XAttribute("modelElement", n.Element.Id),
@@ -76,6 +78,7 @@ public static class XmiExchange
         foreach (var e in d.Edges)
             x.Add(new XElement("ownedElement", new XAttribute(Xmi + "type", "umldi:UMLEdge"), new XAttribute(Xmi + "id", e.Id), new XAttribute("modelElement", e.Relationship.Id),
                 new XAttribute("source", e.Source.Id), new XAttribute("target", e.Target.Id),
+                e.Style.Count > 0 ? new XAttribute(Meridian + "style", string.Join(";", e.Style.Select(kv => $"{kv.Key}={kv.Value}"))) : null,
                 e.Waypoints.Select(p => new XElement("waypoint", new XAttribute(Xmi + "type", "dc:Point"), new XAttribute("x", Num(p.X)), new XAttribute("y", Num(p.Y))))));
         return x;
     }
@@ -97,6 +100,7 @@ public static class XmiExchange
             var d = new Diagram(type, id != null && model.Find(id) == null ? id : null);
             ModelRepository.SetFieldForLoad(d, FieldKeys.Name, Attr(dx, "name"));
             ModelRepository.SetFieldForLoad(d, FieldKeys.Documentation, dx.Attribute(Meridian + "documentation")?.Value);
+            foreach (var key in DiagramFields) ModelRepository.SetFieldForLoad(d, key, dx.Attribute(Meridian + key)?.Value);
             model.AttachForLoad(owner, d);
             var shapes = new Dictionary<string, DiagramNode>();
             foreach (var se in dx.Elements().Where(e => XmiType(e) == "UMLShape"))
@@ -116,10 +120,15 @@ public static class XmiExchange
                 if (!shapes.TryGetValue(Attr(ee, "source") ?? "", out var sn) || !shapes.TryGetValue(Attr(ee, "target") ?? "", out var tn)) continue;
                 var edge = new DiagramEdge(r, sn, tn, XmiId(ee));
                 ModelRepository.SetWaypointsForLoad(edge, ee.Elements().Where(w => w.Name.LocalName == "waypoint").Select(w => new Pt(D(w, "x"), D(w, "y"))));
+                foreach (var kv in (ee.Attribute(Meridian + "style")?.Value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+                    if (kv.Split('=', 2) is [var k, var v]) ModelRepository.SetEdgeStyleForLoad(edge, k, v);
                 model.AddEdgeForLoad(d, edge);
             }
         }
     }
+
+    /// <summary>Diagram settings carried as Meridian attributes of the DI diagram (routing style, line jumps, legend, time unit).</summary>
+    private static readonly string[] DiagramFields = [EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, InteractionNotation.TimeUnit];
 
     /// <summary>Fields with no standard UML/SysML home; they round-trip through the Meridian XMI extension.</summary>
     private static readonly HashSet<string> ExtensionOnlyFields =
@@ -130,6 +139,7 @@ public static class XmiExchange
         FieldKeys.Unique, FieldKeys.FkColumns, FieldKeys.RefColumns,
         Core.Analysis.ViewFields.Query, Core.Analysis.ViewFields.Columns, Core.Analysis.ViewFields.Severity, Core.Analysis.ViewFields.Message,
         .. ExtFieldKeys.All,
+        .. InteractionNotation.All,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -139,7 +149,9 @@ public static class XmiExchange
         or ElementKind.Shape or ElementKind.Line
         or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule
         or ElementKind.Feature or ElementKind.Configuration or ElementKind.TradeStudy
-        or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes;
+        or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes
+        or ElementKind.TimingLifeline or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.InteractionUse
+        or ElementKind.InlineInteraction or ElementKind.CommunicationLifeline or ElementKind.CommunicationLink;
     private static XAttribute Type(string t) => new(Xmi + "type", "uml:" + t);
 
     private static void Emit(ModelRepository m, XElement parent, Element e, List<XElement> st, XElement ext)
@@ -171,7 +183,9 @@ public static class XmiExchange
             ElementKind.Activity or ElementKind.TestCase => ("packagedElement", "Activity"),
             ElementKind.StateMachine => ("packagedElement", "StateMachine"),
             ElementKind.Interaction => ("packagedElement", "Interaction"),
-            ElementKind.Lifeline => ("lifeline", "Lifeline"),
+            ElementKind.Lifeline or ElementKind.TimingLifeline or ElementKind.CommunicationLifeline => ("lifeline", "Lifeline"),
+            ElementKind.InteractionUse or ElementKind.InlineInteraction => ("node", "CallBehaviorAction"),
+            ElementKind.DurationConstraint or ElementKind.TimeConstraint => ("ownedRule", "Constraint"),
             ElementKind.CombinedFragment => ("fragment", "CombinedFragment"),
             ElementKind.Partition => ("group", "ActivityPartition"),
             ElementKind.InputPin => ("input", "InputPin"),

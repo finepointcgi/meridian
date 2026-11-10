@@ -21,7 +21,7 @@ public sealed record SvgTheme(
         k => k switch
         {
             ElementKind.Requirement => "#dce8ff", ElementKind.TestCase => "#d9f1e1",
-            ElementKind.Block or ElementKind.Class or ElementKind.Component => "#ffeec4",
+            ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.CommunicationLifeline => "#ffeec4",
             ElementKind.InterfaceBlock or ElementKind.Interface => "#ece2ff",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#d8f0ef",
             ElementKind.ConstraintBlock => "#fbdede", ElementKind.Property or ElementKind.Port => "#fff4d6",
@@ -47,7 +47,7 @@ public sealed record SvgTheme(
         k => k switch
         {
             ElementKind.Requirement => "#1c335f", ElementKind.TestCase => "#173a2b",
-            ElementKind.Block or ElementKind.Class or ElementKind.Component => "#3a2f14",
+            ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.CommunicationLifeline => "#3a2f14",
             ElementKind.InterfaceBlock or ElementKind.Interface => "#2d2453",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#123c3c",
             ElementKind.ConstraintBlock => "#4a2222", ElementKind.Property or ElementKind.Port => "#33291a",
@@ -94,7 +94,8 @@ public static class SvgRenderer
         double minX = 0, minY = 0, maxX = 400, maxY = 300;
         if (nodes.Count > 0)
         {
-            var pts = view.Edges.SelectMany(e => e.Waypoints).ToList();
+            // Routed connectors may detour around shapes: keep their whole path inside the picture.
+            var pts = EdgeRouter.RouteAll(view, bounds).Values.SelectMany(p => p).ToList();
             minX = Math.Min(nodes.Min(n => n.Bounds.X), pts.Count > 0 ? pts.Min(p => p.X) : double.MaxValue) - margin - (d.DiagramType == DiagramType.InternalBlock ? 40 : 0);
             minY = Math.Min(nodes.Min(n => n.Bounds.Y), pts.Count > 0 ? pts.Min(p => p.Y) : double.MaxValue) - margin - 30 - (d.DiagramType == DiagramType.InternalBlock ? 50 : 0);
             maxX = Math.Max(nodes.Max(n => n.Bounds.Right), pts.Count > 0 ? pts.Max(p => p.X) : double.MinValue) + margin + 60;
@@ -131,6 +132,13 @@ public static class SvgRenderer
     {
         var t = theme ?? SvgTheme.Light;
         d = DiagramExtras.VisibleView(d);   // layers: hidden ones are skipped, the rest drawn bottom layer first
+        // Shape bounds are asked for many times per render (routing, containers, edges): compute each once.
+        var raw = bounds;
+        var memo = new Dictionary<DiagramNode, Bounds>(d.Nodes.Count, ReferenceEqualityComparer.Instance);
+        bounds = n => memo.TryGetValue(n, out var mb) ? mb : memo[n] = raw(n);
+        // Routes are computed on the whole (visible) diagram, before culling, so they don't depend on the viewport.
+        var routes = EdgeRouter.RouteAll(d, bounds, waypoints);
+        var jumps = EdgeRouter.LineJumps(d) ? new List<(Pt A, Pt B)>() : null;
         if (viewport is { } vp && d.Nodes.Count > 150)
         {
             // Large diagrams: draw only what intersects the (padded) viewport.
@@ -154,16 +162,17 @@ public static class SvgRenderer
                 var cx = bounds(ll).Center.X;
                 sb.Append($"<rect x=\"{F(cx - Notation.ActivationWidth / 2)}\" y=\"{F(from)}\" width=\"{F(Notation.ActivationWidth)}\" height=\"{F(Math.Max(8, to - from))}\" rx=\"2\" fill=\"{t.Header(ElementKind.Block)}\" stroke=\"{t.Stroke}\"/>");
             }
-            foreach (var e in d.Edges) RenderEdge(sb, d, e, bounds, waypoints?.Invoke(e), t);
+            foreach (var e in d.Edges) RenderEdge(sb, d, e, routes[e], t, jumps);
             foreach (var n in d.Nodes.Where(n => n.Element.Kind is not (ElementKind.CombinedFragment or ElementKind.Lifeline))) RenderNode(sb, model, d, n, bounds(n), t);
             return;
         }
         // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then paths, then contents by depth.
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
-        foreach (var e in d.Edges) RenderEdge(sb, d, e, bounds, waypoints?.Invoke(e), t);
+        foreach (var e in d.Edges) RenderEdge(sb, d, e, routes[e], t, jumps);
         if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
         foreach (var n in d.Nodes.Except(containers).OrderBy(n => Depth(d, n))) RenderNode(sb, model, d, n, bounds(n), t);
+        if (d.DiagramType == DiagramType.Timing) RenderTimeAxis(sb, d, bounds, t);
         RenderLegend(sb, model, d, bounds, t);
     }
 
@@ -236,9 +245,8 @@ public static class SvgRenderer
         Text(sb, x0 + 12, y0 + 18, $"«block» {d.Owner.Name}", true, "start", size: 12.5, color: t.Text);
     }
 
-    private static void RenderEdge(StringBuilder sb, Diagram d, DiagramEdge e, Func<DiagramNode, Bounds> bounds, IReadOnlyList<Pt>? wps, SvgTheme t)
+    private static void RenderEdge(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps)
     {
-        var pts = Notation.RouteIn(d, e, bounds, wps);
         var style = Notation.StyleOf(e.Relationship);
         if (e.Style.TryGetValue("stroke", out var ec) && ec.Length > 0) t = t with { Edge = ec };
         var width = e.Style.TryGetValue("width", out var ew) && double.TryParse(ew, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var wv) ? wv : 1.3;
@@ -250,7 +258,13 @@ public static class SvgRenderer
                 _ => style,
             };
         var dash = style.Dotted ? " stroke-dasharray=\"2,3\"" : style.Dashed ? " stroke-dasharray=\"6,4\"" : "";
-        sb.Append($"<polyline points=\"{Points(pts)}\" fill=\"none\" stroke=\"{t.Edge}\" stroke-width=\"{F(width)}\"{dash}/>");
+        var hops = jumps is { Count: > 0 } ? EdgeRouter.Hops(pts, jumps) : null;
+        if (hops is { Count: > 0 })
+            sb.Append($"<path d=\"{JumpPath(pts, hops)}\" fill=\"none\" stroke=\"{t.Edge}\" stroke-width=\"{F(width)}\"{dash}/>");
+        else
+            sb.Append($"<polyline points=\"{Points(pts)}\" fill=\"none\" stroke=\"{t.Edge}\" stroke-width=\"{F(width)}\"{dash}/>");
+        jumps?.AddRange(EdgeRouter.Segments(pts));
+        if (e.Relationship.Kind == ElementKind.CommunicationLink) RenderLinkMessages(sb, e.Relationship, pts, t);
         if (e.Relationship.Kind == ElementKind.Connector && e.Relationship.Get(FieldKeys.ItemFlow) is { Length: > 0 } item && pts.Count >= 2)
         {
             // SysML item flow: a filled triangle on the connector pointing in the flow direction, plus the conveyed item.
@@ -289,6 +303,81 @@ public static class SvgRenderer
         }
         if (e.Relationship.Kind is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation && pts.Count >= 2 && !string.IsNullOrEmpty(e.Relationship.Multiplicity))
             sb.Append($"<text x=\"{F(pts[^1].X + 6)}\" y=\"{F(pts[^1].Y - 6)}\" font-size=\"11\" fill=\"{t.Muted}\">{E(e.Relationship.Multiplicity)}</text>");
+    }
+
+    /// <summary>SVG path for a polyline with small semicircular hops at the given crossings.</summary>
+    public static string JumpPath(IReadOnlyList<Pt> pts, IReadOnlyList<(int Segment, Pt At)> hops, double r = 5)
+    {
+        var p = new StringBuilder($"M{F(pts[0].X)},{F(pts[0].Y)}");
+        var k = 0;
+        for (var i = 1; i < pts.Count; i++)
+        {
+            Pt a = pts[i - 1], b = pts[i];
+            var len = Notation.Dist(a, b);
+            var ux = len > 0 ? (b.X - a.X) / len : 0; var uy = len > 0 ? (b.Y - a.Y) / len : 0;
+            var sweep = ux + uy > 0 ? 1 : 0;   // hops bulge up on horizontal runs, right on vertical ones
+            for (; k < hops.Count && hops[k].Segment == i; k++)
+            {
+                var c = hops[k].At;
+                p.Append($" L{F(c.X - ux * r)},{F(c.Y - uy * r)} A{F(r)},{F(r)} 0 0 {sweep} {F(c.X + ux * r)},{F(c.Y + uy * r)}");
+            }
+            p.Append($" L{F(b.X)},{F(b.Y)}");
+        }
+        return p.ToString();
+    }
+
+    /// <summary>Communication diagrams: numbered messages beside a link, each with a small arrow showing its direction.</summary>
+    private static void RenderLinkMessages(StringBuilder sb, Relationship link, IReadOnlyList<Pt> pts, SvgTheme t)
+    {
+        var msgs = InteractionNotation.LinkMessages(link);
+        if (msgs.Count == 0 || pts.Count < 2) return;
+        var m = Notation.Midpoint(pts);
+        var seg = Enumerable.Range(1, pts.Count - 1).Select(i => (pts[i - 1], pts[i])).OrderBy(sg => Notation.DistanceToSegment(m, sg.Item1, sg.Item2)).First();
+        var len = Notation.Dist(seg.Item1, seg.Item2);
+        if (len < 1) return;
+        var ux = (seg.Item2.X - seg.Item1.X) / len; var uy = (seg.Item2.Y - seg.Item1.Y) / len;
+        // Stack the messages on one side of the link (above it, or left of a vertical one).
+        var nx = -uy; var ny = ux;
+        if (ny > 0 || Math.Abs(ny) < 1e-6 && nx > 0) { nx = -nx; ny = -ny; }
+        var accent = t.Accent(ElementKind.Interaction);
+        var horizontal = Math.Abs(ux) >= Math.Abs(uy);
+        for (var i = 0; i < msgs.Count; i++)
+        {
+            var (text, forward) = msgs[i];
+            var tw = text.Length * 6;
+            // Beside a horizontal link the messages stack upwards, centred on it; beside a vertical one they stack downwards on its left.
+            var c = horizontal
+                ? new Pt(m.X - tw / 2 - 16, m.Y + ny * (12 + i * 16))
+                : new Pt(m.X + nx * 14, m.Y - (msgs.Count - 1) * 8 + i * 16);
+            var dx = forward ? ux : -ux; var dy = forward ? uy : -uy;
+            var tail = new Pt(c.X - dx * 9, c.Y - dy * 6 - (horizontal ? 0 : 0)); var tip = new Pt(c.X + dx * 9, c.Y + dy * 6);
+            sb.Append($"<line x1=\"{F(tail.X)}\" y1=\"{F(tail.Y)}\" x2=\"{F(tip.X)}\" y2=\"{F(tip.Y)}\" stroke=\"{accent}\" stroke-width=\"1.3\"/>");
+            sb.Append($"<polygon points=\"{Points(Notation.ArrowPolygon(tail, tip, ArrowHead.Filled, 6))}\" fill=\"{accent}\"/>");
+            if (horizontal) Text(sb, c.X + 14, c.Y + 4, text, false, "start", size: 11, color: t.Text);
+            else Text(sb, c.X + (nx < 0 ? -8 : 8), c.Y + 4, text, false, nx < 0 ? "end" : "start", size: 11, color: t.Text);
+        }
+    }
+
+    /// <summary>Timing diagrams: a time axis under the lowest lifeline, aligned with its plot area.</summary>
+    private static void RenderTimeAxis(StringBuilder sb, Diagram d, Func<DiagramNode, Bounds> bounds, SvgTheme t)
+    {
+        var lifelines = d.Nodes.Where(n => n.Element.Kind == ElementKind.TimingLifeline).ToList();
+        if (lifelines.Count == 0) return;
+        var b = lifelines.Select(bounds).MaxBy(x => x.Bottom);
+        var (t0, t1) = InteractionNotation.TimeRange(d);
+        var lw = Math.Min(InteractionNotation.TimingLabelWidth, b.Width / 2);
+        double x0 = b.X + lw + 10, x1 = b.Right - 10, y = b.Bottom + 14;
+        if (x1 <= x0) return;
+        sb.Append($"<line x1=\"{F(x0)}\" y1=\"{F(y)}\" x2=\"{F(x1)}\" y2=\"{F(y)}\" stroke=\"{t.Stroke}\" stroke-width=\"1.2\"/>");
+        var step = InteractionNotation.TickStep(t1 - t0);
+        var unit = d.Get(InteractionNotation.TimeUnit);
+        for (var v = Math.Ceiling(t0 / step) * step; v <= t1 + 1e-9; v += step)
+        {
+            var x = x0 + (v - t0) / (t1 - t0) * (x1 - x0);
+            sb.Append($"<line x1=\"{F(x)}\" y1=\"{F(y - 4)}\" x2=\"{F(x)}\" y2=\"{F(y + 4)}\" stroke=\"{t.Stroke}\"/>");
+            Text(sb, x, y + 17, v.ToString("0.##", CultureInfo.InvariantCulture), false, "middle", size: 10.5, color: t.Muted);
+        }
+        Text(sb, x1, y + 31, unit.Length > 0 ? $"time ({unit})" : "time", false, "end", italic: true, size: 10.5, color: t.Muted);
     }
 
     public static string Points(IEnumerable<Pt> pts) => string.Join(" ", pts.Select(p => $"{F(p.X)},{F(p.Y)}"));
@@ -500,6 +589,42 @@ public static class SvgRenderer
                     Text(sb, b.X + tagW + 6, b.Y + 14, $"[{guard}]", false, "start", italic: true, size: 11.5, color: t.Muted);
                 break;
             }
+            case NodeShape.Timeline:
+                RenderTimeline(sb, d, n.Element, b, c.Name, t);
+                break;
+            case NodeShape.DurationMarker:
+            {
+                var y = b.Center.Y + 6;
+                var ac = t.Accent(ElementKind.Interaction);
+                sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" fill=\"transparent\"/>");
+                sb.Append($"<path d=\"M{F(b.X)},{F(y - 8)} V{F(y + 8)} M{F(b.Right)},{F(y - 8)} V{F(y + 8)} M{F(b.X)},{F(y)} H{F(b.Right)}\" stroke=\"{ac}\" stroke-width=\"1.3\" fill=\"none\"/>");
+                sb.Append($"<polygon points=\"{Points(Notation.ArrowPolygon(new Pt(b.Center.X, y), new Pt(b.X, y), ArrowHead.Filled, 7))}\" fill=\"{ac}\"/>");
+                sb.Append($"<polygon points=\"{Points(Notation.ArrowPolygon(new Pt(b.Center.X, y), new Pt(b.Right, y), ArrowHead.Filled, 7))}\" fill=\"{ac}\"/>");
+                Text(sb, b.Center.X, y - 6, Trunc(c.Name, b.Width), false, "middle", size: 11.5, color: t.Text);
+                break;
+            }
+            case NodeShape.TimeMarker:
+            {
+                var ac = t.Accent(ElementKind.Interaction);
+                sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" fill=\"transparent\"/>");
+                sb.Append($"<line x1=\"{F(b.Center.X)}\" y1=\"{F(b.Y + 20)}\" x2=\"{F(b.Center.X)}\" y2=\"{F(b.Bottom)}\" stroke=\"{ac}\" stroke-width=\"1.3\" stroke-dasharray=\"4,3\"/>");
+                sb.Append($"<path d=\"M{F(b.Center.X - 6)},{F(b.Y + 20)} H{F(b.Center.X + 6)}\" stroke=\"{ac}\" stroke-width=\"1.3\"/>");
+                Text(sb, b.Center.X, b.Y + 13, Trunc(c.Name, Math.Max(b.Width, 60)), false, "middle", size: 11.5, color: t.Text);
+                break;
+            }
+            case NodeShape.InteractionUse or NodeShape.InlineInteraction:
+            {
+                var isRef = shape == NodeShape.InteractionUse;
+                var tag = isRef ? "ref" : "sd " + n.Element.Name;
+                var tagW = Math.Min(b.Width - 4, tag.Length * 7 + 20);
+                var ac = t.Accent(ElementKind.Interaction);
+                sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"3\" fill=\"{fill}\" stroke=\"{ac}\" stroke-width=\"1.3\" filter=\"url(#msh)\"/>");
+                sb.Append($"<path d=\"M{F(b.X)},{F(b.Y)} H{F(b.X + tagW)} V{F(b.Y + 12)} L{F(b.X + tagW - 8)},{F(b.Y + 20)} H{F(b.X)} Z\" fill=\"{t.Header(ElementKind.Interaction)}\" stroke=\"{ac}\" stroke-width=\"1.3\"/>");
+                Text(sb, b.X + 6, b.Y + 14, Trunc(tag, tagW - 10), true, "start", size: 11.5, color: t.Text);
+                if (isRef) WrappedCentered(sb, b.Center.X, b.Center.Y + 6, b.Width - 16, c.Name, t.Text);
+                else RenderInlineSequence(sb, n.Element, new Bounds(b.X + 6, b.Y + 24, b.Width - 12, b.Height - 28), t);
+                break;
+            }
             case NodeShape.Rounded:
                 sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"12\" fill=\"{fill}\" stroke=\"{stroke}\" filter=\"url(#msh)\"/>");
                 if (n.Element.Kind == ElementKind.State)
@@ -529,6 +654,82 @@ public static class SvgRenderer
                 break;
         }
         sb.Append("</g>");
+    }
+
+    /// <summary>Timing lifeline: name and state labels on the left, the state timeline as a step line over the diagram's time range.</summary>
+    private static void RenderTimeline(StringBuilder sb, Diagram d, Element e, Bounds b, string name, SvgTheme t)
+    {
+        var lw = Math.Min(InteractionNotation.TimingLabelWidth, b.Width / 2);
+        var ac = t.Accent(ElementKind.Interaction);
+        sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"3\" fill=\"{t.NodeFill}\" stroke=\"{t.Stroke}\" filter=\"url(#msh)\"/>");
+        sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(lw)}\" height=\"{F(b.Height)}\" rx=\"3\" fill=\"{t.Header(ElementKind.Interaction)}\" stroke=\"{t.Stroke}\"/>");
+        Text(sb, b.X + 8, b.Y + 17, Trunc(name, lw - 12), true, "start", size: 12, color: t.Text);
+        var states = InteractionNotation.StatesOf(e);
+        double top = b.Y + 26, bottom = b.Bottom - 8;
+        var rowH = (bottom - top) / Math.Max(1, states.Count);
+        double Row(string s) => top + (IndexOf(states, s) + 0.5) * rowH;
+        double px0 = b.X + lw + 10, px1 = b.Right - 10;
+        foreach (var s in states)
+        {
+            var y = Row(s);
+            Text(sb, b.X + lw - 6, y + 4, Trunc(s, lw - 14), false, "end", size: 11, color: t.Muted);
+            sb.Append($"<line x1=\"{F(px0)}\" y1=\"{F(y)}\" x2=\"{F(px1)}\" y2=\"{F(y)}\" stroke=\"{t.Divider}\" stroke-dasharray=\"2,4\"/>");
+        }
+        var line = InteractionNotation.TimelineOf(e);
+        if (line.Count == 0 || px1 <= px0) return;
+        var (t0, t1) = InteractionNotation.TimeRange(d);
+        double X(double time) => px0 + (time - t0) / (t1 - t0) * (px1 - px0);
+        var pts = new List<Pt>();
+        foreach (var (time, state) in line)
+        {
+            var x = Math.Clamp(X(time), px0, px1);
+            if (pts.Count > 0) pts.Add(new Pt(x, pts[^1].Y));
+            pts.Add(new Pt(x, Row(state)));
+        }
+        pts.Add(new Pt(px1, pts[^1].Y));
+        sb.Append($"<polyline points=\"{Points(pts)}\" fill=\"none\" stroke=\"{ac}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>");
+    }
+
+    private static int IndexOf(IReadOnlyList<string> list, string s)
+    {
+        for (var i = 0; i < list.Count; i++) if (list[i] == s) return i;
+        return 0;
+    }
+
+    /// <summary>Interaction overview: the inline sequence of an "sd" frame as miniature lifelines and messages.</summary>
+    private static void RenderInlineSequence(StringBuilder sb, Element e, Bounds area, SvgTheme t)
+    {
+        var parts = InteractionNotation.InlineParticipants(e);
+        var msgs = InteractionNotation.InlineMessages(e);
+        if (parts.Count == 0 || area.Width < 20 || area.Height < 30) return;
+        var colW = area.Width / parts.Count;
+        double X(string p) => area.X + (IndexOf(parts, p) + 0.5) * colW;
+        const double headH = 18;
+        foreach (var p in parts)
+        {
+            var x = X(p); var w = Math.Min(colW - 8, Math.Max(40, p.Length * 6.5 + 10));
+            sb.Append($"<rect x=\"{F(x - w / 2)}\" y=\"{F(area.Y)}\" width=\"{F(w)}\" height=\"{F(headH)}\" rx=\"3\" fill=\"{t.Header(ElementKind.Block)}\" stroke=\"{t.Stroke}\"/>");
+            Text(sb, x, area.Y + 13, Trunc(p, w - 4), false, "middle", size: 10.5, color: t.Text);
+            sb.Append($"<line x1=\"{F(x)}\" y1=\"{F(area.Y + headH)}\" x2=\"{F(x)}\" y2=\"{F(area.Bottom)}\" stroke=\"{t.Stroke}\" stroke-dasharray=\"4,4\"/>");
+        }
+        var gap = Math.Min(22, (area.Height - headH - 6) / Math.Max(1, msgs.Count));
+        var y = area.Y + headH + gap * 0.8;
+        foreach (var (from, to, text) in msgs)
+        {
+            if (y > area.Bottom - 2) break;
+            double x0 = X(from), x1 = X(to);
+            var self = Math.Abs(x1 - x0) < 1;
+            if (self)
+                sb.Append($"<polyline points=\"{F(x0)},{F(y - 6)} {F(x0 + 18)},{F(y - 6)} {F(x0 + 18)},{F(y + 2)} {F(x0 + 2)},{F(y + 2)}\" fill=\"none\" stroke=\"{t.Edge}\"/>");
+            else
+            {
+                sb.Append($"<line x1=\"{F(x0)}\" y1=\"{F(y)}\" x2=\"{F(x1)}\" y2=\"{F(y)}\" stroke=\"{t.Edge}\"/>");
+                sb.Append($"<polygon points=\"{Points(Notation.ArrowPolygon(new Pt(x0, y), new Pt(x1, y), ArrowHead.Filled, 7))}\" fill=\"{t.Edge}\"/>");
+            }
+            if (text.Length > 0)
+                Text(sb, self ? x0 + 24 : (x0 + x1) / 2, y - 3, Trunc(text, Math.Max(40, Math.Abs(x1 - x0) - 6)), false, self ? "start" : "middle", size: 10, color: t.Text);
+            y += gap;
+        }
     }
 
     /// <summary>General drawing shapes: a plain outline with centred, wrapped text (draw.io style).</summary>

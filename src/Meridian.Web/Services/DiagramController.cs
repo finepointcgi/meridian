@@ -1,5 +1,6 @@
 using Meridian.Core.Language;
 using Meridian.Core.Model;
+using Meridian.Core.Samples;
 
 namespace Meridian.Web.Services;
 
@@ -56,10 +57,17 @@ public sealed class DiagramController
     /// <summary>Subtype for the active tool (BPMN / ArchiMate palettes).</summary>
     public string? ToolSubtype { get; set; }
 
+    /// <summary>Stereotype applied by the active tool (UAF viewpoint palettes).</summary>
+    public string? ToolStereotype { get; set; }
+
+    /// <summary>Is <paramref name="item"/> the active tool?</summary>
+    public bool IsTool(PaletteItem item) => Tool == item.Kind && ToolSubtype == item.Subtype && ToolStereotype == item.Stereotype;
+
     public void SetTool(PaletteItem? item)
     {
         Tool = item?.Kind;
         ToolSubtype = item?.Subtype;
+        ToolStereotype = item?.Stereotype;
     }
     public Gesture Current { get; private set; }
     public Pt PressModel => _pressModel;
@@ -295,11 +303,12 @@ public sealed class DiagramController
         var tol = 6 / Zoom;
         var view = DiagramExtras.VisibleView(Diagram);
         var layers = ReferenceEquals(view, Diagram) ? null : DiagramExtras.StateOf(Diagram);
+        var routes = EdgeRouter.RouteAll(view, BoundsOf);
         for (var i = view.Edges.Count - 1; i >= 0; i--)
         {
             var e = view.Edges[i];
             if (layers?.IsLocked(e) == true) continue;
-            var pts = Notation.RouteIn(Diagram, e, BoundsOf);
+            var pts = routes[e];
             for (var k = 1; k < pts.Count; k++)
                 if (Notation.DistanceToSegment(p, pts[k - 1], pts[k]) <= tol) return e;
         }
@@ -381,6 +390,7 @@ public sealed class DiagramController
             ElementKind.BpmnNode when sub == "endEvent" => null,
             ElementKind.BpmnNode when Subtypes.BpmnShape(sub) is NodeShape.Event or NodeShape.Gateway or NodeShape.DataObject => new PaletteItem(ElementKind.BpmnNode, "task"),
             ElementKind.Shape when sub == "text" => new PaletteItem(ElementKind.Shape, "rectangle"),
+            _ when UafViewpoints.IsUaf(Diagram.DiagramType) && e.Stereotypes.FirstOrDefault() is { } st => new PaletteItem(e.Kind, Stereotype: st),
             _ => new PaletteItem(e.Kind, string.IsNullOrEmpty(sub) ? null : sub),
         };
     }
@@ -415,18 +425,18 @@ public sealed class DiagramController
         {
             if (occupant != null && DefaultLink(from.Element.Kind, occupant.Element.Kind) is { } l0)
             {
-                Connect(l0.Kind, l0.Subtype, from, occupant);
+                Connect(l0.Kind, l0.Subtype, from, occupant, stereotype: l0.Stereotype);
                 return;
             }
             using (Model.History.Transaction($"Add connected {next.Title}"))
             {
                 // CreateNode positions by (centre x, top + h/3); convert from the centre.
-                var node = CreateNode(next.Kind, next.Subtype, new Pt(Snap(cx), Snap(cy - h / 2) + h / 3), size: (w, h));
+                var node = CreateNode(next.Kind, next.Subtype, new Pt(Snap(cx), Snap(cy - h / 2) + h / 3), size: (w, h), stereotype: next.Stereotype);
                 if (node == null) return;
                 if (DefaultLink(from.Element.Kind, node.Element.Kind) is { } link)
                 {
                     if (from.Element.Kind == ElementKind.Lifeline) _pressModel = new Pt(_pressModel.X, b.Y + Notation.LifelineHeader + 40);
-                    Connect(link.Kind, link.Subtype, from, node, select: false);
+                    Connect(link.Kind, link.Subtype, from, node, select: false, stereotype: link.Stereotype);
                 }
                 _selNodes.Clear();
                 SelectedEdge = null;
@@ -448,15 +458,15 @@ public sealed class DiagramController
             {
                 var link = DefaultLink(from.Element.Kind, to.Element.Kind);
                 if (link == null) { _ws.SetStatus($"Nothing can connect {Metamodel.DisplayName(from.Element.Kind)} to {Metamodel.DisplayName(to.Element.Kind)} here"); return; }
-                Connect(link.Kind, link.Subtype, from, to);
+                Connect(link.Kind, link.Subtype, from, to, stereotype: link.Stereotype);
                 return;
             }
             if (Successor(from.Element) is not { } next) return;
             using (Model.History.Transaction($"Add connected {next.Title}"))
             {
-                var node = CreateNode(next.Kind, next.Subtype, at);
+                var node = CreateNode(next.Kind, next.Subtype, at, stereotype: next.Stereotype);
                 if (node == null) return;
-                if (DefaultLink(from.Element.Kind, node.Element.Kind) is { } link) Connect(link.Kind, link.Subtype, from, node, select: false);
+                if (DefaultLink(from.Element.Kind, node.Element.Kind) is { } link) Connect(link.Kind, link.Subtype, from, node, select: false, stereotype: link.Stereotype);
                 _selNodes.Clear();
                 SelectedEdge = null;
                 _selNodes.Add(node);
@@ -529,7 +539,7 @@ public sealed class DiagramController
             else
             {
                 CreateNodeAt(tool, _pressModel);
-                if (!mods.HasFlag(Mods.Shift)) { Tool = null; ToolSubtype = null; }
+                if (!mods.HasFlag(Mods.Shift)) { Tool = null; ToolSubtype = null; ToolStereotype = null; }
             }
             return false;
         }
@@ -637,9 +647,11 @@ public sealed class DiagramController
                 if (_dragEdge.Relationship.Kind == ElementKind.Message && wps.Count > 0) _waypointIndex = 0;
                 else
                 {
-                    var pts = Notation.RouteIn(Diagram, _dragEdge, BoundsOf);
-                    // Keep the route's existing bends so the grabbed segment is the one that moves.
-                    if (wps.Count == 0 && pts.Count > 2) wps = pts.Skip(1).Take(pts.Count - 2).ToList();
+                    // With manual bends, work on the polyline through them (a curved connector is drawn smoothed).
+                    var pts = wps.Count > 0 ? Notation.Route(_dragEdge, BoundsOf) : Notation.RouteIn(Diagram, _dragEdge, BoundsOf);
+                    // Keep the route's existing bends so the grabbed segment is the one that moves (a curve just bends where grabbed).
+                    if (wps.Count == 0 && pts.Count > 2 && EdgeRouter.StyleOf(Diagram, _dragEdge) != EdgeRouting.Curved) wps = pts.Skip(1).Take(pts.Count - 2).ToList();
+                    if (wps.Count == 0) pts = [pts[0], pts[^1]];
                     var all = new List<Pt> { pts[0] };
                     all.AddRange(wps);
                     all.Add(pts[^1]);
@@ -675,6 +687,7 @@ public sealed class DiagramController
                         moved = Notation.SnapToBorder(moved, BoundsOf(parent));
                     _preview[n] = moved;
                 }
+                GrowContainers(_origin.Keys);
                 return true;
             }
             case Gesture.Resize:
@@ -692,6 +705,7 @@ public sealed class DiagramController
                 if (DiagramExtras.IsImage(n) != mods.HasFlag(Mods.Shift) && b.Width > 0 && b.Height > 0)
                     (x0, y0, x1, y1) = KeepAspect(b, _handle, x0, y0, x1, y1);
                 _preview[n] = new Bounds(x0, y0, x1 - x0, y1 - y0);
+                GrowContainers([n]);
                 return true;
             }
             case Gesture.Waypoint when WaypointPreview is List<Pt> wps:
@@ -726,10 +740,10 @@ public sealed class DiagramController
                     {
                         if (g == Gesture.Move)
                         {
-                            var first = moved.First();
+                            var first = moved.First(kv => _origin.ContainsKey(kv.Key));
                             var dx = first.Value.X - first.Key.Bounds.X;
                             var dy = first.Value.Y - first.Key.Bounds.Y;
-                            foreach (var edge in Diagram.Edges.Where(x => x.Waypoints.Count > 0 && moved.ContainsKey(x.Source) && moved.ContainsKey(x.Target)).ToList())
+                            foreach (var edge in Diagram.Edges.Where(x => x.Waypoints.Count > 0 && _origin.ContainsKey(x.Source) && _origin.ContainsKey(x.Target)).ToList())
                                 Model.SetWaypoints(Diagram, edge, edge.Waypoints.Select(p => new Pt(p.X + dx, p.Y + dy)).ToList());
                         }
                         Model.SetBounds(Diagram, moved, g == Gesture.Move ? "Move" : "Resize");
@@ -742,8 +756,8 @@ public sealed class DiagramController
                 case Gesture.Connect when ConnectFrom != null && Tool is { } kind:
                 {
                     var to = HitNode(CurrentModel);
-                    if (to != null) Connect(kind, ToolSubtype, ConnectFrom, to);
-                    if (!mods.HasFlag(Mods.Shift)) { Tool = null; ToolSubtype = null; }
+                    if (to != null) Connect(kind, ToolSubtype, ConnectFrom, to, stereotype: ToolStereotype);
+                    if (!mods.HasFlag(Mods.Shift)) { Tool = null; ToolSubtype = null; ToolStereotype = null; }
                     break;
                 }
                 case Gesture.Marquee:
@@ -876,7 +890,7 @@ public sealed class DiagramController
                 RemoveSelectionFromDiagram();
                 return true;
             case "Escape":
-                Tool = null; ToolSubtype = null; Editing = null; EditingEdge = null; QuickAddRequest = null; _selNodes.Clear(); SelectedEdge = null; Notify();
+                Tool = null; ToolSubtype = null; ToolStereotype = null; Editing = null; EditingEdge = null; QuickAddRequest = null; _selNodes.Clear(); SelectedEdge = null; Notify();
                 return true;
             case "a" or "A" when cmd:
                 SelectAll();
@@ -1107,7 +1121,7 @@ public sealed class DiagramController
             SelectedEdge = null;
             _selNodes.Add(node);
             Tool = null;
-            ToolSubtype = null;
+            ToolSubtype = null; ToolStereotype = null;
             EnsureVisible(BoundsOf(node));
             Notify();
             _ws.SetStatus("Image inserted: drag a corner to resize (Shift to stretch)");
@@ -1193,8 +1207,75 @@ public sealed class DiagramController
             case "width": { var w = bs.Values.Max(b => b.Width); foreach (var n in nodes) target[n] = bs[n] with { Width = w }; break; }
             case "height": { var h = bs.Values.Max(b => b.Height); foreach (var n in nodes) target[n] = bs[n] with { Height = h }; break; }
         }
-        Model.SetBounds(Diagram, target, mode switch { "hdist" or "vdist" => "Distribute", "width" or "height" => "Match size", _ => "Align" });
+        using (Model.History.Transaction(mode switch { "hdist" or "vdist" => "Distribute", "width" or "height" => "Match size", _ => "Align" }))
+        {
+            Model.SetBounds(Diagram, target, "Align");
+            ApplyContainerGrowth(target.Keys);
+        }
     }
+
+    // ---------------------------------------------------------------- containers
+
+    /// <summary>While dragging or resizing: containers of the changed shapes grow (live) so their children stay inside.</summary>
+    private void GrowContainers(IEnumerable<DiagramNode> changed)
+    {
+        var moving = Current == Gesture.Move ? _origin.Keys.ToHashSet() : null;
+        foreach (var (n, b) in ContainerLayout.GrowToFit(Diagram, changed.ToList(), BoundsOf, moving)) _preview[n] = b;
+    }
+
+    /// <summary>After a committed change (align, create inside): grows the containers of <paramref name="changed"/>.</summary>
+    private void ApplyContainerGrowth(IEnumerable<DiagramNode> changed)
+    {
+        var grown = ContainerLayout.GrowToFit(Diagram, changed.ToList(), n => n.Bounds);
+        if (grown.Count > 0) Model.SetBounds(Diagram, grown, "Grow container");
+    }
+
+    /// <summary>Is any selected shape a container (it has shapes nested inside)?</summary>
+    public bool SelectionHasContainer => _selNodes.Any(n => ContainerLayout.IsContainer(Diagram, n));
+
+    /// <summary>Fits the selected containers tightly around their contents. One undo step.</summary>
+    public void FitSelectionToContents()
+    {
+        var target = ContainerLayout.FitToContents(Diagram, n => n.Bounds, _selNodes.ToList());
+        if (target.Count > 0) Model.SetBounds(Diagram, target, "Fit to contents");
+        else _ws.SetStatus("Already fitted to its contents");
+    }
+
+    /// <summary>Fits every frame / container on the diagram to its contents, innermost first. One undo step.</summary>
+    public void FitFrameToContents()
+    {
+        var target = ContainerLayout.FitToContents(Diagram, n => n.Bounds);
+        if (target.Count > 0) Model.SetBounds(Diagram, target, "Fit frames to contents");
+        _ws.SetStatus(target.Count > 0 ? $"Fitted {target.Keys.Count(n => ContainerLayout.IsContainer(Diagram, n))} container(s) to their contents" : "Every container already fits its contents");
+    }
+
+    private string UniqueStereotypedName(Element owner, string stereotype)
+    {
+        var baseName = stereotype.Replace(" ", "");
+        var names = owner.OwnedElements.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+        for (var i = 1; ; i++)
+            if (!names.Contains(baseName + i)) return baseName + i;
+    }
+
+    // ---------------------------------------------------------------- connector routing
+
+    /// <summary>The routing of the selected connector (its own, else the diagram's), or null when it has manual bends.</summary>
+    public EdgeRouting? SelectedRouting => SelectedEdge is { } e ? e.Waypoints.Count > 0 ? null : EdgeRouter.StyleOf(Diagram, e) : null;
+
+    /// <summary>Sets the routing style of the selected connector; its manual bends are removed. One undo step.</summary>
+    public void SetSelectedRouting(EdgeRouting style)
+    {
+        if (SelectedEdge is not { } e || _ws.ReadOnly) return;
+        using (Model.History.Transaction($"Connector style: {EdgeRouter.Display(style)}"))
+        {
+            if (e.Waypoints.Count > 0) Model.SetWaypoints(Diagram, e, []);
+            // Matching the diagram default needs no override.
+            var value = style == EdgeRouter.Parse(Diagram.Get(EdgeRouter.DiagramKey)) ? null : EdgeRouter.Format(style) ?? "classic";
+            Model.SetEdgeStyle(Diagram, e, EdgeRouter.EdgeKey, value);
+        }
+        Notify();
+    }
+
 
     public void StraightenSelectedEdge()
     {
@@ -1258,14 +1339,14 @@ public sealed class DiagramController
         _ws.SetStatus($"Displayed {related.Count} related elements");
     }
 
-    private void CreateNodeAt(ElementKind kind, Pt p) => CreateNode(kind, ToolSubtype, p);
+    private void CreateNodeAt(ElementKind kind, Pt p) => CreateNode(kind, ToolSubtype, p, stereotype: ToolStereotype);
 
     /// <summary>Creates an element from a palette entry dropped or picked at a screen point.</summary>
     public void CreateAtScreen(PaletteItem item, double sx, double sy)
     {
         if (_ws.ReadOnly) return;
         if (Metamodel.IsRelationship(item.Kind)) { SetTool(item); return; }
-        CreateNode(item.Kind, item.Subtype, ToModel(sx, sy));
+        CreateNode(item.Kind, item.Subtype, ToModel(sx, sy), stereotype: item.Stereotype);
     }
 
     /// <summary>Click on a palette tile: insert the shape in a free spot near the middle of the view and start naming it.</summary>
@@ -1290,11 +1371,11 @@ public sealed class DiagramController
             }
             if (found) break;
         }
-        CreateNode(item.Kind, item.Subtype, new Pt(at.X + w / 2, at.Y + h / 3));
+        CreateNode(item.Kind, item.Subtype, new Pt(at.X + w / 2, at.Y + h / 3), stereotype: item.Stereotype);
     }
 
     /// <summary>Creates a new element of <paramref name="kind"/> and shows it at <paramref name="p"/> (centre x, top + h/3).</summary>
-    private DiagramNode? CreateNode(ElementKind kind, string? subtype, Pt p, (double W, double H)? size = null)
+    private DiagramNode? CreateNode(ElementKind kind, string? subtype, Pt p, (double W, double H)? size = null, string? stereotype = null)
     {
         try
         {
@@ -1322,6 +1403,19 @@ public sealed class DiagramController
                 var e = Model.Create(owner, kind, subtype != null && kind is ElementKind.BpmnNode && Subtypes.BpmnShape(subtype) is NodeShape.Event or NodeShape.Gateway ? "" : null);
                 if (subtype != null) Model.Set(e, FieldKeys.Subtype, subtype);
                 if (kind == ElementKind.Comment) Model.Set(e, FieldKeys.Body, "Comment");
+                if (stereotype != null)
+                {
+                    // UAF viewpoints: the profile (or a stereotype missing from an older copy of it) comes along with the element.
+                    if (UafViewpoints.IsUaf(Diagram.DiagramType)) Profiles.EnsureUafStereotype(Model, stereotype);
+                    Model.Set(e, FieldKeys.Stereotypes, stereotype);
+                    if (Metamodel.NeedsName(kind)) Model.Set(e, FieldKeys.Name, UniqueStereotypedName(owner, stereotype));
+                }
+                if (kind == ElementKind.TimingLifeline)
+                {
+                    Model.Set(e, InteractionNotation.States, "Idle, Active");
+                    Model.Set(e, InteractionNotation.Timeline, "0 Idle; 10 Active; 30 Idle");
+                }
+                if (kind == ElementKind.InlineInteraction) Model.Set(e, InteractionNotation.Sequence, "A -> B : request\nB -> A : reply");
                 if (subtype != null && Metamodel.NeedsName(kind) && string.IsNullOrEmpty(e.Get(FieldKeys.Name)) == false && kind is ElementKind.ArchiElement or ElementKind.BpmnNode)
                     Model.Set(e, FieldKeys.Name, Subtypes.Display(subtype));
                 var (w, h) = size ?? Notation.DefaultSizeOf(kind, subtype);
@@ -1329,6 +1423,7 @@ public sealed class DiagramController
                 if (Notation.IsBorderShape(kind) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
                 node = Model.AddNode(Diagram, e, bounds, parent: container);
                 PutOnActiveLayer(node);
+                if (container != null) GrowContainers([node]);
             }
             _selNodes.Clear();
             SelectedEdge = null;
@@ -1385,12 +1480,17 @@ public sealed class DiagramController
         }
     }
 
-    private void Connect(ElementKind kind, string? subtype, DiagramNode from, DiagramNode to, bool select = true)
+    private void Connect(ElementKind kind, string? subtype, DiagramNode from, DiagramNode to, bool select = true, string? stereotype = null)
     {
         using (Model.History.Transaction($"Create {Metamodel.DisplayName(kind)}"))
         {
             var r = Model.Connect(kind, from.Element, to.Element);
             if (subtype != null) Model.Set(r, FieldKeys.Subtype, subtype);
+            if (stereotype != null)
+            {
+                if (UafViewpoints.IsUaf(Diagram.DiagramType)) Profiles.EnsureUafStereotype(Model, stereotype);
+                Model.Set(r, FieldKeys.Stereotypes, stereotype);
+            }
             // Ports belong to a block type, so remember which part they were reached through.
             if (Notation.IsBorderShape(from.Element) && Diagram.ParentOf(from) is { } fp) Model.Set(r, FieldKeys.SourcePart, fp.Element.Id);
             if (Notation.IsBorderShape(to.Element) && Diagram.ParentOf(to) is { } tp) Model.Set(r, FieldKeys.TargetPart, tp.Element.Id);
@@ -1407,7 +1507,7 @@ public sealed class DiagramController
 
     private void InsertWaypoint(DiagramEdge edge, Pt at)
     {
-        var pts = Notation.RouteIn(Diagram, edge, BoundsOf);
+        var pts = edge.Waypoints.Count > 0 ? Notation.Route(edge, BoundsOf) : Notation.RouteIn(Diagram, edge, BoundsOf);
         var best = 0;
         var bestD = double.MaxValue;
         for (var i = 1; i < pts.Count; i++)

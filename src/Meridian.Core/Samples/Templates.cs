@@ -39,6 +39,10 @@ public static class Templates
         new("req-tree", "Requirement tree", "A parent requirement refined into three children.", DiagramType.Requirement, RequirementTree),
         new("context", "System context", "A system block, its users and external systems.", DiagramType.BlockDefinition, SystemContext),
         new("archimate-layered", "ArchiMate layered view", "Business, application and technology layers.", DiagramType.ArchiMate, ArchiLayered),
+        new("timing", "Timing diagram", "Two lifelines changing state over time, with a duration and a time constraint.", DiagramType.Timing, TimingSample),
+        new("interaction-overview", "Interaction overview", "A flow of interaction uses and an inline sequence with a decision.", DiagramType.InteractionOverview, InteractionOverviewSample),
+        new("communication", "Communication diagram", "Three lifelines linked by numbered messages.", DiagramType.Communication, CommunicationSample),
+        .. UafViewpoints.All.Select(v => new DiagramTemplate("uaf-" + v.Code.ToLowerInvariant(), v.Name, UafDescription(v), v.Type, (m, pkg) => UafView(m, pkg, v))),
     ];
 
     public static ProjectTemplate? FindProject(string id) => Projects.FirstOrDefault(t => t.Id == id);
@@ -334,6 +338,135 @@ public static class Templates
         Rel("access", app, data);
         Rel("serving", node, app);
         Rel("serving", db, app);
+        return d;
+    }
+
+    // ================================================================ interaction diagrams
+
+    private static Diagram TimingSample(ModelRepository m, Element pkg)
+    {
+        var interaction = m.Create(pkg, ElementKind.Interaction, "Door Timing");
+        var d = m.CreateDiagram(interaction, DiagramType.Timing, "Door Timing");
+        m.Set(d, InteractionNotation.TimeUnit, "s");
+        Element Lifeline(string name, string states, string timeline, double y)
+        {
+            var l = m.Create(interaction, ElementKind.TimingLifeline, name);
+            m.Set(l, InteractionNotation.States, states);
+            m.Set(l, InteractionNotation.Timeline, timeline);
+            m.AddNode(d, l, new Bounds(40, y, 640, 130));
+            return l;
+        }
+        Lifeline("Controller", "Idle, Unlocking, Open", "0 Idle; 4 Unlocking; 6 Open; 16 Idle", 40);
+        Lifeline("Door", "Closed, Opening, Open", "0 Closed; 6 Opening; 9 Open; 18 Closed", 200);
+        // Place the constraints on the time axis: x of a time inside the lifelines' plot area.
+        var (t0, t1) = InteractionNotation.TimeRange(d);
+        double X(double t) => 40 + InteractionNotation.TimingLabelWidth + 10 + (t - t0) / (t1 - t0) * (640 - InteractionNotation.TimingLabelWidth - 20);
+        var dur = m.Create(interaction, ElementKind.DurationConstraint);
+        m.Set(dur, InteractionNotation.Constraint, "{0..3 s}");
+        m.AddNode(d, dur, new Bounds(X(6), 168, X(9) - X(6), 32));
+        var at = m.Create(interaction, ElementKind.TimeConstraint);
+        m.Set(at, InteractionNotation.Constraint, "{t = 6 s}");
+        m.AddNode(d, at, new Bounds(X(6) - 35, 10, 70, 360));
+        return d;
+    }
+
+    private static Diagram InteractionOverviewSample(ModelRepository m, Element pkg)
+    {
+        var activity = m.Create(pkg, ElementKind.Activity, "Checkout Overview");
+        var d = m.CreateDiagram(activity, DiagramType.InteractionOverview, "Checkout Overview");
+        Element Node(ElementKind k, string? name, double x, double y, double w = 0, double h = 0)
+        {
+            var e = m.Create(activity, k, name);
+            var (dw, dh) = Metamodel.DefaultSize(k);
+            m.AddNode(d, e, new Bounds(x, y, w > 0 ? w : dw, h > 0 ? h : dh), showRelationships: false);
+            return e;
+        }
+        var start = Node(ElementKind.InitialNode, null, 226, 20);
+        var login = Node(ElementKind.InteractionUse, "Authenticate", 140, 90);
+        m.Set(login, InteractionNotation.RefersTo, "Authenticate");
+        var decide = Node(ElementKind.DecisionNode, null, 220, 210);
+        var pay = Node(ElementKind.InlineInteraction, "Pay", 100, 300, 280, 170);
+        m.Set(pay, InteractionNotation.Sequence, "Shopper -> Shop : checkout\nShop -> Bank : authorize\nBank -> Shop : approved\nShop -> Shopper : receipt");
+        var retry = Node(ElementKind.InteractionUse, "Report failure", 440, 195);
+        m.Set(retry, InteractionNotation.RefersTo, "Report failure");
+        var end = Node(ElementKind.ActivityFinalNode, null, 226, 520);
+        foreach (var (a, b, guard) in new[] { (start, login, ""), (login, decide, ""), (decide, pay, "ok"), (decide, retry, "failed"), (pay, end, ""), (retry, end, "") })
+        {
+            var f = m.Connect(ElementKind.ControlFlow, a, b);
+            if (guard.Length > 0) m.Set(f, FieldKeys.Guard, guard);
+            m.AddEdge(d, f);
+        }
+        return d;
+    }
+
+    private static Diagram CommunicationSample(ModelRepository m, Element pkg)
+    {
+        var interaction = m.Create(pkg, ElementKind.Interaction, "Place Order");
+        var d = m.CreateDiagram(interaction, DiagramType.Communication, "Place Order");
+        Element Lifeline(string name, double x, double y)
+        {
+            var l = m.Create(interaction, ElementKind.CommunicationLifeline, name);
+            m.AddNode(d, l, new Bounds(x, y, 150, 46));
+            return l;
+        }
+        var ui = Lifeline(":Storefront", 40, 60);
+        var orders = Lifeline(":OrderService", 380, 60);
+        var stock = Lifeline(":Inventory", 380, 300);
+        void Link(Element a, Element b, string messages)
+        {
+            var l = m.Connect(ElementKind.CommunicationLink, a, b, interaction);
+            m.Set(l, InteractionNotation.Messages, messages);
+            m.AddEdge(d, l);
+        }
+        Link(ui, orders, "1: placeOrder(cart)\n< 1.3: confirmation");
+        Link(orders, stock, "1.1: reserve(items)\n< 1.2: reserved");
+        return d;
+    }
+
+    // ================================================================ UAF viewpoints
+
+    private static string UafDescription(UafViewpoint v) =>
+        $"{v.Domain} domain: " + string.Join(", ", v.Elements.Select(e => e.Stereotype).Distinct()) + ", using the UAF profile.";
+
+    /// <summary>A starter view for a UAF domain: the profile (added if missing), a parent element composed of two children and a dependency.</summary>
+    private static Diagram UafView(ModelRepository m, Element pkg, UafViewpoint v)
+    {
+        foreach (var st in v.Elements.Select(e => e.Stereotype).Distinct()) Profiles.EnsureUafStereotype(m, st);
+        var d = m.CreateDiagram(pkg, v.Type, v.Name.Replace("UAF ", ""));
+        var (pk, ps) = v.Elements[0];
+        Element El(ElementKind k, string stereotype, string name, double x, double y)
+        {
+            var e = m.Create(pkg, k, name);
+            m.Set(e, FieldKeys.Stereotypes, stereotype);
+            if (k == ElementKind.Requirement) m.Set(e, FieldKeys.Text, $"The enterprise shall achieve {name.ToLowerInvariant()}.");
+            var (w, h) = Notation.DefaultSizeOf(e);
+            m.AddNode(d, e, new Bounds(x, y, Math.Max(w, 200), h), showRelationships: false);
+            return e;
+        }
+        void Rel(ElementKind k, Element s, Element t, string? stereotype = null)
+        {
+            if (Metamodel.CheckEnds(k, s.Kind, t.Kind) != null) return;
+            var r = m.Connect(k, s, t, pkg);
+            if (stereotype != null) m.Set(r, FieldKeys.Stereotypes, stereotype);
+            m.AddEdge(d, r);
+        }
+        // A taxonomy of the domain's main element, plus its second element linked to one of the parts.
+        var parent = El(pk, ps, ps, 240, 30);
+        var a = El(pk, ps, $"{ps} A", 60, 250);
+        var b = El(pk, ps, $"{ps} B", 420, 250);
+        Rel(pk == ElementKind.Requirement ? ElementKind.DeriveReqt : ElementKind.Composition, pk == ElementKind.Requirement ? a : parent, pk == ElementKind.Requirement ? parent : a);
+        Rel(pk == ElementKind.Requirement ? ElementKind.DeriveReqt : ElementKind.Composition, pk == ElementKind.Requirement ? b : parent, pk == ElementKind.Requirement ? parent : b);
+        if (v.Links.FirstOrDefault(l => l.Stereotype != null) is { Stereotype: { } exchange } ex) Rel(ex.Kind, a, b, exchange);
+        if (v.Elements.Count > 1)
+        {
+            var (ck, cs) = v.Elements[1];
+            var c = El(ck, cs, cs, 240, 450);
+            foreach (var (lk, ls) in v.Links.Where(l => l.Kind is not (ElementKind.Composition or ElementKind.Generalization) && l.Stereotype == null))
+            {
+                if (Metamodel.CheckEnds(lk, c.Kind, a.Kind) == null) { Rel(lk, c, a, ls); break; }
+                if (Metamodel.CheckEnds(lk, a.Kind, c.Kind) == null) { Rel(lk, a, c, ls); break; }
+            }
+        }
         return d;
     }
 
