@@ -8,7 +8,8 @@ This page maps the concepts, windows and menus of **Cameo Systems Modeler / Magi
 | From | How | Notes |
 | --- | --- | --- |
 | Cameo / MagicDraw | open the `.mdzip` (or `.mdxml`) file directly with **Open a file as a new project** (or double-click it with the desktop app installed). XMI exports work too. | Packages, blocks, value types, interface blocks, ports, part/reference/value properties, requirements (id and text) with satisfy / verify / refine / deriveReqt / trace / allocate, activities, state machines, interactions, use cases, constraint blocks, stereotypes and tagged values map, and diagrams keep their layout. Re-importing updates the project by element id. The import report lists anything approximated or skipped. |
-| Enterprise Architect 16+ | open the `.qea` / `.qeax` file directly with **Open a file as a new project** (or the desktop start screen) | Packages, elements, attributes, operations, connectors with SysML stereotypes, tagged values and diagram layouts are read straight from the repository. |
+| Enterprise Architect 16+ | open the `.qea` / `.qeax` file directly with **Open a file as a new project** (or the desktop start screen) | Packages, elements, attributes, operations, connectors with SysML stereotypes, tagged values and diagram layouts are read straight from the repository. Data models («table» classes) keep column lengths, NOT NULL, primary keys, unique constraints, indexes and «FK» connectors as foreign keys. |
+| Database schemas | **Import ▸ Database schema (DDL / .dacpac)…** or **Connect to a database…** | PostgreSQL, SQL Server, MySQL / MariaDB, SQLite and Oracle DDL; SQL Server `.dacpac`; live PostgreSQL, MySQL and SQLite ([details](database.md)) |
 | Older EA (`.eap`, Access) | convert to `.qea` in EA, or export XMI 2.5 from EA | |
 | DOORS, Polarion, Jama, Codebeamer | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
 
@@ -61,6 +62,7 @@ can always compare against it.
 | OSLC / DataHub | **OSLC RM provider**, issue tracker links, webhooks |
 | Cameo AI assistant / third-party AI plugins | **AI assistant** on Claude, a local model or Claude Code; every change reviewed before it is applied ([details](ai-assistant.md)) |
 | Import from diagram-as-code tools | **Mermaid** import and export ([details](mermaid.md)) |
+| Data modeling with SQL / database profiles (Cameo DataHub, SQL profile), entity-relationship diagrams | **Database diagrams** (crow's foot) with tables, views, keys, subject areas and logical entities; DDL, `.dacpac`, Mermaid `erDiagram` and live import with refresh; DDL and migration scripts; data dictionary ([details](database.md)) |
 
 ## Enterprise Architect
 
@@ -86,7 +88,11 @@ can always compare against it.
 | Discussions, reviews | **Comments** and **Reviews** |
 | Scripting (JavaScript, JScript, VBScript) | **Script console** (C#) |
 | Simulation (SysML simulation, executable state machines) | **Simulation** tabs |
-| BPMN, ArchiMate, database modeling | **BPMN**, **ArchiMate** and **ER diagrams** with BPMN XML, ArchiMate exchange and SQL DDL |
+| BPMN, ArchiMate | **BPMN** and **ArchiMate** diagrams with BPMN XML and ArchiMate exchange |
+| Database Engineering: data models, «table» / «column», PK / FK operations | **Database modelling**: databases, schemas, tables, views, keys, indexes, sequences, enum types; EA data models import with lengths, NOT NULL, PK / FK / unique / index operations and «FK» connectors ([details](database.md)) |
+| Database Builder: connect to a live database, import / synchronize schema | **Connect to a database…** (PostgreSQL, MySQL / MariaDB, SQLite) and **Refresh…** with a change review; SQL Server and Oracle through DDL or `.dacpac` |
+| Generate DDL, DDL compare / transformation | **Generate DDL…** for five dialects and **Migration script…** (ALTER statements from a version, branch, baseline or live database, with warnings) |
+| Package-based diagram filtering / data model subject areas | **Subject areas**: colour-framed groups of tables across schemas, diagram filters, permissions |
 | Code engineering | C# reverse engineering and C# skeleton generation; **Code sync** from GitHub / GitLab with a review branch ([details](code-sync.md)) |
 | Model transformations (MDA style) | **Create from…** derivations along the MBSE chain ([details](derivation.md)) |
 | AI-assisted modeling | **AI assistant** (Claude, a local model or Claude Code) ([details](ai-assistant.md)) |

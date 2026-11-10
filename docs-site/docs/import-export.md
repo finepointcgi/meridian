@@ -97,8 +97,10 @@ Import and export the Open Group **ArchiMate Model Exchange File Format** (3.x):
 
 ## SQL
 
-Generate DDL (`CREATE TABLE`, keys, foreign keys) for **PostgreSQL**, **MySQL**, **SQL Server** or **SQLite** from ER
-diagrams, and reverse-engineer `.sql` / `.ddl` scripts (`CREATE TABLE`, `ALTER TABLE … FOREIGN KEY`) into tables.
+Import PostgreSQL, SQL Server, MySQL / MariaDB, SQLite or Oracle DDL scripts and SQL Server `.dacpac` files as a
+database with its schemas, tables, keys, indexes, views and types (**Import ▸ Database schema (DDL / .dacpac)…** or
+**Import into this project…**), connect to a live database, and generate DDL and migration scripts for all five
+dialects. See [Database modelling](database.md).
 
 ## C#
 

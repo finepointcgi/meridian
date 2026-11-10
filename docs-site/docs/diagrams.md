@@ -119,8 +119,9 @@ messages between two lines belong to that operand. Each change is one undo step.
 - **ArchiMate**: business, application and technology layer elements with ArchiMate relationship types (composition,
   aggregation, assignment, realization, serving, access, influence, triggering, flow, specialization, association).
   Elements are coloured by layer. Exchange with the ArchiMate model exchange format.
-- **ER**: tables with typed columns, primary keys, nullable and unique flags, and foreign keys. Generate SQL DDL for
-  PostgreSQL, MySQL, SQL Server or SQLite, and import DDL.
+- **Database (ER)**: crow's-foot diagrams of tables and views with key markers, column-to-column foreign keys and
+  subject-area frames; show all columns, keys only or none. Import DDL, `.dacpac` or a live database, generate DDL
+  and migration scripts for PostgreSQL, SQL Server, MySQL, SQLite or Oracle. See [Database modelling](database.md).
 
 ## Create diagrams from diagrams
 

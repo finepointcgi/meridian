@@ -104,6 +104,14 @@ curl -H "Authorization: Bearer mrd_…" -H "Accept: text/turtle" \
   "https://meridian.example.com/oslc/projects/<id>/requirements?oslc.where=dcterms:identifier=%22REQ-002%22"
 ```
 
+## Databases
+
+Integrations ▸ **Databases** connects to PostgreSQL and MySQL / MariaDB (and SQLite files in the desktop app) to
+import a schema and refresh it later with a review. The connection string is stored encrypted; use a read-only
+account — Meridian only reads the catalog and never runs DDL. On a team server only server administrators add
+connections, and private-network hosts need `Meridian:Integrations:AllowPrivateNetworks`. See
+[Database modelling](database.md).
+
 ## SysML v2 API (server, read-only)
 
 `/api` serves a read-only subset of the OMG Systems Modeling API: `GET /api/projects`,

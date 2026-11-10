@@ -1,8 +1,8 @@
 # Integrations
 
 Meridian connects to issue trackers, notifies other systems through webhooks, follows code repositories, syncs
-requirements with IBM DOORS Next and Siemens Polarion, and exposes requirements and model elements to ALM tools
-through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
+requirements with IBM DOORS Next and Siemens Polarion, reads live database schemas, and exposes requirements and model
+elements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
@@ -388,8 +388,43 @@ All calls to the git host use the same address checks as issue trackers (see *Wh
 call*): allow private networks for an on-premises GitHub Enterprise, GitLab or Bitbucket Data Center. The access token
 and the webhook secret are encrypted like other integration secrets and never written to the log.
 
+## 7. Databases (live schema import)
+
+Integrations ▸ **Databases** (also project menu ▸ **Connect to a database…**) keeps connections to databases whose
+schema is imported into the model and refreshed later with a review. Code: `src/Meridian.Web/Integrations/Databases`
+(`DatabaseConnectionService`), `src/Meridian.Data/Databases/LiveSchemaReader.cs`, UI
+`Components/Workbench/Database/DatabasesPanel.razor`. The modelling side is described in [DATABASE.md](DATABASE.md).
+
+| Engine | Driver | Reads |
+|---|---|---|
+| PostgreSQL | Npgsql | `pg_catalog`: schemas, tables, views, materialized views, columns, keys, indexes, triggers, sequences, enum / domain types, routines, comments |
+| MySQL / MariaDB | MySqlConnector 2.6 (MIT) | `information_schema` |
+| SQLite (desktop / local mode only) | Microsoft.Data.Sqlite | the DDL in `sqlite_master` |
+| SQL Server, Oracle | — | not supported live: import DDL scripts, or a SQL Server `.dacpac` |
+
+Microsoft.Data.SqlClient is MIT licensed but brings Azure.Identity, MSAL and native SNI libraries (tens of MB), so
+SQL Server is supported through DDL and `.dacpac` only.
+
+A connection is a `project_integrations` row of kind `database`: the config JSON holds the provider, a display host,
+the schemas to read, a timeout (5–600 s) and the database element it fills; the **connection string is the secret**,
+encrypted like the other integration secrets, never returned to the browser, never logged (driver errors have
+passwords masked).
+
+* **Read-only.** Meridian only runs catalog queries inside a read-only transaction (SQLite opens the file read-only)
+  and never executes DDL. Still, connect with a **read-only account**: PostgreSQL — a role with `CONNECT` and `USAGE`
+  on the schemas; MySQL — `SELECT` and `SHOW VIEW`.
+* **Who.** On a team server only **server administrators** can add, change, test or delete connections; project
+  members can import and refresh through saved ones. In the desktop app's local mode anyone can.
+* **Where.** The host is resolved once and checked like webhook URLs (*Which addresses the server will call*):
+  link-local and metadata addresses are always refused; loopback and private networks need
+  `Meridian:Integrations:AllowPrivateNetworks=true`. The connection then goes to the checked address (with
+  `SSL Mode=VerifyFull` the host name is kept for certificate validation). SQLite files and Unix sockets are refused
+  on a team server (they are paths on the server); multi-host connection strings are refused.
+* **Time.** Connect and command timeouts follow the connection's timeout, and the whole read is cancelled when it
+  runs out.
+
 ## Storage
 
 New tables (created by `MigrateAsync`, in the integrations migration block of each store):
-`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`/`requirements-tool`, name, config JSON, encrypted secret),
+`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`/`requirements-tool`/`database`, name, config JSON, encrypted secret),
 `webhook_deliveries` (delivery log) and `api_tokens`.
