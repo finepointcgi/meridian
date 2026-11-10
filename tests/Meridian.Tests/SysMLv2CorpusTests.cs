@@ -105,7 +105,7 @@ public partial class SysMLv2CorpusTests
         // perform → allocation of the behavior to the part; satisfy; item flows
         var actionsVehicle = m.OfKind(ElementKind.Block).Single(b => b.Name == "Vehicle" && b.Owner!.Name == "VehicleActions");
         Assert.Equal(3, m.Incoming(actionsVehicle, ElementKind.Allocate).Count());
-        Assert.NotEmpty(m.Relationships.Where(r => r.Kind == ElementKind.Satisfy));
+        Assert.Contains(m.Relationships, r => r.Kind == ElementKind.Satisfy);
         var flow = m.Relationships.Single(r => r.Kind == ElementKind.Connector && r.Name == "electricity");
         Assert.Equal("ElectricalPower", m.Find(flow.Get(FieldKeys.ItemFlow))!.Name);
 
