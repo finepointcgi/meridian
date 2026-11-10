@@ -52,9 +52,9 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .rgroup { display: flex; flex-direction: column; padding: 0 8px; border-right: 1px solid var(--border); flex: none; }
 .rgroup:last-child { border-right: none; }
 .ribbon::-webkit-scrollbar { display: none; }
-@media (max-width: 1900px) { .rgroup.compact .rbtn .t { display: none; } .rgroup.compact .rbtn { padding: 0 7px; } }
-@media (max-width: 1750px) { .rgroup.compact-md .rbtn .t { display: none; } .rgroup.compact-md .rbtn { padding: 0 7px; } }
-@media (max-width: 1400px) { .rgroup .rbtn .t { display: none; } .rgroup .rbtn { padding: 0 7px; } }
+@media (max-width: 2600px) { .rgroup.compact .rbtn .t { display: none; } .rgroup.compact .rbtn { padding: 0 7px; } }
+@media (max-width: 2200px) { .rgroup.compact-md .rbtn .t { display: none; } .rgroup.compact-md .rbtn { padding: 0 7px; } }
+@media (max-width: 1700px) { .rgroup .rbtn .t { display: none; } .rgroup .rbtn { padding: 0 5px; } .rgroup { padding: 0 4px; } }
 .rgroup .rlabel { font-size: 9.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--text-3); padding: 0 4px 2px; }
 .rgroup .ritems { display: flex; gap: 2px; flex: 1; align-items: center; }
 .rbtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; border: 1px solid transparent; background: transparent;
@@ -214,8 +214,9 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .empty-hint h3 { color: var(--text); font-weight: 600; margin: 8px 0 4px; font-size: 16px; }
 
 .dock { border-top: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-.dock-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px; }
-.dock-tab { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 7px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.dock-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px; overflow-x: auto; scrollbar-width: none; }
+.dock-tabs::-webkit-scrollbar { display: none; }
+.dock-tab { display: inline-flex; flex: none; white-space: nowrap; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 7px; font-size: 12px; color: var(--text-2); cursor: pointer; }
 .dock-tab:hover { background: var(--hover); color: var(--text); }
 .dock-tab.on { background: var(--sel); color: var(--text); }
 .dock-tab .mud-icon-root { font-size: 15px; }
