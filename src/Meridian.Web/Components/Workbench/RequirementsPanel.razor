@@ -12,7 +12,7 @@
 </div>
 <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="font-size:12.5px">
     <thead>
-        <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:110px">Priority</th><th style="width:130px">Status</th><th style="width:130px">Verification</th><th style="width:120px">Owner</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th></tr>
+        <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:110px">Priority</th><th style="width:130px">Status</th><th style="width:130px">Verification</th><th style="width:120px">Owner</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th><th style="width:200px">Criterion</th><th style="width:150px" title="Last simulation / analysis result">Result</th></tr>
     </thead>
     <tbody>
         @foreach (var r in Pager.Slice(AllRows(), _page, PageSize))
@@ -36,6 +36,11 @@
                 <td>
                     @foreach (var v in ver) { <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(v)">@v.Name</span> }
                     @if (ver.Count == 0 && leaf) { <span style="color:#9a6700">not verified</span> }
+                </td>
+                <td><MudTextField T="string" Value="@r.Get(Meridian.Core.Analysis.VerificationKeys.Criterion)" ValueChanged="v => SetCriterion(r, v)" Underline="false" Margin="Margin.Dense" Placeholder="—"
+                                  Class="vfy-crit" Error="@(Meridian.Core.Analysis.VerificationCriterion.Check(r.Get(Meridian.Core.Analysis.VerificationKeys.Criterion)) is { } ce && r.Get(Meridian.Core.Analysis.VerificationKeys.Criterion).Length > 0)" /></td>
+                <td data-testid="req-result">
+                    @if (Ws.Verification.ResultOf(r) is { } vr) { @VerificationPanel.Badge(vr) <span style="color:var(--text-3); font-size:11.5px">@vr.Value</span> }
                 </td>
             </tr>
         }
@@ -93,6 +98,12 @@
         var n = Ws.Model.OfKind(ElementKind.Requirement).Count();
         return n == 0 ? "No requirements yet — add one here, on a requirement diagram, or import a CSV."
             : $"{n} requirements · {c.Satisfied}/{c.Total} leaf requirements satisfied ({c.SatisfiedRatio:P0}) · {c.Verified}/{c.Total} verified ({c.VerifiedRatio:P0})";
+    }
+
+    private void SetCriterion(Element r, string? v)
+    {
+        v = v?.Trim();
+        if (r.Get(Meridian.Core.Analysis.VerificationKeys.Criterion) != (v ?? "")) Ws.Model.Set(r, Meridian.Core.Analysis.VerificationKeys.Criterion, string.IsNullOrEmpty(v) ? null : v);
     }
 
     private void Add()

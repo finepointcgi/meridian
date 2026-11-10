@@ -1,0 +1,240 @@
+@* Simulation-driven verification: run criteria, pass / fail summary, per-requirement drill-down, run configuration. *@
+@using Meridian.Core.Analysis
+@using Meridian.Serialization.Fmi
+@inherits WorkspaceComponent
+@inject IServiceProvider Services
+
+@{
+    var vfy = Ws.Verification;
+    var rows = Rows();
+    var results = rows.Select(r => (Req: r, Res: vfy.ResultOf(r))).ToList();
+    int pass = results.Count(x => x.Res?.Status == "pass"), fail = results.Count(x => x.Res?.Status == "fail"),
+        inc = results.Count(x => x.Res is { Status: not ("pass" or "fail") }), stale = results.Count(x => x.Res?.Stale == true), none = results.Count(x => x.Res is null);
+    var total = Math.Max(1, results.Count);
+    var run = Run;
+}
+<div class="vfy-head">
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Rule" Disabled="@(vfy.Running || Ws.ReadOnly)"
+               OnClick="Verify" data-testid="verify-run">@(vfy.Running ? "Verifying…" : run != null ? $"Run “{run.Name}”" : "Verify requirements")</MudButton>
+    <select class="dv-select" style="font-size:12.5px; padding:3px 6px" value="@(_runId ?? "")" @onchange="e => PickRun(e.Value?.ToString())" aria-label="Verification run">
+        <option value="">All runs + requirements with criteria</option>
+        @foreach (var r in Verification.Runs(Ws.Model)) { <option value="@r.Id">@r.DisplayName</option> }
+    </select>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="Ws.ReadOnly" OnClick="NewRun">New run</MudButton>
+    <div class="vfy-summary" data-testid="verify-summary">
+        @Chip("pass", "pass", pass) @Chip("fail", "fail", fail) @Chip("inconclusive", "inconclusive", inc) @Chip("stale", "stale", stale) @Chip("none", "not run", none)
+    </div>
+    <div class="vfy-bar" title="@($"{pass} pass · {fail} fail · {inc} inconclusive · {none} not run")">
+        <i style="width:@Pct(pass, total); background:var(--ok)"></i><i style="width:@Pct(fail, total); background:var(--danger)"></i><i style="width:@Pct(inc, total); background:var(--warn)"></i>
+    </div>
+    <span style="flex:1"></span>
+    <MudCheckBox T="bool" Value="vfy.ShowOnDiagrams" ValueChanged="vfy.SetShowOnDiagrams" Label="Colour requirements on diagrams" Size="Size.Small" Dense="true" />
+    @if (Ws.VariantView.Active && run == null)
+    {
+        <span class="var-kind" title="Ad-hoc checks use the variant shown on diagrams">variant: @Ws.VariantView.Configuration!.Name</span>
+    }
+</div>
+
+@if (run != null)
+{
+    <div class="vfy-run" data-testid="verify-run-config">
+        <label>Default analysis
+            <select value="@run.Get(VerificationKeys.RunAnalysis)" @onchange="e => SetRun(VerificationKeys.RunAnalysis, e.Value?.ToString())" disabled="@Ws.ReadOnly">
+                <option value="">parametric (default)</option>
+                @foreach (var k in Enum.GetValues<AnalysisKind>()) { <option value="@Verification.AnalysisName(k)">@VerificationCriterion.Label(k)</option> }
+            </select>
+        </label>
+        <label>Subject
+            <select value="@run.Get(VerificationKeys.Subject)" @onchange="e => SetRun(VerificationKeys.Subject, e.Value?.ToString())" disabled="@Ws.ReadOnly">
+                <option value="">(from «satisfy» links)</option>
+                @foreach (var s in Subjects()) { <option value="@s.Id">@s.DisplayName · @Metamodel.DisplayName(s.Kind)</option> }
+            </select>
+        </label>
+        <label>Configuration (variant)
+            <select value="@run.Get(VerificationKeys.Configuration)" @onchange="e => SetRun(VerificationKeys.Configuration, e.Value?.ToString())" disabled="@Ws.ReadOnly">
+                <option value="">@Verification.FullModel</option>
+                @foreach (var c in Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name)) { <option value="@c.Id">@c.DisplayName</option> }
+            </select>
+        </label>
+        <label>Inputs <input value="@run.Get(VerificationKeys.Inputs)" placeholder="mass = 1500 kg; driveForce = 6 kN" @onchange="e => SetRun(VerificationKeys.Inputs, e.Value?.ToString())" disabled="@Ws.ReadOnly" /></label>
+        <label>Monte Carlo samples <input type="number" min="1" value="@run.Get(VerificationKeys.Samples)" placeholder="500" @onchange="e => SetRun(VerificationKeys.Samples, e.Value?.ToString())" disabled="@Ws.ReadOnly" /></label>
+        <label>Seed <input type="number" value="@run.Get(VerificationKeys.Seed)" placeholder="12345" @onchange="e => SetRun(VerificationKeys.Seed, e.Value?.ToString())" disabled="@Ws.ReadOnly" /></label>
+        <label>Stop time <input value="@run.Get(VerificationKeys.StopTime)" placeholder="timed 3600 s · co-sim 10 s" @onchange="e => SetRun(VerificationKeys.StopTime, e.Value?.ToString())" disabled="@Ws.ReadOnly" /></label>
+        <label>Co-sim step <input value="@run.Get(VerificationKeys.Step)" placeholder="0.01 s" @onchange="e => SetRun(VerificationKeys.Step, e.Value?.ToString())" disabled="@Ws.ReadOnly" /></label>
+        @if (run.Get(VerificationKeys.Summary) is { Length: > 0 } summary)
+        {
+            <label>Last run <span style="color:var(--text-2); font-size:12px">@run.Get(VerificationKeys.LastRun) · @summary</span></label>
+        }
+        @foreach (var p in Verification.ParseInputsProblems(run)) { <span class="vfy-err">⚠ @p</span> }
+    </div>
+}
+
+@if (results.Count == 0)
+{
+    <div class="vfy-empty">
+        No requirement has a verification criterion yet. Give a requirement a criterion such as <code>mass &lt;= 1500 kg</code>,
+        <code>mc: p95(accelTime) &lt; 8 s</code> or <code>timed: final(speed) &gt;= 25 m/s</code> (in the Requirements table or the
+        Inspector), then verify. See docs/VERIFICATION.md.
+    </div>
+}
+else
+{
+    <table class="vfy-table" data-testid="verify-results">
+        <thead><tr><th style="width:90px">Id</th><th style="width:180px">Requirement</th><th>Criterion</th><th style="width:120px">Result</th><th style="width:110px">Value</th><th style="width:110px">Bound</th><th style="width:150px">Margin</th><th style="width:120px">Variant</th><th style="width:150px">When</th></tr></thead>
+        <tbody>
+            @foreach (var (req, res) in results.Where(x => Matches(x.Res)))
+            {
+                var r = req;
+                var crit = Verification.Criterion(r);
+                var err = crit.Length > 0 ? VerificationCriterion.Check(crit) : null;
+                var open = _open.Contains(r.Id);
+                <tr class="row" @key="r.Id" data-req="@r.Id" @onclick="() => Toggle(r)">
+                    <td>@r.Get(FieldKeys.RequirementId)</td>
+                    <td>@r.DisplayName</td>
+                    <td @onclick:stopPropagation="true">
+                        <input class="vfy-crit cell-input @(err != null ? "bad" : "")" value="@crit" placeholder="e.g. mass <= 1500 kg" title="@(err ?? "Criterion")" disabled="@Ws.ReadOnly"
+                               @onchange="e => SetCriterion(r, e.Value?.ToString())" />
+                        @if (err != null) { <div class="vfy-err">@err</div> }
+                    </td>
+                    <td>@Badge(res)</td>
+                    <td>@res?.Value</td>
+                    <td>@res?.Bound</td>
+                    <td style="color:@(res?.Margin.StartsWith('-') == true ? "var(--danger)" : "inherit")">@res?.Margin</td>
+                    <td>@res?.Variant</td>
+                    <td>@res?.At.Replace('T', ' ').TrimEnd('Z')</td>
+                </tr>
+                @if (open)
+                {
+                    <tr class="detail" @key="@(r.Id + "-d")">
+                        <td colspan="9">
+                            <div class="vfy-detail">
+                                @if (res is null) { <b>Result</b><span>Not verified yet.</span> }
+                                else
+                                {
+                                    <b>Result</b><span>@res.Label — @res.Message</span>
+                                    <b>Analysis</b><span>@res.Analysis</span>
+                                    <b>Model version</b><span>@res.ModelVersion</span>
+                                    <b>Variant</b><span>@res.Variant</span>
+                                    <b>Run</b><span>@(Ws.Model.Find(res.RunId) is { } rr ? rr.DisplayName : "ad hoc")</span>
+                                    @if (res.Stale) { <b>Stale</b><span>The model changed since this result was recorded (criterion, analysed elements, run or variant). Verify again.</span> }
+                                }
+                                <b>Requirement</b><span>@r.Get(FieldKeys.Text)</span>
+                                <b></b><span><span class="link" @onclick="() => Shell.Navigate(r)">Show in model</span></span>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string? _runId;
+    private string? _filter;
+    private readonly HashSet<string> _open = new(StringComparer.Ordinal);
+
+    private Element? Run => Ws.Model.Find(_runId) is { } r && Verification.IsRun(r) ? r : null;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        if (Ws.Selected is { } s && Verification.IsRun(s)) _runId = s.Id;
+    }
+
+    private IReadOnlyList<Element> Rows()
+    {
+        if (Run is { } run) return Verification.RequirementsOf(Ws.Model, run);
+        return Ws.Model.OfKind(ElementKind.Requirement)
+            .Where(r => Verification.HasCriterion(r) || r.Get(VerificationKeys.Status).Length > 0)
+            .OrderBy(r => r.Get(FieldKeys.RequirementId), StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Name).ToList();
+    }
+
+    private bool Matches(StoredResult? r) => _filter switch
+    {
+        null => true,
+        "stale" => r?.Stale == true,
+        "none" => r is null,
+        "inconclusive" => r is { Status: not ("pass" or "fail") },
+        var f => r?.Status == f,
+    };
+
+    private static string Pct(int n, int total) => $"{100.0 * n / total:0.#}%".Replace(',', '.');
+
+    private RenderFragment Chip(string key, string label, int n) => __builder =>
+    {
+        <span class="@key @(_filter == key ? "on" : "")" title="Show only these" @onclick="() => _filter = _filter == key ? null : key"><span class="n">@n</span> @label</span>
+    };
+
+    internal static RenderFragment Badge(StoredResult? r) => __builder =>
+    {
+        if (r is null) { <span class="verdict none">not run</span> }
+        else
+        {
+            <span class="verdict @r.Status" title="@r.Message">@r.Status</span>
+            if (r.Stale) { <span class="verdict stale" title="The model changed since this result">stale</span> }
+        }
+    };
+
+    private void Toggle(Element r)
+    {
+        if (!_open.Remove(r.Id)) _open.Add(r.Id);
+        Ws.Select(r);
+    }
+
+    private void PickRun(string? id)
+    {
+        _runId = string.IsNullOrEmpty(id) ? null : id;
+        if (Run is { } r) Ws.Select(r);
+    }
+
+    private void SetRun(string key, string? value)
+    {
+        if (Run is not { } run || Ws.ReadOnly) return;
+        value = value?.Trim();
+        if (run.Get(key) == (value ?? "")) return;
+        Ws.Model.Set(run, key, string.IsNullOrEmpty(value) ? null : value);
+    }
+
+    private void SetCriterion(Element r, string? value)
+    {
+        if (Ws.ReadOnly) return;
+        value = value?.Trim();
+        if (Verification.Criterion(r) == (value ?? "")) return;
+        Ws.Model.Set(r, VerificationKeys.Criterion, string.IsNullOrEmpty(value) ? null : value);
+    }
+
+    private IEnumerable<Element> Subjects() => Ws.Model.AllElements
+        .Where(e => e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Activity or ElementKind.StateMachine)
+        .OrderBy(e => e.Kind).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void NewRun()
+    {
+        try
+        {
+            var selected = Ws.Selected is { Kind: ElementKind.Requirement } sel ? [sel] : Ws.Model.OfKind(ElementKind.Requirement).Where(Verification.HasCriterion).ToList();
+            var owner = Ws.Model.Root.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Package && p.Name.Contains("Verification", StringComparison.OrdinalIgnoreCase)) ?? Ws.Model.Root;
+            var name = $"Verification run {Verification.Runs(Ws.Model).Count() + 1}";
+            var run = Verification.CreateRun(Ws.Model, owner, name, selected);
+            _runId = run.Id;
+            Ws.Select(run);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    /// <summary>Runs the chosen run, or every run plus the requirements no run covers.</summary>
+    public Task Verify() => RunAndReport(Ws, Services, Run);
+
+    /// <summary>Runs verification from anywhere (panel, ribbon, ⌘K) and reports to the status bar and output.</summary>
+    public static async Task RunAndReport(Workspace ws, IServiceProvider services, Element? run)
+    {
+        var settings = FmiCoSimSettings.From(services.GetService<IConfiguration>(), services.GetService<MeridianHostInfo>());
+        var fmu = settings.WhyNotAllowed(ws) == null ? FmuUnit.Factory(settings.FmuPath, settings.Runtime, default) : null;
+        var reports = await ws.Verification.RunAsync(run, ws.Verification.Options(fmu));
+        var all = reports.SelectMany(r => r.Results).ToList();
+        ws.SetStatus(all.Count == 0 ? "Nothing to verify: no requirement has a criterion"
+            : $"Verified {all.Count} requirement{(all.Count == 1 ? "" : "s")}: {all.Count(r => r.Verdict == Verdict.Pass)} pass, {all.Count(r => r.Verdict == Verdict.Fail)} fail, {all.Count(r => r.Verdict == Verdict.Inconclusive)} inconclusive");
+        if (reports.Count > 0) ws.Log($"Verification ({string.Join("; ", reports.Select(r => $"{r.Run?.Name ?? "ad hoc"}: {r.Summary}, {r.Variant}"))})");
+        foreach (var p in reports.SelectMany(r => r.Problems).Distinct()) ws.Log("  ⚠ " + p);
+    }
+}

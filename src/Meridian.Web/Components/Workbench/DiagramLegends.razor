@@ -1,0 +1,53 @@
+@* Canvas chips for the variant view (which configuration, grey / hide / off) and requirement verification results. *@
+@using Meridian.Core.Analysis
+@inject Workspace Ws
+
+@{
+    var vv = Ws.VariantView;
+    var configs = Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    var reqs = Diagram.Nodes.Where(n => n.Element.Kind == ElementKind.Requirement).Select(n => Ws.Verification.ResultOf(n.Element)).OfType<StoredResult>().ToList();
+}
+@if (vv.Active || reqs.Count > 0)
+{
+    <div class="dv-legends" @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true" @onkeydown:stopPropagation="true">
+        @if (vv.Active)
+        {
+            <div class="dv-chip variant" data-testid="variant-chip">
+                <MudIcon Icon="@Icons.Material.Outlined.Balance" Style="font-size:14px" />
+                <span>Variant</span>
+                <select class="dv-select" value="@vv.ConfigurationId" @onchange="e => vv.Show(e.Value?.ToString(), vv.Mode)" aria-label="Configuration shown">
+                    @foreach (var c in configs) { <option value="@c.Id">@c.DisplayName</option> }
+                </select>
+                <span class="dv-count">@vv.CountOut(Diagram) out</span>
+                @foreach (var mode in new[] { VariantDisplay.Grey, VariantDisplay.Hide })
+                {
+                    var m = mode;
+                    <button class="dv-btn @(vv.Mode == m ? "on" : "")" @onclick="() => vv.SetMode(m)">@VariantView.Label(m)</button>
+                }
+                <button class="dv-btn" title="Show the whole (150%) model" @onclick="() => vv.SetMode(VariantDisplay.Off)">Off</button>
+            </div>
+        }
+        @if (reqs.Count > 0)
+        {
+            var vfy = Ws.Verification;
+            <div class="dv-chip verify" data-testid="verify-chip">
+                @if (vfy.ShowOnDiagrams)
+                {
+                    <span class="vs pass">✓ @reqs.Count(r => r.Status == "pass")</span>
+                    <span class="vs fail">✗ @reqs.Count(r => r.Status == "fail")</span>
+                    <span class="vs inconclusive">? @reqs.Count(r => r.Status is not ("pass" or "fail"))</span>
+                    @if (reqs.Count(r => r.Stale) is > 0 and var stale) { <span class="vs stale">@stale stale</span> }
+                    <button class="dv-btn" @onclick="() => vfy.SetShowOnDiagrams(false)">Hide results</button>
+                }
+                else
+                {
+                    <button class="dv-btn" @onclick="() => vfy.SetShowOnDiagrams(true)">Show verification results</button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Diagram Diagram { get; set; } = default!;
+}

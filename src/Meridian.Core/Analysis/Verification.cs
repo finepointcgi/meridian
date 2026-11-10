@@ -194,6 +194,14 @@ public static partial class Verification
         return list;
     }
 
+    /// <summary>Problems reading a run's inputs (for the run editor).</summary>
+    public static IReadOnlyList<string> ParseInputsProblems(Element run)
+    {
+        var problems = new List<string>();
+        ParseInputs(run.Get(VerificationKeys.Inputs), problems);
+        return problems;
+    }
+
     [GeneratedRegex(@"^(?<n>[\p{L}_][\p{L}\p{N}_.]*)\s*=\s*(?<v>[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(?<u>.*)$")]
     private static partial Regex InputRe();
 
@@ -415,19 +423,44 @@ public static partial class Verification
     /// </summary>
     public static IReadOnlyList<VerificationReport> RunAll(ModelRepository m, VerificationOptions? options = null)
     {
+        var reports = ExecuteAll(m, options);
+        foreach (var r in reports) Record(m, r);
+        return reports;
+    }
+
+    /// <summary>What <see cref="RunAll"/> would record, without changing the model.</summary>
+    public static IReadOnlyList<VerificationReport> ExecuteAll(ModelRepository m, VerificationOptions? options = null)
+    {
         options ??= new VerificationOptions();
         var reports = new List<VerificationReport>();
         var covered = new HashSet<Element>(ReferenceEqualityComparer.Instance);
         foreach (var run in Runs(m).ToList())
         {
-            var report = Run(m, run, options);
+            var report = Execute(m, run, null, options);
             reports.Add(report);
             foreach (var r in report.Results) covered.Add(r.Requirement);
         }
         var rest = m.OfKind(ElementKind.Requirement).Where(r => HasCriterion(r) && !covered.Contains(r))
             .OrderBy(r => r.Get(FieldKeys.RequirementId), StringComparer.OrdinalIgnoreCase).ToList();
-        if (rest.Count > 0 || reports.Count == 0) reports.Add(Run(m, null, options, rest));
+        if (rest.Count > 0 || reports.Count == 0) reports.Add(Execute(m, null, rest, options));
         return reports;
+    }
+
+    /// <summary>
+    /// The same report against another copy of the model (elements matched by id, missing ones dropped): run the analyses
+    /// on a snapshot in the background, then record into the live model.
+    /// </summary>
+    public static VerificationReport Rebind(VerificationReport report, ModelRepository target)
+    {
+        var copy = new VerificationReport
+        {
+            Run = report.Run is { } run ? target.Find(run.Id) : null,
+            Variant = report.Variant, ModelVersion = report.ModelVersion, At = report.At,
+        };
+        copy.Problems.AddRange(report.Problems);
+        foreach (var r in report.Results)
+            if (target.Find(r.Requirement.Id) is { } req) copy.Results.Add(r with { Requirement = req });
+        return copy;
     }
 
     // ================================================================== stored results and staleness
