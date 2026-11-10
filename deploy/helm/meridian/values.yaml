@@ -126,7 +126,7 @@ meridian:
     loginAttemptsPerMinute: 10
   sso:
     disableLocalPasswords: false
-    # Each provider: name, displayName, authority, clientId, scopes, claimMappings, autoProvision.
+    # Each provider: name, displayName, authority, clientId, scopes, claimMappings, autoProvision, preset (gitlab).
     # Client secrets go in secrets.ssoClientSecrets (same order) or an existingSecret key
     # Meridian__Sso__Providers__<N>__ClientSecret. Redirect URI: https://<host>/signin-oidc-<name>
     providers: []
@@ -134,6 +134,10 @@ meridian:
     #   displayName: Microsoft
     #   authority: https://login.microsoftonline.com/<tenant-id>/v2.0
     #   clientId: 00000000-0000-0000-0000-000000000000
+    # - name: gitlab        # GitLab preset (docs/DEPLOYMENT.md#sign-in-with-gitlab): scopes, username claims and button text
+    #   authority: https://gitlab.com   # or your self-managed GitLab root
+    #   clientId: <GitLab application id>
+    #   displayName: GitLab
   backup:
     # In-app scheduled backups (zip of all projects) into the backups volume. Set intervalHours: 0 to disable.
     intervalHours: 24

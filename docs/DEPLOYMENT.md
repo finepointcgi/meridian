@@ -190,7 +190,7 @@ compose `.env` file, every setting has a short variable that `docker-compose.pro
 | `Meridian__Security__LockoutMinutes` | 15 | Lockout duration |
 | `Meridian__Security__LoginAttemptsPerMinute` | 10 | Sign-in rate limit per client IP |
 | `Meridian__Sso__Providers__N__{Name,DisplayName,Authority,ClientId,ClientSecret}` | none | OpenID Connect providers ([SSO](#first-administrator-and-sso)) |
-| `Meridian__Sso__Providers__N__Scopes__i`, `…__ClaimMappings__{Username,DisplayName,Email,AdminClaim,AdminValue}`, `…__AutoProvision` | see `Admin/AdminOptions.cs` | Provider details |
+| `Meridian__Sso__Providers__N__Scopes__i`, `…__ClaimMappings__{Username,UsernameFallback,DisplayName,Email,AdminClaim,AdminValue}`, `…__AutoProvision`, `…__Preset` | see `Admin/AdminOptions.cs` | Provider details. `Preset=gitlab` (or the name `gitlab`) fills in GitLab defaults ([Sign in with GitLab](#sign-in-with-gitlab)) |
 | `Meridian__Sso__DisableLocalPasswords` | false | SSO only (no passwords, registration or HTTP Basic API auth) |
 | `Meridian__Backup__Folder` | none (off) | Folder for in-app scheduled backups (`/data/backups`) |
 | `Meridian__Backup__IntervalHours` / `__Retain` / `__IncludeUsers` | 24 / 7 / true | Backup schedule and retention |
@@ -251,6 +251,57 @@ To set up SSO with any OpenID Connect provider (Entra ID, Okta, Google, Keycloak
 3. Keep `TrustForwardedHeaders=true` behind the proxy. Without it, Meridian builds `http://` redirect URIs and the
    provider rejects them.
 4. Once SSO works and an SSO administrator exists, consider `DisableLocalPasswords=true`.
+
+### Sign in with GitLab
+
+GitLab (gitlab.com or a self-managed instance) is an OpenID Connect provider, and Meridian has a preset for it. A
+provider named `gitlab`, or any provider with `Preset=gitlab`, gets these defaults, and anything you set explicitly
+wins:
+
+| Setting | Preset default |
+| --- | --- |
+| `Authority` | `https://gitlab.com`. For self-managed, the instance root, e.g. `https://gitlab.example.com` (it is also the issuer) |
+| `DisplayName` | `GitLab` |
+| `Scopes` | `openid profile email` |
+| `ClaimMappings__Username` | `preferred_username`, falling back to GitLab's `nickname` claim (`ClaimMappings__UsernameFallback`). Both hold the GitLab username |
+| `ClaimMappings__DisplayName` | `name` |
+
+To set it up:
+
+1. In GitLab, create an application. For gitlab.com use **User settings ▸ Applications** or **Group ▸ Settings ▸
+   Applications**. For a self-managed instance, an administrator can use **Admin area ▸ Applications** to make it
+   available to every user.
+   - Redirect URI: `https://<domain>/signin-oidc-gitlab`. Use the provider's name in place of `gitlab` if you chose
+     another one.
+   - Confidential: yes. Scopes: `openid`, `profile` and `email`. Add `read_user` only if your other tools need it.
+2. Copy the Application ID and Secret into the provider settings:
+
+   ```bash
+   # .env (docker-compose.prod.yml)
+   MERIDIAN_SSO_NAME=gitlab
+   MERIDIAN_SSO_AUTHORITY=https://gitlab.com          # or https://gitlab.example.com
+   MERIDIAN_SSO_CLIENT_ID=<Application ID>
+   MERIDIAN_SSO_CLIENT_SECRET=<Secret>
+   ```
+
+   ```yaml
+   # Helm values (the secret goes in secrets.ssoClientSecrets)
+   meridian:
+     sso:
+       providers:
+         - name: gitlab
+           authority: https://gitlab.example.com
+           clientId: <Application ID>
+           claimMappings: { adminClaim: groups, adminValue: my-group/meridian-admins }
+   ```
+
+3. Optional: to make members of a GitLab group Meridian administrators, set `ClaimMappings__AdminClaim=groups` and
+   `ClaimMappings__AdminValue=<full group path>`. GitLab lists the user's groups in the `groups` claim of the userinfo
+   response.
+
+Accounts are linked by issuer and subject. The subject is GitLab's numeric user id, so renaming a GitLab user keeps the
+same Meridian account. A self-managed instance with a private CA must be trusted by the container, for example by
+mounting the CA certificate and setting `SSL_CERT_FILE`.
 
 Provider-specific notes and the issue-tracker and API integrations are in [INTEGRATIONS.md](INTEGRATIONS.md).
 

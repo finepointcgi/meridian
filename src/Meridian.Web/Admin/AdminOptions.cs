@@ -19,13 +19,42 @@ public sealed class SsoProviderOptions
     /// <summary>Only for local identity-provider testing over plain HTTP.</summary>
     public bool RequireHttpsMetadata { get; set; } = true;
 
+    /// <summary>Ready-made defaults for a well-known provider: <c>gitlab</c> (also implied by the name <c>gitlab</c>). Explicit settings win.</summary>
+    public string? Preset { get; set; }
+
     public string Scheme => "oidc-" + Name.ToLowerInvariant();
     public string Label => string.IsNullOrWhiteSpace(DisplayName) ? Name : DisplayName!;
+
+    public const string GitLabPreset = "gitlab";
+    public const string GitLabDotCom = "https://gitlab.com";
+
+    /// <summary>
+    /// Fills in what a preset implies and the configuration left out. GitLab (gitlab.com or self-managed) is a standard
+    /// OpenID Connect provider whose issuer is the instance root: Authority defaults to https://gitlab.com, the scopes are
+    /// <c>openid profile email</c>, the button says "GitLab", and the username comes from <c>preferred_username</c>, falling
+    /// back to GitLab's <c>nickname</c> claim (both carry the GitLab username).
+    /// </summary>
+    public void ApplyPreset()
+    {
+        var preset = Preset?.Trim().ToLowerInvariant() is { Length: > 0 } p ? p
+            : string.Equals(Name?.Trim(), GitLabPreset, StringComparison.OrdinalIgnoreCase) ? GitLabPreset : null;
+        if (preset != GitLabPreset) return;
+        Preset = GitLabPreset;
+        if (string.IsNullOrWhiteSpace(Name)) Name = GitLabPreset;
+        Authority = string.IsNullOrWhiteSpace(Authority) ? GitLabDotCom : Authority.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(DisplayName) || string.Equals(DisplayName, Name, StringComparison.Ordinal)) DisplayName = "GitLab";
+        if (Scopes is not { Length: > 0 }) Scopes = ["openid", "profile", "email"];
+        if (string.IsNullOrWhiteSpace(ClaimMappings.Username)) ClaimMappings.Username = "preferred_username";
+        ClaimMappings.UsernameFallback ??= "nickname";
+        if (string.IsNullOrWhiteSpace(ClaimMappings.DisplayName)) ClaimMappings.DisplayName = "name";
+    }
 }
 
 public sealed class SsoClaimMappings
 {
     public string Username { get; set; } = "preferred_username";
+    /// <summary>Claim used when <see cref="Username"/> is missing, before falling back to the e-mail (GitLab preset: <c>nickname</c>).</summary>
+    public string? UsernameFallback { get; set; }
     public string DisplayName { get; set; } = "name";
     public string Email { get; set; } = "email";
     /// <summary>Optional claim (e.g. <c>groups</c> or <c>roles</c>) and value that make the user a Meridian administrator.</summary>
@@ -79,6 +108,7 @@ public sealed record AdminSettings(SsoOptions Sso, SecurityOptions Security, Bac
     public static AdminSettings From(IConfiguration c)
     {
         var sso = c.GetSection("Meridian:Sso").Get<SsoOptions>() ?? new SsoOptions();
+        foreach (var p in sso.Providers) p.ApplyPreset();
         sso.Providers.RemoveAll(p => string.IsNullOrWhiteSpace(p.Name) || string.IsNullOrWhiteSpace(p.Authority) || string.IsNullOrWhiteSpace(p.ClientId));
         var security = c.GetSection("Meridian:Security").Get<SecurityOptions>() ?? new SecurityOptions();
         // Also accept Meridian:Admins (array or comma-separated string).
