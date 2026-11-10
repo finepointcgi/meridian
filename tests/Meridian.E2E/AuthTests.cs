@@ -12,17 +12,17 @@ public sealed class AuthTests(ServerFixture f) : E2ETest(f)
         await Expect(s.Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("/login"));
         await Expect(s.Page.GetByRole(AriaRole.Heading, new() { Name = "Welcome back" })).ToBeVisibleAsync();
 
-        await s.Page.GetByLabel("Username").FillAsync(F.Alice.Username);
+        await s.Page.GetByLabel("Username").FillAsync(F.Admin.Username);
         await s.Page.GetByLabel("Password").FillAsync("not-the-password");
         await s.Page.GetByRole(AriaRole.Button, new() { Name = "Sign in" }).ClickAsync();
         await Expect(s.Page.Locator(".auth-error")).ToBeVisibleAsync();
 
-        await s.Page.GetByLabel("Username").FillAsync(F.Alice.Username);
-        await s.Page.GetByLabel("Password").FillAsync(F.Alice.Password);
+        await s.Page.GetByLabel("Username").FillAsync(F.Admin.Username);
+        await s.Page.GetByLabel("Password").FillAsync(F.Admin.Password);
         await s.Page.GetByRole(AriaRole.Button, new() { Name = "Sign in" }).ClickAsync();
         await s.WaitForWorkbenchAsync("Vehicle System (sample)");
 
-        // The sample model is in the explorer, and a diagram opens on double-click.
+        // A fresh account gets its own sample project. It is in the explorer, and a diagram opens on double-click.
         var tree = s.Page.Tree();
         await Expect(tree.GetByText("Vehicle Requirements", new() { Exact = true })).ToBeVisibleAsync();
         await tree.GetByText("Vehicle Structure", new() { Exact = true }).DblClickAsync();

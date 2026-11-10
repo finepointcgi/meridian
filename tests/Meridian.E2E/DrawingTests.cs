@@ -147,4 +147,22 @@ public sealed class DrawingTests(ServerFixture f) : E2ETest(f)
         await Ui.EventuallyAsync(async () => (await p.CountsAsync()).Relationships == rels + 1, "the line tool should connect the two shapes");
         Assert.Equal(2, await p.Nodes().CountAsync());
     }
+
+    /// <summary>Regression: keys typed before the inline editor had focus used to be dropped ("Gearbox" became "Geax").</summary>
+    [E2EFact]
+    public async Task Typing_a_label_quickly_on_a_new_shape_keeps_every_key()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        await p.NewProjectAsync("Blank project", Unique("Typing"));
+        var names = new[] { "Gearbox", "Shared Pump", "Alternator", "Radiator", "Crankshaft", "Fuel Injector" };
+        foreach (var name in names)
+        {
+            await p.ShapeTileAsync("Block");
+            await p.Keyboard.TypeAsync(name);   // no delay: faster than the server round trip
+            await p.Keyboard.PressAsync("Enter");
+            await Expect(p.Tree().GetByText(name, new() { Exact = true })).ToHaveCountAsync(1);
+        }
+        await Expect(p.Nodes()).ToHaveCountAsync(names.Length);
+    }
 }

@@ -153,7 +153,13 @@ public abstract class E2ETest(ServerFixture fixture) : IAsyncLifetime
         return s;
     }
 
-    public Task InitializeAsync() => Task.CompletedTask;
+    private int _serverErrorsBefore;
+
+    public Task InitializeAsync()
+    {
+        if (F.App != null) _serverErrorsBefore = F.App.ServerErrors.Count;
+        return Task.CompletedTask;
+    }
 
     public async Task DisposeAsync()
     {
@@ -168,6 +174,8 @@ public abstract class E2ETest(ServerFixture fixture) : IAsyncLifetime
             try { s.AssertNoErrors(); } catch (Exception ex) { failures.Add(ex.Message); }
             await s.DisposeAsync();
         }
+        if (F.App != null && F.App.ServerErrors.Entries.Skip(_serverErrorsBefore).ToList() is { Count: > 0 } server)
+            failures.Add("Server logged errors:\n" + string.Join("\n", server));
         if (failures.Count > 0) throw new Xunit.Sdk.XunitException(string.Join("\n", failures));
     }
 }

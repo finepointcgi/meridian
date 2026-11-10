@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Meridian.E2E;
 
@@ -25,6 +26,9 @@ public sealed class MeridianApp : IAsyncDisposable
 
     public IServiceProvider Services => _app.Services;
 
+    /// <summary>Server-side errors (log level Error and above), so tests also fail on exceptions the browser never sees.</summary>
+    public ServerErrorLog ServerErrors { get; } = new();
+
     public static async Task<MeridianApp> StartAsync(bool localMode, IDictionary<string, string?>? extra = null)
     {
         var data = Path.Combine(Path.GetTempPath(), "meridian-e2e-" + Guid.NewGuid().ToString("N")[..10]);
@@ -38,12 +42,15 @@ public sealed class MeridianApp : IAsyncDisposable
             ["Meridian:KeysPath"] = Path.Combine(data, "keys"),
             ["Meridian:Security:LoginAttemptsPerMinute"] = "1000",
             ["Logging:LogLevel:Default"] = "Warning",
+            ["DetailedErrors"] = "true",   // circuit exceptions reach the browser console with their message
         };
         if (localMode) { settings["Meridian:Mode"] = "local"; settings["Meridian:LaunchToken"] = token; }
         if (extra != null) foreach (var kv in extra) settings[kv.Key] = kv.Value;
 
+        var errors = new ServerErrorLog();
         var app = await Meridian.Web.MeridianServer.CreateAsync([], b =>
         {
+            b.Logging.AddProvider(errors);
             b.Configuration.AddInMemoryCollection(settings);
             b.WebHost.UseUrls("http://127.0.0.1:0");
             b.WebHost.UseStaticWebAssets();   // serves wwwroot + MudBlazor's _content from the build output
@@ -55,7 +62,9 @@ public sealed class MeridianApp : IAsyncDisposable
         });
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-        return new MeridianApp(app, address.TrimEnd('/'), data, token);
+        var started = new MeridianApp(app, address.TrimEnd('/'), data, token);
+        started.ServerErrors.Attach(errors);
+        return started;
     }
 
     /// <summary>src/Meridian.Web, found by walking up from the test output folder.</summary>
@@ -75,5 +84,32 @@ public sealed class MeridianApp : IAsyncDisposable
         await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { Directory.Delete(DataPath, true); } catch { }
+    }
+}
+
+/// <summary>Collects error-level log entries from the in-process server.</summary>
+public sealed class ServerErrorLog : Microsoft.Extensions.Logging.ILoggerProvider
+{
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _entries = new();
+    private ServerErrorLog? _source;
+
+    internal void Attach(ServerErrorLog source) => _source = source;
+
+    /// <summary>All entries so far; take <see cref="Count"/> before a test and read the rest after it.</summary>
+    public IReadOnlyList<string> Entries => (_source ?? this)._entries.ToList();
+    public int Count => (_source ?? this)._entries.Count;
+
+    public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) => new Category(this, categoryName);
+    public void Dispose() { }
+
+    private sealed class Category(ServerErrorLog log, string name) : Microsoft.Extensions.Logging.ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => logLevel >= Microsoft.Extensions.Logging.LogLevel.Error;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel)) return;
+            log._entries.Enqueue($"{logLevel} {name}: {formatter(state, exception)}{(exception != null ? "\n" + exception : "")}");
+        }
     }
 }

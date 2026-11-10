@@ -60,8 +60,14 @@ public static class Ui
     /// <summary>Center of a locator's box in page coordinates.</summary>
     public static async Task<(float X, float Y, LocatorBoundingBoxResult Box)> CenterAsync(this ILocator l)
     {
-        var b = await l.BoundingBoxAsync() ?? throw new InvalidOperationException("Element has no box");
-        return (b.X + b.Width / 2, b.Y + b.Height / 2, b);
+        // The canvas SVG is re-rendered as markup, so a shape can be swapped for an identical copy mid-measure: retry briefly.
+        for (var attempt = 0; ; attempt++)
+        {
+            await l.WaitForAsync(new() { State = WaitForSelectorState.Attached });
+            if (await l.BoundingBoxAsync() is { } b) return (b.X + b.Width / 2, b.Y + b.Height / 2, b);
+            if (attempt >= 20) throw new InvalidOperationException("Element has no box");
+            await Task.Delay(50);
+        }
     }
 
     /// <summary>Waits until the inline label editor on the canvas is gone (edit committed or cancelled).</summary>

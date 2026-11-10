@@ -256,11 +256,11 @@
              @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true">
             @if (multiline)
             {
-                <textarea @ref="_editor" value="@_editText" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="Type a label"></textarea>
+                <textarea @ref="_editor" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="Type a label"></textarea>
             }
             else
             {
-                <input @ref="_editor" value="@_editText" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="@(C.EditingEdge != null ? "Label" : "Name")" />
+                <input @ref="_editor" @oninput="e => _editText = e.Value?.ToString()" @onkeydown="EditorKey" @onblur="CommitEdit" placeholder="@(C.EditingEdge != null ? "Label" : "Name")" />
             }
         </div>
     }
@@ -298,7 +298,6 @@
     private DotNetObjectReference<DiagramView>? _self;
     private (double Left, double Top) _origin;
     private object? _editorShownFor;
-    private string? _appliedSeed;
     private string? _editText;
     private static bool _shapesOpen = true;
     private string? _shapeQuery;
@@ -433,29 +432,10 @@
         if (target != null && !ReferenceEquals(_editorShownFor, target))
         {
             _editorShownFor = target;
-            _appliedSeed = C.EditSeed;
             _editText = C.EditSeed ?? (C.Editing is { } n
                 ? n.Element.Kind == ElementKind.Comment ? n.Element.Get(FieldKeys.Body) : n.Element.Name
                 : C.EditingEdge!.Relationship.Name);
-            StateHasChanged();
-            await Task.Yield();
-            await JS.InvokeVoidAsync(C.EditSeed != null ? "meridian.caretEnd" : "meridian.select", _editor);
-        }
-        else if (target != null && C.EditSeed != null && C.EditSeed != _appliedSeed)
-        {
-            // Keys typed before the editor took focus. Insert only the new ones client-side: re-rendering the whole seed
-            // would overwrite characters already typed into the focused editor.
-            var applied = _appliedSeed ?? "";
-            _appliedSeed = C.EditSeed;
-            if (C.EditSeed.StartsWith(applied, StringComparison.Ordinal))
-                await JS.InvokeVoidAsync("meridian.insertSeed", _editor, C.EditSeed[applied.Length..]);
-            else
-            {
-                _editText = C.EditSeed;
-                StateHasChanged();
-                await Task.Yield();
-                await JS.InvokeVoidAsync("meridian.caretEnd", _editor);
-            }
+            await JS.InvokeVoidAsync("meridian.beginEdit", _editor, _canvas, C.EditSeed, _editText);
         }
         if (target == null) _editorShownFor = null;
 
