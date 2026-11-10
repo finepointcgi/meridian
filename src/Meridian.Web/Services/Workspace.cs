@@ -97,6 +97,8 @@ public sealed class Workspace : IDisposable, ISessionClient
         Model.Changed += OnModelChanged;
         Model.History.Changed += OnHistoryChanged;
         Model.OpEmitted += OnLocalOp;
+        ModelVersion++;
+        TreeVersion++;
         _open.Clear();
         _back.Clear();
         _forward.Clear();
@@ -232,20 +234,36 @@ public sealed class Workspace : IDisposable, ISessionClient
     // ---------------------------------------------------------------- model health (cached per version)
 
     private int _healthVersion = -1;
+    private ModelRepository? _healthModel;
     private (int Errors, int Warnings, int Infos) _health;
     private DateTime _healthAt;
 
+    /// <summary>
+    /// Issue counts for the status bar. Cached against <see cref="ModelVersion"/> (selection and other UI-only changes never
+    /// re-validate); while the model is being edited it refreshes at most every 1.5 s. Only counts are needed, so the rules
+    /// run without the sorting <see cref="ModelValidator.Validate"/> does for the issue list.
+    /// </summary>
     public (int Errors, int Warnings, int Infos) Health
     {
         get
         {
-            if (_healthVersion == Version) return _health;
+            var sameModel = ReferenceEquals(_healthModel, Model);
+            if (sameModel && _healthVersion == ModelVersion) return _health;
             // Validation is O(model); while editing, refresh it at most every 1.5 s.
-            if (_healthVersion >= 0 && (DateTime.UtcNow - _healthAt).TotalSeconds < 1.5) return _health;
+            if (sameModel && _healthVersion >= 0 && (DateTime.UtcNow - _healthAt).TotalSeconds < 1.5) return _health;
             _healthAt = DateTime.UtcNow;
-            var issues = new ModelValidator().Validate(Model);
-            _health = (issues.Count(i => i.Severity == Severity.Error), issues.Count(i => i.Severity == Severity.Warning), issues.Count(i => i.Severity == Severity.Info));
-            _healthVersion = Version;
+            int errors = 0, warnings = 0, infos = 0;
+            foreach (var rule in new ModelValidator().Rules)
+            foreach (var issue in rule.Check(Model))
+                switch (issue.Severity)
+                {
+                    case Severity.Error: errors++; break;
+                    case Severity.Warning: warnings++; break;
+                    default: infos++; break;
+                }
+            _health = (errors, warnings, infos);
+            _healthVersion = ModelVersion;
+            _healthModel = Model;
             return _health;
         }
     }
@@ -311,8 +329,25 @@ public sealed class Workspace : IDisposable, ISessionClient
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Bumped by every change to model content (elements, fields, ownership; not diagram layout) and when another model is
+    /// installed. Panels cache derived data (traceability rows, table rows, tree rows) against it, so selection changes and
+    /// other UI-only bumps of <see cref="Version"/> don't recompute them.
+    /// </summary>
+    public int ModelVersion { get; private set; }
+
+    /// <summary>
+    /// Bumped when the containment tree's shape or sort keys change: elements added, removed or moved, a name or requirement
+    /// id edited, or another model installed. The model tree rebuilds its rows only when this moves.
+    /// </summary>
+    public int TreeVersion { get; private set; }
+
     private void OnModelChanged(object? sender, ModelChange change)
     {
+        if (change.Kind != ChangeKind.DiagramChanged) ModelVersion++;
+        if (change.Kind is ChangeKind.Added or ChangeKind.Removed or ChangeKind.Moved or ChangeKind.Reset
+            || change is { Kind: ChangeKind.Updated, Field: FieldKeys.Name or FieldKeys.RequirementId })
+            TreeVersion++;
         if (change.Kind == ChangeKind.Removed)
         {
             if (Selected != null && !Model.Contains(Selected)) Selected = null;

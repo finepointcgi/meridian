@@ -542,6 +542,7 @@ public static class XmiExchange
 
         // Relationships
         var rels = 0;
+        Dictionary<string, XElement>? byXmiId = null;
         foreach (var (kind0, id, src0, tgt0, owner, x) in pending)
         {
             var kind = kind0; var src = src0; var tgt = tgt0;
@@ -550,7 +551,14 @@ public static class XmiExchange
             {
                 var memberEnds = (Attr(x, "memberEnd") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
                 memberEnds.AddRange(x.Elements().Where(e => e.Name.LocalName == "memberEnd").Select(e => e.Attribute(Xmi + "idref")?.Value).OfType<string>());
-                var ends = memberEnds.Select(me => doc.Descendants().FirstOrDefault(d => XmiId(d) == me)).OfType<XElement>().ToList();
+                // Index every xmi:id once (first occurrence in document order wins, as a linear search would find).
+                if (byXmiId == null)
+                {
+                    byXmiId = new Dictionary<string, XElement>(StringComparer.Ordinal);
+                    foreach (var d in doc.Descendants())
+                        if (XmiId(d) is { } xid) byXmiId.TryAdd(xid, d);
+                }
+                var ends = memberEnds.Select(me => byXmiId.GetValueOrDefault(me)).OfType<XElement>().ToList();
                 if (ends.Count != 2) { warnings.Add($"Association {id} skipped: needs two ends"); continue; }
                 var whole = ends.FindIndex(e => Attr(e, "aggregation") is "composite" or "shared");
                 var partEnd = whole >= 0 ? ends[whole] : ends[0];

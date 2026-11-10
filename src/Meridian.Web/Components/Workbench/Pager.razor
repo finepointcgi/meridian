@@ -1,0 +1,32 @@
+@* Page navigation for long tables. Renders nothing while everything fits on one page. *@
+@if (Total > PageSize)
+{
+    var pages = (Total + PageSize - 1) / PageSize;
+    var page = Math.Clamp(Page, 0, pages - 1);
+    <div class="pager">
+        <span class="pager-range">@($"{page * PageSize + 1:N0}–{Math.Min(Total, (page + 1) * PageSize):N0} of {Total:N0}")</span>
+        <button class="pager-btn" disabled="@(page == 0)" title="First page" @onclick="() => Go(0)">«</button>
+        <button class="pager-btn" disabled="@(page == 0)" title="Previous page" @onclick="() => Go(page - 1)">‹</button>
+        <span class="pager-page">Page @(page + 1) of @pages</span>
+        <button class="pager-btn" disabled="@(page >= pages - 1)" title="Next page" @onclick="() => Go(page + 1)">›</button>
+        <button class="pager-btn" disabled="@(page >= pages - 1)" title="Last page" @onclick="() => Go(pages - 1)">»</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int Total { get; set; }
+    [Parameter] public int PageSize { get; set; } = 200;
+    [Parameter] public int Page { get; set; }
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+
+    /// <summary>The slice of <paramref name="items"/> shown on <paramref name="page"/> (clamped to the last page).</summary>
+    public static IReadOnlyList<T> Slice<T>(IReadOnlyList<T> items, int page, int pageSize)
+    {
+        if (items.Count <= pageSize) return items;
+        var pages = (items.Count + pageSize - 1) / pageSize;
+        var p = Math.Clamp(page, 0, pages - 1);
+        return items.Skip(p * pageSize).Take(pageSize).ToList();
+    }
+
+    private Task Go(int page) => PageChanged.InvokeAsync(page);
+}

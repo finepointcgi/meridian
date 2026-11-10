@@ -15,7 +15,7 @@
         <tr><th style="width:110px">Id</th><th style="width:200px">Name</th><th>Text</th><th style="width:110px">Priority</th><th style="width:130px">Status</th><th style="width:130px">Verification</th><th style="width:120px">Owner</th><th style="width:200px">Satisfied by</th><th style="width:170px">Verified by</th></tr>
     </thead>
     <tbody>
-        @foreach (var r in Rows())
+        @foreach (var r in Pager.Slice(AllRows(), _page, PageSize))
         {
             var depth = r.AncestorsAndSelf().Skip(1).TakeWhile(a => a.Kind == ElementKind.Requirement).Count();
             var leaf = !r.OwnedElements.Any(c => c.Kind == ElementKind.Requirement);
@@ -41,8 +41,34 @@
         }
     </tbody>
 </MudSimpleTable>
+<Pager Total="AllRows().Count" PageSize="PageSize" Page="_page" PageChanged="p => _page = p" />
 
 @code {
+    /// <summary>Rows per page: each row holds several editors, so long requirement sets are paged.</summary>
+    internal const int PageSize = 100;
+
+    private int _page;
+    private int _rowsVersion = -1;
+    private ModelRepository? _rowsModel;
+    private List<Element> _allRows = [];
+    private string _summary = "";
+
+    /// <summary>Requirement rows (and the summary line), recomputed only when the model content changes.</summary>
+    private List<Element> AllRows()
+    {
+        if (_rowsVersion == Ws.ModelVersion && ReferenceEquals(_rowsModel, Ws.Model)) return _allRows;
+        _allRows = Rows().ToList();
+        _summary = ComputeSummary();
+        _rowsVersion = Ws.ModelVersion;
+        _rowsModel = Ws.Model;
+        return _allRows;
+    }
+
+    private string Summary()
+    {
+        AllRows();
+        return _summary;
+    }
 
     private RenderFragment AttrSelect(Element r, string key, string[] values) => __builder =>
     {
@@ -61,7 +87,7 @@
         return Walk(Ws.Model.Root);
     }
 
-    private string Summary()
+    private string ComputeSummary()
     {
         var c = Traceability.Coverage(Ws.Model);
         var n = Ws.Model.OfKind(ElementKind.Requirement).Count();

@@ -106,11 +106,9 @@
 @code {
     private RenderFragment TableBody() => __builder =>
     {
-        IReadOnlyList<ModelTableRow> rows;
-        string? error = null;
-        try { rows = ModelTables.Build(Ws.Model, _def); }
-        catch (QueryParseException ex) { rows = []; error = ex.Message; }
-        var shown = rows.Take(MaxRows).ToList();
+        var rows = TableRows(out var error);
+        var offset = Math.Clamp(_tablePage, 0, Math.Max(0, (rows.Count - 1) / PageSize)) * PageSize;
+        var shown = Pager.Slice(rows, _tablePage, PageSize);
         <div class="gt-status">
             @if (error != null)
             {
@@ -118,7 +116,7 @@
             }
             else
             {
-                <span>@rows.Count @(rows.Count == 1 ? "row" : "rows")@(rows.Count > MaxRows ? $" (showing the first {MaxRows})" : "")</span>
+                <span>@rows.Count @(rows.Count == 1 ? "row" : "rows")</span>
             }
             <code class="gt-code" title="Row query">@_def.Query</code>
             @if (_view != null) { <span class="gt-saved"><MudIcon Icon="@UiKinds.Icon(_view.Kind)" /> @_view.QualifiedName</span> }
@@ -150,7 +148,7 @@
                         @foreach (var col in _def.Columns)
                         {
                             var c = col;
-                            <th><input class="gt-filter" placeholder="Filter" value="@c.Filter" @oninput="e => SetFilter(c, (string?)e.Value)" spellcheck="false" title="Text, or >10, <=5, =x, !=x, !x" /></th>
+                            <th><input class="gt-filter" placeholder="Filter" value="@c.Filter" @oninput="e => OnFilterInput(c, (string?)e.Value)" spellcheck="false" title="Text, or >10, <=5, =x, !=x, !x" /></th>
                         }
                         <th></th>
                     </tr>
@@ -160,7 +158,7 @@
                     {
                         var row = shown[r];
                         var e = row.Element;
-                        var n = r + 1;
+                        var n = offset + r + 1;
                         <tr @key="e.Id" class="@(ReferenceEquals(Ws.Selected, e) ? "sel" : "")" @onclick="() => Ws.Select(e)">
                             <td class="gt-num">@n</td>
                             @for (var i = 0; i < _def.Columns.Count; i++)
@@ -200,6 +198,7 @@
                     }
                 </tbody>
             </table>
+            <Pager Total="rows.Count" PageSize="PageSize" Page="_tablePage" PageChanged="p => _tablePage = p" />
             @if (error == null && rows.Count == 0)
             {
                 <div class="gt-empty">No elements match. Change the row kind, scope or filters@(RowKind != null && !Ws.ReadOnly ? ", or add a row" : "").</div>
@@ -301,7 +300,7 @@
                     @foreach (var f in FieldSuggestions()) { <option value="@f">@ModelValues.Label(f)</option> }
                 </datalist>
                 <datalist id="gt-stereos">
-                    @foreach (var s in Ws.Model.AllElements.SelectMany(x => x.Stereotypes).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s)) { <option value="@s"></option> }
+                    @foreach (var s in StereotypeNames()) { <option value="@s"></option> }
                 </datalist>
             }
         </div>
@@ -311,7 +310,8 @@
         }
         else
         {
-            var results = _parsed.Run(Ws.Model);
+            var results = QueryResults();
+            var qOffset = Math.Clamp(_queryPage, 0, Math.Max(0, (results.Count - 1) / PageSize)) * PageSize;
             <div class="gt-status">
                 <span>@results.Count @(results.Count == 1 ? "match" : "matches")</span>
                 @if (_queryView != null) { <span class="gt-saved"><MudIcon Icon="@UiKinds.Icon(_queryView.Kind)" /> @_queryView.QualifiedName</span> }
@@ -320,8 +320,8 @@
                 <table class="gt-table">
                     <thead><tr><th class="gt-num">#</th><th>Name</th><th style="width:150px">Kind</th><th>Location</th></tr></thead>
                     <tbody>
-                        @{ var n = 0; }
-                        @foreach (var e in results.Take(MaxRows))
+                        @{ var n = qOffset; }
+                        @foreach (var e in Pager.Slice(results, _queryPage, PageSize))
                         {
                             var el = e;
                             n++;
@@ -334,6 +334,7 @@
                         }
                     </tbody>
                 </table>
+                <Pager Total="results.Count" PageSize="PageSize" Page="_queryPage" PageChanged="p => _queryPage = p" />
             </div>
         }
     };
