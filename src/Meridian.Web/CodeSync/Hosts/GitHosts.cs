@@ -28,17 +28,43 @@ public interface IGitHost
     /// <paramref name="paths"/> (empty = all) accepted by <paramref name="include"/>: a full snapshot.</summary>
     Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, CancellationToken ct = default);
     Task PostCommitStatusAsync(string commit, CommitState state, string description, string? targetUrl, CancellationToken ct = default);
+    /// <summary>Writes Meridian's comment on pull / merge request <paramref name="number"/>: updates comment
+    /// <paramref name="commentId"/> in place when given (and still there), else adds one. Returns the comment's id.
+    /// Hosts that cannot comment keep the default, which fails (the caller logs it and carries on).</summary>
+    Task<string> UpsertPullRequestCommentAsync(int number, string? commentId, string body, CancellationToken ct = default) =>
+        throw new GitHostException("This host cannot comment on pull requests.");
 }
 
 /// <summary>Builds host clients over a supplied <see cref="HttpClient"/> (tests pass one with a fake handler).</summary>
 public static class GitHostFactory
 {
-    public const string StatusContext = "meridian/model";
+    /// <summary>The context of the code-sync status ("meridian/model").</summary>
+    public const string ModelStatusContext = "meridian/model";
+
+    private static readonly AsyncLocal<string?> CurrentContext = new();
+
+    /// <summary>The context hosts post commit statuses under: <see cref="ModelStatusContext"/>, unless a caller
+    /// switched it for its own status with <see cref="UseStatusContext"/> (the architecture check posts "meridian/architecture").</summary>
+    public static string StatusContext => CurrentContext.Value ?? ModelStatusContext;
+
+    /// <summary>Posts made in this async flow, until disposed, use <paramref name="context"/> as the status context.</summary>
+    public static IDisposable UseStatusContext(string context)
+    {
+        var previous = CurrentContext.Value;
+        CurrentContext.Value = context;
+        return new Restore(() => CurrentContext.Value = previous);
+    }
+
+    private sealed class Restore(Action undo) : IDisposable
+    {
+        public void Dispose() => undo();
+    }
 
     public static IGitHost Create(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits? limits = null) => config.Host switch
     {
         GitHostKind.GitHub => new GitHubHost(config, token, http, limits ?? SnapshotLimits.Default),
         GitHostKind.GitLab => new GitLabHost(config, token, http, limits ?? SnapshotLimits.Default),
+        GitHostKind.Bitbucket => new BitbucketHost(config, token, http, limits ?? SnapshotLimits.Default),
         _ => throw new GitHostException($"Unknown git host '{config.Host}'."),
     };
 }
@@ -58,6 +84,31 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
     public abstract Task<string> TestConnectionAsync(CancellationToken ct = default);
     public abstract Task<GitCommitInfo> ResolveBranchHeadAsync(string branch, CancellationToken ct = default);
     public abstract Task PostCommitStatusAsync(string commit, CommitState state, string description, string? targetUrl, CancellationToken ct = default);
+
+    /// <summary>Adds a comment to a pull request; returns its id.</summary>
+    protected abstract Task<string> CreateCommentAsync(int number, string body, CancellationToken ct);
+    /// <summary>Replaces the text of an existing comment; returns its id.</summary>
+    protected abstract Task<string> UpdateCommentAsync(int number, string commentId, string body, CancellationToken ct);
+
+    /// <summary>Largest comment body sent (hosts cap comments at about 64 KB).</summary>
+    public const int MaxCommentChars = 60_000;
+
+    public async Task<string> UpsertPullRequestCommentAsync(int number, string? commentId, string body, CancellationToken ct = default)
+    {
+        if (number <= 0) throw new GitHostException("Not a pull request number.");
+        body = Truncate(body, MaxCommentChars);
+        if (commentId is { Length: > 0 and <= 40 } id && id.All(char.IsAsciiDigit))
+        {
+            try { return await UpdateCommentAsync(number, id, body, ct); }
+            catch (GitHostException ex) when (ex.Status is HttpStatusCode.NotFound or HttpStatusCode.Gone) { /* deleted by someone: add a new one */ }
+        }
+        return await CreateCommentAsync(number, body, ct);
+    }
+
+    /// <summary>The id of a created or updated comment (a number in every host's JSON).</summary>
+    protected string CommentId(JsonNode? node) =>
+        node?["id"] is JsonValue v && (v.TryGetValue<long>(out var n) ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : v.TryGetValue<string>(out var s) ? s : null) is { Length: > 0 } id
+            ? id : throw new GitHostException($"{HostName} did not return the comment id.");
 
     protected HttpRequestMessage Request(HttpMethod method, string url, string accept)
     {
@@ -93,11 +144,14 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
         catch (OperationCanceledException) when (!outer.IsCancellationRequested) { throw new GitHostException($"{request.RequestUri!.Host} did not answer in time."); }
     }
 
+    /// <summary>The host's own error message in an error response body (GitHub and GitLab: <c>message</c>).</summary>
+    protected virtual string? ErrorDetail(JsonNode? body) => body is JsonObject o && o["message"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
     /// <summary>A readable error for a failed call; quotes the host's own message, never the request.</summary>
     protected GitHostException Error(HttpStatusCode status, string body)
     {
         string? detail = null;
-        try { detail = (string?)JsonNode.Parse(body)?["message"]; } catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { }
+        try { detail = ErrorDetail(JsonNode.Parse(body)); } catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { }
         if (detail is { Length: > 200 }) detail = detail[..200];
         var what = status switch
         {
@@ -200,6 +254,12 @@ public sealed class GitHubHost(CodeRepoConfig config, string token, HttpClient h
         if (SafeTargetUrl(targetUrl) is { } url) body["target_url"] = url;
         await SendAsync(HttpMethod.Post, $"{Repo}/statuses/{commit}", body, ct);
     }
+
+    protected override async Task<string> CreateCommentAsync(int number, string body, CancellationToken ct) =>
+        CommentId(await SendAsync(HttpMethod.Post, $"{Repo}/issues/{number}/comments", new JsonObject { ["body"] = body }, ct));
+
+    protected override async Task<string> UpdateCommentAsync(int number, string commentId, string body, CancellationToken ct) =>
+        CommentId(await SendAsync(HttpMethod.Patch, $"{Repo}/issues/comments/{commentId}", new JsonObject { ["body"] = body }, ct));
 }
 
 /// <summary>GitLab (gitlab.com or self-managed) over REST API v4, with a personal, project or group access token.</summary>
@@ -251,4 +311,10 @@ public sealed class GitLabHost(CodeRepoConfig config, string token, HttpClient h
         if (SafeTargetUrl(targetUrl) is { } url) body["target_url"] = url;
         await SendAsync(HttpMethod.Post, $"{Project}/statuses/{commit}", body, ct);
     }
+
+    protected override async Task<string> CreateCommentAsync(int number, string body, CancellationToken ct) =>
+        CommentId(await SendAsync(HttpMethod.Post, $"{Project}/merge_requests/{number}/notes", new JsonObject { ["body"] = body }, ct));
+
+    protected override async Task<string> UpdateCommentAsync(int number, string commentId, string body, CancellationToken ct) =>
+        CommentId(await SendAsync(HttpMethod.Put, $"{Project}/merge_requests/{number}/notes/{commentId}", new JsonObject { ["body"] = body }, ct));
 }

@@ -93,7 +93,14 @@
   .app > .workbench > .center { position: absolute; inset: 0; border: none; border-radius: 0; box-shadow: none; grid-template-rows: minmax(0, 1fr); }
   .app > .workbench > .center > .tabstrip, .app > .workbench > .center > .crumbs, .app > .workbench > .center > .dock { display: none; }
   .diagram-host .minimap { display: none; }
-  .app > .tour { display: none; }   /* the guided tour explains the desktop ribbon and panels */
+  /* Tour chapters and What's new: a bottom sheet above the navigation bar (the inline position is for desktop). */
+  .app > .tour .tour-spot { display: none; }
+  .app > .tour .tour-card { left: max(8px, var(--m-safe-l)) !important; right: max(8px, var(--m-safe-r)) !important; top: auto !important;
+    bottom: calc(var(--m-bottom) + 8px) !important; width: auto !important; max-height: calc(100dvh - var(--m-top) - var(--m-bottom) - 16px); }
+  .app > .tour.tour-light { inset: auto; }
+  .tour-chapter { min-height: 48px; }
+  .tour-btn { height: 40px; }
+  .tour-skip { min-height: 40px; }
   .diagram-host .empty-hint { padding: 80px 24px 24px; }
   /* View only: no editing chrome on the canvas. */
   .app:has(.m-shell[data-mode="view"]) .diagram-host :is(.toolbox, .selbar, .layers-fab, .quickadd) { display: none !important; }

@@ -2,8 +2,12 @@
   href: getting-started.md
 - name: Drawing basics
   href: drawing.md
+- name: Multi-select and bulk editing
+  href: multi-select.md
 - name: Diagram types
   href: diagrams.md
+- name: Creating diagrams from diagrams
+  href: derivation.md
 - name: Requirements and traceability
   href: requirements.md
 - name: Tables and queries
@@ -22,6 +26,8 @@
   href: document-generation.md
 - name: Import and export
   href: import-export.md
+- name: Mermaid
+  href: mermaid.md
 - name: Scripting
   href: scripting.md
 - name: Plugins
@@ -30,6 +36,12 @@
   href: administration.md
 - name: Integrations
   href: integrations.md
+- name: Code sync
+  href: code-sync.md
+- name: AI assistant
+  href: ai-assistant.md
+- name: Settings and theming
+  href: settings.md
 - name: Keyboard shortcuts
   href: keyboard-shortcuts.md
 - name: Sample projects

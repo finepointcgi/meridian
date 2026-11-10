@@ -8,6 +8,13 @@ drawing, with live multi-user editing. It is built with C#, Blazor and MudBlazor
 It runs as a **web app** (a team server backed by PostgreSQL) and as a **desktop app** for Windows, macOS
 and Linux. The desktop app works offline on your computer or connects to a team server.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/workbench-dark.png">
+  <img src="docs-site/images/workbench-light.png" alt="The Meridian workbench with a block definition diagram, the model explorer and the inspector">
+</picture>
+
+The user guide is in [`docs-site/`](docs-site/) (built with DocFX).
+
 ## Download
 
 Get the latest build from [Releases](../../releases):
@@ -32,12 +39,24 @@ You can change the choice later from your avatar menu (**Switch workspace or ser
 
 ## Features
 
+New in **0.5**: code sync, creating diagrams from diagrams, Mermaid, more AI providers and multi-select (marked ★).
+New in 0.4: Settings and themes, Auto-diagram and one-click SDD.
+
 - **Drawing as easy as draw.io**
   - A searchable shapes panel: click to add, drag to place.
-  - Hover arrows that add connected shapes.
+  - Hover arrows that add connected shapes; ★ lines pick their relationship type (satisfy, verify, composition…)
+    and a chip switches it in one click.
   - Alignment guides and resize handles.
   - Double-click empty canvas to add a shape; start typing to label one.
   - A format bar for fill, line and text colors and line width, with a format painter.
+  - ★ **Multi-select** shapes and connectors, edit them together in the Inspector, and **Link to…** one element in a
+    single undo step. ([guide](docs-site/docs/multi-select.md))
+- **Generate diagrams**
+  - **Auto-diagram** draws a package overview, structure, internal structure, requirement and behavior views from
+    the model, with no AI.
+  - ★ **Create diagrams from diagrams**: requirements → use cases → activity → sequence → BDD / IBD → state machine,
+    reviewed before anything changes, with **Update from source** that keeps your edits.
+    ([guide](docs-site/docs/derivation.md), [reference](docs/DERIVATION.md))
 - **SysML and UML**
   - Block definition, internal block (ports, item flows), parametric (with an equation solver), activity
     (swimlanes, pins, call behavior), state machine (composite states), sequence (fragments), use case,
@@ -48,20 +67,68 @@ You can change the choice later from your avatar menu (**Switch workspace or ser
   - Satisfy, verify, refine, derive and trace links, plus allocation.
 - **Other languages**: BPMN 2.0, ArchiMate 3, ER/database diagrams (DDL in and out for PostgreSQL, MySQL,
   SQL Server and SQLite), C# reverse engineering, and a free-drawing whiteboard.
+- ★ **Code sync**: connect a GitHub or GitLab repository; each push updates a review branch of the model, diagrams
+  highlight what changed, and you accept or reject changes into `main` in **What changed**.
+  ([guide](docs-site/docs/code-sync.md), [reference](docs/CODE-SYNC.md))
+- **AI assistant**: ask about the model, review it, generate requirements and trace links, or **Diagram my model**.
+  Every change is shown as a diff you apply or discard. Runs on Claude (API key), ★ a local model (Ollama, LM Studio
+  or any OpenAI-compatible server) or ★ Claude Code with your own login.
+  ([guide](docs-site/docs/ai-assistant.md), [reference](docs/AI.md))
 - **Simulation**: step through activities and state machines.
 - **FMI co-simulation**: import FMI 2.0 / 3.0 FMUs as blocks, wire them with native parametric blocks in an IBD and run them
   with a fixed-step master (plots, CSV, requirement checks). See [docs/FMI.md](docs/FMI.md).
 - **Exchange**
   - XMI 2.5.1 (with diagrams), SysML v2 text, ReqIF, BPMN XML and ArchiMate exchange files.
-  - Enterprise Architect `.qea` import.
+  - Cameo / MagicDraw `.mdzip` and Enterprise Architect `.qea` import.
+  - ★ **Mermaid** import (flowchart, class, state, sequence, requirement, ER and C4) and export.
+    ([guide](docs-site/docs/mermaid.md), [reference](docs/MERMAID.md))
   - A read-only SysML v2 REST API.
 - **Reports**: program deliverables (SRS, ICD, SDD, VCRM / test report, model overview) as PDF, Word and HTML from
   editable templates: numbered sections, TOC, lists of figures / tables, captions and cross-references, query-driven
   loops and tables, traceability matrices and vector diagrams. Templates are stored in the model or as JSON. Plus SVG export.
+- **Settings and themes**: light, dark or match system, accent colors, density and font size; settings follow your
+  account. ([guide](docs-site/docs/settings.md))
+- **Getting started**: a guided tour with chapters for each feature (Help ▸ Tour), a one-time "What's new" card after
+  an upgrade, and empty projects that offer Import Mermaid, Open a Cameo file, Start from a sample and Auto-diagram.
 - **Collaboration** (server)
   - Accounts and project roles (owner, editor, viewer).
   - Live co-editing with presence.
   - Version history with diff and restore, and comments.
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/code-changes-dark.png">
+        <img src="docs-site/images/code-changes-light.png" alt="What changed: code changes from a push, waiting for review">
+      </picture>
+      <br><sub>Code sync: What changed</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/derive-activity-dark.png">
+        <img src="docs-site/images/derive-activity-light.png" alt="An activity created from a use case">
+      </picture>
+      <br><sub>Create from…: an activity from a use case</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/multi-select-dark.png">
+        <img src="docs-site/images/multi-select-light.png" alt="Three use cases selected and edited together">
+      </picture>
+      <br><sub>Multi-select and the bulk Inspector</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/mermaid-result-dark.png">
+        <img src="docs-site/images/mermaid-result-light.png" alt="An activity diagram imported from a Mermaid flowchart">
+      </picture>
+      <br><sub>A Mermaid flowchart, imported</sub>
+    </td>
+  </tr>
+</table>
 
 ## Run the server
 
