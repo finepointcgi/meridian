@@ -10,7 +10,7 @@ Meridian comes in two forms that share the same workbench:
 
 ### Install
 
-Download the file for your platform from the project's GitHub *Releases* page:
+Download the file for your platform from the project's *Releases* page on GitHub (or on GitLab, when your team builds Meridian there):
 
 | Platform | File | Notes |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ You can change your choice later from the avatar menu: **Switch workspace or ser
 
 ### Updates
 
-When **Check for updates** is on (the default), the desktop app checks GitHub at most once a day and shows a banner
+When **Check for updates** is on (the default), the desktop app checks its update source at most once a day (GitHub releases by default; GitLab releases, a private GitHub repository or your own Meridian server under **Settings ▸ Desktop ▸ Update source**) and shows a banner
 when a newer release exists. **Install** downloads the installer for your platform, checks its SHA-256 against the
 release's `SHA256SUMS.txt`, runs it and quits. Set the environment variable `MERIDIAN_NO_UPDATE_CHECK=1` to turn
 checks off, for example for managed installs.

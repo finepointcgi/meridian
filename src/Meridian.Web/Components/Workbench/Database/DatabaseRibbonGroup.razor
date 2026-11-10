@@ -1,0 +1,61 @@
+@* The ribbon's Database group: shown when the project has data models or a database diagram is active. *@
+@using Meridian.Core.DataModeling
+@inherits WorkspaceComponent
+
+@if (Shell.ShowDatabaseTools)
+{
+    var diagram = Ws.Active is { Diagram.DiagramType: DiagramType.Database } a ? a.Diagram : null;
+    <div class="rgroup compact" data-testid="ribbon-database">
+        <div class="rlabel">Database</div>
+        <div class="ritems">
+            <MudTooltip Text="New table in the selected schema (shown on the active database diagram)">
+                <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => Shell.NewTable()" data-testid="ribbon-new-table"><MudIcon Icon="@Icons.Material.Outlined.TableChart" Style="color:#4ec9d6" /><span class="t">New table</span></button>
+            </MudTooltip>
+            <MudTooltip Text="Add the selected tables to a subject area">
+                <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="Shell.AddSelectionToGroup" data-testid="ribbon-add-to-group"><MudIcon Icon="@Icons.Material.Outlined.Workspaces" /><span class="t">Add to group</span></button>
+            </MudTooltip>
+            <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
+                <ActivatorContent><button title="Subject areas: manage them, filter the diagram" class="rbtn" data-testid="ribbon-groups"><MudIcon Icon="@Icons.Material.Outlined.FilterAlt" /><span class="t">Groups</span></button></ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Workspaces" OnClick="Shell.ManageGroups">Subject areas…</MudMenuItem>
+                    @if (diagram != null)
+                    {
+                        <MudDivider />
+                        <MudMenuItem Disabled="true" Class="menu-heading">Show on this diagram</MudMenuItem>
+                        <MudMenuItem OnClick="() => Shell.FilterActiveDiagram(null)">@(diagram.Get(DbFields.GroupFilter).Length == 0 ? "✓ " : "")Every table</MudMenuItem>
+                        @foreach (var g in DbModel.Groups(Ws.Model))
+                        {
+                            var group = g;
+                            <MudMenuItem OnClick="() => Shell.FilterActiveDiagram(group)" data-group="@group.Name">
+                                <span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:@DbModel.ColorOf(group); margin-right:6px"></span>@(diagram.Get(DbFields.GroupFilter) == group.Id ? "✓ " : "")@group.Name
+                            </MudMenuItem>
+                        }
+                        <MudDivider />
+                        <MudMenuItem Disabled="true" Class="menu-heading">Columns</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => Shell.SetShowColumns("all"))" data-testid="columns-all">All columns</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => Shell.SetShowColumns("keys"))" data-testid="columns-keys">Keys only</MudMenuItem>
+                        <MudMenuItem OnClick="@(() => Shell.SetShowColumns("none"))" data-testid="columns-none">None</MudMenuItem>
+                    }
+                </ChildContent>
+            </MudMenu>
+            <MudTooltip Text="CREATE scripts for a database, schema, subject area or selection, in five dialects">
+                <button class="rbtn" @onclick="() => Shell.GenerateDdl()" data-testid="ribbon-generate-ddl"><MudIcon Icon="@Icons.Material.Outlined.Code" /><span class="t">DDL…</span></button>
+            </MudTooltip>
+            <MudTooltip Text="ALTER script from a version, branch, baseline or live database to the model">
+                <button class="rbtn" @onclick="() => Shell.MigrationScript()" data-testid="ribbon-migration"><MudIcon Icon="@Icons.Material.Outlined.CompareArrows" /><span class="t">Migration…</span></button>
+            </MudTooltip>
+            <MudTooltip Text="Compare with the database (or a new script) and review the changes">
+                <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => Shell.RefreshFromDatabase()" data-testid="ribbon-db-refresh"><MudIcon Icon="@Icons.Material.Outlined.Sync" /><span class="t">Refresh…</span></button>
+            </MudTooltip>
+        </div>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        // Integrations ▸ Databases runs imports through the workbench (dialogs sit outside it).
+        Ws.DatabaseImport = c => Shell.RefreshFromConnection(c);
+    }
+}

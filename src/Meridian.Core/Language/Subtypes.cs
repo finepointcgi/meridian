@@ -67,6 +67,9 @@ public static class Subtypes
         ElementKind.ArchiRelation => ArchiRelations,
         ElementKind.Shape => Shapes,
         ElementKind.Line => Lines,
+        ElementKind.Table => DataModeling.DbFields.TableKinds,
+        ElementKind.DbConstraint => DataModeling.DbFields.ConstraintKinds,
+        ElementKind.Routine => DataModeling.DbFields.RoutineKinds,
         _ => [],
     };
 

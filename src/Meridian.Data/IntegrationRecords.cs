@@ -8,6 +8,8 @@ public static class IntegrationKinds
 {
     public const string IssueTracker = "issue-tracker";
     public const string Webhook = "webhook";
+    /// <summary>A live database connection for schema import (the connection string is the encrypted secret).</summary>
+    public const string Database = "database";
 }
 
 /// <summary>

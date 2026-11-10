@@ -23,6 +23,101 @@ git push origin v0.6.0
 You can also start the workflow by hand (**Actions → Release → Run workflow**) to build and download the packages as
 workflow artifacts. A manual run never publishes a release.
 
+## Releasing with GitLab
+
+`.gitlab-ci.yml` is the GitLab twin of `.github/workflows/`. Keep the two in step: `tests/Meridian.Tests/GitLabCiTests.cs`
+parses it and checks that it builds and links the same files that `release.yml` checks for.
+
+| Job | Stage | Runs on | When | GitHub equivalent |
+|---|---|---|---|---|
+| `test` | test | any Linux runner, `mcr.microsoft.com/dotnet/sdk:10.0` | merge requests, default branch, `v*` tags | `ci.yml` test |
+| `e2e` | test | same, plus `install-browsers.sh --with-deps`, `MERIDIAN_E2E=require` | same | `ci.yml` e2e |
+| `postgres-store` | test | same, with a `postgres:17-alpine` service (`MERIDIAN_POSTGRES_CONNECTION`) | same | `ci.yml` postgres-store (Testcontainers) |
+| `package-smoke` | test | same | merge requests, default branch | `ci.yml` package-smoke |
+| `docs` | test | same | changes under `docs-site/` or `src/Meridian.Scripting/` | `docs.yml` build |
+| `package:linux` | package | Linux runner (appimagetool downloaded, `dpkg-deb` in the image) | `v*` tags, manual pipelines | `release.yml` linux |
+| `package:windows` | package | `saas-windows-medium-amd64` (Inno Setup from Chocolatey, .NET from `dotnet-install.ps1`, signtool from the Windows SDK) | same | `release.yml` windows |
+| `package:macos` | package | `saas-macos-medium-m1`, image `macos-15-xcode-16` | same; **manual** unless `MACOS_RUNNER_ENABLED=true` | `release.yml` macos |
+| `release:upload` | release | Linux | `v*` tags | `release.yml` release (SHA256SUMS.txt) |
+| `release:publish` | release | `release-cli` image, `release:` keyword | `v*` tags | `softprops/action-gh-release` |
+| `release:macos` | publish | Linux | after `package:macos` has run on a tag | (part of the release job) |
+| `container` | publish | Docker-in-Docker | `v*` tags; manual pipelines build only (push the SHA tag with `PUSH_IMAGE=true`) | `container.yml` |
+| `pages` | publish | Linux | manual job on the default branch, or a manual pipeline with `PUBLISH_PAGES=true` | `docs.yml` deploy |
+
+A tag release:
+
+1. The package jobs run `build/package.sh` with `NO_CHECKSUMS=1`, exactly as on GitHub, and check that every expected
+   file exists.
+2. `release:upload` writes `SHA256SUMS.txt` over the Windows and Linux files and uploads everything to the project's
+   generic package registry as `meridian/<version>/<file>`
+   (`$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/meridian/<version>/<file>`), using `CI_JOB_TOKEN`.
+3. `release:publish` creates the GitLab release for the tag with one asset link per file, pointing at the registry.
+   The desktop updater's **GitLab releases** source reads these links (see [Update sources](#update-sources)).
+   GitLab has no pre-release flag. The updater ignores versions with a `-` itself.
+4. `release:macos` waits for `package:macos`. When that job has run, `release:macos` uploads the four macOS files,
+   uploads `SHA256SUMS.txt` again with their checksums added (the registry serves the newest file with a name, so the
+   existing link stays valid), and adds the macOS links to the release. If you never run `package:macos`, this job
+   never runs and the release has no macOS files.
+5. `container` builds `linux/amd64` and `linux/arm64` with Buildx on Docker-in-Docker and pushes them to
+   `$CI_REGISTRY_IMAGE` with an SBOM and provenance. It then signs them with cosign keyless, using the job's
+   `SIGSTORE_ID_TOKEN`.
+
+```sh
+git tag v0.6.0
+git push gitlab v0.6.0
+```
+
+To build without releasing, use **Build ▸ Pipelines ▸ Run pipeline** with `VERSION=0.7.0-test`. The packages are
+then job artifacts for 7 days.
+
+### Runners
+
+- **Linux jobs** run on any Docker executor (GitLab.com shared runners: `saas-linux-small-amd64`, the default).
+  `package:linux` and `e2e` install packages with `apt-get`, so the job must run as root, which is the default in
+  these images. `container` needs a runner that allows privileged Docker-in-Docker. GitLab.com shared runners do.
+- **Windows** (`saas-windows-medium-amd64`): GitLab's hosted Windows runners are available on every GitLab.com plan.
+  On self-managed GitLab, register a Windows runner with the PowerShell shell, Git for Windows and Chocolatey, and
+  give it the `saas-windows-medium-amd64` tag, or change the tag in `.gitlab-ci.yml`.
+- **macOS** (`saas-macos-medium-m1`): GitLab's hosted macOS runners need a **Premium or Ultimate** plan on GitLab.com.
+  That is why `package:macos` is a manual job that may fail. Set `MACOS_RUNNER_ENABLED=true` (Settings ▸ CI/CD ▸
+  Variables) once you have the runners, so it runs on every tag. Self-managed: register a macOS shell runner with
+  Xcode and give it that tag. Apple-silicon runners build both `osx-arm64` and `osx-x64`.
+
+### CI/CD variables
+
+Add these under **Settings ▸ CI/CD ▸ Variables**. Mark the secrets **Masked and hidden** and **Protected**, and protect
+the `v*` tags (**Settings ▸ Repository ▸ Protected tags**, wildcard `v*`), because protected variables are only
+given to pipelines for protected refs. Every signing variable is optional, as on GitHub.
+
+| Variable | Used by | Value |
+|---|---|---|
+| `APPLE_CERT_P12_BASE64` | `package:macos` | Developer ID Application certificate and key as `.p12`, base64. Mask it, or use a **File** variable and `$(base64 < "$APPLE_CERT_P12_FILE")` if it is too long to mask |
+| `APPLE_CERT_PASSWORD` | `package:macos` | The `.p12` password |
+| `APPLE_TEAM_ID` | `package:macos` | 10-character Team ID |
+| `APPLE_ID` | `package:macos` | Apple ID e-mail for notarization |
+| `APPLE_APP_PASSWORD` | `package:macos` | App-specific password for that Apple ID |
+| `WINDOWS_CERT_PFX_BASE64` | `package:windows` | Authenticode certificate and key as `.pfx`, base64 |
+| `WINDOWS_CERT_PASSWORD` | `package:windows` | The `.pfx` password |
+| `WINDOWS_TIMESTAMP_URL` | `package:windows` | Optional RFC 3161 timestamp server (default DigiCert) |
+| `MACOS_RUNNER_ENABLED` | `package:macos` | `true` to build macOS automatically on tags |
+| `RELEASE_API_TOKEN` | `release:macos` | Optional. A project access token (Developer role, `api` scope) for the release-links API, if your GitLab version refuses `CI_JOB_TOKEN` there |
+| `COSIGN_SIGN` | `container` | `false` to skip cosign, for example on a self-managed GitLab whose OIDC issuer Sigstore does not trust |
+| `PUSH_IMAGE`, `PUBLISH_PAGES`, `VERSION` | manual pipelines | See the table above |
+
+`CI_REGISTRY*`, `CI_JOB_TOKEN`, `CI_API_V4_URL` and `SIGSTORE_ID_TOKEN` (from `id_tokens:`) are provided by GitLab.
+Nothing needs a personal token, except the optional `RELEASE_API_TOKEN`. `build/macos/import-cert.sh` prints
+`export MACOS_SIGN_IDENTITY=… MACOS_KEYCHAIN=…` when it is not running on GitHub. The macOS job `eval`s that line, and
+`after_script` deletes the temporary keychain.
+
+### What only a real GitLab pipeline can verify
+
+The YAML is checked by `GitLabCiTests` (structure, references, `bash -n` on every Linux and macOS script, and the
+same files as `release.yml`), but not by GitLab's own linter. These still need a real run: the CI Lint page
+(**Build ▸ Pipeline editor ▸ Validate**), the Windows PowerShell job, the hosted macOS image name, notarization on
+GitLab's macOS runners, `release-cli` with dotenv-expanded asset links, `CI_JOB_TOKEN` on the release-links API,
+Buildx multi-arch with attestations into the GitLab registry, cosign keyless with GitLab's OIDC token, and Pages
+publishing.
+
 ## Building locally
 
 ```sh
@@ -184,6 +279,7 @@ Settings ▸ Desktop ▸ **Update source**:
 | **GitHub releases** (default) | `GET https://api.github.com/repos/finepointcgi/meridian/releases/latest` without credentials. While the repository is private, this returns 404, and the app says to set a token or another source |
 | **GitHub with a token** | The same request with `Authorization: Bearer <token>`. Assets are downloaded through the asset API (`…/releases/assets/<id>`, `Accept: application/octet-stream`). Use a fine-grained token with read-only access to the repository's **Contents** |
 | **Custom URL** | A JSON manifest at an `https://` address (see below), for example your team server's `/api/desktop/latest` |
+| **GitLab releases** | `GET <gitlab>/api/v4/projects/<url-encoded path or id>/releases/permalink/latest`, which redirects to the latest release. On GitLab before 15.4, or when the latest is an upcoming release or a pre-release, the app lists `…/releases?per_page=50` and picks the highest published version without a `-`. Assets are the release's **links**. A link into the same GitLab's `/api/v4/` (the generic package registry that `.gitlab-ci.yml` uploads to) is downloaded directly, and any other link through its `direct_asset_url`. The address defaults to `https://gitlab.com`. A self-managed GitLab works too, including one under a sub-path |
 
 The token is pasted into a password field that Blazor never reads. JavaScript sends it straight to the desktop host,
 so it does not pass through a team server even when the window is showing one. The token is stored in `desktop.json`
@@ -191,6 +287,13 @@ encrypted with ASP.NET Core Data Protection, the same mechanism as the AI assist
 `desktop-keys/` in the data folder, and on Windows they are also protected with DPAPI. The token is only ever sent to
 `api.github.com`. GitHub answers asset requests with a redirect to `objects.githubusercontent.com`, and the updater
 follows redirects itself, without the token.
+
+The GitLab token is optional; it is needed only for a private project. Use a personal or project access token with
+`read_api`. It is pasted, stored and encrypted the same way, in its own `ProtectedGitLabToken` setting, and sent as
+`PRIVATE-TOKEN` only to the configured GitLab instance: the same scheme, host and port, under its path. GitLab
+redirects package downloads to object storage (or `permalink/latest` to the release), and the updater follows those
+redirects without the token. Changing the GitLab address forgets a saved GitLab token, so a token is never sent to a
+different instance. Downloads are verified against the release's `SHA256SUMS.txt` link, as for GitHub.
 
 All update traffic is HTTPS only, and a redirect to `http://` is refused. The only exception is a manifest address that
 is explicitly set to `http://localhost` or `http://127.0.0.1`, for testing. Its assets may then also come from loopback
@@ -231,4 +334,5 @@ content. On macOS and Linux, `update.sh` actually runs in a temporary folder. Th
 
 - running `update.cmd` on Windows (including a file still locked by antivirus or the FMU host);
 - the macOS `.app` swap in `/Applications` under App Management privacy settings, and Gatekeeper on the relaunched bundle;
-- GitHub's real asset redirect with a fine-grained token.
+- GitHub's real asset redirect with a fine-grained token;
+- a real GitLab release: `permalink/latest`, package-registry links behind object storage, and a private project with a `read_api` token.

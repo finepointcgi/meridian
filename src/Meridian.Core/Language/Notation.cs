@@ -34,6 +34,7 @@ public static class Notation
         ElementKind.ArchiRelation => Subtypes.ArchiStyle(r.Get(FieldKeys.Subtype)),
         ElementKind.Line => Subtypes.LineStyle(r.Get(FieldKeys.Subtype)),
         ElementKind.FeatureDecomposition => VariabilityNotation.DecompositionStyle(r),
+        ElementKind.ForeignKey => DataModeling.DbNotation.ForeignKeyStyle(r),
         _ => Metamodel.Style(r.Kind),
     };
 
@@ -67,6 +68,7 @@ public static class Notation
         var keywords = new List<string>();
         var kw = Metamodel.Keyword(e.Kind);
         if (e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) is Subtypes.DataStore or Subtypes.CentralBuffer) kw = e.Get(FieldKeys.Subtype);
+        if (e.Kind == ElementKind.Table) kw = DataModeling.DbModel.TableKeyword(e);
         if (kw != null) keywords.Add(kw);
         keywords.AddRange(e.Stereotypes);
         var keyword = keywords.Count > 0 ? string.Join(", ", keywords.Select(k => $"«{k}»")) : null;
@@ -93,7 +95,7 @@ public static class Notation
         }
         else if (e.Kind == ElementKind.Table)
         {
-            comps.Add(new Compartment(null, e.OwnedElements.Where(c => c.Kind == ElementKind.Column).Select(ColumnLine).ToList()));
+            comps.Add(new Compartment(null, DataModeling.DbNotation.Lines(model, e)));
         }
         else if (e.Kind == ElementKind.Stereotype)
         {
@@ -212,6 +214,17 @@ public static class Notation
     private static bool IsBlockTyped(ModelRepository model, Element p) =>
         model.ResolveType(p)?.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.ConstraintBlock;
 
+    /// <summary>What a shape displays: <see cref="Content(ModelRepository, Element, DiagramType)"/>, with a table's columns limited to what the shape shows.</summary>
+    public static NodeContent Content(ModelRepository model, DiagramNode n, DiagramType diagramType)
+    {
+        var c = Content(model, n.Element, diagramType);
+        if (n.Element.Kind != ElementKind.Table) return c;
+        var mode = DataModeling.DbModel.ShowColumnsOf(n);
+        if (mode == "all") return c;
+        var lines = DataModeling.DbNotation.Lines(model, n.Element, mode);
+        return c with { Compartments = mode == "none" ? [] : [new Compartment(null, lines)] };
+    }
+
     public static string ColumnLine(Element c)
     {
         var flags = new List<string>();
@@ -244,7 +257,7 @@ public static class Notation
         var parts = new List<string>();
         if (style.Keyword != null) parts.Add($"«{style.Keyword}»");
         foreach (var st in r.Stereotypes) parts.Add($"«{st}»");
-        if (!string.IsNullOrEmpty(r.Name)) parts.Add(r.Name);
+        if (!string.IsNullOrEmpty(r.Name) && r.Kind != ElementKind.ForeignKey) parts.Add(r.Name);   // key names stay off ER diagrams
         if (r.Kind == ElementKind.Message && r.Get(FieldKeys.Signature) is { Length: > 0 } sig) parts.Add(sig);
         if (r.Kind is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow)
         {
@@ -361,6 +374,8 @@ public static class Notation
     public static IReadOnlyList<Pt> RouteIn(Diagram d, DiagramEdge e, Func<DiagramNode, Bounds>? boundsOf = null, IReadOnlyList<Pt>? waypoints = null)
     {
         boundsOf ??= n => n.Bounds;
+        // Database diagrams: foreign keys run from column row to column row.
+        if (DataModeling.DbNotation.ColumnRoute(d, e, boundsOf, waypoints) is { } columns) return columns;
         // Diagrams with a routing style (new diagrams, or chosen in their properties) use the edge router.
         if (EdgeRouter.TryRoute(d, e, boundsOf, waypoints) is { } routed) return routed;
         var wps = waypoints ?? e.Waypoints;
@@ -641,7 +656,7 @@ public static class Notation
         var shape = ShapeOf(n.Element);
         if (shape != NodeShape.Rectangle) return bounds;
         var wrap = n.Element.Kind == ElementKind.Requirement ? Math.Max(8, (int)((bounds.Width - 12) / 6.4)) : 0;
-        var h = PreferredHeight(Content(model, n.Element, dt), shape, LineHeight, wrap);
+        var h = PreferredHeight(Content(model, n, dt), shape, LineHeight, wrap);
         return h > bounds.Height ? bounds with { Height = h } : bounds;
     }
 

@@ -52,6 +52,28 @@ Meridian matches elements by their code symbol, so a second sync changes only wh
 stereotypes, tagged values, hand-made elements and hand-made relationships are left alone. Running the same code twice
 changes nothing.
 
+## Submodules
+
+If the repository uses git submodules, Meridian reads their code too. Each submodule is read at the commit the
+repository pins it to, and its files appear under the submodule's folder (for example `libs/core/src/Battery.cs`), as
+if they were part of the repository. Submodules inside submodules are read up to three levels deep.
+
+- **Include git submodules** is on by default. Turn it off, or list paths under **Submodules to skip**, in the
+  repository's settings. A submodule marked `update = none` in `.gitmodules` is skipped as well. **Folders to include**
+  also apply inside submodules.
+- **Access.** A submodule on the same server as the repository is read with the repository's token. For a submodule on
+  another account or server, add a connection for that repository to the same project: Meridian uses its token.
+  Public submodules on github.com, gitlab.com and bitbucket.org are read without a token. A token is only ever sent to
+  its own server.
+- **When one cannot be read**, the sync still runs without it, and its summary says "1 submodule not read". The
+  repository's entry lists every submodule of the last sync with its commit and whether it was **fetched**,
+  **skipped**, had **no access** or was **not found**.
+- **Bumps.** When the repository moves a submodule to a new commit, **What changed** shows it under **Submodules**
+  (`libs/core 1a2b3c4 → 5d6e7f8`, with a **Compare** link) next to the model changes the new code brings. Accept it
+  together with them.
+- Elements made from submodule code have a `code.submodule` field (`libs/core@<commit>`) that tells where they came
+  from. Pull request previews and the architecture checks include submodule code.
+
 ## Review the changes
 
 When a push changes the model, the title bar shows **Code changes (N)**. Click it, or use the **Code ▸ Changes** ribbon

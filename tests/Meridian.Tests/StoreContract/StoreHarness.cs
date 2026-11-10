@@ -155,8 +155,32 @@ public sealed class PostgresServerFixture : IAsyncLifetime
 
     public static bool Required => Environment.GetEnvironmentVariable("MERIDIAN_REQUIRE_POSTGRES") is "1" or "true";
 
+    /// <summary>
+    /// An existing server to use instead of starting a container (CI services without Docker, e.g. a GitLab CI <c>postgres</c>
+    /// service): an Npgsql connection string for a role that may create databases.
+    /// </summary>
+    public static string? ExistingServer => Environment.GetEnvironmentVariable("MERIDIAN_POSTGRES_CONNECTION") is { Length: > 0 } cs ? cs : null;
+
+    private string? _existing;
+
+    private string ServerConnectionString => _existing ?? _container!.GetConnectionString();
+
     public async Task InitializeAsync()
     {
+        if (ExistingServer is { } existing)
+        {
+            try
+            {
+                await using var probe = new NpgsqlConnection(existing);
+                await probe.OpenAsync();
+                _existing = existing;
+            }
+            catch (Exception ex) when (!Required)
+            {
+                SkipReason = $"PostgreSQL contract tests skipped: could not connect with MERIDIAN_POSTGRES_CONNECTION ({ex.GetType().Name}: {ex.Message.Split('\n')[0]}).";
+            }
+            return;
+        }
         try
         {
             _container = new PostgreSqlBuilder(Image)
@@ -174,15 +198,15 @@ public sealed class PostgresServerFixture : IAsyncLifetime
 
     public async Task<string> CreateDatabaseAsync()
     {
-        if (_container is null) throw new InvalidOperationException(SkipReason);
+        if (_container is null && _existing is null) throw new InvalidOperationException(SkipReason);
         var name = $"meridian_{Interlocked.Increment(ref _databases)}_{Guid.NewGuid():N}"[..40];
-        await using (var admin = new NpgsqlConnection(_container.GetConnectionString()))
+        await using (var admin = new NpgsqlConnection(ServerConnectionString))
         {
             await admin.OpenAsync();
             await using var cmd = new NpgsqlCommand($"create database \"{name}\"", admin);
             await cmd.ExecuteNonQueryAsync();
         }
-        return new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = name }.ToString();
+        return new NpgsqlConnectionStringBuilder(ServerConnectionString) { Database = name }.ToString();
     }
 
     public async Task DisposeAsync()

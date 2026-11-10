@@ -179,6 +179,70 @@ head changed while the sync ran, the operations are replayed onto the new head i
 **A failed sync leaves nothing behind.** When a sync fails (or is cancelled) after it created a new review or preview
 branch, that branch is deleted again and the failed run is recorded without a branch. An existing branch is never deleted.
 
+## Git submodules
+
+Repository archives (GitHub tarball, GitLab `archive.tar.gz`, Bitbucket `get/<sha>.tar.gz` and Data Center `archive`)
+leave the code of git submodules out: a submodule is an empty folder in them. With **Include git submodules** on (the
+default), every sync — pushes and pull request previews alike — also reads the submodules and merges their files into the
+snapshot under the submodule path, so `libs/core/src/Battery.cs` maps like any other file. The code is in
+`src/Meridian.Web/CodeSync/Hosts/Submodules.cs` (discovery, credentials, merge) and `SubmoduleHosts.cs` (pinned commits).
+
+1. **Discovery.** After reading the archive, Meridian reads `.gitmodules` from it (always, even outside the folders to
+   include). The reader is tolerant: quoted values, `#` / `;` comments, line continuations, the old
+   `[submodule.name]` form; malformed lines are skipped. Each entry gives `path`, `url`, `branch` and `update`.
+2. **Pinned commit.** The submodule is read at the commit the parent pins it to (its *gitlink*), never at a branch head.
+   Meridian asks the host's API at the parent commit:
+
+   | Host | How the pinned commit is read |
+   |---|---|
+   | GitHub | `GET /repos/{owner}/{repo}/contents/{path}?ref={commit}` → `{"type":"submodule","sha":…}` |
+   | GitLab | `GET /projects/{id}/repository/tree?path={folder}&ref={commit}` → the entry with `"type":"commit"`, its `id` |
+   | Bitbucket Cloud | `GET /2.0/repositories/{ws}/{repo}/src/{commit}/{folder}/` → the entry for the path whose type names a submodule, or a directory whose `commit.hash` is not the listed commit |
+   | Bitbucket Data Center | `GET /rest/api/1.0/projects/{key}/repos/{slug}/browse/{folder}?at={commit}` → the child with `"type":"SUBMODULE"`, its `contentId` |
+
+3. **Where it lives.** The URL is resolved to a host and repository path: `https://`, `ssh://`, `git://` URLs, scp-like
+   `git@host:group/repo.git`, and relative `../lib.git` / `./lib` (git's rule: each `../` drops one segment of the
+   parent's path on the parent's host). Bitbucket Data Center's `/scm/PROJECT/repo.git` is understood. User names and
+   passwords in a URL are ignored and never shown.
+4. **Credentials**, tried in order until one works:
+   - a code-repo connection **in the same project** for exactly that repository (host and path) — its own token;
+   - the connection's own token, when the submodule is on **the same host** as the connection;
+   - **anonymous** access on `github.com`, `gitlab.com` and `bitbucket.org`, for public repositories.
+
+   A token only ever goes to the API address of the connection it belongs to. A URL in `.gitmodules` never chooses where
+   a request goes: requests go only to configured connections and to the fixed public API addresses, all through the same
+   outbound address checks as every other integration (private networks only when the administrator allowed them). A
+   submodule on any other host is reported as *no access*, without a request.
+5. **Merge.** The submodule's archive is fetched at the pinned commit and its files are added under the submodule path.
+   The connection's **Folders to include** apply to the merged paths: a submodule outside them is skipped, one partly
+   inside is read only there. Submodules of submodules are followed up to **3 levels**; a repository that includes itself
+   (directly or further down) is cut off as a cycle. At most 50 submodules are looked at per sync.
+
+**Limits cover the whole snapshot.** The archive, file count, per-file size and total size limits of a sync (200 MB
+compressed, 4 GB unpacked, 20,000 files, 2 MB per file, 500 MB of source) count the repository and all of its submodules
+together. Going over any of them fails the sync, as it does for a single archive.
+
+**Failures do not stop the sync.** A submodule that cannot be read (token without access, private repository on another
+account, deleted repository, a path in `.gitmodules` with no gitlink at the commit) is recorded and logged; the sync
+continues with everything else, and its summary ends with “(N submodules not read)”. The fix is usually a connection
+for that repository in the same project, or a token that can read it.
+
+**Settings** (per connection): *Include git submodules* (`IncludeSubmodules`, default on) and *Submodules to skip*
+(`SkipSubmodules`, paths such as `vendor/big-library`; a nested one by its full path). `update = none` in `.gitmodules`
+also skips a submodule. The connection lists the submodules of the last sync of its branch, each with its pinned commit
+and a status: **fetched** (with the number of files), **skipped** (why), **no access** or **not found**.
+
+**Bumps in What changed.** The commits a repository pins its submodules to are kept on the model root, in the field
+`code.submodules:<connection id>` (one `path@sha <compare link>` line each). Moving a submodule to another commit
+changes that field, and *What changed* lists it under **Submodules** as `libs/core 1a2b3c4 → 5d6e7f8`, with a
+**Compare** link on GitHub, GitLab and Bitbucket, next to the element changes the new code caused. Accepting it moves
+`main`'s pins forward; a new submodule shows as *added*, a removed one as *removed*. The pull request comment lists bumps
+as rows of kind *Submodule*. Pins are recorded for skipped and unreadable submodules too, so their bumps still show.
+
+**Where elements came from.** Elements mapped from submodule code carry `code.submodule` = `path@sha` next to
+`code.file`. Like the file and line it is kept current on every sync, and a bump alone does not mark the element as
+changed. The architecture checks read the same merged snapshot, so they cover submodule code too.
+
 ## Pull request previews
 
 When a pull request (GitHub, Bitbucket) or merge request (GitLab) **into the followed branch** is opened, reopened or gets
@@ -257,6 +321,13 @@ status colours, so they read in light and dark mode.
 - `CodeSyncReviewService.Accepted` is raised once per run when its last pending change is decided and at least one was
   accepted, with `(outcome, connectionId, commitSha)` — use it to update the commit status. `Rejected` is raised when all of a
   run's changes were rejected.
+- `CodeSyncRequest.Submodules` lists the repository's submodule pins (`CodeSubmodulePin`: path, sha, compare link,
+  fetched). The runner writes them to the model root (`CodeSubmodulePins.FieldKey`) and passes the fetched ones to the
+  mapper (`CodeSyncOptions.Submodules`) for `code.submodule`. `CodeSubmodulePins.Bumps(before, after)` turns two field
+  values into bumps. Callers that know nothing of submodules leave it empty; a partial push then leaves the pins alone.
+- `IGitHost.ResolveSubmoduleCommitsAsync(commit, paths)` returns the gitlinks, and
+  `IGitHost.FetchSnapshotAsync(…, SnapshotBudget, …)` reads an archive against a shared budget. Both have default
+  implementations, so other hosts and test fakes keep compiling.
 - Runs are stored in the `code_sync_runs` table (SQLite and PostgreSQL), one row per push, with the change list as JSON.
 - The model root's `codeSync.rootPackage` field names the package code is mapped into. It overrides the connection's
   *Model package*, which defaults to the repository name. `codeSync.autoDiagrams` likewise overrides the connection's

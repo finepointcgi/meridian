@@ -112,6 +112,11 @@ public static class UiKinds
         ElementKind.Table => MudBlazor.Icons.Material.Outlined.TableChart,
         ElementKind.Column => MudBlazor.Icons.Material.Outlined.ViewColumn,
         ElementKind.ForeignKey => MudBlazor.Icons.Material.Outlined.Key,
+        ElementKind.DbIndex => MudBlazor.Icons.Material.Outlined.Bolt,
+        ElementKind.DbConstraint => MudBlazor.Icons.Material.Outlined.Rule,
+        ElementKind.Sequence => MudBlazor.Icons.Material.Outlined.FormatListNumbered,
+        ElementKind.Routine => MudBlazor.Icons.Material.Outlined.Functions,
+        ElementKind.Trigger => MudBlazor.Icons.Material.Outlined.FlashOn,
         ElementKind.Binding => MudBlazor.Icons.Material.Outlined.DragHandle,
         ElementKind.ArchiRelation or ElementKind.BpmnFlow => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
         ElementKind.Diagram => MudBlazor.Icons.Material.Outlined.Schema,
@@ -222,5 +227,16 @@ public static class UiKinds
         ElementKind.Composition, ElementKind.Generalization, ElementKind.Association, ElementKind.Dependency,
     ];
 
-    public static string KindName(Element e) => e is Diagram d ? Metamodel.DisplayName(d.DiagramType) : Metamodel.DisplayName(e.Kind);
+    public static string KindName(Element e) => e is Diagram d ? Metamodel.DisplayName(d.DiagramType) : Meridian.Core.DataModeling.DbModel.KindName(e) ?? Metamodel.DisplayName(e.Kind);
+
+    /// <summary>The icon of a particular element: databases, schemas, subject areas and views have their own.</summary>
+    public static string IconOf(Element e) => e switch
+    {
+        Diagram d => DiagramIcon(d.DiagramType),
+        _ when Meridian.Core.DataModeling.DbModel.IsDatabase(e) => MudBlazor.Icons.Material.Outlined.Storage,
+        _ when Meridian.Core.DataModeling.DbModel.IsSchema(e) => MudBlazor.Icons.Material.Outlined.SnippetFolder,
+        _ when Meridian.Core.DataModeling.DbModel.IsGroup(e) => MudBlazor.Icons.Material.Outlined.Workspaces,
+        _ when Meridian.Core.DataModeling.DbModel.IsView(e) => MudBlazor.Icons.Material.Outlined.Preview,
+        _ => Icon(e.Kind, e.Get(FieldKeys.Subtype)),
+    };
 }

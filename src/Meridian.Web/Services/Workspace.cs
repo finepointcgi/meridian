@@ -64,6 +64,9 @@ public sealed partial class Workspace : IDisposable, ISessionClient
     /// <summary>Marshals work onto this circuit's synchronization context (set by the root component).</summary>
     public Func<Action, Task> Dispatch { get; set; } = a => { a(); return Task.CompletedTask; };
 
+    /// <summary>Imports or refreshes from a saved database connection (set by the workbench; used by Integrations ▸ Databases).</summary>
+    public Func<Meridian.Data.IntegrationConnection, Task>? DatabaseImport { get; set; }
+
     public IReadOnlyList<Presence> Others =>
         Session?.Participants.Where(p => p.ParticipantId != ParticipantId).ToList() ?? (IReadOnlyList<Presence>)[];
 
@@ -602,7 +605,7 @@ public sealed class ViewTab(ViewTabKind kind)
 /// What the diagrams highlight during a code-sync review: element id → how it changed, and (on the review branch) main's
 /// model, whose diagrams give the last place of removed elements (drawn as ghosts).
 /// </summary>
-public sealed record CodeChangeOverlay(IReadOnlyDictionary<string, Meridian.Serialization.ChangeHighlight> Kinds, ModelRepository? GhostSource)
+public sealed record CodeChangeOverlay(IReadOnlyDictionary<string, Meridian.Serialization.ChangeHighlight> Kinds, ModelRepository? GhostSource, string Label = "code changes")
 {
     public int Count(Meridian.Serialization.ChangeHighlight k) => Kinds.Values.Count(v => v == k);
 }

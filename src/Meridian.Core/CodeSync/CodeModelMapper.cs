@@ -435,6 +435,7 @@ public static class CodeModelMapper
                     // Location-only edits (lines shifting) are kept current but are not reported as changes.
                     if (file != null) m.Set(e, CodeFieldKeys.File, file);
                     if (line != null) m.Set(e, CodeFieldKeys.Line, line.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    StampSubmodule(e, file);
                     if (changed) Changed(e);
                     return e;
                 }
@@ -468,6 +469,7 @@ public static class CodeModelMapper
                     if (r.Get(RemovedKey).Length > 0) { m.Set(r, RemovedKey, null); changed = true; }
                     m.Set(r, CodeFieldKeys.File, from.File);
                     m.Set(r, CodeFieldKeys.Line, from.Line.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    StampSubmodule(r, from.File);
                     if (changed) Changed(r);
                     return;
                 }
@@ -486,7 +488,17 @@ public static class CodeModelMapper
             m.Set(e, CodeFieldKeys.Repo, o.RepoId);
             if (file != null) m.Set(e, CodeFieldKeys.File, file);
             if (line != null) m.Set(e, CodeFieldKeys.Line, line.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            StampSubmodule(e, file);
             m.Set(e, CodeFieldKeys.Commit, o.Commit);
+        }
+
+        /// <summary>"path@sha" of the submodule the file is in; like the file and line it is kept current without
+        /// counting as a change (a bump alone shows as the bump, not as every element of the submodule).</summary>
+        private void StampSubmodule(Element e, string? file)
+        {
+            if (file is null) return;
+            var label = CodeSubmodulePins.Containing(o.Submodules, file)?.Label ?? "";
+            if (e.Get(CodeFieldKeys.Submodule) != label) m.Set(e, CodeFieldKeys.Submodule, label.Length == 0 ? null : label);
         }
 
         private void Changed(Element e)

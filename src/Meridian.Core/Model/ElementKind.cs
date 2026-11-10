@@ -133,6 +133,13 @@ public enum ElementKind
     // Operands and pseudostates (appended: keep existing ordinals stable)
     InteractionOperand,     // one operand of a combined fragment: guard; its vertical extent is a style of the fragment's shape
     Pseudostate,            // state machine pseudostate; subtype: choice / junction / fork / join / shallowHistory / deepHistory / entryPoint / exitPoint / terminate
+    // Data modelling (appended: keep existing ordinals stable). Databases, schemas and subject areas are packages with a
+    // "db.role" field; views are tables with subtype "view" / "materializedView"; enum and domain types are Enumeration / DataType.
+    DbIndex,                // index on a table: db.columns, unique, db.method, db.expression (partial index WHERE)
+    DbConstraint,           // named unique (subtype "unique") or check (subtype "check") constraint of a table
+    Sequence,               // sequence generator in a schema
+    Routine,                // stored procedure (subtype "procedure") or function (subtype "function"): signature only
+    Trigger,                // trigger on its owning table: db.timing, db.events
 }
 
 public enum DiagramType

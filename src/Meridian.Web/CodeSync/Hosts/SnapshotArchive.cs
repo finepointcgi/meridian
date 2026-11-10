@@ -25,6 +25,28 @@ public sealed record SnapshotLimits
     public static readonly SnapshotLimits Default = new();
 }
 
+/// <summary>
+/// What a snapshot has used of its <see cref="SnapshotLimits"/> so far. One budget is shared by the repository archive
+/// and every submodule archive merged into it, so the limits apply to the combined total, not to each archive.
+/// </summary>
+public sealed class SnapshotBudget(SnapshotLimits limits)
+{
+    public SnapshotLimits Limits { get; } = limits;
+    /// <summary>Compressed bytes downloaded, all archives together.</summary>
+    internal readonly System.Runtime.CompilerServices.StrongBox<long> ArchiveBytes = new(0);
+    /// <summary>Decompressed bytes read, all archives together.</summary>
+    internal readonly System.Runtime.CompilerServices.StrongBox<long> UncompressedBytes = new(0);
+    public int Entries { get; internal set; }
+    public int Files { get; internal set; }
+    public long TotalBytes { get; internal set; }
+    public long DownloadedBytes => ArchiveBytes.Value;
+    /// <summary>Compressed bytes still allowed.</summary>
+    public long RemainingArchiveBytes => Math.Max(0, Limits.MaxArchiveBytes - ArchiveBytes.Value);
+}
+
+/// <summary>A snapshot limit was exceeded. The whole sync fails (submodule archives count towards the same limits).</summary>
+public sealed class SnapshotLimitException(string message) : GitHostException(message);
+
 /// <summary>Every watched source file of a commit, plus files that were skipped (too large, not text).</summary>
 public sealed class CodeSnapshot(IReadOnlyList<CodeFile> files, IReadOnlyList<string> skipped) : IReadOnlyList<CodeFile>
 {
@@ -48,34 +70,39 @@ public static class SnapshotArchive
     /// <paramref name="paths"/> accepted by <paramref name="include"/>; ignores directories, symlinks and hard links.
     /// Throws <see cref="GitHostException"/> when a limit is exceeded or an entry path is unsafe.
     /// </summary>
-    public static async Task<CodeSnapshot> ReadTarGzAsync(Stream archive, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotLimits limits, CancellationToken ct = default)
+    public static Task<CodeSnapshot> ReadTarGzAsync(Stream archive, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotLimits limits, CancellationToken ct = default) =>
+        ReadTarGzAsync(archive, paths, include, new SnapshotBudget(limits), ct);
+
+    /// <summary>As the overload with limits, counting against <paramref name="budget"/>, which earlier archives of the same
+    /// snapshot (the repository, other submodules) have already used.</summary>
+    public static async Task<CodeSnapshot> ReadTarGzAsync(Stream archive, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotBudget budget, CancellationToken ct = default)
     {
+        var limits = budget.Limits;
         var files = new List<CodeFile>();
         var skipped = new List<string>();
-        long total = 0;
-        var entries = 0;
         try
         {
-            await using var compressed = new BoundedStream(archive, limits.MaxArchiveBytes, $"The repository archive is larger than {Mb(limits.MaxArchiveBytes)}.");
+            await using var compressed = new BoundedStream(archive, budget.ArchiveBytes, limits.MaxArchiveBytes, $"The repository archive is larger than {Mb(limits.MaxArchiveBytes)}.");
             await using var gzip = new GZipStream(compressed, CompressionMode.Decompress);
-            await using var tar = new BoundedStream(gzip, limits.MaxUncompressedBytes, $"The repository is larger than {Mb(limits.MaxUncompressedBytes)} when unpacked.");
+            await using var tar = new BoundedStream(gzip, budget.UncompressedBytes, limits.MaxUncompressedBytes, $"The repository is larger than {Mb(limits.MaxUncompressedBytes)} when unpacked.");
             await using var reader = new TarReader(tar);
             while (await reader.GetNextEntryAsync(copyData: false, ct) is { } entry)
             {
-                if (++entries > limits.MaxEntries) throw new GitHostException($"The archive has more than {limits.MaxEntries:N0} entries.");
+                if (++budget.Entries > limits.MaxEntries) throw new SnapshotLimitException($"The archive has more than {limits.MaxEntries:N0} entries.");
                 if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile or TarEntryType.ContiguousFile)) continue;
                 var path = RelativePath(entry.Name);
                 if (path is null) continue;
                 if (!CodeRepoConfig.InPaths(path, paths) || !include(path)) continue;
                 if (entry.Length > limits.MaxFileBytes) { skipped.Add($"{path} (larger than {Mb(limits.MaxFileBytes)})"); continue; }
-                if (files.Count >= limits.MaxFiles) throw new GitHostException($"More than {limits.MaxFiles:N0} source files in the watched folders. Narrow the folders to sync.");
-                total += entry.Length;
-                if (total > limits.MaxTotalBytes) throw new GitHostException($"The watched source files add up to more than {Mb(limits.MaxTotalBytes)}. Narrow the folders to sync.");
-                if (entry.DataStream is null) { files.Add(new CodeFile(path, "")); continue; }
+                if (budget.Files >= limits.MaxFiles) throw new SnapshotLimitException($"More than {limits.MaxFiles:N0} source files in the watched folders. Narrow the folders to sync.");
+                budget.TotalBytes += entry.Length;
+                if (budget.TotalBytes > limits.MaxTotalBytes) throw new SnapshotLimitException($"The watched source files add up to more than {Mb(limits.MaxTotalBytes)}. Narrow the folders to sync.");
+                if (entry.DataStream is null) { files.Add(new CodeFile(path, "")); budget.Files++; continue; }
                 var bytes = new byte[entry.Length];   // ≤ MaxFileBytes, checked above
                 await entry.DataStream.ReadExactlyAsync(bytes, ct);
                 if (Array.IndexOf(bytes, (byte)0) >= 0) { skipped.Add($"{path} (binary)"); continue; }
                 files.Add(new CodeFile(path, Decode(bytes)));
+                budget.Files++;
             }
         }
         catch (InvalidDataException ex)
@@ -94,7 +121,7 @@ public static class SnapshotArchive
         return new CodeSnapshot(files, skipped);
     }
 
-    private static string Mb(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / (1024 * 1024)} MB" : $"{bytes:N0} bytes";
+    internal static string Mb(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / (1024 * 1024)} MB" : $"{bytes:N0} bytes";
 
     /// <summary>
     /// The repository-relative path of an archive entry with the top-level folder removed; null for the folder itself.
@@ -122,7 +149,7 @@ public static class SnapshotArchive
     }
 
     /// <summary>Read-only pass-through that throws <see cref="GitHostException"/> once more than a fixed number of bytes were read.</summary>
-    internal sealed class BoundedStream(Stream inner, long maxBytes, string message) : Stream
+    internal sealed class BoundedStream(Stream inner, System.Runtime.CompilerServices.StrongBox<long> counter, long maxBytes, string message) : Stream
     {
         private long _read;
 
@@ -142,7 +169,8 @@ public static class SnapshotArchive
         private int Count(int n)
         {
             _read += n;
-            if (_read > maxBytes) throw new GitHostException(message);
+            counter.Value += n;
+            if (counter.Value > maxBytes) throw new SnapshotLimitException(message);
             return n;
         }
 

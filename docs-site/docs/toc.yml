@@ -30,6 +30,8 @@
   href: import-export.md
 - name: Mermaid
   href: mermaid.md
+- name: Database modelling
+  href: database.md
 - name: Scripting
   href: scripting.md
 - name: Plugins

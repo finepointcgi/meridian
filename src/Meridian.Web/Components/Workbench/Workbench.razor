@@ -34,6 +34,8 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip, Mermaid .mmd / Markdown">Open a file as a new project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, Mermaid (.mmd, Markdown), or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="@(() => PasteMermaid())" Disabled="Ws.ReadOnly" title="Flowcharts, class, state, sequence, requirement, ER and C4 diagrams written in Mermaid (for example by an AI assistant)">Paste Mermaid…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Storage" OnClick="ImportDatabaseSchema" Disabled="Ws.ReadOnly" data-testid="menu-import-database" title="PostgreSQL, SQL Server, MySQL / MariaDB, SQLite or Oracle DDL, a SQL Server .dacpac or a Mermaid erDiagram">Database schema (DDL / .dacpac)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Cable" OnClick="ConnectToDatabase" Disabled="Ws.Session == null" title="Integrations ▸ Databases: import a live PostgreSQL, MySQL / MariaDB or SQLite schema and refresh it later">Connect to a database…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Badge" OnClick="AddUafProfile" Disabled="Ws.ReadOnly">Add UAF profile</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Disabled="true" Class="menu-heading">Versions &amp; team</MudMenuItem>
@@ -220,6 +222,7 @@
                 <button title="Open reviews and approvals" class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
             </div>
         </div>
+        <Meridian.Web.Components.Workbench.Database.DatabaseRibbonGroup />
         <div class="rgroup compact">
             <div class="rlabel">Model views</div>
             <div class="ritems">
@@ -460,7 +463,7 @@
     <div style="display:none">
         <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml,.mmd,.mermaid,.md" OnChange="OnOpenFile" />
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
-        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md" multiple OnChange="OnImportInto" />
+        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.dacpac,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
         <InputFile id="file-req-sheet" accept=".xlsx,.csv" OnChange="OnRequirementsSheetFile" />
     </div>

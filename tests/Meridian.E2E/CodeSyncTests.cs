@@ -97,6 +97,60 @@ public sealed class CodeSyncTests(ServerFixture f) : E2ETest(f)
     }
 
     [E2EFact]
+    public async Task A_submodule_bump_shows_in_what_changed_with_a_compare_link_and_is_accepted()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        var name = "Submodules " + Guid.NewGuid().ToString("N")[..6];
+        await p.NewProjectAsync("Vehicle sample", name);
+
+        var db = F.App.Services.GetRequiredService<IMeridianStore>();
+        var alice = (await db.FindUserAsync(F.Alice.Username))!;
+        var project = (await db.ListProjectsAsync(alice.Id)).Single(x => x.Name == name).Id;
+        var runner = F.App.Services.GetRequiredService<ICodeSyncRunner>();
+        var connection = Guid.NewGuid();
+        const string v1 = "1111111111111111111111111111111111111111", v2 = "2222222222222222222222222222222222222222";
+        const string compare = "https://github.com/acme/core/compare/{old}...{new}";
+        CodeSyncRequest Push(string commit, string sha) => new(
+            project, connection, "acme/sat", "main", commit, null, "Dana Dev", "Bump core",
+            [new CodeFile("src/Sat.cs", "class Sat {}"), new CodeFile("libs/core/Battery.cs", "class Battery {}")], IsFullSnapshot: true)
+        {
+            Submodules = [new CodeSubmodulePin("libs/core", sha, compare)],
+        };
+
+        // The first sync pins libs/core; accepted in-process (as a reviewer would).
+        CodeSyncE2E.Script.Enqueue(_ => new CodeSyncChanges([], [], [], []));
+        Assert.Equal(CodeSyncStatus.AwaitingReview, (await runner.RunAsync(Push("0123456789abcdef0123456789abcdef01234567", v1))).Status);
+        Assert.True((await F.App.Services.GetRequiredService<Meridian.Web.CodeSync.CodeSyncReviewService>().AcceptAsync(project, null, null, alice)).Done);
+
+        // The parent repository bumps libs/core, whose new code adds a block.
+        CodeSyncE2E.Script.Enqueue(m =>
+        {
+            var structure = m.OfKind(ElementKind.Package).First(x => x.Name == "Structure");
+            return new CodeSyncChanges([m.Create(structure, ElementKind.Block, "CoreBattery").Id], [], [], []);
+        });
+        Assert.Equal(CodeSyncStatus.AwaitingReview, (await runner.RunAsync(Push("89abcdef0123456789abcdef0123456789abcdef", v2))).Status);
+
+        var badge = p.Locator("[data-testid=code-changes-badge]");
+        await Expect(badge).ToContainTextAsync("Code changes (2)");
+        await badge.ClickAsync();
+        var review = p.ViewTab();
+        var bump = review.Locator(".chg-submodule[data-submodule='libs/core']");
+        await Expect(bump).ToContainTextAsync("1111111 → 2222222");
+        await Expect(bump.Locator("a.chg-compare")).ToHaveAttributeAsync("href", $"https://github.com/acme/core/compare/{v1}...{v2}");
+        await Expect(review.Locator(".chg-row[data-kind=added]")).ToContainTextAsync("CoreBattery");
+        await Expect(review.Locator(".chg-row[data-kind=changed]")).ToHaveCountAsync(0);   // the pins are shown as the bump only
+
+        await review.Locator(".chg-select-all").CheckAsync();
+        await review.GetByRole(AriaRole.Button, new() { Name = "Accept selected" }).ClickAsync();
+        await p.SnackbarAsync("Accepted 2 code changes into main.");
+        await Expect(review).ToContainTextAsync("No code changes to review");
+        var json = (await db.LoadProjectAsync(project))!.Value.ModelJson;
+        Assert.Contains($"libs/core@{v2}", json);
+        Assert.Contains("CoreBattery", json);
+    }
+
+    [E2EFact]
     public async Task A_pull_request_preview_shows_as_PR_n_and_goes_away_when_merged()
     {
         var s = await OpenAsync(F.Alice);

@@ -111,9 +111,9 @@ public readonly record struct SemVersion(int Major, int Minor, int Patch, string
 }
 
 /// <summary>
-/// Checks an update source (GitHub releases, GitHub with a token, or a self-hosted manifest) for a newer Meridian, picks the
+/// Checks an update source (GitHub releases, GitHub with a token, GitLab releases, or a self-hosted manifest) for a newer Meridian, picks the
 /// package for this OS and architecture (installer, or the portable archive as a fallback), downloads it and verifies its SHA-256
-/// (SHA256SUMS.txt for GitHub releases, the manifest's sha256 otherwise). Nothing unverified is ever returned.
+/// (SHA256SUMS.txt for GitHub and GitLab releases, the manifest's sha256 otherwise). Nothing unverified is ever returned.
 /// </summary>
 public sealed class Updater
 {
@@ -246,7 +246,38 @@ public sealed class Updater
             assets);
     }
 
+    /// <summary>
+    /// Reads a GitLab "release" JSON object (GET /projects/:id/releases/…). Assets are the release's links: a link into the
+    /// project's API on the same GitLab host (the generic package registry) is used as is, so a token works for a private
+    /// project; any other link is downloaded through its <c>direct_asset_url</c> (or <c>url</c>) without the token.
+    /// </summary>
+    public static (string Tag, string PageUrl, bool Upcoming, List<ReleaseAsset> Assets) ParseGitLabRelease(JsonElement r, Uri gitLabBase)
+    {
+        var assets = new List<ReleaseAsset>();
+        if (r.TryGetProperty("assets", out var a) && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("links", out var links) && links.ValueKind == JsonValueKind.Array)
+            foreach (var l in links.EnumerateArray())
+            {
+                var name = Str(l, "name");
+                var url = Str(l, "url");
+                var direct = Str(l, "direct_asset_url");
+                if (name is null || (url is null && direct is null)) continue;
+                if (name.Contains('/') || name.Contains('\\') || name is "." or "..") continue;
+                var apiOnHost = url != null && Uri.TryCreate(url, UriKind.Absolute, out var u) && SameOrigin(u, gitLabBase)
+                    && u.AbsolutePath.StartsWith(gitLabBase.AbsolutePath.TrimEnd('/') + "/api/v4/", StringComparison.OrdinalIgnoreCase);
+                assets.Add(new ReleaseAsset(name, apiOnHost ? url! : direct ?? url!, 0));
+            }
+        var page = r.TryGetProperty("_links", out var lk) && lk.ValueKind == JsonValueKind.Object ? Str(lk, "self") : null;
+        return (Str(r, "tag_name") ?? "", page ?? "", r.TryGetProperty("upcoming_release", out var up) && up.ValueKind == JsonValueKind.True, assets);
+
+        static string? Str(JsonElement e, string p) => e.TryGetProperty(p, out var x) && x.ValueKind == JsonValueKind.String && x.GetString() is { Length: > 0 } s ? s : null;
+    }
+
+    internal static bool SameOrigin(Uri a, Uri b) =>
+        a.Scheme == b.Scheme && a.Port == b.Port && string.Equals(a.Host, b.Host, StringComparison.OrdinalIgnoreCase);
+
     private bool IsManifest => _source.Kind == UpdateSourceKind.Manifest;
+    private bool IsGitLab => _source.Kind == UpdateSourceKind.GitLab;
+    private string SourceName => IsManifest ? "the update server" : IsGitLab ? "GitLab" : "GitHub";
 
     /// <summary>
     /// Asks the update source for the latest release. Never throws for network, HTTP or format problems: the result says what
@@ -256,18 +287,84 @@ public sealed class Updater
     {
         try
         {
-            return IsManifest ? await CheckManifestAsync(ct) : await CheckGitHubAsync(ct);
+            return IsManifest ? await CheckManifestAsync(ct) : IsGitLab ? await CheckGitLabAsync(ct) : await CheckGitHubAsync(ct);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
         {
             _log($"Update check failed: {ex.Message}");
-            return new(UpdateStatus.Unreachable, $"Couldn't reach {(IsManifest ? "the update server" : "GitHub")}: {Reason(ex)}");
+            return new(UpdateStatus.Unreachable, $"Couldn't reach {SourceName}: {Reason(ex)}");
         }
         catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException or UriFormatException)
         {
             _log($"Update check failed: {ex.Message}");
-            return new(UpdateStatus.Invalid, $"{(IsManifest ? "The update manifest" : "GitHub's answer")} could not be read: {ex.Message}");
+            return new(UpdateStatus.Invalid, $"{(IsManifest ? "The update manifest" : IsGitLab ? "GitLab's answer" : "GitHub's answer")} could not be read: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// GitLab: <c>/api/v4/projects/:id/releases/permalink/latest</c> (it redirects to the latest release), falling back to
+    /// listing the releases when that address is unknown (GitLab before 15.4), the latest is an upcoming release or a pre-release.
+    /// </summary>
+    private async Task<UpdateCheckResult> CheckGitLabAsync(CancellationToken ct)
+    {
+        if (_source.GitLabBase() is not { } gitLab)
+            return new(UpdateStatus.NotConfigured, "The GitLab address is not valid — enter an https:// address in Settings ▸ Desktop.");
+        if (UpdateSource.ValidateGitLabProject(_source.GitLabProject) is { } problem) return new(UpdateStatus.NotConfigured, problem);
+        var project = _source.GitLabProject!.Trim().Trim('/');
+        var releases = new Uri(gitLab, $"api/v4/projects/{Uri.EscapeDataString(project)}/releases");
+        var withToken = !string.IsNullOrEmpty(_source.Token);
+
+        (string Tag, string PageUrl, bool Upcoming, List<ReleaseAsset> Assets)? chosen = null;
+        using (var res = await SendAsync(new Uri(releases.AbsoluteUri + "/permalink/latest"), "application/json", ct))
+        {
+            if (GitLabFailure(res, project, withToken, listing: false) is { } failure) return failure;
+            if (res.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await ReadLimitedStringAsync(res, ct));
+                var latest = ParseGitLabRelease(doc.RootElement, gitLab);
+                if (!latest.Upcoming && SemVersion.TryParse(latest.Tag, out var lv) && lv.Prerelease.Length == 0) chosen = latest;
+            }
+        }
+        if (chosen is null)
+        {
+            using var res = await SendAsync(new Uri(releases.AbsoluteUri + "?per_page=50&order_by=released_at&sort=desc"), "application/json", ct);
+            if (GitLabFailure(res, project, withToken, listing: true) is { } failure) return failure;
+            if (!res.IsSuccessStatusCode) return new(UpdateStatus.Unreachable, $"Couldn't reach GitLab: it answered {(int)res.StatusCode}.");
+            using var doc = JsonDocument.Parse(await ReadLimitedStringAsync(res, ct));
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) throw new FormatException("the release list is not a JSON array.");
+            // Like GitHub's "latest": the highest published version that is not a pre-release.
+            chosen = doc.RootElement.EnumerateArray().Select(e => ParseGitLabRelease(e, gitLab))
+                .Where(x => !x.Upcoming && SemVersion.TryParse(x.Tag, out var v) && v.Prerelease.Length == 0)
+                .OrderByDescending(x => { SemVersion.TryParse(x.Tag, out var v); return v; })
+                .Cast<(string, string, bool, List<ReleaseAsset>)?>()
+                .FirstOrDefault();
+            if (chosen is null)
+            {
+                _log("Update check: no published GitLab release.");
+                return new(UpdateStatus.UpToDate, $"You're up to date ({Display(_currentVersion)}).");
+            }
+        }
+        var (tag, page, _, assets) = chosen.Value;
+        return Evaluate(tag, page, assets, assets.FirstOrDefault(a => a.Name == ChecksumsName));
+    }
+
+    private UpdateCheckResult? GitLabFailure(HttpResponseMessage res, string project, bool withToken, bool listing)
+    {
+        switch (res.StatusCode)
+        {
+            case HttpStatusCode.Unauthorized:
+                return new(UpdateStatus.Unauthorized, "GitLab rejected the token (401) — it may have expired or been revoked. Set a new one in Settings ▸ Desktop.");
+            case HttpStatusCode.Forbidden:
+                return new(UpdateStatus.Unreachable, $"GitLab refused the request (403){(withToken ? " — the token needs the read_api scope and at least Reporter access" : "")}.");
+            case HttpStatusCode.TooManyRequests:
+                return new(UpdateStatus.Unreachable, "GitLab's rate limit for update checks is used up — try again later.");
+            case HttpStatusCode.NotFound when listing && !withToken:
+                _log("Update check: 404 from GitLab (the project is private or does not exist).");
+                return new(UpdateStatus.PrivateRepository, $"Couldn't reach GitLab: the project {project} is private or does not exist — add a token in Settings ▸ Desktop.");
+            case HttpStatusCode.NotFound when listing:
+                return new(UpdateStatus.PrivateRepository, $"GitLab found no project {project}, or the token can't read it — check the project path and the token's access.");
+        }
+        return null;
     }
 
     private static string Reason(Exception ex) => ex switch
@@ -422,12 +519,24 @@ public sealed class Updater
     public static bool IsAllowedUrl(Uri url, bool allowLoopbackHttp) =>
         url.IsAbsoluteUri && (url.Scheme == Uri.UriSchemeHttps || (allowLoopbackHttp && url.Scheme == Uri.UriSchemeHttp && url.IsLoopback));
 
-    private bool AllowLoopbackHttp => _source.AllowLoopbackHttp || (_api.Scheme == Uri.UriSchemeHttp && _api.IsLoopback);
+    private bool AllowLoopbackHttp => _source.AllowLoopbackHttp || (_api.Scheme == Uri.UriSchemeHttp && _api.IsLoopback)
+        || _source.GitLabBase() is { Scheme: "http" };
 
-    /// <summary>The token goes only to the GitHub API host (api.github.com), and only in GitHub-with-token mode.</summary>
-    internal bool SendsTokenTo(Uri url) =>
-        _source.Kind == UpdateSourceKind.GitHubToken && !string.IsNullOrEmpty(_source.Token) &&
-        url.Scheme == _api.Scheme && url.Port == _api.Port && string.Equals(url.Host, _api.Host, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The token goes only to the GitHub API host (api.github.com) in GitHub-with-token mode, or only to the configured GitLab
+    /// instance (same scheme, host and port, under its path) in GitLab mode.
+    /// </summary>
+    internal bool SendsTokenTo(Uri url)
+    {
+        if (string.IsNullOrEmpty(_source.Token)) return false;
+        return _source.Kind switch
+        {
+            UpdateSourceKind.GitHubToken => SameOrigin(url, _api),
+            UpdateSourceKind.GitLab => _source.GitLabBase() is { } gl && SameOrigin(url, gl)
+                && url.AbsolutePath.StartsWith(gl.AbsolutePath, StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
 
     /// <summary>
     /// GET with redirects followed by hand: every hop must be an allowed address, and the token goes only to the GitHub API
@@ -442,7 +551,11 @@ public sealed class Updater
             req.Headers.UserAgent.Add(new ProductInfoHeaderValue("Meridian", SemVersion.TryParse(_currentVersion, out var v) ? v.ToString() : "0.0.0"));
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
             if (string.Equals(url.Host, _api.Host, StringComparison.OrdinalIgnoreCase)) req.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
-            if (SendsTokenTo(url)) req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _source.Token);
+            if (SendsTokenTo(url))
+            {
+                if (IsGitLab) req.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", _source.Token);
+                else req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _source.Token);
+            }
             var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             if ((int)res.StatusCode is 301 or 302 or 303 or 307 or 308 && res.Headers.Location is { } location)
             {

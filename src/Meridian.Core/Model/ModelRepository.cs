@@ -443,9 +443,12 @@ public sealed partial class ModelRepository
         // Requirement name/text edits make their trace links suspect (baseline recorded in the same undo step).
         using var suspectStep = Analysis.SuspectLinks.Watches(e, key) ? History.Transaction($"Set {key}") : null;
         if (suspectStep != null) Analysis.SuspectLinks.Baseline(this, e);
+        // Renaming a column renames it in the foreign keys, indexes and constraints that list it (same undo step).
+        using var renameStep = DataModeling.DbRename.Watches(e, key, old, value) ? History.Transaction($"Rename {old}") : null;
         History.Execute(new DelegateCommand($"Set {key}",
             () => SetFieldRaw(e, key, value),
             () => SetFieldRaw(e, key, old)));
+        if (renameStep != null) DataModeling.DbRename.Propagate(this, e, old!, value!);
     }
 
     public void Rename(Element e, string name) => Set(e, FieldKeys.Name, name);

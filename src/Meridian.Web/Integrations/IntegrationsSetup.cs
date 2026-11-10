@@ -69,6 +69,7 @@ public static class IntegrationsSetup
         services.AddSingleton(new WebhookOptions());
         services.AddSingleton<ProjectEvents>();
         services.AddSingleton<IntegrationService>();
+        services.AddSingleton<Databases.DatabaseConnectionService>();   // live schema import (Integrations ▸ Databases)
         services.AddSingleton<WebhookDispatcher>();
         services.AddHostedService(sp => sp.GetRequiredService<WebhookDispatcher>());
         Requirements.RequirementsToolsSetup.AddMeridianRequirementsTools(services);   // DOORS Next / Polarion connectors (Requirements/)

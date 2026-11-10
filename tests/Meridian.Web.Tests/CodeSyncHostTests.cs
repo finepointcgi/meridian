@@ -75,7 +75,7 @@ public class CodeSyncArchiveTests
     public async Task Oversized_Archive_Is_Rejected()
     {
         var tgz = TestArchives.TarGz(("r/a.cs", new string('x', 50_000) + Guid.NewGuid()), ("r/b.cs", Convert.ToBase64String(Guid.NewGuid().ToByteArray())));
-        var ex = await Assert.ThrowsAsync<GitHostException>(() =>
+        var ex = await Assert.ThrowsAsync<SnapshotLimitException>(() =>
             SnapshotArchive.ReadTarGzAsync(new MemoryStream(tgz), [], TestArchives.Cs, new SnapshotLimits { MaxArchiveBytes = 64 }));
         Assert.Contains("archive is larger", ex.Message);
     }
@@ -85,7 +85,7 @@ public class CodeSyncArchiveTests
     {
         var tgz = TestArchives.TarGz(("r/assets/zeros.bin", new string('\0', 2_000_000)), ("r/src/a.cs", "class A {}"));
         Assert.True(tgz.Length < 50_000);
-        var ex = await Assert.ThrowsAsync<GitHostException>(() =>
+        var ex = await Assert.ThrowsAsync<SnapshotLimitException>(() =>
             SnapshotArchive.ReadTarGzAsync(new MemoryStream(tgz), ["src"], TestArchives.Cs, new SnapshotLimits { MaxUncompressedBytes = 1_000_000 }));
         Assert.Contains("when unpacked", ex.Message);
     }
@@ -94,11 +94,11 @@ public class CodeSyncArchiveTests
     public async Task Too_Many_Files_And_Too_Much_Content_Are_Rejected_And_Large_Files_Skipped()
     {
         var tgz = TestArchives.TarGz(("r/a.cs", "class A {}"), ("r/b.cs", "class B {}"), ("r/c.cs", "class C {}"));
-        var many = await Assert.ThrowsAsync<GitHostException>(() =>
+        var many = await Assert.ThrowsAsync<SnapshotLimitException>(() =>
             SnapshotArchive.ReadTarGzAsync(new MemoryStream(tgz), [], TestArchives.Cs, new SnapshotLimits { MaxFiles = 2 }));
         Assert.Contains("More than 2 source files", many.Message);
 
-        var total = await Assert.ThrowsAsync<GitHostException>(() =>
+        var total = await Assert.ThrowsAsync<SnapshotLimitException>(() =>
             SnapshotArchive.ReadTarGzAsync(new MemoryStream(tgz), [], TestArchives.Cs, new SnapshotLimits { MaxTotalBytes = 25 }));
         Assert.Contains("add up to more than", total.Message);
 
@@ -107,7 +107,7 @@ public class CodeSyncArchiveTests
         Assert.Equal("Small.cs", Assert.Single(snap).Path);
         Assert.Contains(snap.Skipped, s => s.StartsWith("Generated.cs"));
 
-        var entries = await Assert.ThrowsAsync<GitHostException>(() =>
+        var entries = await Assert.ThrowsAsync<SnapshotLimitException>(() =>
             SnapshotArchive.ReadTarGzAsync(new MemoryStream(tgz), [], TestArchives.Cs, new SnapshotLimits { MaxEntries = 2 }));
         Assert.Contains("entries", entries.Message);
     }
@@ -470,6 +470,82 @@ public sealed class CodeSyncHostServiceTests : IAsyncLifetime
         Assert.Contains("not found", notFound.Summary);
         Assert.DoesNotContain("glpat", notFound.Summary);
         Assert.Equal("failed", (string)JsonNode.Parse(handler.Requests.Last(r => r.Request.Method == HttpMethod.Post).Body!)!["state"]!);
+    }
+
+    [Fact]
+    public async Task Pipeline_Merges_Submodules_For_Pushes_And_Previews_And_Records_What_It_Found()
+    {
+        const string core = SubmoduleFetcherTests.CoreSha, other = SubmoduleFetcherTests.LibSha, head = SubmoduleFetcherTests.Parent;
+        var fakes = new SubmoduleFetcherTests.FakeHosts();
+        fakes.GitHubRepo("acme/sat", head, ("src/Sat.cs", "class Sat {}"), (".gitmodules", """
+            [submodule "core"]
+            	path = src/core
+            	url = ../core.git
+            [submodule "lab"]
+            	path = src/lab
+            	url = https://gitlab.example.com/team/lab.git
+            """));
+        fakes.GitHubLink("acme/sat", head, "src/core", core);
+        fakes.GitHubLink("acme/sat", head, "src/lab", other);
+        fakes.GitHubRepo("acme/core", core, ("Core.cs", "class Core {}"), ("docs/x.md", "x"));
+        var lab = $"https://gitlab.example.com/api/v4/projects/team%2Flab/repository/archive.tar.gz?sha={other}";
+        fakes.Archives[lab] = TestArchives.TarGz(("lab-x/Lab.cs", "class Lab {}"));
+        fakes.Requires[lab] = "glpat-lab";
+        var handler = new FakeHandler((req, _) => req.Method == HttpMethod.Post ? FakeHandler.Json("""{"id":1}""", HttpStatusCode.Created) : fakes.Respond(req));
+        var runner = new PreviewRunner();
+        var (svc, _) = Create(handler, runner);
+        var config = GitHub();
+        config.PreviewPullRequests = true;
+        config.CommentOnPullRequests = false;
+        var saved = await svc.SaveAsync(_project, null, null, config, Token);
+
+        // Without a connection for the GitLab repository the push still syncs, with a warning.
+        var outcome = await svc.ProcessAsync(new CodeSyncJob(_project, saved.Connection.Id, "main", head, null, null, null, "webhook"));
+        Assert.Contains("(1 submodule not read)", outcome.Summary);
+        var request = runner.Requests[^1];
+        Assert.Equal(["src/Sat.cs", "src/core/Core.cs"], request.Files.Select(f => f.Path));
+        Assert.Equal([("src/core", core, true), ("src/lab", other, false)], request.Submodules.Select(p => (p.Path, p.Sha, p.Fetched)));
+        var recorded = CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).Submodules;
+        Assert.Equal([CodeRepoSubmodule.Fetched, CodeRepoSubmodule.NoAccess], recorded.Select(s => s.Status));
+
+        // With one, its token reads it (and only it goes to that host).
+        await svc.SaveAsync(_project, null, "Lab", new CodeRepoConfig { Host = GitHostKind.GitLab, BaseUrl = "https://gitlab.example.com", Project = "team/lab" }, "glpat-lab");
+        handler.Requests.Clear();
+        outcome = await svc.ProcessAsync(new CodeSyncJob(_project, saved.Connection.Id, "main", head, null, null, null, "webhook"));
+        Assert.DoesNotContain("not read", outcome.Summary);
+        Assert.Contains("src/lab/Lab.cs", runner.Requests[^1].Files.Select(f => f.Path));
+        Assert.All(handler.Requests.Where(r => r.Request.RequestUri!.Host == "gitlab.example.com"), r => Assert.Null(r.Request.Headers.Authorization));
+        Assert.All(handler.Requests.Where(r => r.Request.RequestUri!.Host == "api.github.com"), r => Assert.False(r.Request.Headers.Contains("PRIVATE-TOKEN")));
+
+        // A pull request preview gets the same merged snapshot, without replacing the followed branch's list.
+        var previewOutcome = await svc.ProcessAsync(new CodeSyncJob(_project, saved.Connection.Id, "feature", head, null, null, null, "webhook", PullRequest: 3));
+        var preview = Assert.Single(runner.Previews);
+        Assert.Equal(CodeSyncStatus.AwaitingReview, previewOutcome.Status);
+        Assert.Equal(["src/Sat.cs", "src/core/Core.cs", "src/lab/Lab.cs"], preview.Files.Select(f => f.Path));
+        Assert.Equal(2, preview.Submodules.Count);
+        Assert.Equal(2, CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).Submodules.Count);
+    }
+
+    /// <summary>Records pushes and pull request previews.</summary>
+    private sealed class PreviewRunner : ICodeSyncRunner, IPullRequestPreviews
+    {
+        public List<CodeSyncRequest> Requests { get; } = new();
+        public List<CodeSyncRequest> Previews { get; } = new();
+
+        public Task<CodeSyncOutcome> RunAsync(CodeSyncRequest request, CancellationToken ct = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, "3 added", "/r", Guid.NewGuid()));
+        }
+
+        public Task<CodeSyncOutcome> RunPreviewAsync(CodeSyncRequest request, int pullRequest, CancellationToken ct = default)
+        {
+            Previews.Add(request);
+            return Task.FromResult(new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, "1 added", null, null));
+        }
+
+        public Task<string> ClosePreviewAsync(Guid projectId, string repoDisplay, int pullRequest, bool merged, CancellationToken ct = default) => Task.FromResult("closed");
+        public Task<IReadOnlyList<PreviewChange>> PreviewChangesAsync(Guid projectId, string repoDisplay, int pullRequest) => Task.FromResult<IReadOnlyList<PreviewChange>>([]);
     }
 
     [Fact]

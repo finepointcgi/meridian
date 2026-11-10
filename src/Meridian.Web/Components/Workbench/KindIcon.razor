@@ -1,16 +1,27 @@
-<span class="kicon" style="background:@(UiKinds.Accent(Kind))22; color:@UiKinds.Accent(Kind)" title="@Metamodel.DisplayName(Kind)">
-    <MudIcon Icon="@(DiagramType is { } t ? UiKinds.DiagramIcon(t) : UiKinds.Icon(Kind))" />
+<span class="kicon" style="background:@(Accent)22; color:@Accent" title="@Metamodel.DisplayName(Kind)">
+    <MudIcon Icon="@(IconName ?? (DiagramType is { } t ? UiKinds.DiagramIcon(t) : UiKinds.Icon(Kind)))" />
 </span>
 
 @code {
     [Parameter] public ElementKind Kind { get; set; }
     [Parameter] public DiagramType? DiagramType { get; set; }
+    /// <summary>An element-specific icon (databases, schemas, subject areas, views); null uses the kind's.</summary>
+    [Parameter] public string? IconName { get; set; }
+    /// <summary>An element-specific colour (a subject area's); null uses the kind's.</summary>
+    [Parameter] public string? Color { get; set; }
+
+    private string Accent => Color ?? UiKinds.Accent(Kind);
 
     public static RenderFragment For(Element e) => builder =>
     {
         builder.OpenComponent<KindIcon>(0);
         builder.AddAttribute(1, nameof(Kind), e.Kind);
         builder.AddAttribute(2, nameof(DiagramType), (e as Diagram)?.DiagramType);
+        if (Meridian.Core.DataModeling.DbModel.IsDataElement(e))
+        {
+            builder.AddAttribute(3, nameof(IconName), UiKinds.IconOf(e));
+            if (Meridian.Core.DataModeling.DbModel.IsGroup(e)) builder.AddAttribute(4, nameof(Color), Meridian.Core.DataModeling.DbModel.ColorOf(e));
+        }
         builder.CloseComponent();
     };
 }

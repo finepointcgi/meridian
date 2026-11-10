@@ -25,6 +25,30 @@ public sealed class CodeRepoLastSync
     public string? ReviewUrl { get; set; }
 }
 
+/// <summary>What happened to a git submodule in the most recent sync of the followed branch (kept in the connection's config).</summary>
+public sealed class CodeRepoSubmodule
+{
+    public const string Fetched = "fetched";
+    public const string Skipped = "skipped";
+    public const string NoAccess = "no-access";
+    public const string NotFound = "not-found";
+
+    /// <summary>Path in the merged snapshot ("libs/core"; nested ones under their parent's path).</summary>
+    public string Path { get; set; } = "";
+    /// <summary>The URL from .gitmodules, without any user name or password it carried.</summary>
+    public string Url { get; set; } = "";
+    /// <summary>The commit the parent pins it to; empty when unknown.</summary>
+    public string Sha { get; set; } = "";
+    /// <summary><see cref="Fetched"/>, <see cref="Skipped"/>, <see cref="NoAccess"/> or <see cref="NotFound"/>.</summary>
+    public string Status { get; set; } = "";
+    /// <summary>Why it was skipped or not fetched, and whose credentials read it ("anonymous", another connection).</summary>
+    public string? Message { get; set; }
+    /// <summary>1 for a submodule of the repository, 2–3 for nested ones.</summary>
+    public int Depth { get; set; } = 1;
+    /// <summary>Source files it added to the snapshot.</summary>
+    public int Files { get; set; }
+}
+
 /// <summary>An open pull / merge request with a preview branch (kept in the connection's config).</summary>
 public sealed class CodeRepoPullRequest
 {
@@ -83,6 +107,13 @@ public sealed partial class CodeRepoConfig
     public bool CommentOnPullRequests { get; set; } = true;
     /// <summary>Create diagrams for new packages and blocks. The model root's <c>codeSync.autoDiagrams</c> field overrides it when set.</summary>
     public bool AutoDiagrams { get; set; } = true;
+    /// <summary>Also read the code of git submodules (archives leave it out): each is fetched at the commit the
+    /// repository pins it to and merged in under its path (docs/CODE-SYNC.md, "Submodules").</summary>
+    public bool IncludeSubmodules { get; set; } = true;
+    /// <summary>Submodule paths not to fetch (repository-relative; a nested one by its full path).</summary>
+    public List<string> SkipSubmodules { get; set; } = [];
+    /// <summary>The submodules found by the most recent sync of <see cref="Branch"/>.</summary>
+    public List<CodeRepoSubmodule> Submodules { get; set; } = [];
     /// <summary>Open pull requests with a preview branch, by number.</summary>
     public List<CodeRepoPullRequest> PullRequests { get; set; } = [];
     /// <summary>Webhook secret, encrypted with the integrations protector. Never shown again after creation.</summary>
@@ -146,6 +177,7 @@ public sealed partial class CodeRepoConfig
         if (Branch.StartsWith("refs/heads/", StringComparison.Ordinal)) Branch = Branch["refs/heads/".Length..];
         if (Branch.Length == 0) Branch = "main";
         Paths = (Paths ?? []).Select(NormalizePath).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        SkipSubmodules = (SkipSubmodules ?? []).Select(NormalizePath).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         RootPackage = RootPackage?.Trim() is { Length: > 0 } r ? r : null;
         Language = string.IsNullOrWhiteSpace(Language) ? "auto" : Language.Trim().ToLowerInvariant();
     }
@@ -192,6 +224,11 @@ public sealed partial class CodeRepoConfig
         {
             var n = NormalizePath(p);
             if (n.Split('/').Any(s => s is ".." or ".") || n.Contains(':')) return $"“{p}” is not a valid folder.";
+        }
+        foreach (var p in SkipSubmodules ?? [])
+        {
+            var n = NormalizePath(p);
+            if (n.Split('/').Any(s => s is ".." or ".") || n.Contains(':')) return $"“{p}” is not a valid submodule path.";
         }
         if (!Meridian.Serialization.CodeSync.CodeReaders.Languages.Contains(Language)) return "The language must be auto, csharp, typescript, java or python.";
         return null;

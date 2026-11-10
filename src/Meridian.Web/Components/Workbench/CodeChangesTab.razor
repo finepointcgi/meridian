@@ -1,5 +1,6 @@
 @inherits WorkspaceComponent
 @using Meridian.Core.Analysis
+@using Meridian.Core.CodeSync
 @using Meridian.Data
 @using Meridian.Web.CodeSync
 @inject CodeSyncState State
@@ -93,10 +94,45 @@
                 </div>
             }
 
+            var bumps = SubmoduleBumps(review);
+            @if (bumps.Count > 0)
+            {
+                <h3><span class="chg-kind changed">Submodules</span> <span class="dim" style="text-transform:none">(@bumps.Count)</span></h3>
+                @foreach (var (pinChange, bump) in bumps)
+                {
+                    var pc = pinChange;
+                    <div class="chg-row chg-submodule" data-element="@pc.ElementId" data-submodule="@bump.Path">
+                        <input type="checkbox" checked="@(!preview && _selected.Contains(pc.ElementId))" disabled="@preview" @onchange="e => Toggle(pc.ElementId, e.Value is true)" aria-label="@($"Select the {bump.Path} submodule bump")" />
+                        <MudIcon Icon="@Icons.Material.Outlined.Inventory2" Style="font-size:16px" />
+                        <span class="name" title="@($"{bump.OldSha ?? "—"} → {bump.NewSha ?? "—"}")">
+                            <code>@bump.Path</code>
+                            <span class="chg-bump">
+                                @if (bump.OldSha is null)
+                                {
+                                    <span>added at <span class="sha">@ShortSha(bump.NewSha)</span></span>
+                                }
+                                else if (bump.NewSha is null)
+                                {
+                                    <span>removed (was <span class="sha">@ShortSha(bump.OldSha)</span>)</span>
+                                }
+                                else
+                                {
+                                    <span><span class="sha">@ShortSha(bump.OldSha)</span> → <span class="sha">@ShortSha(bump.NewSha)</span></span>
+                                }
+                            </span>
+                        </span>
+                        @if (bump.CompareUrl is { } compare && Uri.TryCreate(compare, UriKind.Absolute, out var cu) && cu.Scheme is "https" or "http")
+                        {
+                            <a class="chg-link chg-compare" href="@compare" target="_blank" rel="noopener noreferrer">Compare</a>
+                        }
+                    </div>
+                }
+            }
+
             @foreach (var kind in new[] { CodeSyncChangeKind.Added, CodeSyncChangeKind.Changed, CodeSyncChangeKind.Removed })
             {
                 var k = kind;
-                var rows = review.Changes.Where(c => c.Kind == k && Matches(c)).ToList();
+                var rows = review.Changes.Where(c => c.Kind == k && Matches(c) && !PinsOnly(c)).ToList();
                 if (rows.Count == 0) continue;
                 <h3><span class="chg-kind @Css(k)">@KindTitle(k)</span> <span class="dim" style="text-transform:none">(@rows.Count)</span></h3>
                 @foreach (var c in rows)
@@ -280,6 +316,18 @@
         CodeSyncChangeKind.Changed => Icons.Material.Outlined.EditNote,
         _ => Icons.Material.Outlined.IndeterminateCheckBox,
     };
+
+    /// <summary>Submodule bumps of a review: changes of the pins kept on the model root (CodeSubmodulePins).</summary>
+    private List<(CodeSyncPendingChange Change, CodeSubmoduleBump Bump)> SubmoduleBumps(CodeSyncReview review) =>
+        review.Changes.SelectMany(c => c.Fields.Where(f => CodeSubmodulePins.IsPinsField(f.Key))
+                .SelectMany(f => CodeSubmodulePins.Bumps(f.Before, f.After)).Select(b => (c, b)))
+            .Where(x => _filter.Length == 0 || x.b.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase) || "submodule".Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    /// <summary>A change that only moves submodule pins: listed as bumps, not as an element change.</summary>
+    private static bool PinsOnly(CodeSyncPendingChange c) => c.Fields.Count > 0 && c.Fields.All(f => CodeSubmodulePins.IsPinsField(f.Key));
+
+    private static string ShortSha(string? sha) => sha is null ? "—" : sha.Length > 7 ? sha[..7] : sha;
 
     private static string FirstLine(string? m) => (m ?? "").Split('\n', 2)[0].Trim() is { Length: > 0 } s ? s : "(no message)";
     private static string Clip(string? v) => v is null ? "∅" : v.Length > 200 ? v[..200] + "…" : v;

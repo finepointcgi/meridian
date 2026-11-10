@@ -13,8 +13,9 @@ to other tools through OSLC and a read-only SysML v2 API. Project owners set int
 | Jira Server / Data Center (REST v2) | `https://jira.example.com` | project key | personal access token |
 | Azure DevOps (work items) | `https://dev.azure.com/your-org` | project name | PAT with *Work Items: read & write* |
 | GitHub Issues | `https://api.github.com` or `https://ghe.example.com/api/v3` | `owner/repo` | fine-grained token with *Issues: read & write* |
+| GitLab Issues (REST v4) | `https://gitlab.com` or `https://gitlab.example.com` | `group/project` path (subgroups allowed) or numeric project id | project, group or personal access token with the `api` scope (or an OAuth token, sent as Bearer) |
 
-Optionally set the issue type for new issues (default `Task`). **Test connection** checks the credentials and that
+Optionally set the issue type for new issues (default `Task`); for GitLab, set labels to add to new issues instead. **Test connection** checks the credentials and that
 the project is reachable. Base URLs must be `https://`.
 
 Tokens and secrets are encrypted before they are stored, are only decrypted to call the tracker, are never logged and
@@ -103,6 +104,14 @@ ELM link to Meridian items by URL.
 curl -H "Authorization: Bearer mrd_…" -H "Accept: text/turtle" \
   "https://meridian.example.com/oslc/projects/<id>/requirements?oslc.where=dcterms:identifier=%22REQ-002%22"
 ```
+
+## Databases
+
+Integrations ▸ **Databases** connects to PostgreSQL and MySQL / MariaDB (and SQLite files in the desktop app) to
+import a schema and refresh it later with a review. The connection string is stored encrypted; use a read-only
+account — Meridian only reads the catalog and never runs DDL. On a team server only server administrators add
+connections, and private-network hosts need `Meridian:Integrations:AllowPrivateNetworks`. See
+[Database modelling](database.md).
 
 ## SysML v2 API (server, read-only)
 

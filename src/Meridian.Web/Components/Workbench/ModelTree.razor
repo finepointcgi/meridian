@@ -20,6 +20,18 @@
         var filter = f;
         <span class="chip @(_filter == filter.Name ? "on" : "")" @onclick="() => _filter = filter.Name">@filter.Name</span>
     }
+    @if (Meridian.Core.DataModeling.DbModel.HasDataModel(Ws.Model))
+    {
+        @* Data models: every table, or the tables of one subject area. *@
+        <span class="chip @(_filter == DataFilter ? "on" : "")" @onclick="() => _filter = DataFilter" data-testid="tree-filter-data">Data</span>
+        @foreach (var g in Meridian.Core.DataModeling.DbModel.Groups(Ws.Model))
+        {
+            var key = "group:" + g.Id;
+            <span class="chip @(_filter == key ? "on" : "")" @onclick="() => _filter = key" data-group="@g.Name" title="Tables of the subject area @g.Name">
+                <span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:@Meridian.Core.DataModeling.DbModel.ColorOf(g); margin-right:4px"></span>@g.Name
+            </span>
+        }
+    }
 </div>
 
 <div class="card-body">
@@ -77,6 +89,7 @@
     private string? _query;
     private int _hitsVersion = -1;
     private string _filter = "All";
+    private const string DataFilter = "Data";
     private List<Element>? _hits;
     private (string Filter, int Version) _filteredKey;
     private List<Element> _filtered = new();
@@ -153,8 +166,13 @@
     private List<Element> FilteredItems()
     {
         if (_filteredKey == (_filter, Ws.TreeVersion) && ReferenceEquals(_builtFor, Ws.Model)) return _filtered;
-        var kinds = Filters.First(f => f.Name == _filter).Kinds;
-        _filtered = Ws.Model.AllElements.Where(e => kinds.Contains(e.Kind)).OrderBy(e => e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.RequirementId) : e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        if (_filter.StartsWith("group:", StringComparison.Ordinal))
+            _filtered = Ws.Model.Find(_filter[6..]) is { } area ? Meridian.Core.DataModeling.DbModel.Members(Ws.Model, area).ToList() : [];
+        else
+        {
+            var kinds = _filter == DataFilter ? [ElementKind.Table, ElementKind.Sequence, ElementKind.Routine] : Filters.FirstOrDefault(f => f.Name == _filter).Kinds ?? [];
+            _filtered = Ws.Model.AllElements.Where(e => kinds.Contains(e.Kind)).OrderBy(e => e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.RequirementId) : e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        }
         _filteredKey = (_filter, Ws.TreeVersion);
         return _filtered;
     }

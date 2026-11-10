@@ -55,7 +55,7 @@ public static class ReportTemplates
     // ================================================================== built-ins
 
     /// <summary>Fresh copies of the built-in templates (safe to edit).</summary>
-    public static IReadOnlyList<DocTemplate> BuiltIn => [Srs(), Icd(), Sdd(), Vcrm(), ModelOverview()];
+    public static IReadOnlyList<DocTemplate> BuiltIn => [Srs(), Icd(), Sdd(), Vcrm(), ModelOverview(), DataDictionary()];
 
     private static DocSection S(string title, params DocBlock[] blocks) => new() { Title = title, Blocks = blocks.ToList() };
     private static DocSection S(string title, DocBlock[] blocks, params DocSection[] subs) => new() { Title = title, Blocks = blocks.ToList(), Sections = subs.ToList() };
@@ -287,6 +287,52 @@ public static class ReportTemplates
                 ],
             },
             S("Open items", new RequirementTableBlock { Caption = "Requirements without verification", Query = "kind:Requirement where no:in:Verify", Attributes = ["reqId", "name", "verifyMethod", "status"] }),
+        ],
+    };
+
+    /// <summary>The data dictionary: every table and view with its columns, types, keys, comments and subject areas, plus the database diagrams.</summary>
+    public static DocTemplate DataDictionary() => new()
+    {
+        Name = "Data Dictionary",
+        Description = "Data models: tables and views with columns, types, keys, defaults, comments and subject areas, and the database diagrams.",
+        Title = "{model.name}", Subtitle = "Data Dictionary", DocumentNumber = "DD-001", RevisionHistory = false, ListOfFigures = true,
+        Sections =
+        [
+            S("Introduction", T("This data dictionary describes the tables and views of **{model.name}** as of {date}. {ref:tbl-dd-tables} lists them; " +
+                                "each is detailed with its columns below. Key markers: PK primary key, FK foreign key, UQ unique.")),
+            S("Tables and views", new TableBlock
+            {
+                Caption = "Tables and views", Ref = "tbl-dd-tables", Query = "kind:Table", SortBy = "name", EmptyText = "The model has no tables.",
+                Columns = [new("name", "Table"), new("owner", "Schema"), new(Core.Analysis.ModelValues.SubjectAreasKey, "Subject areas"), new("documentation", "Comment")],
+            }),
+            S("Subject areas", new ForEachBlock
+            {
+                Query = "kind:Package where db.role = subjectArea", SortBy = "name", Heading = "{name}", EmptyText = "_No subject areas are defined._",
+                Blocks = [new DocumentationBlock(), new TableBlock { Query = "kind:Table where subjectAreas contains \"{name}\"", SortBy = "name", Columns = [new("name", "Table"), new("owner", "Schema"), new("documentation", "Comment")] }],
+            }),
+            new DocSection
+            {
+                Title = "Table details", PageBreakBefore = true,
+                Blocks =
+                [
+                    new ForEachBlock
+                    {
+                        Query = "kind:Table", SortBy = "name", Heading = "{name}",
+                        Blocks =
+                        [
+                            new DocumentationBlock { EmptyText = "_No comment._" },
+                            new FieldsBlock { Keys = ["qualifiedName", Core.Analysis.ModelValues.SubjectAreasKey, "field:db.definition"], IncludeTags = false, Layout = "inline" },
+                            new TableBlock
+                            {
+                                Caption = "Columns of {name}", Query = "kind:Column in:{id}", EmptyText = "No columns.",
+                                Columns = [new("name", "Column"), new("field:sqlType", "Type"), new(Core.Analysis.ModelValues.KeysKey, "Keys"), new("field:nullable", "Nullable"),
+                                           new("field:defaultValue", "Default"), new("documentation", "Comment")],
+                            },
+                        ],
+                    },
+                ],
+            },
+            S("Diagrams", new DiagramBlock { Query = "kind:Diagram", DiagramTypes = [DiagramType.Database], Caption = "{name}" }),
         ],
     };
 

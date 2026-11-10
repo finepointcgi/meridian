@@ -149,7 +149,8 @@ internal static class Program
                 SetUpdateSource(msg!);
                 break;
             case "updateToken":
-                SetUpdateToken((string?)msg!["token"]);
+                if ((string?)msg!["provider"] == "GitLab") SetGitLabToken((string?)msg["token"]);
+                else SetUpdateToken((string?)msg["token"]);
                 break;
             case "autoOpen":
                 _settings.AutoOpen = (bool?)msg!["enabled"] ?? false;
@@ -279,7 +280,7 @@ internal static class Program
             try
             {
                 tcs.TrySetResult(await _window.ShowOpenFileAsync("Open a model", null, false,
-                    [("Models (.meridian, .sysml, .xmi, .qea, .mdzip, .mdxml, Mermaid .mmd / .md)", LocalFileImport.Extensions.Select(e => "*" + e).ToArray())]));
+                    [("Models (.meridian, .sysml, .xmi, .qea, .mdzip, .mdxml, Mermaid .mmd / .md, SQL DDL / .dacpac)", LocalFileImport.Extensions.Select(e => "*" + e).ToArray())]));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });
@@ -385,6 +386,9 @@ internal static class Program
         updateSource = _settings.UpdateSource.ToString(),
         manifestUrl = _settings.UpdateManifestUrl,
         hasToken = !string.IsNullOrEmpty(_settings.ProtectedGitHubToken),
+        gitLabUrl = _settings.UpdateGitLabUrl,
+        gitLabProject = _settings.UpdateGitLabProject,
+        hasGitLabToken = !string.IsNullOrEmpty(_settings.ProtectedGitLabToken),
         checksDisabled = ChecksDisabled,
     };
 
@@ -440,7 +444,19 @@ internal static class Program
             if (UpdateSource.ParseManifestUrl(url, out var uri) is { } error) { PostStatus("invalid-source", error); return; }
             _settings.UpdateManifestUrl = uri!.AbsoluteUri;
         }
-        if (_settings.UpdateSource != kind || kind == UpdateSourceKind.Manifest)
+        if (kind == UpdateSourceKind.GitLab)
+        {
+            var url = (string?)msg["url"];
+            var project = (string?)msg["project"];
+            if (UpdateSource.ParseGitLabUrl(url, out var uri) is { } error) { PostStatus("invalid-source", error); return; }
+            if (UpdateSource.ValidateGitLabProject(project) is { } projectError) { PostStatus("invalid-source", projectError); return; }
+            var host = uri!.AbsoluteUri.TrimEnd('/');
+            // A token saved for another GitLab instance must never be sent to this one.
+            if (_settings.UpdateGitLabUrl is { } previous && !string.Equals(previous, host, StringComparison.OrdinalIgnoreCase)) _settings.ProtectedGitLabToken = null;
+            _settings.UpdateGitLabUrl = host;
+            _settings.UpdateGitLabProject = project!.Trim().Trim('/');
+        }
+        if (_settings.UpdateSource != kind || kind is UpdateSourceKind.Manifest or UpdateSourceKind.GitLab)
         {
             _settings.AvailableUpdate = null;
             _settings.LastUpdateMessage = null;
@@ -454,8 +470,34 @@ internal static class Program
         {
             UpdateSourceKind.GitHubToken when string.IsNullOrEmpty(_settings.ProtectedGitHubToken) => "Saved. Paste a GitHub token to check the private repository.",
             UpdateSourceKind.Manifest => $"Saved. Updates come from {_settings.UpdateManifestUrl}.",
+            UpdateSourceKind.GitLab => $"Saved. Updates come from the releases of {_settings.UpdateGitLabProject} on {new Uri(_settings.UpdateGitLabUrl!).Host}"
+                + (string.IsNullOrEmpty(_settings.ProtectedGitLabToken) ? " (add a token if the project is private)." : "."),
             _ => "Saved.",
         });
+    }
+
+    /// <summary>Saves (or clears) the GitLab token, encrypted. It is sent only to the configured GitLab instance.</summary>
+    private static void SetGitLabToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            _settings.ProtectedGitLabToken = null;
+            _settings.Save();
+            Post(DesktopState());
+            PostStatus("saved", "GitLab token removed.");
+            return;
+        }
+        if (UpdateTokenProtector.Validate(token, "GitLab") is { } error) { PostStatus("invalid-source", error); return; }
+        if (Tokens() is not { } tokens) { PostStatus("invalid-source", "The token could not be stored encrypted on this computer."); return; }
+        _settings.ProtectedGitLabToken = tokens.Protect(token.Trim());
+        _settings.Save();
+        Post(DesktopState());
+        if (_settings.UpdateSource == UpdateSourceKind.GitLab)
+        {
+            PostStatus("saved", "GitLab token saved (encrypted on this computer). Checking…");
+            _ = CheckForUpdatesAsync(force: true);
+        }
+        else PostStatus("saved", "GitLab token saved (encrypted on this computer). Choose GitLab releases and Use this source.");
     }
 
     /// <summary>Saves (or clears) the GitHub token, encrypted. The token comes straight from the page's input to this process.</summary>
@@ -547,7 +589,13 @@ internal static class Program
     /// <summary>The install folder can't be replaced: say why and open the release page (or the manifest's notes) to download by hand.</summary>
     private static void OpenReleasePage(UpdateInfo update, string problem)
     {
-        var page = update.PageUrl is { Length: > 0 } p ? p : update.Source == UpdateSourceKind.Manifest ? null : $"https://github.com/{Updater.Repository}/releases";
+        var page = update.PageUrl is { Length: > 0 } p ? p : update.Source switch
+        {
+            UpdateSourceKind.Manifest => null,
+            UpdateSourceKind.GitLab => _settings.UpdateGitLabUrl is { } gl && _settings.UpdateGitLabProject is { } proj && !proj.All(char.IsAsciiDigit)
+                ? $"{gl.TrimEnd('/')}/{proj}/-/releases" : null,
+            _ => $"https://github.com/{Updater.Repository}/releases",
+        };
         var message = page != null
             ? $"{problem} Opening the release page so you can download {update.Version} yourself."
             : $"{problem} Download {update.Version} from your update server and install it by hand.";

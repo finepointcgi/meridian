@@ -1,0 +1,181 @@
+@* Migration script…: ALTER statements that bring a baseline up to the model — a committed version, a baseline, another
+   branch, a live database (Integrations ▸ Databases) or a DDL script — with warnings on steps that can lose data.
+   Meridian writes the script; it never runs it against a database. *@
+@using Meridian.Core.DataModeling
+@using Meridian.Data
+@using Meridian.Serialization
+@using Meridian.Serialization.Database
+@using Meridian.Web.Integrations.Databases
+@inject Workspace Ws
+@inject IMeridianStore Db
+@inject DatabaseConnectionService Connections
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<MudDialog Class="db-migration-dialog">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.CompareArrows" /><MudText Typo="Typo.h6">Migration script</MudText></div></TitleContent>
+    <DialogContent>
+        @if (Database is null)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">Select a database in the model explorer (or open one of its diagrams) first.</MudAlert>
+        }
+        else
+        {
+            <div class="d-flex gap-2 align-center flex-wrap">
+                <MudSelect T="string" Label="From (what the database has now)" Value="_from" ValueChanged="SetFrom" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:320px" data-testid="migration-from">
+                    <MudSelectItem Value="@("empty")">An empty database (create everything)</MudSelectItem>
+                    @foreach (var o in _options) { <MudSelectItem Value="@o.Key">@o.Label</MudSelectItem> }
+                    <MudSelectItem Value="@("script")">A DDL script…</MudSelectItem>
+                </MudSelect>
+                <span style="color:var(--text-3)">→ the model's “@Database.Name”</span>
+                <span style="flex:1"></span>
+                <MudSelect T="string" Label="Dialect" Value="_dialect" ValueChanged="d => { _dialect = d; Build(); }" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:200px" data-testid="migration-dialect">
+                    @foreach (var d in DbFields.Dialects) { <MudSelectItem Value="@d">@DbReservedWords.DialectName(d)</MudSelectItem> }
+                </MudSelect>
+            </div>
+            @if (_from == "script")
+            {
+                <textarea spellcheck="false" rows="6" aria-label="DDL of the current database" placeholder="Paste the DDL of the database as it is now" data-testid="migration-script-input"
+                          style="width:100%; margin-top:8px; font-family:var(--mono, ui-monospace, monospace); font-size:12px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)"
+                          value="@_baselineScript" @oninput="OnScript"></textarea>
+            }
+            @if (_busy) { <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" /> }
+            @if (_error != null) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_error</MudAlert> }
+            @if (_script is { } s)
+            {
+                @if (s.Warnings.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" data-testid="migration-warnings">
+                        @s.Warnings.Count step@(s.Warnings.Count == 1 ? "" : "s") can lose data or fail on existing rows:
+                        <ul style="margin:2px 0 0 18px; padding:0">@foreach (var w in s.Warnings.Take(12)) { <li>@w</li> }</ul>
+                    </MudAlert>
+                }
+                <textarea readonly spellcheck="false" data-testid="migration-preview"
+                          style="width:100%; height:42vh; margin-top:8px; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)">@s.Sql</textarea>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Download" Disabled="@(_script == null)" OnClick="Download" data-testid="migration-download">Download .sql</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Element? Database { get; set; }
+
+    private sealed record Option(string Key, string Label, Func<Task<DbCatalog?>> Load);
+    private readonly List<Option> _options = new();
+    private string _from = "empty";
+    private string _dialect = "postgresql";
+    private string _baselineScript = "";
+    private DbCatalog? _baseline;
+    private MigrationScript? _script;
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Database is null) return;
+        _dialect = Database.Get(DbFields.Dialect) is { Length: > 0 } d ? d : "postgresql";
+        if (Ws.Session is { } session)
+        {
+            try
+            {
+                foreach (var b in (await Db.ListBaselinesAsync(session.ProjectId)).Take(20))
+                {
+                    var bl = b;
+                    _options.Add(new($"baseline:{bl.Id}", $"Baseline “{bl.Name}” (version {bl.VersionNumber})", async () => FromJson(await Db.LoadVersionAsync(session.ProjectId, bl.VersionId))));
+                }
+                foreach (var v in (await Db.ListBranchVersionsAsync(session.ProjectId, Ws.BranchId)).OrderByDescending(v => v.Number).Take(20))
+                {
+                    var ver = v;
+                    _options.Add(new($"version:{ver.Id}", $"Version {ver.Number}: {ver.Message}", async () => FromJson(await Db.LoadVersionAsync(session.ProjectId, ver.Id))));
+                }
+                if (Ws.BranchId != null)
+                    _options.Add(new("branch:main", "Branch main (latest)", async () => FromJson((await Db.LoadProjectAsync(session.ProjectId))?.ModelJson)));
+                foreach (var br in await Db.ListBranchesAsync(session.ProjectId))
+                {
+                    if (br.Id == Ws.BranchId) continue;
+                    var branch = br;
+                    _options.Add(new($"branch:{branch.Id}", $"Branch {branch.Name} (latest)", async () => FromJson((await Db.LoadBranchAsync(branch.Id))?.HeadJson)));
+                }
+                foreach (var c in await Connections.ListAsync(session.ProjectId))
+                {
+                    var conn = c;
+                    _options.Add(new($"connection:{conn.Id}", $"Live database {conn.Name}", async () =>
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                        return await Connections.ReadAsync(conn, cts.Token);
+                    }));
+                }
+            }
+            catch (InvalidOperationException ex) { _error = ex.Message; }
+        }
+        await Load();
+    }
+
+    /// <summary>The same database in another version of the model (matched by id, else by name).</summary>
+    private DbCatalog? FromJson(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        var other = ProjectFile.Deserialize(PackagePermissions.RedactJson(json, Ws.Access));   // hidden packages stay hidden
+        var db = other.Find(Database!.Id) is { } same && DbModel.IsDatabase(same) ? same
+               : DbModel.Databases(other).FirstOrDefault(d => DbCatalog.Eq(d.Name, Database.Name));
+        return db == null ? new DbCatalog { Name = Database.Name } : DbExtract.FromModel(other, db).Catalog;
+    }
+
+    private Task OnScript(ChangeEventArgs e)
+    {
+        _baselineScript = e.Value?.ToString() ?? "";
+        return Load();
+    }
+
+    private async Task SetFrom(string key)
+    {
+        _from = key;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            _baseline = _from switch
+            {
+                "empty" => new DbCatalog { Name = Database!.Name },
+                "script" => DdlParser.Parse(_baselineScript, _dialect, Database!.Name),
+                _ => _options.FirstOrDefault(o => o.Key == _from) is { } o ? await o.Load() : null,
+            };
+            if (_baseline == null) _error = "That version has no model.";
+        }
+        catch (Exception ex) when (ex is Meridian.Data.Databases.DatabaseImportException or FormatException or System.Text.Json.JsonException)
+        {
+            _error = ex.Message;
+            _baseline = null;
+        }
+        finally { _busy = false; }
+        Build();
+    }
+
+    private void Build()
+    {
+        if (Database is null || _baseline is null) { _script = null; return; }
+        var current = DbExtract.FromModel(Ws.Model, Database).Catalog;
+        var label = _options.FirstOrDefault(o => o.Key == _from)?.Label ?? (_from == "script" ? "a DDL script" : "an empty database");
+        _script = MigrationWriter.Generate(_baseline, current, _dialect, $"Migration from {label} to {Database.Name}");
+    }
+
+    private async Task Download()
+    {
+        if (_script is null || Database is null) return;
+        var name = $"{Database.Name}-migration-{_dialect}.sql".Replace(' ', '_');
+        await JS.InvokeVoidAsync("meridian.download", name, "text/plain", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_script.Sql)));
+        Ws.Log($"Downloaded {name}");
+        if (_script.Warnings.Count > 0) Snackbar.Add($"{_script.Warnings.Count} step(s) can lose data — review them before running", Severity.Warning);
+    }
+}

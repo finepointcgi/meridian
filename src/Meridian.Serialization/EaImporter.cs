@@ -129,6 +129,7 @@ public static class EaImporter
         }
         foreach (var item in pendingParents) Attach(item);
 
+        var columnsById = new Dictionary<int, Element>();
         // Attributes and operations.
         foreach (var a in Query("select ID, Object_ID, Name, Type, Classifier, LowerBound, UpperBound, \"Default\" as Def, Notes, Scope from t_attribute order by Pos"))
         {
@@ -147,9 +148,10 @@ public static class EaImporter
                 if (int.TryParse(S(a, "Classifier"), out var cid) && cid > 0) typeRefs.Add((e, cid));
                 else ModelRepository.SetFieldForLoad(e, FieldKeys.Type, PrimitiveName(S(a, "Type")));
             }
-            if (kind == ElementKind.Column) ModelRepository.SetFieldForLoad(e, FieldKeys.SqlType, S(a, "Type"));
+            if (kind == ElementKind.Column) { ModelRepository.SetFieldForLoad(e, FieldKeys.SqlType, S(a, "Type")); columnsById[I(a, "ID")] = e; }
             model.AttachForLoad(owner, e);
         }
+        var fkColumns = ReadDataModel(model, Query, columnsById, objById);
         var parameters = Query("select OperationID, Name, Type, Kind, Pos from t_operationparams order by Pos").GroupBy(p => I(p, "OperationID")).ToDictionary(g => g.Key, g => g.ToList());
         foreach (var op in Query("select OperationID, Object_ID, Name, Type, Notes from t_operation order by Pos"))
         {
@@ -185,6 +187,14 @@ public static class EaImporter
             }
             var r = new Relationship(k, s, t);
             ModelRepository.SetFieldForLoad(r, FieldKeys.Name, S(c, "Name"));
+            if (k == ElementKind.ForeignKey)
+            {
+                // EA keeps the key columns on «FK» / «PK» operations of the two tables.
+                if (fkColumns.TryGetValue((I(c, "Start_Object_ID"), S(c, "Name")), out var fkc) || fkColumns.TryGetValue((I(c, "End_Object_ID"), S(c, "Name")), out fkc))
+                    ModelRepository.SetFieldForLoad(r, FieldKeys.FkColumns, string.Join(", ", fkc));
+                var pk = t.OwnedElements.Where(x => x.Kind == ElementKind.Column && x.Get(FieldKeys.PrimaryKey) == "true").Select(x => x.Name).ToList();
+                if (pk.Count > 0) ModelRepository.SetFieldForLoad(r, FieldKeys.RefColumns, string.Join(", ", pk));
+            }
             if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation) ModelRepository.SetFieldForLoad(r, FieldKeys.Multiplicity, S(c, "DestCard"));
             if (k is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow)
             {
@@ -234,6 +244,67 @@ public static class EaImporter
         return (model, new ImportReport(objById.Count, rels, warnings));
     }
 
+    /// <summary>
+    /// EA data models ("database engineering"): column lengths / precision and NOT NULL from t_attribute, primary keys,
+    /// unique constraints and indexes from «PK» / «unique» / «index» operations of tables. Returns the columns of each
+    /// «FK» operation by (table, name), for the foreign key connectors. Repositories without these columns are left as is.
+    /// </summary>
+    private static Dictionary<(int Table, string Name), List<string>> ReadDataModel(ModelRepository model, Func<string, List<Dictionary<string, object?>>> query,
+        Dictionary<int, Element> columns, Dictionary<int, Element> objects)
+    {
+        static string S(Dictionary<string, object?> row, string col) => row.TryGetValue(col, out var v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) ?? "" : "";
+        static int I(Dictionary<string, object?> row, string col) => int.TryParse(S(row, col), out var v) ? v : 0;
+        var fks = new Dictionary<(int, string), List<string>>();
+        if (columns.Count == 0) return fks;
+        var attrCols = query("pragma table_info('t_attribute')").Select(r => S(r, "name")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (attrCols.Contains("Length") && attrCols.Contains("Precision") && attrCols.Contains("Scale") && attrCols.Contains("AllowDuplicates"))
+            foreach (var a in query("select ID, Length, Precision, Scale, AllowDuplicates from t_attribute"))
+            {
+                if (!columns.TryGetValue(I(a, "ID"), out var c)) continue;
+                var type = c.Get(FieldKeys.SqlType);
+                if (!type.Contains('(') && type.Length > 0)
+                {
+                    if (I(a, "Length") > 0) type = $"{type}({I(a, "Length")})";
+                    else if (I(a, "Precision") > 0) type = I(a, "Scale") > 0 ? $"{type}({I(a, "Precision")},{I(a, "Scale")})" : $"{type}({I(a, "Precision")})";
+                    ModelRepository.SetFieldForLoad(c, FieldKeys.SqlType, type);
+                }
+                // EA stores NOT NULL in AllowDuplicates.
+                ModelRepository.SetFieldForLoad(c, FieldKeys.Nullable, I(a, "AllowDuplicates") == 1 ? null : "true");
+            }
+        var opCols = query("pragma table_info('t_operation')").Select(r => S(r, "name")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!opCols.Contains("Stereotype")) return fks;
+        var parms = query("select OperationID, Name from t_operationparams order by Pos").GroupBy(p => I(p, "OperationID")).ToDictionary(g => g.Key, g => g.Select(p => S(p, "Name")).ToList());
+        foreach (var op in query("select OperationID, Object_ID, Name, Stereotype from t_operation"))
+        {
+            if (!objects.TryGetValue(I(op, "Object_ID"), out var table) || table.Kind != ElementKind.Table) continue;
+            var names = parms.GetValueOrDefault(I(op, "OperationID")) ?? [];
+            switch (S(op, "Stereotype").ToLowerInvariant())
+            {
+                case "pk":
+                    foreach (var c in table.OwnedElements.Where(x => x.Kind == ElementKind.Column && names.Contains(x.Name, StringComparer.OrdinalIgnoreCase)))
+                    {
+                        ModelRepository.SetFieldForLoad(c, FieldKeys.PrimaryKey, "true");
+                        ModelRepository.SetFieldForLoad(c, FieldKeys.Nullable, null);
+                    }
+                    ModelRepository.SetFieldForLoad(table, Core.DataModeling.DbFields.PkName, S(op, "Name"));
+                    break;
+                case "fk":
+                    fks[(I(op, "Object_ID"), S(op, "Name"))] = names;
+                    break;
+                case "unique" or "index":
+                {
+                    var e = new Element(S(op, "Stereotype").Equals("index", StringComparison.OrdinalIgnoreCase) ? ElementKind.DbIndex : ElementKind.DbConstraint);
+                    ModelRepository.SetFieldForLoad(e, FieldKeys.Name, S(op, "Name"));
+                    ModelRepository.SetFieldForLoad(e, Core.DataModeling.DbFields.Columns, string.Join(", ", names));
+                    if (e.Kind == ElementKind.DbConstraint) ModelRepository.SetFieldForLoad(e, FieldKeys.Subtype, Core.DataModeling.DbFields.UniqueConstraint);
+                    model.AttachForLoad(table, e);
+                    break;
+                }
+            }
+        }
+        return fks;
+    }
+
     private static bool IsSysmlStereo(string s) => s is "block" or "interfaceBlock" or "valueType" or "constraintBlock" or "requirement" or "testCase" or "table";
 
     private static ElementKind? MapObject(string type, string stereo, int ntype) => type switch
@@ -278,6 +349,7 @@ public static class EaImporter
         "allocate" => ElementKind.Allocate,
         "include" => ElementKind.Include,
         "extend" => ElementKind.Extend,
+        "fk" => ElementKind.ForeignKey,
         _ => type switch
         {
             "Association" => ElementKind.Association,
