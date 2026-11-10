@@ -62,7 +62,7 @@ public partial class Workbench
             C("Arrange active diagram", Icons.Material.Outlined.AutoAwesomeMosaic, () => Ws.Active?.Arrange()),
             C("Zoom to fit", Icons.Material.Outlined.FitScreen, () => Ws.Active?.ZoomToFit()),
             CA("Open HTML report", Icons.Material.Outlined.Article, OpenReport),
-            CA("Export Word document", Icons.Material.Outlined.Description, ExportDocx),
+            CA("Generate document from template (PDF / Word / HTML)", Icons.Material.Outlined.Description, ExportDocx),
             CA("Export XMI", Icons.Material.Outlined.SwapHoriz, ExportXmi),
             CA("Export SysML v2 text", Icons.Material.Outlined.Code, ExportSysML),
             C("Edit as SysML v2 text", Icons.Material.Outlined.EditNote, EditAsSysml),
@@ -869,7 +869,7 @@ public partial class Workbench
     private Task ExportDdl(SqlDialect dialect) => DownloadText($"{BaseName}-{dialect.ToString().ToLowerInvariant()}.sql", "text/plain", SqlDdl.Generate(Ws.Model, dialect));
 
     private async Task ExportDocx() =>
-        await Dialogs.ShowAsync<ReportDialog>("Generate document", new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        await Dialogs.ShowAsync<ReportDialog>("Generate document", new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false });
 
     private Task ImportReqIfIntoSelection()
     {
