@@ -62,6 +62,7 @@
             </ChildContent>
         </MudMenu>
         <BranchPicker />
+        <CodeChangesBadge />
 
         <div class="cmdk" @onclick="() => _palette!.Show()">
             <MudIcon Icon="@Icons.Material.Outlined.Search" Style="font-size:16px" />
@@ -248,6 +249,16 @@
                 <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
             </div>
         </div>
+        @if (Ws.CodeChanges is not null)
+        {
+            <div class="rgroup compact">
+                <div class="rlabel">Code</div>
+                <div class="ritems">
+                    <MudTooltip Text="What changed: code changes from connected repositories to accept or reject"><button class="rbtn @(Ws.ActiveView?.Kind == ViewTabKind.CodeChanges ? "on" : "")" @onclick="OpenCodeChanges"><MudIcon Icon="@Icons.Material.Outlined.Difference" /><span class="t">Changes</span></button></MudTooltip>
+                    <MudTooltip Text="Highlight code changes on diagrams (⌘K “Highlight code changes”)"><button class="rbtn @(Ws.HighlightCodeChanges ? "on" : "")" @onclick="ToggleCodeHighlights"><MudIcon Icon="@Icons.Material.Outlined.Highlight" /><span class="t">Highlight</span></button></MudTooltip>
+                </div>
+            </div>
+        }
         <RibbonOverflow />
     </nav>
 
@@ -296,7 +307,7 @@
                 @if (Ws.ActiveView is { } shownView)
                 {
                     <span class="crumb current">@shownView.Title</span>
-                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", _ => "TEMPLATE" })</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", _ => "TEMPLATE" })</span>
                 }
                 else if (Ws.Active is { } act)
                 {
@@ -427,6 +438,7 @@
     {
         ViewTabKind.Table => Icons.Material.Outlined.TableChart,
         ViewTabKind.Query => Icons.Material.Outlined.ManageSearch,
+        ViewTabKind.CodeChanges => Icons.Material.Outlined.Difference,
         _ => Icons.Material.Outlined.EditNote,
     };
 
@@ -438,6 +450,10 @@
             var request = v.State as TablesPanel.Request ?? new TablesPanel.Request(v.Kind == ViewTabKind.Table ? TablesPanel.Mode.Table : TablesPanel.Mode.Query, v.Element);
             v.State = request;
             <TablesPanel Open="request" CurrentChanged="e => { if (!ReferenceEquals(v.Element, e)) { v.Element = e; InvokeAsync(StateHasChanged); } }" />
+        }
+        else if (v.Kind == ViewTabKind.CodeChanges)
+        {
+            <CodeChangesTab />
         }
         else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
         {

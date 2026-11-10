@@ -29,7 +29,7 @@ public sealed class ServerFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         if (BrowserSupport.MissingReason != null && !BrowserSupport.Required) return;   // every test skips anyway
-        App = await MeridianApp.StartAsync(localMode: false);
+        App = await MeridianApp.StartAsync(localMode: false, services: CodeSyncE2E.Register);   // scripted code-sync mapper (CodeSyncTests)
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
         Browser = await Playwright.Chromium.LaunchAsync(new() { Headless = Environment.GetEnvironmentVariable("HEADED") != "1" });
         foreach (var u in new[] { Admin, Alice, Bob }) await RegisterAsync(u);

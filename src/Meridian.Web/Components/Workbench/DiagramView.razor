@@ -20,6 +20,24 @@
         </g>
     </svg>
 
+    @if (Ws.CodeChanges is { } chg)
+    {
+        @* Code-sync legend chip: what the highlight colours mean, and the toggle. *@
+        <div class="chg-legend" @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true">
+            @if (Ws.HighlightCodeChanges)
+            {
+                <span class="chg-sw added"><i></i>Added @chg.Count(ChangeHighlight.Added)</span>
+                <span class="chg-sw changed"><i></i>Changed @chg.Count(ChangeHighlight.Changed)</span>
+                <span class="chg-sw removed"><i></i>Removed @chg.Count(ChangeHighlight.Removed)</span>
+                <button class="chg-toggle" @onclick="() => Ws.SetHighlightCodeChanges(false)">Hide</button>
+            }
+            else
+            {
+                <button class="chg-toggle" @onclick="() => Ws.SetHighlightCodeChanges(true)">Highlight code changes</button>
+            }
+        </div>
+    }
+
     @* Shapes panel (draw.io style): search, sections, click to insert, drag to place. Collapses to an icon strip. *@
     <div class="toolbox @(_shapesOpen ? "open" : "")" style="@(Ws.ReadOnly ? "display:none" : "")"
          @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true" @onkeydown:stopPropagation="true">
@@ -807,6 +825,9 @@
         SvgRenderer.RenderHeader(sb, C.Diagram, cb.X - frame, cb.Y - 34 - frame, Theme);
         // Pictures are drawn from a URL served by ImageCache, so megabytes of base64 aren't resent on every render.
         SvgRenderer.RenderBody(sb, C.Model, C.Diagram, C.BoundsOf, C.WaypointsFor, Theme with { ImageHref = Images.Href }, C.Viewport);
+        // Code-sync review: added / changed / removed outlines, and ghosts of removed shapes at main's positions.
+        if (Ws.HighlightCodeChanges && Ws.CodeChanges is { } changes)
+            SvgRenderer.RenderChangeHighlights(sb, C.Diagram, C.BoundsOf, C.WaypointsFor, changes.Kinds, changes.GhostSource?.Find(C.Diagram.Id) as Diagram);
         return sb.ToString();
     }
 

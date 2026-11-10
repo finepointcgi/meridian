@@ -1,0 +1,35 @@
+@inherits WorkspaceComponent
+@using Meridian.Web.CodeSync
+@inject CodeSyncState State
+
+@* Title-bar badge: code changes from connected repositories waiting for review. Opens the "What changed" tab. *@
+@if (State.PendingCount > 0)
+{
+    <MudTooltip Text="@Tip">
+        <button class="chg-badge" @onclick="Open" data-testid="code-changes-badge">
+            <MudIcon Icon="@Icons.Material.Outlined.Difference" Style="font-size:15px" />
+            Code changes (@State.PendingCount)
+        </button>
+    </MudTooltip>
+}
+
+@code {
+    private string Tip => $"{State.OpenRuns} push{(State.OpenRuns == 1 ? "" : "es")} from code waiting for review — open “What changed”";
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        State.Changed += OnState;
+        if (!State.Loaded) _ = State.ReloadAsync();
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    private void Open() => Ws.OpenView(ViewTabKind.CodeChanges);
+
+    public override void Dispose()
+    {
+        State.Changed -= OnState;
+        base.Dispose();
+    }
+}

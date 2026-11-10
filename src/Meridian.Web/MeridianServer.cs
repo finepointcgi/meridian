@@ -65,6 +65,7 @@ public static class MeridianServer
         Settings.SettingsHosting.AddMeridianSettings(builder.Services, host);   // Settings page: preferences, theme, account
         builder.Services.AddHttpContextAccessor();
         Integrations.IntegrationsSetup.AddMeridianIntegrations(builder.Services);   // issue trackers, webhooks, API tokens, OSLC
+        CodeSync.CodeSyncSetup.AddMeridianCodeSync(builder.Services);   // code-sync review branches: runner + accept/reject (docs/CODE-SYNC.md)
 
         // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.
         if ((builder.Configuration["Meridian:KeysPath"] is { Length: > 0 } kp ? kp : host.LocalMode ? Path.Combine(host.DataPath, "keys") : null) is { } keysPath)
