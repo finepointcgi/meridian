@@ -1,0 +1,285 @@
+@using Meridian.Core.Model
+@using Meridian.Data
+@using Meridian.Web.Integrations
+@using Meridian.Web.Integrations.Requirements
+@inject RequirementsToolService Tools
+@inject Workspace Ws
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+@inject MeridianHostInfo HostInfo
+@inject IConfiguration Configuration
+
+@* DOORS Next and Polarion connections (Integrations dialog → Requirements tools). *@
+@if (_form is null)
+{
+    @foreach (var r in _tools)
+    {
+        var conn = r;
+        var cfg = RequirementsToolConfig.Parse(conn.ConfigJson);
+        var last = cfg.LastSync;
+        <div class="integration-row" style="align-items:flex-start">
+            <MudIcon Icon="@Icons.Material.Outlined.Assignment" Style="font-size:18px; color:var(--accent-2); margin-top:2px" />
+            <div style="flex:1; min-width:0">
+                <div style="font-weight:600">@conn.Name <span class="integration-type">@RequirementsToolKinds.Display(cfg.Type)</span></div>
+                <div class="integration-sub">@(cfg.ProjectTitle ?? cfg.Project)@(cfg.Scope is { Length: > 0 } ? $" · {cfg.ScopeTitle ?? cfg.Scope}" : "") · @RequirementsToolConfig.ScheduleLabel(cfg.ScheduleMinutes)@(cfg.PublishLinks ? " · publishes links" : "")</div>
+                <div class="integration-sub">
+                    @if (last is null)
+                    {
+                        <span>Not synced yet.</span>
+                    }
+                    else
+                    {
+                        <span style="@($"color:{(last.Status == "failed" ? "var(--mud-palette-error)" : last.Status == "conflicts" ? "var(--mud-palette-warning)" : "var(--mud-palette-success)")}")">@(last.Status switch { "failed" => "Failed", "conflicts" => $"{last.Conflicts} conflict(s)", _ => "Synced" })</span>
+                        <span> · @last.At.ToLocalTime().ToString("MMM d HH:mm") · @last.Summary</span>
+                    }
+                </div>
+            </div>
+            <MudTooltip Text="Import changes from the tool now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy || Ws.ReadOnly" OnClick="() => SyncNow(conn)" /></MudTooltip>
+            @if (CanManage)
+            {
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+            }
+        </div>
+    }
+    @if (_tools.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Style="opacity:.7">No requirements tool connected. Connect IBM DOORS Next or Siemens Polarion to import requirements, keep them in step and mark trace links suspect when they change.</MudText>
+    }
+    <div class="d-flex gap-2 mt-3 align-center">
+        @if (CanManage)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="New">Add connection</MudButton>
+        }
+        <span style="flex:1"></span>
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+    </div>
+}
+else
+{
+    var f = _form;
+    <div class="d-flex flex-column gap-2">
+        <MudSelect T="string" Label="Tool" Value="f.Type" ValueChanged="t => { f.Type = t; _projects = null; _scopes = null; }" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var t in RequirementsToolKinds.All) { <MudSelectItem Value="t">@RequirementsToolKinds.Display(t)</MudSelectItem> }
+        </MudSelect>
+        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@RequirementsToolKinds.Display(f.Type)" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Server URL" @bind-Value="f.BaseUrl" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      HelperText="@(f.IsDoors ? "The DOORS Next application root, e.g. https://jazz.example.com/rm" : "The Polarion server, e.g. https://polarion.example.com")" />
+        @if (f.IsDoors)
+        {
+            <MudSelect T="string" Label="Sign in with" @bind-Value="f.Auth" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var a in JazzAuth.All) { <MudSelectItem Value="a">@JazzAuth.Display(a)</MudSelectItem> }
+            </MudSelect>
+            <MudTextField T="string" Label="Username" @bind-Value="f.User" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            @if (f.Auth == JazzAuth.Form)
+            {
+                <MudTextField T="string" Label="Login URL (optional)" @bind-Value="f.AuthUrl" Placeholder="https://jazz.example.com/jts" HelperText="Where j_security_check lives when it is not the RM application." Variant="Variant.Outlined" Margin="Margin.Dense" />
+            }
+        }
+        <MudTextField T="string" Label="@SecretLabel(f)" @bind-Value="_secret" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="@(_secretSet ? "••• set (leave empty to keep)" : "")" HelperText="Stored encrypted; never shown again after saving." autocomplete="new-password" />
+        <div class="d-flex gap-2 align-center">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.NetworkCheck" Disabled="_busy" OnClick="Test">Test connection</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.TravelExplore" Disabled="_busy" OnClick="BrowseProjects">Browse projects</MudButton>
+        </div>
+        @if (_projects is { Count: > 0 })
+        {
+            <MudSelect T="string" Label="Project" Value="f.Project" ValueChanged="SetProject" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var p in _projects) { <MudSelectItem Value="p.Id">@p.Title</MudSelectItem> }
+            </MudSelect>
+        }
+        else
+        {
+            <MudTextField T="string" Label="@(f.IsDoors ? "Project (service provider URL)" : "Project id")" @bind-Value="f.Project" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          HelperText="@(f.IsDoors ? "Use Browse projects to pick it." : "Or use Browse projects.")" />
+        }
+        <div class="d-flex gap-2 align-center">
+            @if (_scopes is { } scopes)
+            {
+                <MudSelect T="string" Label="@(f.IsDoors ? "Module" : "Document")" Value="@(f.Scope ?? "")" ValueChanged="SetScope" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem Value="@("")">Whole project</MudSelectItem>
+                    @foreach (var s in scopes) { <MudSelectItem Value="s.Id">@s.Title</MudSelectItem> }
+                </MudSelect>
+            }
+            else
+            {
+                <div style="flex:1" class="integration-sub">@(f.Scope is { Length: > 0 } ? $"{(f.IsDoors ? "Module" : "Document")}: {f.ScopeTitle ?? f.Scope}" : "Whole project")</div>
+            }
+            <MudButton Variant="Variant.Text" Disabled="_busy || string.IsNullOrWhiteSpace(f.Project)" OnClick="BrowseScopes">@(f.IsDoors ? "Browse modules" : "Browse documents")</MudButton>
+        </div>
+        @if (!f.IsDoors)
+        {
+            <MudTextField T="string" Label="Work item type" @bind-Value="f.WorkItemType" Placeholder="requirement" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        }
+        <MudTextField T="string" Label="@(f.IsDoors ? "Extra filter (oslc.where, optional)" : "Extra filter (Lucene query, optional)")" @bind-Value="f.Query"
+                      Placeholder="@(f.IsDoors ? "dcterms:title=\"Braking\"" : "status:approved")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudSelect T="string" Label="Import into package" Value="@(f.TargetPackage ?? "")" ValueChanged="v => f.TargetPackage = v.Length > 0 ? v : null" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="@("")">A new package “Imported from @(_name is { Length: > 0 } n ? n : RequirementsToolKinds.Display(f.Type))”</MudSelectItem>
+            @foreach (var p in Ws.Model.OfKind(ElementKind.Package).OrderBy(p => p.QualifiedName))
+            {
+                <MudSelectItem Value="p.Id">@p.QualifiedName</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="int" Label="Automatic sync" @bind-Value="f.ScheduleMinutes" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var m in RequirementsToolConfig.Schedules) { <MudSelectItem Value="m">@RequirementsToolConfig.ScheduleLabel(m)</MudSelectItem> }
+        </MudSelect>
+        <MudSwitch T="bool" @bind-Value="f.PublishLinks" Label="@($"Publish Meridian «satisfy», «verify» and «trace» links back to {RequirementsToolKinds.Display(f.Type)}")" Color="Color.Primary" Disabled="HostInfo.LocalMode" />
+        @if (HostInfo.LocalMode)
+        {
+            <MudText Typo="Typo.caption" Style="opacity:.7">Publishing links needs a team server: the links point at Meridian's OSLC resources.</MudText>
+        }
+        @if (_message != null)
+        {
+            <MudAlert Severity="@(_messageOk ? Severity.Success : Severity.Error)" Dense="true">@_message</MudAlert>
+        }
+        <div class="d-flex gap-2">
+            <span style="flex:1"></span>
+            <MudButton OnClick="() => { _form = null; _message = null; }">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Save">Save</MudButton>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool CanManage { get; set; }
+
+    private IReadOnlyList<IntegrationConnection> _tools = [];
+    private bool _busy;
+    private RequirementsToolConfig? _form;
+    private Guid? _editId;
+    private string? _name;
+    private string? _secret;
+    private bool _secretSet;
+    private string? _message;
+    private bool _messageOk;
+    private IReadOnlyList<RemoteContainer>? _projects;
+    private IReadOnlyList<RemoteContainer>? _scopes;
+
+    private Guid ProjectId => Ws.Session!.ProjectId;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        if (Ws.Session is null) return;
+        _tools = await Tools.ListAsync(ProjectId);
+    }
+
+    private static string SecretLabel(RequirementsToolConfig f) => f.IsDoors
+        ? f.Auth == JazzAuth.AppPassword ? "App password" : "Password"
+        : "Personal access token";
+
+    /// <summary>Meridian's OSLC addresses for published links (team servers only).</summary>
+    private Oslc.Urls? PublicUrls() => HostInfo.LocalMode ? null
+        : new Oslc.Urls(Configuration["Meridian:PublicUrl"] is { Length: > 0 } p ? p.TrimEnd('/') : Nav.BaseUri.TrimEnd('/'));
+
+    private void New()
+    {
+        _form = new RequirementsToolConfig();
+        (_editId, _name, _secret, _secretSet, _message, _projects, _scopes) = (null, null, null, false, null, null, null);
+    }
+
+    private void Edit(IntegrationConnection c)
+    {
+        _form = RequirementsToolConfig.Parse(c.ConfigJson);
+        (_editId, _name, _secret, _secretSet, _message, _projects, _scopes) = (c.Id, c.Name, null, c.ProtectedSecret != null, null, null, null);
+    }
+
+    private void SetProject(string id)
+    {
+        if (_form is null) return;
+        if (_form.Project != id) { _form.Scope = null; _form.ScopeTitle = null; _scopes = null; }
+        _form.Project = id;
+        _form.ProjectTitle = _projects?.FirstOrDefault(p => p.Id == id)?.Title;
+    }
+
+    private void SetScope(string id)
+    {
+        if (_form is null) return;
+        _form.Scope = id.Length > 0 ? id : null;
+        _form.ScopeTitle = id.Length > 0 ? _scopes?.FirstOrDefault(s => s.Id == id)?.Title : null;
+    }
+
+    private RequirementsToolConfig FormConfig()
+    {
+        var f = _form!.Clone();
+        f.BaseUrl = f.BaseUrl.Trim().TrimEnd('/');
+        f.Project = f.Project.Trim();
+        if (!f.IsDoors) { f.User = null; f.AuthUrl = null; }
+        return f;
+    }
+
+    private async Task Run(Func<Task<string?>> work)
+    {
+        _busy = true;
+        try
+        {
+            _message = await work();
+            _messageOk = true;
+        }
+        catch (RequirementsToolException ex) { _message = ex.Message; _messageOk = false; }
+        finally { _busy = false; }
+    }
+
+    private Task Test() => Run(() => Tools.TestAsync(ProjectId, FormConfig(), _secret, _editId)!);
+
+    private Task BrowseProjects() => Run(async () =>
+    {
+        _projects = await Tools.ProjectsAsync(ProjectId, FormConfig(), _secret, _editId);
+        if (_projects.Count == 0) return "No projects are visible to this account.";
+        if (_projects.All(p => p.Id != _form!.Project)) SetProject(_projects[0].Id);
+        return $"{_projects.Count} project{(_projects.Count == 1 ? "" : "s")} found.";
+    });
+
+    private Task BrowseScopes() => Run(async () =>
+    {
+        _scopes = await Tools.ScopesAsync(ProjectId, FormConfig(), _secret, _editId);
+        return _scopes.Count == 0 ? $"No {(_form!.IsDoors ? "modules" : "documents")} found — the whole project will be imported." : null;
+    });
+
+    private async Task Save()
+    {
+        if (!CanManage || Ws.User is null) return;
+        var f = FormConfig();
+        if (f.Validate() is { } err) { _message = err; _messageOk = false; return; }
+        try
+        {
+            await Tools.SaveAsync(ProjectId, _editId, _name is { Length: > 0 } n ? n : RequirementsToolKinds.Display(f.Type), f, _secret, Ws.User.Id);
+        }
+        catch (RequirementsToolException ex) { _message = ex.Message; _messageOk = false; return; }
+        _secret = null;
+        _form = null;
+        Snackbar.Add("Requirements tool saved", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Delete(IntegrationConnection c)
+    {
+        if (!CanManage) return;
+        await Tools.DeleteAsync(ProjectId, c.Id);
+        await Reload();
+    }
+
+    private async Task SyncNow(IntegrationConnection c)
+    {
+        if (Ws.Session is null || Ws.ReadOnly) return;
+        _busy = true;
+        try
+        {
+            var tool = RequirementsToolKinds.Display(RequirementsToolConfig.Parse(c.ConfigJson).Type);
+            var result = await Tools.SyncAsync(Ws.Model, c, PublicUrls());
+            if (result.Conflicts.Count > 0 && await RequirementConflictDialog.ShowAsync(Dialogs, result.Conflicts, tool) is { } choices)
+                result = await Tools.SyncAsync(Ws.Model, c, PublicUrls(), choices);
+            Snackbar.Add($"{c.Name}: {result.Summary}", result.Conflicts.Count > 0 || result.Problems.Count > 0 ? Severity.Warning : Severity.Success);
+            Ws.Log($"Requirements sync ({c.Name}): {result.Summary}");
+            foreach (var e in result.Problems) Ws.Log("  " + e);
+        }
+        catch (RequirementsToolException ex) { Snackbar.Add($"{c.Name}: {ex.Message}", Severity.Error); }
+        finally
+        {
+            _busy = false;
+            await Reload();
+        }
+    }
+}
