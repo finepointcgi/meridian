@@ -41,6 +41,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory">Version history…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.CallSplit" OnClick="ShowBranches">Branches &amp; merge…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Flag" OnClick="ShowBaselines">Baselines…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.LibraryBooks" OnClick="ShowUsedProjects" Disabled="Ws.Session == null" data-testid="menu-used-projects">Used projects…</MudMenuItem>
                 @if (!Host.LocalMode)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
@@ -67,6 +68,7 @@
         </MudMenu>
         <BranchPicker />
         <CodeChangesBadge />
+        <LibraryUpdatesBadge />
 
         <div class="cmdk" @onclick="() => _palette!.Show()">
             <MudIcon Icon="@Icons.Material.Outlined.Search" Style="font-size:16px" />
@@ -223,6 +225,13 @@
             <div class="ritems">
                 <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Custom table</span></button></MudTooltip>
                 <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
+                <MudTooltip Text="@(LibState.Updates.Count > 0 ? $"{LibState.Updates.Count} library update(s) available — review" : "Used projects (shared libraries): check for updates")">
+                    <button class="rbtn lib-rbtn" disabled="@(Ws.Session == null)" data-testid="ribbon-libraries"
+                            @onclick="@(() => LibState.Updates.Count > 0 ? UpdateUsedProject() : CheckLibraryUpdates())">
+                        <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" /><span class="t">Libraries</span>
+                        @if (LibState.Updates.Count > 0) { <span class="lib-count">@LibState.Updates.Count</span> }
+                    </button>
+                </MudTooltip>
             </div>
         </div>
         <div class="rgroup compact">

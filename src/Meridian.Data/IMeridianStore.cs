@@ -189,6 +189,21 @@ public interface IMeridianStore
     Task<IReadOnlyList<Guid>> UserTeamIdsAsync(Guid userId);
     /// <summary>Teams with a role on a project.</summary>
     Task<IReadOnlyList<ProjectTeam>> ProjectTeamsAsync(Guid projectId);
+
+    // ---------------------------------------------------------------- used projects / shared model libraries (see ProjectUsages.cs)
+    // A project uses a package of another project, pinned to a version, a branch head or a baseline; see docs/LIBRARIES.md.
+
+    /// <summary>The packages a project uses, oldest first (the load order: the first usage of a package wins).</summary>
+    Task<IReadOnlyList<ProjectUsage>> ListProjectUsagesAsync(Guid projectId);
+    /// <summary>The usages of a project by other projects.</summary>
+    Task<IReadOnlyList<ProjectUsage>> ListProjectUsersAsync(Guid usedProjectId);
+    Task<ProjectUsage?> GetProjectUsageAsync(Guid usageId);
+    /// <summary>Adds a usage; a project can use each package of another project once (<see cref="InvalidOperationException"/> otherwise).</summary>
+    Task<Guid> AddProjectUsageAsync(Guid projectId, Guid usedProjectId, string rootPackageId, Core.Libraries.LibraryPinKind pinKind, string pinValue,
+                                    string? mountPointId, Guid? addedBy);
+    /// <summary>Moves a usage's pin and/or mount point.</summary>
+    Task UpdateProjectUsageAsync(Guid usageId, Core.Libraries.LibraryPinKind pinKind, string pinValue, string? mountPointId);
+    Task RemoveProjectUsageAsync(Guid usageId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

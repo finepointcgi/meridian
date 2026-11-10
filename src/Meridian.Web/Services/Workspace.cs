@@ -11,7 +11,7 @@ namespace Meridian.Web.Services;
 /// are submitted to the shared <see cref="ProjectSession"/>, and everyone else's are applied here in order.
 /// Components subscribe to <see cref="Changed"/> and re-render.
 /// </summary>
-public sealed class Workspace : IDisposable, ISessionClient
+public sealed partial class Workspace : IDisposable, ISessionClient
 {
     private readonly List<DiagramController> _open = new();
     private readonly List<ModelOp> _buffered = new();
@@ -198,10 +198,10 @@ public sealed class Workspace : IDisposable, ISessionClient
     public Meridian.Core.Permissions.AccessView Access => Session?.AccessOf(ParticipantId) ?? Meridian.Core.Permissions.AccessView.Full;
 
     /// <summary>True when I may change <paramref name="e"/> (role and package permissions; the session enforces the same rules).</summary>
-    public bool CanEdit(Element e) => !ReadOnly && Access.CanEdit(e);
+    public bool CanEdit(Element e) => !ReadOnly && Access.CanEdit(e) && !Model.IsLibraryElement(e);   // used projects are read-only (Workspace.Libraries.cs)
 
     /// <summary>True when the diagram is read-only for me (view-only project, or a diagram owned by a package I can't edit).</summary>
-    public bool IsReadOnly(Diagram d) => ReadOnly || !Access.CanEdit(d);
+    public bool IsReadOnly(Diagram d) => ReadOnly || !Access.CanEdit(d) || Model.IsLibraryElement(d);
 
     /// <summary>Some packages' contents are hidden from me: my model is a filtered copy.</summary>
     public bool HasHiddenPackages => Access.HidesAnything;
@@ -246,8 +246,9 @@ public sealed class Workspace : IDisposable, ISessionClient
     /// <summary>Opens the requirement diagram and the BDD (active), and selects the top-level block.</summary>
     public void OpenDefaultDiagrams()
     {
-        if (Model.Diagrams.FirstOrDefault(d => d.DiagramType == DiagramType.Requirement) is { } req) Open(req, recordHistory: false);
-        var bdd = Model.Diagrams.FirstOrDefault(d => d.DiagramType == DiagramType.BlockDefinition) ?? Model.Diagrams.FirstOrDefault();
+        IEnumerable<Diagram> own = Model.HasLibraries ? Model.Diagrams.Where(d => !Model.IsLibraryElement(d)).ToList() : Model.Diagrams;   // not a used project's
+        if (own.FirstOrDefault(d => d.DiagramType == DiagramType.Requirement) is { } req) Open(req, recordHistory: false);
+        var bdd = own.FirstOrDefault(d => d.DiagramType == DiagramType.BlockDefinition) ?? own.FirstOrDefault();
         if (bdd != null) Open(bdd, recordHistory: false);
         var top = Model.OfKind(ElementKind.Block).FirstOrDefault(b => b.Name == "Vehicle") ?? bdd?.Nodes.FirstOrDefault()?.Element;
         if (top != null) Select(top, syncCanvas: false);   // shown in the inspector, not highlighted on the canvas

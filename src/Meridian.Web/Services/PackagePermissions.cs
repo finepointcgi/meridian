@@ -37,7 +37,7 @@ public static class PackagePermissions
     public static ModelRepository Redact(ModelRepository model, AccessView view)
     {
         if (!view.HidesAnything) return model;
-        var copy = ProjectFile.Deserialize(ProjectFile.Serialize(model));
+        var copy = ProjectFile.Copy(model);
         ModelRedactor.Redact(copy, view);
         return copy;
     }

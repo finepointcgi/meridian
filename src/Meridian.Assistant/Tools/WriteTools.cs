@@ -315,7 +315,7 @@ public sealed class ApplySysmlTextTool : WriteTool
             return ToolResult.Error("The SysML v2 text has errors:\n" + string.Join("\n", doc.Errors.Take(10).Select(d => $"line {d.Span.Line}:{d.Span.Column}: {d.Message}")));
 
         // Dry run on a copy of the model: the user sees exactly what would change.
-        var copy = ProjectFile.Deserialize(ProjectFile.Serialize(ctx.Model));
+        var copy = ProjectFile.Copy(ctx.Model);
         var copyScope = copy.Find(scope.Id)!;
         var result = SysMLv2Sync.Apply(copy, copyScope, doc, new SysmlSyncOptions());
         if (result.Changes.Count == 0) throw new ToolInputException("The text matches the model already; nothing would change.");

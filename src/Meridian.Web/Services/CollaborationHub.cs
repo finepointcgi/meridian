@@ -37,20 +37,25 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
                     if (branch is null || branch.ProjectId != projectId) return null;
                     (modelJson, branchName) = (branch.HeadJson, branch.Name);
                 }
-                session = new ProjectSession(projectId, row.Value.Name, ProjectFile.Deserialize(modelJson), db, log, () => _sessions.TryRemove(key, out _))
+                // Used projects (docs/LIBRARIES.md) are mounted read-only; they are never part of what is saved.
+                var libraries = await Libraries.LibraryLoader.ResolveAsync(db, this, projectId);
+                var master = libraries.Payloads.Count == 0 ? ProjectFile.Deserialize(modelJson) : ProjectFile.Deserialize(modelJson, libraries.Payloads);
+                session = new ProjectSession(projectId, row.Value.Name, master, db, log, () => _sessions.TryRemove(key, out _))
                 {
                     BranchId = branchId,
                     BranchName = branchName ?? Branching.MainBranch,
                     Events = events,
                 };
                 session.InitRules(await LoadRulesAsync(projectId));
+                session.InitLibraries(libraries);
                 _sessions[key] = session;
             }
             // Package permissions come from the store, not from the tab: the project role (a view-only tab stays view-only) and teams.
             var role = await db.RoleOfAsync(projectId, me.User.Id) ?? (me.CanEdit ? ProjectRole.Editor : ProjectRole.Viewer);
             if (!me.CanEdit) role = ProjectRole.Viewer;
             var teams = session.Rules.Any(r => r.PrincipalKind == Core.Permissions.PrincipalKind.Team) ? await db.UserTeamIdsAsync(me.User.Id) : [];
-            session.Join(me, client, role, teams);
+            var mine = await Libraries.LibraryLoader.ForUserAsync(db, this, session.Libraries, me.User.Id);
+            session.Join(me, client, role, teams, mine);
             return session;
         }
         finally { _openGate.Release(); }
@@ -143,11 +148,13 @@ public sealed partial class ProjectSession : IDisposable
         lock (_gate) return SnapshotLocked();
     }
 
-    internal void Join(Presence me, ISessionClient client, ProjectRole role = ProjectRole.Editor, IReadOnlyList<Guid>? teams = null)
+    internal void Join(Presence me, ISessionClient client, ProjectRole role = ProjectRole.Editor, IReadOnlyList<Guid>? teams = null,
+                       IReadOnlyList<Core.Libraries.LibraryPayload>? libraries = null)
     {
         lock (_gate)
         {
             _participants[me.ParticipantId] = (me, client);
+            RegisterLibraries(me.ParticipantId, libraries);   // used projects this user may read (ProjectSession.Libraries.cs)
             RegisterAccess(me.ParticipantId, me.User.Id, me.CanEdit ? role : ProjectRole.Viewer, teams ?? []);   // ProjectSession.Permissions.cs
             BroadcastPresence();
         }
@@ -160,6 +167,7 @@ public sealed partial class ProjectSession : IDisposable
         {
             _participants.Remove(participantId);
             ForgetAccess(participantId);     // package permissions (ProjectSession.Permissions.cs)
+            ForgetLibraries(participantId);  // used projects (ProjectSession.Libraries.cs)
             ReleaseLocksOf(participantId);   // element locks end when their holder leaves
             LeaveTexts(participantId);       // and so does their place in shared SysML v2 texts
             BroadcastPresence();
@@ -232,7 +240,8 @@ public sealed partial class ProjectSession : IDisposable
     /// </summary>
     public void Reset(string modelJson, Guid userId)
     {
-        var restored = ProjectFile.Deserialize(modelJson);
+        ModelRepository restored;
+        lock (_gate) restored = Materialize(modelJson);   // with the used projects mounted (ProjectSession.Libraries.cs)
         lock (_gate)
         {
             if (_rules.Count > 0)

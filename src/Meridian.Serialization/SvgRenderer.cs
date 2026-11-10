@@ -490,6 +490,7 @@ public static partial class SvgRenderer
     private static void RenderNode(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
     {
         if (Core.Permissions.ModelRedactor.IsPlaceholder(n.Element)) { RenderPlaceholder(sb, b, t); return; }
+        if (Core.Libraries.MissingReference.Is(n.Element)) { RenderMissing(sb, b, t); return; }
         var link = DiagramExtras.LinkOf(n);
         // Only the normalised http(s)/mailto form is written: the raw value could be any scheme (e.g. javascript:).
         var href = t.LinkAnchors && DiagramExtras.IsExternalLink(link) ? DiagramExtras.NormalizeLink(link) : null;
@@ -501,6 +502,28 @@ public static partial class SvgRenderer
         finally { _fontScale = scale; }
         if (link != null) LinkBadge(sb, b, link, t);
         if (anchor) sb.Append("</a>");
+        // Elements of used projects (libraries) shown on the project's own diagrams get a subtle marker.
+        if (m.HasLibraries && m.LibraryOf(n.Element) is { } lib && !m.IsLibraryElement(d)) LibraryMarker(sb, b, lib.Info, t);
+    }
+
+    /// <summary>A small "linked book" tag in the top-right corner of a shape whose element comes from a used project.</summary>
+    private static void LibraryMarker(StringBuilder sb, Bounds b, Core.Libraries.LibraryInfo info, SvgTheme t)
+    {
+        if (b.Width < 30 || b.Height < 16) return;
+        double s = 11, x = b.Right - s - 3, y = b.Y + 3;
+        sb.Append($"<g class=\"lib-marker\" data-library=\"{E(info.UsageId)}\" opacity=\"0.85\"><title>From {E(info.SourceProjectName)} ({E(info.PinLabel)}) — read-only</title>");
+        sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(s)}\" height=\"{F(s)}\" rx=\"2.5\" fill=\"{t.NodeFill}\" stroke=\"{t.Muted}\" stroke-width=\"0.8\"/>");
+        sb.Append($"<path d=\"M{F(x + 2.5)},{F(y + 2.5)} h3 a1.5,1.5 0 0 1 1.5,1.5 v4.5 M{F(x + 2.5)},{F(y + 2.5)} v6 h4.5 M{F(x + 8.5)},{F(y + 2.5)} v6\" fill=\"none\" stroke=\"{t.Muted}\" stroke-width=\"0.9\" stroke-linecap=\"round\"/>");
+        sb.Append("</g>");
+    }
+
+    /// <summary>A shape whose element no longer exists (a library element removed by an update): a dashed box that says so.</summary>
+    private static void RenderMissing(StringBuilder sb, Bounds b, SvgTheme t)
+    {
+        sb.Append($"<g class=\"missing-ref\"><title>Missing reference: this element no longer exists (validation LIB-001)</title>");
+        sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"4\" fill=\"{t.NodeFill}\" stroke=\"#e5484d\" stroke-dasharray=\"6,3\"/>");
+        if (b.Height >= 24 && b.Width >= 70) Text(sb, b.Center.X, b.Center.Y + 4, "⚠ missing reference", false, "middle", italic: true, size: 11, color: "#e5484d");
+        sb.Append("</g>");
     }
 
     /// <summary>

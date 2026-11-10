@@ -26,7 +26,14 @@
         var protector = Ws.Access.ProtectingPackage(C.Diagram);
         <div class="perm-readonly" data-testid="diagram-read-only" @onpointerdown:stopPropagation="true">
             <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:14px" />
-            Read-only@(protector != null ? $" — “{protector.DisplayName}” is protected" : "")
+            @if (Ws.LibraryOf(C.Diagram) is { } lib)
+            {
+                @($"Read-only — from used project “{lib.SourceProjectName}” ({lib.PinLabel})")
+            }
+            else
+            {
+                @($"Read-only{(protector != null ? $" — “{protector.DisplayName}” is protected" : "")}")
+            }
         </div>
     }
 

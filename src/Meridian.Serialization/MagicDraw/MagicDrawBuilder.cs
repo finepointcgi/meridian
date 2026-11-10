@@ -50,6 +50,7 @@ public static partial class MagicDrawImporter
             // Pass 2: the model itself.
             foreach (var open in _src.ModelParts) ReadModel(open);
 
+            ReadProjectMetadata();   // used projects (MagicDrawUsedProjects.cs)
             ResolveTypes();
             ResolveRelationships();
             ResolveFieldRefs();
@@ -61,6 +62,7 @@ public static partial class MagicDrawImporter
             _report.Elements = _model.AllElements.Count(e => e is not Relationship && e is not Diagram) - 1;
             _report.Relationships = _model.Relationships.Count();
             _report.Finish();
+            if (_report.ProjectId is { } pid) ModelRepository.SetFieldForLoad(_model.Root, ProjectIdField, pid);
             _model.History.Clear();
             return (_model, _report);
         }

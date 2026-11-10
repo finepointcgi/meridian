@@ -61,7 +61,8 @@ public sealed partial class ProjectSession
         if (!_access.TryGetValue(participantId, out var a))
             throw new InvalidOperationException("Join the session before reading its model.");
         fullJson ??= SnapshotLocked();   // cached per model change (ProjectSession.Snapshot.cs)
-        return a.View.HidesAnything ? PackagePermissions.RedactJson(fullJson, a.View) : fullJson;
+        var json = a.View.HidesAnything ? PackagePermissions.RedactJson(fullJson, a.View) : fullJson;
+        return WithLibrariesFor(participantId, a.View, json);   // the used projects this participant may read (ProjectSession.Libraries.cs)
     }
 
     /// <summary>True when an element of the authoritative model is hidden from <paramref name="view"/> (or doesn't exist).</summary>

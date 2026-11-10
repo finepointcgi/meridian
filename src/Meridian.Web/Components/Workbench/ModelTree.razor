@@ -166,7 +166,8 @@
         var el = row.Element;
         var expanded = row.Expandable && _expanded.Contains(el.Id);
         var selected = ReferenceEquals(Ws.Selected, el);
-        <div class="mtree-row @(selected ? "sel" : "") @(_dropTarget == el ? "drop-target" : "")" role="treeitem" aria-selected="@(selected ? "true" : "false")"
+        var lib = Ws.Model.HasLibraries ? Ws.Model.LibraryOf(el) : null;
+        <div class="mtree-row @(selected ? "sel" : "") @(_dropTarget == el ? "drop-target" : "") @(lib != null ? "lib" : "")" role="treeitem" aria-selected="@(selected ? "true" : "false")"
              aria-expanded="@(row.Expandable ? (expanded ? "true" : "false") : null)" @key="el.Id"
              style="padding-left:@(4 + row.Depth * 16)px" draggable="true" data-drag="@el.Id"
              @onclick="() => OnSelected(el)"
@@ -203,6 +204,17 @@
                 @if (Ws.PermissionBadge(el) is { } badge)
                 {
                     <span class="perm-badge @badge.Css" title="@badge.Tip" data-testid="perm-badge"><MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:11px" /></span>
+                }
+                @if (lib != null && ReferenceEquals(lib.Root, el))
+                {
+                    @* Used project (docs/LIBRARIES.md): the library's root package shows where it comes from and its pin. *@
+                    <span class="lib-badge" title="@($"Used project “{lib.Info.SourceProjectName}”, pinned to {lib.Info.PinLabel} — read-only")" data-testid="lib-badge">
+                        <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" Style="font-size:11px" />@lib.Info.PinLabel
+                    </span>
+                }
+                else if (lib != null && el.Kind == ElementKind.Package)
+                {
+                    <span class="lib-dot" title="@($"From {lib.Info.Badge} — read-only")"><MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" Style="font-size:11px" /></span>
                 }
                 @if (el.Kind != ElementKind.Model)
                 {

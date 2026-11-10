@@ -48,7 +48,7 @@ public static class DerivationUi
         if (!plan.IsUpdate || plan.Items.FirstOrDefault(i => i.IsDiagram && i.Existing is Diagram) is not { Existing: Diagram original }) return null;
         try
         {
-            var copy = ProjectFile.Deserialize(ProjectFile.Serialize(m));
+            var copy = ProjectFile.Copy(m);
             if (copy.Find(plan.Source.Id) is not { } src) return null;
             var again = DiagramDerivation.Plan(copy, plan.Kind, src, plan.Target is { } t ? copy.Find(t.Id) : null, plan.Options);
             foreach (var i in again.Items)

@@ -38,7 +38,9 @@ public partial class Workbench
     private async Task OpenMagicDrawProject(IBrowserFile file)
     {
         var (report, model) = await ReadMagicDraw(file, null);
-        await CreateProjectFrom(model!, Path.GetFileNameWithoutExtension(file.Name));
+        var usages = await OfferCameoUsagesAsync(model!, report);   // used projects already in Meridian (Workbench.Libraries.cs)
+        var created = await CreateProjectFrom(model!, Path.GetFileNameWithoutExtension(file.Name));
+        if (created is { } projectId && usages.Count > 0) await CreateCameoUsagesAsync(projectId, usages);
         LogMagicDrawReport(report, file.Name);
         Snackbar.Add($"Imported {file.Name}: {report.Elements} elements, {report.Diagrams} diagrams ({report.Warnings.Count} warnings, see Output)", Severity.Success);
     }

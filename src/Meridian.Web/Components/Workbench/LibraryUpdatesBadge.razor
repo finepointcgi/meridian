@@ -1,0 +1,31 @@
+@using Meridian.Web.Libraries
+@implements IDisposable
+@inject LibraryState State
+@inject IDialogService Dialogs
+
+@* Title-bar badge: newer versions, branch heads or baselines of the projects this project uses (docs/LIBRARIES.md). *@
+@if (State.Updates.Count > 0)
+{
+    <MudTooltip Text="@Tip">
+        <button class="lib-update-badge" @onclick="Open" data-testid="lib-updates-badge">
+            <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" Style="font-size:15px" />
+            Library update@(State.Updates.Count == 1 ? "" : "s") (@State.Updates.Count)
+        </button>
+    </MudTooltip>
+}
+
+@code {
+    private string Tip => string.Join(", ", State.Updates.Select(u => $"{u.LibraryName}: {u.CurrentLabel} → {u.Label}")) + " — review the update";
+
+    protected override void OnInitialized() => State.Changed += OnState;
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task Open()
+    {
+        if (State.Updates.Count == 1) await LibraryUpdateDialog.ShowAsync(Dialogs, State.Updates[0]);
+        else await Dialogs.ShowAsync<UsedProjectsDialog>("Used projects", new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true });
+    }
+
+    public void Dispose() => State.Changed -= OnState;
+}

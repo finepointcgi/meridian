@@ -32,7 +32,8 @@ public sealed partial class ModelValidator
                     .SelectMany(g => g.Skip(1).Select(c => Issue(Severity.Error, "MER-002", $"Duplicate name '{c.Name}' in {owner.DisplayName}", c))))),
 
         new Rule("MER-003", "Relationship ends must be valid for the relationship kind", m =>
-            m.Relationships.Select(r => (r, problem: Metamodel.CheckEnds(r.Kind, r.Source.Kind, r.Target.Kind)))
+            m.Relationships.Where(r => !Libraries.MissingReference.Is(r.Source) && !Libraries.MissingReference.Is(r.Target))
+                .Select(r => (r, problem: Metamodel.CheckEnds(r.Kind, r.Source.Kind, r.Target.Kind)))
                 .Where(t => t.problem != null).Select(t => Issue(Severity.Error, "MER-003", t.problem!, t.r))),
 
         new Rule("MER-004", "Generalization hierarchy must not be cyclic", CheckCycles),
@@ -78,11 +79,13 @@ public sealed partial class ModelValidator
                 .Select(s => Issue(Severity.Warning, "BEH-002", $"State '{s.Name}' has no incoming transition", s))),
 
         new Analysis.SuspectLinkRule(),
+        new Libraries.MissingReferenceRule(),   // references to library elements that are gone (docs/LIBRARIES.md)
         new QueryRules(),   // the model's own ValidationRule elements
     };
 
+    /// <summary>The project's issues. Elements of used projects (libraries) are validated in their own project, not here.</summary>
     public IReadOnlyList<ValidationIssue> Validate(ModelRepository model) =>
-        Rules.SelectMany(r => r.Check(model))
+        Rules.SelectMany(r => r.Check(model)).Where(i => !model.HasLibraries || !model.IsLibraryElement(i.Element))
              .OrderByDescending(i => i.Severity).ThenBy(i => i.RuleId).ThenBy(i => i.Element.QualifiedName)
              .ToList();
 

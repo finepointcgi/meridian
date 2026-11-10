@@ -46,7 +46,23 @@ public static class SuspectLinks
     public static IEnumerable<Element> ChangedEnds(Relationship r) =>
         TrackedEnds(r).Where(t => r.Get(t.Key) is { Length: > 0 } fp && fp != Fingerprint(t.End)).Select(t => t.End);
 
-    public static bool IsSuspect(Relationship r) => ChangedEnds(r).Any();
+    public static bool IsSuspect(Relationship r) => r.Get(ReqFields.LibraryChange).Length > 0 || ChangedEnds(r).Any();
+
+    /// <summary>
+    /// Elements (not relationships) of the project made suspect by a library update: parts typed by a library block that
+    /// changed, and so on (see <see cref="MarkLibraryChange"/>).
+    /// </summary>
+    public static IEnumerable<Element> SuspectElements(ModelRepository model) =>
+        model.OwnElements.Where(e => !e.IsRelationship && e.Fields.Count > 0 && e.Get(ReqFields.LibraryChange).Length > 0);
+
+    /// <summary>Why a library update made <paramref name="e"/> suspect, or null.</summary>
+    public static string? LibraryChangeOf(Element e) => e.Get(ReqFields.LibraryChange) is { Length: > 0 } why ? why : null;
+
+    /// <summary>Marks a project element or relationship as suspect because the library element it refers to changed (undoable).</summary>
+    public static void MarkLibraryChange(ModelRepository model, Element e, string why) => model.Set(e, ReqFields.LibraryChange, why);
+
+    /// <summary>Marks an element whose library reference changed as reviewed (undoable).</summary>
+    public static void ClearLibraryChange(ModelRepository model, Element e) => model.Set(e, ReqFields.LibraryChange, null);
 
     public static IEnumerable<Relationship> All(ModelRepository model) => model.Relationships.Where(IsSuspect);
 
@@ -72,8 +88,11 @@ public static class SuspectLinks
     public static void Clear(ModelRepository model, Relationship r)
     {
         using (model.History.Transaction("Clear suspect link"))
+        {
             foreach (var (end, key) in TrackedEnds(r))
                 model.Set(r, key, Fingerprint(end));
+            if (r.Get(ReqFields.LibraryChange).Length > 0) model.Set(r, ReqFields.LibraryChange, null);
+        }
     }
 
     /// <summary>Clears every suspect link (or those in <paramref name="links"/>) in one undo step. Returns the count.</summary>
@@ -90,7 +109,7 @@ public static class SuspectLinks
     public static string Describe(Relationship r)
     {
         var ends = ChangedEnds(r).Select(e => $"{e.Get(FieldKeys.RequirementId)} {e.Name}".Trim()).ToList();
-        if (ends.Count == 0) return "Not suspect";
+        if (ends.Count == 0) return LibraryChangeOf(r) ?? "Not suspect";
         var kw = Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind);
         return $"{string.Join(" and ", ends)} changed since this «{kw}» link was reviewed";
     }
@@ -104,5 +123,7 @@ public sealed class SuspectLinkRule : IValidationRule
 
     public IEnumerable<ValidationIssue> Check(ModelRepository model) =>
         SuspectLinks.All(model).Select(r => new ValidationIssue(Severity.Warning, Id,
-            $"Suspect link: {r.Source.DisplayName} → {r.Target.DisplayName} — {SuspectLinks.Describe(r)}", r));
+            $"Suspect link: {r.Source.DisplayName} → {r.Target.DisplayName} — {SuspectLinks.Describe(r)}", r))
+        .Concat(SuspectLinks.SuspectElements(model).Select(e => new ValidationIssue(Severity.Warning, Id,
+            $"Suspect: {e.DisplayName} — {SuspectLinks.LibraryChangeOf(e)}", e)));
 }

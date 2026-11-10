@@ -52,7 +52,11 @@
         <div class="d-flex align-center gap-2 mb-1"><MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" /><MudText Typo="Typo.subtitle2">Package permissions</MudText></div>
         <PackagePermissionsEditor />
     </DialogContent>
-    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
+    <DialogActions>
+        <MudButton StartIcon="@Icons.Material.Outlined.LibraryBooks" OnClick="@(() => MudDialog.Close(DialogResult.Ok("__used_projects__")))" data-testid="share-used-projects">Used projects…</MudButton>
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Close()">Done</MudButton>
+    </DialogActions>
 </MudDialog>
 
 @code {

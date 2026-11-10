@@ -221,7 +221,7 @@ else
 
     private ModelRepository ResolvedCopy()
     {
-        var copy = ProjectFile.Deserialize(ProjectFile.Serialize(Ws.Model));
+        var copy = ProjectFile.Copy(Ws.Model);
         Variability.ApplyTo(copy, _resolution!);
         copy.History.Clear();
         return copy;

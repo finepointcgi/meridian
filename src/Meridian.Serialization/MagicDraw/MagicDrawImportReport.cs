@@ -1,7 +1,7 @@
 namespace Meridian.Serialization;
 
 /// <summary>What a MagicDraw / Cameo import produced: counts per imported kind, constructs it skipped, and warnings.</summary>
-public sealed class MagicDrawImportReport
+public sealed partial class MagicDrawImportReport
 {
     private const int MaxWarnings = 1000;
     private int _droppedWarnings;
@@ -63,6 +63,9 @@ public sealed class MagicDrawImportReport
             yield return "  Skipped (no Meridian equivalent):";
             foreach (var (k, v) in Skipped) yield return $"    {k}: {v}";
         }
+        if (_used.Count > 0)
+            yield return "  Uses other Cameo projects: " + string.Join(", ", UsedProjects.Select(u => u.Name)) +
+                         " (references to them are kept by name, or by id when they are used from Meridian projects).";
         foreach (var w in Warnings) yield return "  warning: " + w;
     }
 }

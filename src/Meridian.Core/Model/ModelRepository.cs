@@ -1,5 +1,6 @@
 using Meridian.Core.Commands;
 using Meridian.Core.Language;
+using Meridian.Core.Libraries;
 
 namespace Meridian.Core.Model;
 
@@ -11,7 +12,7 @@ public sealed record ModelChange(ChangeKind Kind, Element? Element, string? Fiel
 /// The model repository: owns the containment tree, an id index, an incidence index for relationships
 /// and the undo history. Every public mutator is undoable and raises <see cref="Changed"/>.
 /// </summary>
-public sealed class ModelRepository
+public sealed partial class ModelRepository
 {
     private readonly Dictionary<string, Element> _index = new(StringComparer.Ordinal);
     private readonly Dictionary<Element, List<Relationship>> _incident = new(ReferenceEqualityComparer.Instance);
@@ -253,6 +254,8 @@ public sealed class ModelRepository
     /// <summary>Applies an operation made by someone else. It is not undoable here and is not re-emitted.</summary>
     public void ApplyRemote(ModelOp op)
     {
+        // Library elements are read-only everywhere (the server refuses such operations; a replica ignores them too).
+        if (_libraries.Count > 0 && LibraryGuard.Check(this, op) != null) return;
         _applyingRemote = true;
         try
         {
@@ -317,7 +320,7 @@ public sealed class ModelRepository
     {
         var made = new Dictionary<string, Element>(StringComparer.Ordinal);
         var all = root.SelfAndDescendants().ToList();
-        Element? Resolve(string? id) => id == null ? null : made.TryGetValue(id, out var m) ? m : Find(id);
+        Element? Resolve(string? id) => id == null ? null : made.TryGetValue(id, out var m) ? m : FindOrMissing(id);
 
         foreach (var s in all.Where(s => !Metamodel.IsRelationship(s.Kind)))
         {
@@ -395,6 +398,7 @@ public sealed class ModelRepository
     public T Add<T>(Element owner, T element, int index = -1) where T : Element
     {
         if (!Contains(owner)) throw new InvalidOperationException("Owner is not part of this model");
+        EnsureEditable(owner);
         if (!Metamodel.CanOwn(owner.Kind, element.Kind))
             throw new InvalidOperationException($"{Metamodel.DisplayName(owner.Kind)} cannot own {Metamodel.DisplayName(element.Kind)}");
         History.Execute(new DelegateCommand($"Add {Metamodel.DisplayName(element.Kind)}",
@@ -414,11 +418,13 @@ public sealed class ModelRepository
         owner ??= DefaultOwnerFor(source.Owner ?? Root, kind);
         if (kind is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow or ElementKind.Connector or ElementKind.Message)
             owner = source.Owner ?? Root;   // flows live with their nodes
+        if (_libraries.Count > 0) owner = EditableOwnerFor(owner, target, kind);   // links to library elements belong to the project
         return Add(owner, r);
     }
 
     public Diagram CreateDiagram(Element owner, DiagramType type, string? name = null)
     {
+        EnsureEditable(owner);
         if (!Metamodel.IsValidDiagramContext(type, owner.Kind))
             throw new InvalidOperationException($"A {Metamodel.DisplayName(type)} cannot be owned by a {Metamodel.DisplayName(owner.Kind)}");
         var d = new Diagram(type);
@@ -433,6 +439,7 @@ public sealed class ModelRepository
         value = string.IsNullOrEmpty(value) ? null : value;
         var old = e.Fields.TryGetValue(key, out var o) ? o : null;
         if (old == value) return;
+        EnsureEditable(e);
         // Requirement name/text edits make their trace links suspect (baseline recorded in the same undo step).
         using var suspectStep = Analysis.SuspectLinks.Watches(e, key) ? History.Transaction($"Set {key}") : null;
         if (suspectStep != null) Analysis.SuspectLinks.Baseline(this, e);
@@ -447,6 +454,8 @@ public sealed class ModelRepository
     {
         if (e.Owner == null) throw new InvalidOperationException("Cannot move the root");
         if (ReferenceEquals(e, newOwner) || e.IsAncestorOf(newOwner)) throw new InvalidOperationException("Cannot move an element into itself");
+        EnsureEditable(e);
+        EnsureEditable(newOwner);
         if (!Metamodel.CanOwn(newOwner.Kind, e.Kind))
             throw new InvalidOperationException($"{Metamodel.DisplayName(newOwner.Kind)} cannot own {Metamodel.DisplayName(e.Kind)}");
         var oldOwner = e.Owner;
@@ -471,6 +480,8 @@ public sealed class ModelRepository
     public void Delete(Element e)
     {
         if (e.Owner == null) throw new InvalidOperationException("Cannot delete the model root");
+        EnsureEditable(e);
+        EnsureNoMountInside(e);
 
         var subtree = new HashSet<Element>(ReferenceEqualityComparer.Instance) { e };
         foreach (var d in e.Descendants()) subtree.Add(d);
@@ -547,7 +558,7 @@ public sealed class ModelRepository
         {
             var c = new Element(src.Kind);
             foreach (var (k, v) in src.Fields) c.SetRaw(k, v);
-            foreach (var child in src.Children.Where(x => x is not Relationship && x is not Diagram))
+            foreach (var child in src.Children.Where(x => x is not Relationship && x is not Diagram && !IsLibraryRoot(x)))
             {
                 var cc = CloneTree(child);
                 cc.Owner = c;
@@ -616,6 +627,7 @@ public sealed class ModelRepository
     {
         var existing = parent == null ? d.NodeFor(e) : d.Nodes.FirstOrDefault(n => ReferenceEquals(n.Element, e) && n.ParentId == parent.Id);
         if (existing != null) return existing;
+        EnsureEditable(d);
         var node = new DiagramNode(e, b) { ParentId = parent?.Id };
         using (History.Transaction($"Show {e.DisplayName}"))
         {
@@ -633,6 +645,7 @@ public sealed class ModelRepository
     {
         var existing = d.EdgeFor(r);
         if (existing != null) return existing;
+        EnsureEditable(d);
         var s = EndNode(d, r.Source, r.Get(FieldKeys.SourcePart));
         var t = EndNode(d, r.Target, r.Get(FieldKeys.TargetPart));
         if (s == null || t == null) return null;
@@ -660,6 +673,7 @@ public sealed class ModelRepository
         var nodeSet = nodes.SelectMany(n => d.DescendantsOf(n).Prepend(n)).ToHashSet();
         var edgeSet = (edges ?? []).Concat(d.EdgeList.Where(x => nodeSet.Contains(x.Source) || nodeSet.Contains(x.Target))).ToHashSet();
         if (nodeSet.Count == 0 && edgeSet.Count == 0) return;
+        EnsureEditable(d);
         var removedNodes = d.NodeList.Select((n, i) => (n, i)).Where(t => nodeSet.Contains(t.n)).ToList();
         var removedEdges = d.EdgeList.Select((x, i) => (x, i)).Where(t => edgeSet.Contains(t.x)).ToList();
         History.Execute(new DelegateCommand("Remove from diagram",
@@ -678,6 +692,7 @@ public sealed class ModelRepository
     /// <summary>Sets (or clears, with null) a per-shape appearance override such as "fill".</summary>
     public void SetNodeStyle(Diagram d, DiagramNode n, string key, string? value)
     {
+        EnsureEditable(d);
         var old = n.Style.TryGetValue(key, out var o) ? o : null;
         value = string.IsNullOrEmpty(value) ? null : value;
         if (old == value) return;
@@ -686,6 +701,7 @@ public sealed class ModelRepository
 
     public void SetEdgeStyle(Diagram d, DiagramEdge x, string key, string? value)
     {
+        EnsureEditable(d);
         var old = x.Style.TryGetValue(key, out var o) ? o : null;
         value = string.IsNullOrEmpty(value) ? null : value;
         if (old == value) return;
@@ -696,6 +712,7 @@ public sealed class ModelRepository
     {
         var changes = newBounds.Where(kv => kv.Key.Bounds != kv.Value).Select(kv => (node: kv.Key, from: kv.Key.Bounds, to: kv.Value)).ToList();
         if (changes.Count == 0) return;
+        EnsureEditable(d);
         History.Execute(new DelegateCommand(description,
             () => { foreach (var c in changes) BoundsRaw(d, c.node, c.to); },
             () => { foreach (var c in changes) BoundsRaw(d, c.node, c.from); }));
@@ -703,6 +720,7 @@ public sealed class ModelRepository
 
     public void SetWaypoints(Diagram d, DiagramEdge edge, IReadOnlyList<Pt> points)
     {
+        EnsureEditable(d);
         var old = edge.Waypoints;
         var neu = points.ToList();
         History.Execute(new DelegateCommand("Reroute",

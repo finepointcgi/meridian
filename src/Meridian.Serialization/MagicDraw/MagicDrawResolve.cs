@@ -42,7 +42,7 @@ public static partial class MagicDrawImporter
             foreach (var (el, x) in _typeRefs)
             {
                 var t = ResolveTypeOf(x, out var ext);
-                if (ext) external++;
+                if (ext) { external++; NoteExternalType(el, x); }   // a used project's type (MagicDrawUsedProjects.cs)
                 ModelRepository.SetFieldForLoad(el, FieldKeys.Type, t);
             }
             foreach (var (ll, propId) in _represents)
@@ -151,6 +151,8 @@ public static partial class MagicDrawImporter
 
             if (src == null || tgt == null || !_map.TryGetValue(src, out var s) || !_map.TryGetValue(tgt, out var t))
             {
+                // An end in a used project: kept aside, so a usage of that project can link it (MagicDrawUsedProjects.cs).
+                if (NoteExternalRelationship(p, kind, src, tgt)) { _report.Skip("Relationships to used-project elements"); return; }
                 _report.Warn($"{p.Label} {p.Id} skipped: an end is not in the project");
                 _report.Skip("Relationships with unresolved ends");
                 return;

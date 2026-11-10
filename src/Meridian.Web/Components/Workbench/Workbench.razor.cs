@@ -99,6 +99,7 @@ public partial class Workbench
             list.Add(new($"New {Metamodel.DisplayName(type)}", "Command", UiKinds.DiagramIcon(type), () => { NewDiagramSmart(type); return Task.CompletedTask; }));
         }
         list.AddRange(TablesPaletteCommands());
+        list.AddRange(LibraryPaletteCommands());   // used projects (Workbench.Libraries.cs)
         foreach (var d in Ws.Model.Diagrams.OrderBy(d => d.Name))
         {
             var diagram = d;
@@ -211,8 +212,9 @@ public partial class Workbench
     private async Task ShareProject()
     {
         if (Ws.Session is null) return;
-        await Dialogs.ShowAsync<MembersDialog>("Share", new DialogParameters<MembersDialog> { { x => x.ProjectId, Ws.Session.ProjectId } },
+        var share = await Dialogs.ShowAsync<MembersDialog>("Share", new DialogParameters<MembersDialog> { { x => x.ProjectId, Ws.Session.ProjectId } },
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if ((await share.Result)?.Data is "__used_projects__") await ShowUsedProjects();   // Workbench.Libraries.cs
     }
 
     private async Task ShowHistory()
@@ -365,6 +367,7 @@ public partial class Workbench
 
     public void ShowTreeMenu(Element e, double x, double y)
     {
+        if (Ws.LibraryOf(e) is { } lib) { OpenMenu(LibraryTreeMenu(e, lib), x, y); return; }   // read-only (Workbench.Libraries.cs)
         var m = new List<MenuEntry>();
         var groups = new (string, ElementKind[])[]
         {
@@ -996,15 +999,24 @@ public partial class Workbench
         await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionCommit, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{n}", details: new { message = message.Trim() });
     }
 
-    private Task ExportXmi()
+    private async Task ExportXmi()
     {
-        var x = XmiExchange.ToXml(Ws.Model);
-        return DownloadText(BaseName + ".xmi", "application/xml", x.Declaration + "\n" + x.Root);
+        if (await ModelForExport("XMI") is not { } model) return;   // used projects inline or by reference (Workbench.Libraries.cs)
+        var x = XmiExchange.ToXml(model);
+        await DownloadText(BaseName + ".xmi", "application/xml", x.Declaration + "\n" + x.Root);
     }
 
-    private Task ExportSysML() => DownloadText(BaseName + ".sysml", "text/plain", SysMLv2Text.Export(Ws.Model));
+    private async Task ExportSysML()
+    {
+        if (await ModelForExport("SysML v2 text") is not { } model) return;
+        await DownloadText(BaseName + ".sysml", "text/plain", SysMLv2Text.Export(model));
+    }
     private Task ExportCsv() => DownloadText(BaseName + " requirements.csv", "text/csv", RequirementsCsv.Export(Ws.Model));
-    private Task DownloadReport() => DownloadText(BaseName + " report.html", "text/html", HtmlReport.Generate(Ws.Model));
+    private async Task DownloadReport()
+    {
+        if (await ModelForExport("HTML report") is not { } model) return;
+        await DownloadText(BaseName + " report.html", "text/html", HtmlReport.Generate(model));
+    }
     private async Task OpenReport() => await JS.InvokeVoidAsync("meridian.openHtml", HtmlReport.Generate(Ws.Model));
 
     private Task ExportSvg()

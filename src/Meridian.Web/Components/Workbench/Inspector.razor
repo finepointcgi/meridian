@@ -33,7 +33,26 @@
                 <div class="sub">@UiKinds.KindName(e)@(e.Owner != null ? $" · in {e.Owner.DisplayName}" : "")</div>
             </div>
         </div>
-        @if (!Ws.ReadOnly && !Ws.CanEdit(e))
+        @if (Ws.LibraryOf(e) is { } lib)
+        {
+            @* Used project (docs/LIBRARIES.md): read-only here; changed in its own project. *@
+            <div class="lib-hint" data-testid="inspector-library">
+                <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" Style="font-size:13px" />
+                From used project “@lib.SourceProjectName” (@lib.PinLabel) — read-only
+                <span class="link" @onclick="() => Shell.OpenInSourceProject(e)" data-testid="open-in-source">Open in source project</span>
+            </div>
+        }
+        else if (Meridian.Core.Analysis.SuspectLinks.LibraryChangeOf(e) is { } why)
+        {
+            <div class="lib-suspect" data-testid="inspector-library-suspect">
+                <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:14px" /> Suspect: @why
+                @if (Ws.CanEdit(e))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => ClearLibrarySuspect(e)" data-testid="clear-library-suspect">Mark reviewed</MudButton>
+                }
+            </div>
+        }
+        @if (!Ws.ReadOnly && !Ws.CanEdit(e) && Ws.LibraryOf(e) is null)
         {
             @* Package permissions: changes here are refused by the server; say so up front. *@
             <div class="perm-hint" data-testid="inspector-read-only" style="color:var(--warn); margin:2px 0 6px">
@@ -359,6 +378,17 @@
     }
 
     private void SetFlag(Element e, string key, bool v) => Set(e, key, v ? "true" : null);
+
+    private void ClearLibrarySuspect(Element e)
+    {
+        try
+        {
+            if (e is Relationship r) Meridian.Core.Analysis.SuspectLinks.Clear(Ws.Model, r);
+            else Meridian.Core.Analysis.SuspectLinks.ClearLibraryChange(Ws.Model, e);
+            Ws.SetStatus("Marked as reviewed");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
 
     private static readonly string[] SwatchColors = ["#ffeec4", "#dce8ff", "#d9f1e1", "#fbdede", "#ece2ff", "#d8f0ef", "#fff4b0", "#e3e6eb", "#4f8cff", "#2dd4bf", "#f0b429", "#ff6b6b", "#a283ff", "#3fbf7f"];
 

@@ -1,0 +1,123 @@
+@using System.Text
+@using Meridian.Core.Analysis
+@using Meridian.Core.Libraries
+@using Meridian.Serialization
+@using Meridian.Web.Libraries
+@inject Workspace Ws
+@inject LibraryService Libraries
+@inject LibraryState State
+
+@* "Update used project…": what moving a library's pin changes (ModelDiff between the pins, the library's diagrams with the
+   code-sync change highlights), which project elements become suspect or lose their target; Accept moves the pin as one undo step. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.Difference" />
+            <MudText Typo="Typo.h6">Update “@Offer.LibraryName”</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_error is { } err)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@err</MudAlert>
+        }
+        else if (_plan is not { } plan)
+        {
+            <div class="d-flex align-center gap-2 pa-4"><MudProgressCircular Size="Size.Small" Indeterminate="true" /> Comparing @Offer.CurrentLabel with @Offer.Label…</div>
+        }
+        else
+        {
+            <div class="lib-review-head" data-testid="lib-review">
+                <span class="pin">@plan.FromLabel</span><MudIcon Icon="@Icons.Material.Outlined.ArrowForward" Style="font-size:16px" /><span class="pin">@plan.ToLabel</span>
+                <span class="vc-stat ok">@plan.Diff.Count(d => d.Kind == DiffKind.Added) added</span>
+                <span class="vc-stat warn">@plan.Diff.Count(d => d.Kind == DiffKind.Changed) changed</span>
+                <span class="vc-stat bad">@plan.Diff.Count(d => d.Kind == DiffKind.Removed) removed</span>
+            </div>
+            @if (plan.Affected.Count > 0)
+            {
+                <div class="lib-affected" data-testid="lib-affected">
+                    <b>@plan.Affected.Select(a => a.Referrer.Id).Distinct().Count() element@(plan.Affected.Select(a => a.Referrer.Id).Distinct().Count() == 1 ? "" : "s") of this project will become suspect:</b>
+                    <ul>
+                        @foreach (var a in plan.Affected.Take(50))
+                        {
+                            <li>@a.Referrer.DisplayName <span class="dim">— @a.How @a.Target.DisplayName@(plan.Removed.Contains(a.Target.Id) ? " (removed: a missing reference after the update)" : "")</span></li>
+                        }
+                    </ul>
+                </div>
+            }
+            else
+            {
+                <div class="lib-affected dim">No element of this project refers to what changed.</div>
+            }
+            @foreach (var (name, svg) in _previews)
+            {
+                <div class="dim">@name</div>
+                <div class="lib-review-svg" data-testid="lib-review-diagram">@((MarkupString)svg)</div>
+            }
+            <div class="vc-diffscroll mt-2"><DiffList Diff="plan.Diff" /></div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_plan is null || _busy || Ws.ReadOnly)" OnClick="Accept" data-testid="lib-accept">
+            Update to @Offer.Label
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public LibraryUpdateOffer Offer { get; set; } = default!;
+
+    private LibraryUpdatePlan? _plan;
+    private readonly List<(string Name, string Svg)> _previews = [];
+    private string? _error;
+    private bool _busy;
+
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogs, LibraryUpdateOffer offer) =>
+        dialogs.ShowAsync<LibraryUpdateDialog>("Update used project", new DialogParameters<LibraryUpdateDialog> { { x => x.Offer, offer } },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true });
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Ws.Session is not { } s || Ws.User is not { } me) { _error = "Open the project first."; return; }
+        try
+        {
+            _plan = await Libraries.PrepareUpdateAsync(s, Offer.UsageId, Offer.Kind, Offer.Value, me.Id);
+            BuildPreviews(_plan);
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    /// <summary>The library's diagrams that changed, at the new pin, with the code-sync highlights (removed shapes as ghosts).</summary>
+    private void BuildPreviews(LibraryUpdatePlan plan)
+    {
+        var highlights = plan.Highlights;
+        if (highlights.Count == 0) return;
+        foreach (var d in plan.After.Diagrams.Take(6))
+        {
+            var before = plan.Before.Find(d.Id) as Diagram;
+            var touched = d.Nodes.Any(n => highlights.ContainsKey(n.Element.Id)) || d.Edges.Any(x => highlights.ContainsKey(x.Relationship.Id))
+                          || (before?.Nodes.Any(n => highlights.ContainsKey(n.Element.Id)) ?? false);
+            if (!touched) continue;
+            var svg = SvgRenderer.Render(plan.After, d);
+            var sb = new StringBuilder();
+            SvgRenderer.RenderChangeHighlights(sb, d, n => n.Bounds, x => x.Waypoints, highlights, before);
+            var end = svg.LastIndexOf("</svg>", StringComparison.Ordinal);
+            _previews.Add((d.DisplayName, end < 0 ? svg : svg[..end] + sb + "</svg>"));
+        }
+    }
+
+    private async Task Accept()
+    {
+        if (_plan is not { } plan) return;
+        _busy = true;
+        try
+        {
+            await State.ApplyAsync(plan);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

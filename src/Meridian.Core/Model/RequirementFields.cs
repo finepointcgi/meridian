@@ -21,6 +21,11 @@ public static class ReqFields
     /// <summary>Trace relationships: fingerprint of the requirement at the source / target end when last reviewed.</summary>
     public const string SourceFingerprint = "suspectSrcFp";
     public const string TargetFingerprint = "suspectTgtFp";
+    /// <summary>
+    /// Any element or relationship of the project: why it is suspect after a used project (library) it refers to was updated,
+    /// e.g. "Wheel changed in Standard Parts (v1 → v2)". Cleared when the reference is reviewed.
+    /// </summary>
+    public const string LibraryChange = "suspectLib";
 
     public const string DefaultIdPrefix = "REQ-";
 

@@ -29,6 +29,8 @@ public static class PermissionCheck
     /// <summary>Null when <paramref name="view"/> may apply <paramref name="op"/> to <paramref name="model"/> (before it is applied), else why not.</summary>
     public static string? Check(ModelRepository model, AccessView view, ModelOp op)
     {
+        // Used projects (libraries) are read-only for everyone, owners included (docs/LIBRARIES.md).
+        if (Libraries.LibraryGuard.Check(model, op) is { } library) return library;
         if (view.IsOwner || (!view.HasRules && view.Default >= PackageAccess.Edit)) return null;
         switch (op)
         {

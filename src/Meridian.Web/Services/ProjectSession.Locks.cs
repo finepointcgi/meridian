@@ -149,7 +149,7 @@ public sealed partial class ProjectSession
         lock (_gate)
         {
             _snapshotSequence = -1;
-            _master = ProjectFile.Deserialize(modelJson);
+            _master = Materialize(modelJson);   // used projects stay mounted (ProjectSession.Libraries.cs)
             Sequence++;
             MarkDirty();
             _lastEditor = userId;

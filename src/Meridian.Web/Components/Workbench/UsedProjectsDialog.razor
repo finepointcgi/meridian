@@ -1,0 +1,310 @@
+@implements IDisposable
+@using Meridian.Core.Libraries
+@using Meridian.Data
+@using Meridian.Web.Libraries
+@inject Workspace Ws
+@inject LibraryService Libraries
+@inject LibraryState State
+@inject IDialogService Dialogs
+
+@* Project ▸ Used projects… (docs/LIBRARIES.md): packages of other projects this project uses, read-only, at a pinned version,
+   branch head or baseline. Add a usage, move its pin, remove it, and see which elements refer to each library. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" />
+            <MudText Typo="Typo.h6">Used projects</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Sync" Disabled="State.Checking" OnClick="Check" data-testid="lib-check">
+                @(State.Checking ? "Checking…" : "Check for updates")
+            </MudButton>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_error is { } err) { <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2" ShowCloseIcon="true" CloseIconClicked="() => _error = null">@err</MudAlert> }
+        @foreach (var w in State.Warnings)
+        {
+            <div class="lib-warn"><MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:15px" />@w</div>
+        }
+        @if (_usages.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="pa-2" Style="opacity:.7" data-testid="lib-empty">
+                This project doesn't use other projects yet. Use a package of another project — a parts catalogue, a requirements standard, shared
+                interfaces — to type parts by its blocks, trace to its requirements and show it on your diagrams, without copying it.
+            </MudText>
+        }
+        else
+        {
+            <table class="lib-table" data-testid="lib-usages">
+                <tr><th>Project and package</th><th>Pin</th><th>Shown in</th><th>Used by</th><th></th></tr>
+                @foreach (var u in _usages)
+                {
+                    var usage = u;
+                    var loaded = Loaded(u);
+                    var update = State.Updates.FirstOrDefault(x => x.UsageId == u.Id);
+                    var refs = loaded is null ? [] : References(loaded);
+                    <tr data-testid="lib-usage" data-usage="@u.Id">
+                        <td>
+                            <b>@(string.IsNullOrEmpty(u.UsedProjectName) ? "(deleted project)" : u.UsedProjectName)</b>
+                            <div class="dim">@(loaded is null ? "not available to you" : Ws.Model.Find(u.RootPackageId)?.Name ?? u.RootPackageId)</div>
+                            <div class="dim">added by @(string.IsNullOrEmpty(u.AddedByName) ? "unknown" : u.AddedByName) · @u.AddedAt.ToLocalTime().ToString("MMM d, yyyy")</div>
+                        </td>
+                        <td>
+                            <span class="lib-badge">@(loaded?.PinLabel ?? LibraryPins.Label(u.PinKind, u.PinValue))</span>
+                            @if (update is not null)
+                            {
+                                <div><span class="lib-badge update" data-testid="lib-update-available" title="@($"{update.Label} is available")">@update.Label available</span></div>
+                            }
+                        </td>
+                        <td class="dim">@(Ws.Model.Find(u.MountPointId)?.QualifiedName is { Length: > 0 } q ? q : "model root")</td>
+                        <td>
+                            <span class="dim">@refs.Count reference@(refs.Count == 1 ? "" : "s")</span>
+                            @if (refs.Count > 0)
+                            {
+                                <MudIconButton Size="Size.Small" Icon="@(_open.Contains(u.Id) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                               OnClick="() => ToggleRefs(usage.Id)" data-testid="lib-refs-toggle" />
+                                @if (_open.Contains(u.Id))
+                                {
+                                    <ul class="lib-refs" data-testid="lib-refs">
+                                        @foreach (var r in refs.Take(100))
+                                        {
+                                            var reference = r;
+                                            <li @onclick="() => Go(reference.Referrer)">@KindIcon.For(r.Referrer) @r.Referrer.DisplayName <span class="dim">@r.How @r.Target.DisplayName</span></li>
+                                        }
+                                    </ul>
+                                }
+                            }
+                        </td>
+                        <td style="white-space:nowrap">
+                            @if (update is not null)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" Disabled="!CanEdit" OnClick="() => Review(update)" data-testid="lib-review-update">Update…</MudButton>
+                            }
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" title="Change pin or mount point" Disabled="!CanEdit" OnClick="() => Edit(usage)" data-testid="lib-edit" />
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove usage" Disabled="!CanEdit" OnClick="() => Remove(usage, refs.Count)" data-testid="lib-remove" />
+                        </td>
+                    </tr>
+                }
+            </table>
+        }
+
+        @if (CanEdit)
+        {
+            <div class="vc-section-title mt-4">@(_editing is null ? "Use a package of another project" : $"Change “{_editing.UsedProjectName}”")</div>
+            <div class="lib-form" data-testid="lib-form">
+                <MudSelect T="Guid?" Value="_project" ValueChanged="PickProject" Label="Project" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                           Disabled="_editing is not null" data-testid="lib-project">
+                    @foreach (var p in _projects) { <MudSelectItem T="Guid?" Value="p.Id">@p.Name</MudSelectItem> }
+                </MudSelect>
+                <MudSelect T="LibraryPinKind" Value="_kind" ValueChanged="PickKind" Label="Pin to" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" data-testid="lib-pin-kind">
+                    <MudSelectItem T="LibraryPinKind" Value="LibraryPinKind.Version">A version</MudSelectItem>
+                    <MudSelectItem T="LibraryPinKind" Value="LibraryPinKind.Branch">A branch head (follows it)</MudSelectItem>
+                    <MudSelectItem T="LibraryPinKind" Value="LibraryPinKind.Baseline">A baseline</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="string" Value="_pin" ValueChanged="PickPin" Label="@PinLabel" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_pins is null" data-testid="lib-pin">
+                    @foreach (var (value, label) in PinChoices()) { <MudSelectItem T="string" Value="value">@label</MudSelectItem> }
+                </MudSelect>
+                <MudSelect T="string" Value="_package" ValueChanged="v => _package = v" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                           Disabled="_packages.Count == 0 || _editing is not null" data-testid="lib-package">
+                    @foreach (var (id, path) in _packages) { <MudSelectItem T="string" Value="id">@path</MudSelectItem> }
+                </MudSelect>
+                <MudSelect T="string" Value="_mount" ValueChanged="v => _mount = v" Label="Show it in" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" data-testid="lib-mount">
+                    <MudSelectItem T="string" Value="@("")">The model root</MudSelectItem>
+                    @foreach (var p in Ws.Model.OfKind(ElementKind.Package).Where(p => !Ws.Model.IsLibraryElement(p)).OrderBy(p => p.QualifiedName))
+                    {
+                        <MudSelectItem T="string" Value="p.Id">@p.QualifiedName</MudSelectItem>
+                    }
+                </MudSelect>
+                <div class="d-flex gap-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!Ready || _busy)" OnClick="Save" data-testid="lib-save">
+                        @(_editing is null ? "Use package" : "Save")
+                    </MudButton>
+                    @if (_editing is not null) { <MudButton Variant="Variant.Text" OnClick="CancelEdit">Cancel</MudButton> }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()" data-testid="lib-close">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private IReadOnlyList<ProjectUsage> _usages = [];
+    private IReadOnlyList<ProjectSummary> _projects = [];
+    private readonly HashSet<Guid> _open = [];
+    private Guid? _project;
+    private LibraryPinKind _kind = LibraryPinKind.Version;
+    private string? _pin;
+    private string? _package;
+    private string _mount = "";
+    private LibraryPinOptions? _pins;
+    private IReadOnlyList<(string Id, string Path)> _packages = [];
+    private ProjectUsage? _editing;
+    private string? _error;
+    private bool _busy;
+
+    private bool CanEdit => Ws.Session is not null && !Ws.ReadOnly;
+    private bool Ready => _project is not null && !string.IsNullOrEmpty(_pin) && !string.IsNullOrEmpty(_package);
+    private string PinLabel => _kind switch { LibraryPinKind.Version => "Version", LibraryPinKind.Branch => "Branch", _ => "Baseline" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnState;
+        await Reload();
+        if (Ws.User is { } me && Ws.Session is { } s) _projects = await Libraries.SourceProjectsAsync(me.Id, s.ProjectId);
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnState;
+
+    private async Task Reload()
+    {
+        if (Ws.Session is { } s) _usages = await Libraries.UsagesAsync(s.ProjectId);
+    }
+
+    private LibraryInfo? Loaded(ProjectUsage u) => State.Loaded.FirstOrDefault(l => l.UsageId == u.Id.ToString("N"));
+
+    private IReadOnlyList<LibraryReference> References(LibraryInfo info) =>
+        Ws.Model.Libraries.FirstOrDefault(m => m.Info.UsageId == info.UsageId) is { } mount ? LibraryUpdates.References(Ws.Model, mount) : [];
+
+    private void ToggleRefs(Guid id)
+    {
+        if (!_open.Remove(id)) _open.Add(id);
+    }
+
+    private void Go(Element e)
+    {
+        MudDialog.Close();
+        Ws.Select(e);
+    }
+
+    private async Task PickProject(Guid? id)
+    {
+        _project = id;
+        _pin = null;
+        _package = null;
+        _packages = [];
+        _pins = null;
+        if (id is { } p && Ws.User is { } me)
+        {
+            try { _pins = await Libraries.PinsAsync(p, me.Id); }
+            catch (InvalidOperationException ex) { _error = ex.Message; }
+            if (_pins is { } pins)
+            {
+                // Default: the latest version if there is one, else follow main.
+                if (pins.Versions.Count > 0) { _kind = LibraryPinKind.Version; await PickPin(pins.Versions[0].Number.ToString()); }
+                else { _kind = LibraryPinKind.Branch; await PickPin(Branching.MainBranch); }
+            }
+        }
+    }
+
+    private async Task PickKind(LibraryPinKind kind)
+    {
+        _kind = kind;
+        _pin = null;
+        if (_editing is null) { _package = null; _packages = []; }
+        var first = PinChoices().FirstOrDefault();
+        if (first.Value is { } v) await PickPin(v);
+    }
+
+    private IEnumerable<(string Value, string Label)> PinChoices()
+    {
+        if (_pins is not { } p) yield break;
+        switch (_kind)
+        {
+            case LibraryPinKind.Version:
+                foreach (var v in p.Versions) yield return (v.Number.ToString(), $"v{v.Number} · {v.Message}");
+                break;
+            case LibraryPinKind.Branch:
+                foreach (var b in p.Branches) yield return (b, b);
+                break;
+            default:
+                foreach (var b in p.Baselines) yield return (b.Id.ToString(), $"{b.Name} (v{b.VersionNumber})");
+                break;
+        }
+    }
+
+    private async Task PickPin(string? value)
+    {
+        _pin = value;
+        if (_editing is not null || _project is not { } p || value is null || Ws.User is not { } me) return;
+        try
+        {
+            _packages = await Libraries.PackagesAsync(p, _kind, value, me.Id);
+            if (_package is null || _packages.All(x => x.Id != _package)) _package = _packages.FirstOrDefault().Id;
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private async Task Edit(ProjectUsage u)
+    {
+        _editing = u;
+        _project = u.UsedProjectId;
+        _package = u.RootPackageId;
+        _packages = [(u.RootPackageId, Ws.Model.Find(u.RootPackageId)?.QualifiedName ?? u.RootPackageId)];
+        _mount = u.MountPointId ?? "";
+        if (Ws.User is { } me)
+        {
+            try { _pins = await Libraries.PinsAsync(u.UsedProjectId, me.Id); }
+            catch (InvalidOperationException ex) { _error = ex.Message; }
+        }
+        _kind = u.PinKind;
+        _pin = u.PinValue;
+    }
+
+    private void CancelEdit()
+    {
+        _editing = null;
+        _project = null;
+        _pin = _package = null;
+        _packages = [];
+        _mount = "";
+    }
+
+    private async Task Save()
+    {
+        if (Ws.User is not { } me || Ws.Session is not { } s || _project is not { } p || _pin is null || _package is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var editing = _editing;
+            await State.ChangeAsync(() => editing is null
+                    ? Libraries.AddAsync(s.ProjectId, p, _package, _kind, _pin, _mount, me.Id)
+                    : Libraries.ChangeAsync(editing.Id, _kind, _pin, _mount, me.Id),
+                editing is null ? "Package added as a used project" : "Used project changed");
+            CancelEdit();
+            await Reload();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task Remove(ProjectUsage u, int references)
+    {
+        if (Ws.User is not { } me) return;
+        if (references > 0)
+        {
+            var ok = await Dialogs.ShowMessageBox("Remove used project",
+                $"{references} element{(references == 1 ? " refers" : "s refer")} to “{u.UsedProjectName}”. The references are kept, but they will show as missing references (validation LIB-001) until you fix them. Remove it anyway?",
+                yesText: "Remove", cancelText: "Cancel");
+            if (ok != true) return;
+        }
+        try
+        {
+            await State.ChangeAsync(() => Libraries.RemoveAsync(u.Id, me.Id), $"“{u.UsedProjectName}” is no longer used");
+            await Reload();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private async Task Check() => await State.CheckAsync();
+
+    private async Task Review(LibraryUpdateOffer offer)
+    {
+        MudDialog.Close();
+        await LibraryUpdateDialog.ShowAsync(Dialogs, offer);
+    }
+}

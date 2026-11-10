@@ -48,7 +48,7 @@ public sealed class VerificationView(Workspace ws)
 
     public StoredResult? ResultOf(Element requirement) => Results.GetValueOrDefault(requirement.Id);
 
-    public static ModelRepository Copy(ModelRepository m) => ProjectFile.Deserialize(ProjectFile.Serialize(m));
+    public static ModelRepository Copy(ModelRepository m) => ProjectFile.Copy(m);
 
     /// <summary>Options for a run from this workspace: model copies, the version label, and the variant shown on diagrams (ad hoc checks).</summary>
     public VerificationOptions Options(Func<CoSimPart, IReadOnlyDictionary<string, double>, ICoSimUnit>? fmu = null, bool useShownVariant = true, CancellationToken ct = default) => new()

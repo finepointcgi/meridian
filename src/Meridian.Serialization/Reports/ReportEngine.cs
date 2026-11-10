@@ -11,7 +11,7 @@ public enum ReportFormat { Pdf, Docx, Html }
 public static class ReportEngine
 {
     /// <summary>A private copy of the model, so generation on a worker thread never races with edits.</summary>
-    public static ModelRepository Snapshot(ModelRepository m) => ProjectFile.Deserialize(ProjectFile.Serialize(m));
+    public static ModelRepository Snapshot(ModelRepository m) => ProjectFile.Copy(m);
 
     public static string Extension(ReportFormat f) => f switch { ReportFormat.Pdf => "pdf", ReportFormat.Docx => "docx", _ => "html" };
 

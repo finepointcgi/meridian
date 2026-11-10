@@ -40,6 +40,7 @@ public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
         await MigratePreferencesAsync(conn);   // per-user preferences (PostgresStore.Preferences.cs)
         await MigrateCodeSyncRunsAsync(conn);   // code-sync review runs (PostgresStore.CodeSync.cs)
         await MigratePermissionsAsync(conn);   // per-package permissions (PostgresStore.Permissions.cs)
+        await MigrateUsagesAsync(conn);   // used projects / shared model libraries (PostgresStore.Usages.cs)
         await tx.CommitAsync();
     }
 

@@ -60,6 +60,8 @@ public static class MeridianServer
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddScoped<ReviewService>();
         builder.Services.AddScoped<MobileUiState>();   // phone / tablet shell state (Components/Mobile)
+        builder.Services.AddSingleton<Libraries.LibraryService>();   // used projects / shared model libraries (docs/LIBRARIES.md)
+        builder.Services.AddScoped<Libraries.LibraryState>();   // per tab: loaded libraries, update badge
         builder.Services.AddMeridianScripting(builder.Configuration, host);   // script console + plugins (docs/SCRIPTING.md, docs/PLUGINS.md)
         builder.Services.AddMeridianAssistant();   // AI assistant powered by Claude (docs/AI.md)
         Settings.SettingsHosting.AddMeridianSettings(builder.Services, host);   // Settings page: preferences, theme, account
