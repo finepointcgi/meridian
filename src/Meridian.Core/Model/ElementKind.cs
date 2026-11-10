@@ -110,6 +110,11 @@ public enum ElementKind
 
     // Views
     Diagram,
+
+    // Saved model views and custom rules (generic tables, model queries, query-based validation)
+    TableView,
+    QueryView,
+    ValidationRule,
 }
 
 public enum DiagramType

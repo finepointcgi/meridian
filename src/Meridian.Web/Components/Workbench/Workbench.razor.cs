@@ -78,6 +78,7 @@ public partial class Workbench
             var type = t;
             list.Add(new($"New {Metamodel.DisplayName(type)}", "Command", UiKinds.DiagramIcon(type), () => { NewDiagramSmart(type); return Task.CompletedTask; }));
         }
+        list.AddRange(TablesPaletteCommands());
         foreach (var d in Ws.Model.Diagrams.OrderBy(d => d.Name))
         {
             var diagram = d;
@@ -234,6 +235,7 @@ public partial class Workbench
     public void Activate(Element e)
     {
         if (e is Diagram d) { Ws.Open(d); return; }
+        if (e.Kind is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) { OpenSavedView(e); return; }
         var owned = e.OwnedElements.OfType<Diagram>().FirstOrDefault();
         if (owned != null) Ws.Open(owned);
     }

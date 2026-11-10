@@ -1,0 +1,34 @@
+@* Name, severity and message for a query-based validation rule. *@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">@(Existing ? "Update validation rule" : "Save as validation rule")</MudText></TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:12px; min-width:460px">
+            <MudTextField T="string" @bind-Value="Name" Label="Rule name" AutoFocus="true" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudSelect T="string" @bind-Value="Severity" Label="Severity" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelectItem Value="@("error")">Error</MudSelectItem>
+                <MudSelectItem Value="@("warning")">Warning</MudSelectItem>
+                <MudSelectItem Value="@("info")">Info</MudSelectItem>
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="Message" Label="Message" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2"
+                          HelperText="Placeholders: {name}, {owner}, {kind}, {qualifiedName} or any field / tag / value property, e.g. {mass}" />
+            <div style="font:11.5px 'JetBrains Mono', Menlo, monospace; color:var(--text-3); word-break:break-word">@Query</div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="string.IsNullOrWhiteSpace(Name)" OnClick="Ok">@(Existing ? "Update" : "Save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Result(string Name, string Severity, string Message);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Severity { get; set; } = "warning";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string Query { get; set; } = "";
+    [Parameter] public bool Existing { get; set; }
+
+    private void Ok() => MudDialog.Close(DialogResult.Ok(new Result(Name.Trim(), Severity, Message ?? "")));
+}

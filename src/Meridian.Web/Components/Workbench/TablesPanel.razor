@@ -1,0 +1,340 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+<div class="gt">
+    @* ------------------------------------------------------------ toolbar *@
+    <div class="gt-bar">
+        <div class="gt-seg">
+            <button class="@(_mode == Mode.Table ? "on" : "")" @onclick="() => _mode = Mode.Table"><MudIcon Icon="@Icons.Material.Outlined.TableChart" />Table</button>
+            <button class="@(_mode == Mode.Query ? "on" : "")" @onclick="() => _mode = Mode.Query"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" />Query</button>
+        </div>
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" MaxHeight="420">
+            <ActivatorContent>
+                <button class="gt-btn gt-views" title="Saved tables, queries and rules">
+                    <MudIcon Icon="@Icons.Material.Outlined.Bookmarks" />
+                    <span>@(Current?.DisplayName ?? "Saved views")</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" />
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                @{ var saved = SavedViews.All(Ws.Model).ToList(); }
+                @if (saved.Count == 0)
+                {
+                    <div class="gt-empty-menu">No saved views yet. Save a table or query to keep it in the model.</div>
+                }
+                @foreach (var g in saved.GroupBy(v => v.Kind))
+                {
+                    <div class="gt-menu-sec">@(g.Key switch { ElementKind.TableView => "Tables", ElementKind.QueryView => "Queries", _ => "Validation rules" })</div>
+                    foreach (var v in g)
+                    {
+                        var view = v;
+                        <MudMenuItem Icon="@UiKinds.Icon(view.Kind)" OnClick="() => Load(view)">@view.DisplayName <span class="gt-menu-path">@view.Owner?.DisplayName</span></MudMenuItem>
+                    }
+                }
+                <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Outlined.NoteAdd" OnClick="NewView">New @(_mode == Mode.Table ? "table" : "query")</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+        <span class="gt-sep"></span>
+
+        @if (_mode == Mode.Table)
+        {
+            <label class="gt-lbl">Rows</label>
+            <select class="gt-select" value="@RowKindValue" @onchange="e => SetRowKind((string?)e.Value)" title="Element kind shown as rows">
+                <option value="">(any element)</option>
+                @foreach (var k in RowKinds) { <option value="@k">@Metamodel.DisplayName(k)</option> }
+            </select>
+            <label class="gt-lbl">in</label>
+            <select class="gt-select" value="@(_rowQuery.Scope ?? "")" @onchange="e => SetRowScope((string?)e.Value)" title="Package scope">
+                <option value="">Whole model</option>
+                @foreach (var p in Scopes()) { <option value="@ScopeValue(p)">@ScopeLabel(p)</option> }
+            </select>
+            <input class="gt-input gt-where" placeholder="where …  e.g. mass > 50 and not has:satisfy" value="@_rowWhere" @onchange="e => SetRowWhere((string?)e.Value)" spellcheck="false" />
+            <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" MaxHeight="460">
+                <ActivatorContent><button class="gt-btn" title="Add a column"><MudIcon Icon="@Icons.Material.Outlined.ViewColumn" />Column</button></ActivatorContent>
+                <ChildContent>
+                    @foreach (var g in ColumnChoices().GroupBy(c => c.Group))
+                    {
+                        <div class="gt-menu-sec">@g.Key</div>
+                        foreach (var c in g)
+                        {
+                            var key = c.Key;
+                            var has = _def.Columns.Any(x => x.Key == key);
+                            <MudMenuItem Disabled="has" OnClick="() => AddColumn(key)">@ModelValues.Label(key) <span class="gt-menu-path">@key</span></MudMenuItem>
+                        }
+                    }
+                    <MudDivider />
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Edit" OnClick="AddCustomColumn">Custom key…</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
+            <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" MaxHeight="420" Disabled="@(Ws.ReadOnly || RowKind == null)">
+                <ActivatorContent>
+                    <button class="gt-btn" disabled="@(Ws.ReadOnly || RowKind == null)" title="@(RowKind == null ? "Choose a row kind to add rows" : $"New {Metamodel.DisplayName(RowKind.Value)} in a chosen owner")"><MudIcon Icon="@Icons.Material.Outlined.PlaylistAdd" />Add row</button>
+                </ActivatorContent>
+                <ChildContent>
+                    <div class="gt-menu-sec">Create in</div>
+                    @foreach (var o in OwnerCandidates())
+                    {
+                        var owner = o;
+                        <MudMenuItem Icon="@UiKinds.Icon(owner.Kind)" OnClick="() => AddRow(owner)">@ScopeLabel(owner)</MudMenuItem>
+                    }
+                </ChildContent>
+            </MudMenu>
+            <button class="gt-btn" @onclick="ExportCsv" title="Export the visible rows as CSV"><MudIcon Icon="@Icons.Material.Outlined.FileDownload" />CSV</button>
+            <button class="gt-btn primary" disabled="@Ws.ReadOnly" @onclick="SaveTable" title="@(_view != null ? $"Update '{_view.Name}'" : "Save this table in the model")"><MudIcon Icon="@Icons.Material.Outlined.Save" />@(_view != null ? "Save" : "Save view")</button>
+            @if (_view != null)
+            {
+                <button class="gt-btn" disabled="@Ws.ReadOnly" @onclick="() => SaveTableAs()" title="Save a copy under a new name"><MudIcon Icon="@Icons.Material.Outlined.SaveAs" /></button>
+            }
+        }
+        else
+        {
+            <div class="gt-seg small">
+                <button class="@(!_textMode ? "on" : "")" @onclick="() => SetTextMode(false)">Builder</button>
+                <button class="@(_textMode ? "on" : "")" @onclick="() => SetTextMode(true)">Text</button>
+            </div>
+            <span style="flex:1"></span>
+            <button class="gt-btn" disabled="@(_queryError != null)" @onclick="OpenAsTable" title="Show the results as an editable table"><MudIcon Icon="@Icons.Material.Outlined.TableChart" />Open as table</button>
+            <button class="gt-btn primary" disabled="@(Ws.ReadOnly || _queryError != null)" @onclick="SaveQuery"><MudIcon Icon="@Icons.Material.Outlined.Save" />@(_queryView?.Kind == ElementKind.QueryView ? "Save query" : "Save as query")</button>
+            <button class="gt-btn" disabled="@(Ws.ReadOnly || _queryError != null)" @onclick="SaveRule" title="Report every match in the Validation panel"><MudIcon Icon="@Icons.Material.Outlined.Rule" />@(_queryView?.Kind == ElementKind.ValidationRule ? "Update rule" : "Save as rule")</button>
+        }
+    </div>
+
+    @if (_mode == Mode.Table) { @TableBody() } else { @QueryBody() }
+</div>
+
+@code {
+    private RenderFragment TableBody() => __builder =>
+    {
+        IReadOnlyList<ModelTableRow> rows;
+        string? error = null;
+        try { rows = ModelTables.Build(Ws.Model, _def); }
+        catch (QueryParseException ex) { rows = []; error = ex.Message; }
+        var shown = rows.Take(MaxRows).ToList();
+        <div class="gt-status">
+            @if (error != null)
+            {
+                <span class="gt-error"><MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" /> @error</span>
+            }
+            else
+            {
+                <span>@rows.Count @(rows.Count == 1 ? "row" : "rows")@(rows.Count > MaxRows ? $" (showing the first {MaxRows})" : "")</span>
+            }
+            <code class="gt-code" title="Row query">@_def.Query</code>
+            @if (_view != null) { <span class="gt-saved"><MudIcon Icon="@UiKinds.Icon(_view.Kind)" /> @_view.QualifiedName</span> }
+        </div>
+        <div class="gt-scroll">
+            <table class="gt-table">
+                <thead>
+                    <tr>
+                        <th class="gt-num">#</th>
+                        @for (var i = 0; i < _def.Columns.Count; i++)
+                        {
+                            var col = _def.Columns[i];
+                            var idx = i;
+                            <th class="gt-h" title="@col.Key">
+                                <span class="gt-hl" @onclick="() => Sort(col)">
+                                    @col.Header
+                                    @if (_def.SortKey == col.Key) { <MudIcon Icon="@(_def.SortDescending ? Icons.Material.Filled.ArrowDownward : Icons.Material.Filled.ArrowUpward)" Class="gt-sort" /> }
+                                </span>
+                                <span class="gt-hx">
+                                    @if (idx > 0) { <span title="Move left" @onclick="() => MoveColumn(idx)"><MudIcon Icon="@Icons.Material.Filled.ChevronLeft" /></span> }
+                                    <span title="Remove column" @onclick="() => RemoveColumn(idx)"><MudIcon Icon="@Icons.Material.Filled.Close" /></span>
+                                </span>
+                            </th>
+                        }
+                        <th class="gt-act"></th>
+                    </tr>
+                    <tr class="gt-filters">
+                        <th></th>
+                        @foreach (var col in _def.Columns)
+                        {
+                            var c = col;
+                            <th><input class="gt-filter" placeholder="Filter" value="@c.Filter" @oninput="e => SetFilter(c, (string?)e.Value)" spellcheck="false" title="Text, or >10, <=5, =x, !=x, !x" /></th>
+                        }
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var r = 0; r < shown.Count; r++)
+                    {
+                        var row = shown[r];
+                        var e = row.Element;
+                        var n = r + 1;
+                        <tr @key="e.Id" class="@(ReferenceEquals(Ws.Selected, e) ? "sel" : "")" @onclick="() => Ws.Select(e)">
+                            <td class="gt-num">@n</td>
+                            @for (var i = 0; i < _def.Columns.Count; i++)
+                            {
+                                var key = _def.Columns[i].Key;
+                                var value = row.Cells[i];
+                                <td>
+                                    @if (ModelValues.TryRel(ModelValues.Canonical(key), out var rk, out var dir))
+                                    {
+                                        foreach (var x in ModelValues.Related(Ws.Model, e, rk, dir))
+                                        {
+                                            var target = x;
+                                            <span class="link gt-ref" @onclick:stopPropagation="true" @onclick="() => Go(target)">@UiKinds.Label(Ws.Model, target)</span>
+                                        }
+                                    }
+                                    else if (!Ws.ReadOnly && ModelValues.CanEdit(e, key))
+                                    {
+                                        <input class="gt-cell @(key == "name" ? "strong" : "")" value="@value" @onchange="ev => Commit(e, key, (string?)ev.Value)" spellcheck="false" />
+                                    }
+                                    else if (key == "owner" && e.Owner is { } owner)
+                                    {
+                                        <span class="link gt-ref" @onclick:stopPropagation="true" @onclick="() => Go(owner)">@value</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="gt-ro">@value</span>
+                                    }
+                                </td>
+                            }
+                            <td class="gt-act">
+                                @if (!Ws.ReadOnly)
+                                {
+                                    <span class="gt-del" title="Delete @e.DisplayName from the model" @onclick:stopPropagation="true" @onclick="() => DeleteRow(e)"><MudIcon Icon="@Icons.Material.Outlined.DeleteOutline" /></span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (error == null && rows.Count == 0)
+            {
+                <div class="gt-empty">No elements match. Change the row kind, scope or filters@(RowKind != null && !Ws.ReadOnly ? ", or add a row" : "").</div>
+            }
+        </div>
+    };
+
+    private RenderFragment QueryBody() => __builder =>
+    {
+        <div class="gt-query">
+            @if (_textMode)
+            {
+                <div class="gt-qrow">
+                    <textarea class="gt-input gt-qtext" rows="2" spellcheck="false" placeholder="kind:Block in:Structure where mass > 50 and not has:satisfy"
+                              value="@_queryText" @oninput="e => SetQueryText((string?)e.Value)"></textarea>
+                </div>
+                <div class="gt-help">
+                    <b>kind:</b>Block,Part · <b>in:</b>Package · <b>stereotype:</b>name · <b>where</b> field <code>= != &lt; &gt; &lt;= &gt;= contains</code> value ·
+                    field <code>is empty</code> · <code>has:satisfy</code> · <code>no:out:allocate</code> · <code>and or not ( )</code> ·
+                    fields: name, owner, type, stereotype, doc, any field, tag:x, prop:x, satisfies, allocatedTo…
+                </div>
+            }
+            else
+            {
+                <div class="gt-qrow">
+                    <label class="gt-lbl">Find</label>
+                    <select class="gt-select" value="@(_q.Kinds.Count > 0 ? _q.Kinds[0].ToString() : "")" @onchange="@(e => { SetKinds(_q, (string?)e.Value); RebuildQuery(); })">
+                        <option value="">any element</option>
+                        @foreach (var k in RowKinds) { <option value="@k">@Metamodel.DisplayName(k)</option> }
+                    </select>
+                    <label class="gt-lbl">in</label>
+                    <select class="gt-select" value="@(_q.Scope ?? "")" @onchange="@(e => { _q.Scope = NullIfEmpty((string?)e.Value); RebuildQuery(); })">
+                        <option value="">Whole model</option>
+                        @foreach (var p in Scopes()) { <option value="@ScopeValue(p)">@ScopeLabel(p)</option> }
+                    </select>
+                    <label class="gt-lbl">stereotype</label>
+                    <input class="gt-input" style="width:130px" list="gt-stereos" placeholder="(any)" value="@_q.Stereotype" @onchange="@(e => { _q.Stereotype = NullIfEmpty((string?)e.Value); RebuildQuery(); })" />
+                </div>
+                @for (var i = 0; i < _rows.Count; i++)
+                {
+                    var row = _rows[i];
+                    var idx = i;
+                    <div class="gt-qrow gt-cond">
+                        @if (idx == 0)
+                        {
+                            <span class="gt-join">where</span>
+                        }
+                        else
+                        {
+                            <select class="gt-select gt-joinsel" value="@(row.Or ? "or" : "and")" @onchange="@(e => { row.Or = (string?)e.Value == "or"; RebuildQuery(); })">
+                                <option value="and">and</option>
+                                <option value="or">or</option>
+                            </select>
+                        }
+                        <select class="gt-select" value="@(row.IsRelation ? "rel" : "field")" @onchange="@(e => { row.IsRelation = (string?)e.Value == "rel"; RebuildQuery(); })">
+                            <option value="field">Value</option>
+                            <option value="rel">Relationship</option>
+                        </select>
+                        @if (row.IsRelation)
+                        {
+                            <select class="gt-select" value="@(row.Negate ? "no" : "has")" @onchange="@(e => { row.Negate = (string?)e.Value == "no"; RebuildQuery(); })">
+                                <option value="has">has</option>
+                                <option value="no">has no</option>
+                            </select>
+                            <select class="gt-select" value="@row.RelDirection" @onchange="@(e => { row.RelDirection = Enum.Parse<RelDirection>((string)e.Value!); RebuildQuery(); })">
+                                <option value="@RelDirection.Any">any</option>
+                                <option value="@RelDirection.Out">outgoing</option>
+                                <option value="@RelDirection.In">incoming</option>
+                            </select>
+                            <select class="gt-select" value="@row.RelKind" @onchange="@(e => { row.RelKind = Enum.Parse<ElementKind>((string)e.Value!); RebuildQuery(); })">
+                                @foreach (var k in Metamodel.RelationshipKinds) { <option value="@k">@Metamodel.DisplayName(k)</option> }
+                            </select>
+                            <span class="gt-lbl">link</span>
+                        }
+                        else
+                        {
+                            <select class="gt-select" value="@(row.Negate ? "not" : "")" @onchange="@(e => { row.Negate = (string?)e.Value == "not"; RebuildQuery(); })" title="Negate">
+                                <option value=""></option>
+                                <option value="not">not</option>
+                            </select>
+                            <input class="gt-input" style="width:150px" list="gt-fields" placeholder="field" value="@row.Field" @oninput="@(e => { row.Field = (string?)e.Value ?? ""; RebuildQuery(); })" spellcheck="false" />
+                            <select class="gt-select" value="@row.Op" @onchange="@(e => { row.Op = Enum.Parse<QueryOp>((string)e.Value!); RebuildQuery(); })">
+                                @foreach (var op in Enum.GetValues<QueryOp>()) { <option value="@op">@OpLabel(op)</option> }
+                            </select>
+                            @if (row.Op is not (QueryOp.Empty or QueryOp.NotEmpty))
+                            {
+                                <input class="gt-input" style="width:160px" placeholder="value" value="@row.Value" @oninput="@(e => { row.Value = (string?)e.Value ?? ""; RebuildQuery(); })" spellcheck="false" />
+                            }
+                        }
+                        <span class="gt-del" title="Remove condition" @onclick="() => { _rows.RemoveAt(idx); RebuildQuery(); }"><MudIcon Icon="@Icons.Material.Filled.Close" /></span>
+                    </div>
+                }
+                <div class="gt-qrow">
+                    <button class="gt-btn" @onclick="() => AddCondition(false)"><MudIcon Icon="@Icons.Material.Filled.Add" />Value condition</button>
+                    <button class="gt-btn" @onclick="() => AddCondition(true)"><MudIcon Icon="@Icons.Material.Filled.Add" />Relationship condition</button>
+                    <code class="gt-code" title="Text form of this query">@(_queryText.Length > 0 ? _queryText : "(all elements)")</code>
+                </div>
+                <datalist id="gt-fields">
+                    @foreach (var f in FieldSuggestions()) { <option value="@f">@ModelValues.Label(f)</option> }
+                </datalist>
+                <datalist id="gt-stereos">
+                    @foreach (var s in Ws.Model.AllElements.SelectMany(x => x.Stereotypes).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s)) { <option value="@s"></option> }
+                </datalist>
+            }
+        </div>
+        @if (_queryError != null)
+        {
+            <div class="gt-status"><span class="gt-error"><MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" /> @_queryError</span></div>
+        }
+        else
+        {
+            var results = _parsed.Run(Ws.Model);
+            <div class="gt-status">
+                <span>@results.Count @(results.Count == 1 ? "match" : "matches")</span>
+                @if (_queryView != null) { <span class="gt-saved"><MudIcon Icon="@UiKinds.Icon(_queryView.Kind)" /> @_queryView.QualifiedName</span> }
+            </div>
+            <div class="gt-scroll">
+                <table class="gt-table">
+                    <thead><tr><th class="gt-num">#</th><th>Name</th><th style="width:150px">Kind</th><th>Location</th></tr></thead>
+                    <tbody>
+                        @{ var n = 0; }
+                        @foreach (var e in results.Take(MaxRows))
+                        {
+                            var el = e;
+                            n++;
+                            <tr @key="el.Id" class="@(ReferenceEquals(Ws.Selected, el) ? "sel" : "")" @onclick="() => Go(el)">
+                                <td class="gt-num">@n</td>
+                                <td><span class="gt-name"><MudIcon Icon="@UiKinds.Icon(el.Kind)" Style="@($"color:{UiKinds.Accent(el.Kind)}")" />@UiKinds.Label(Ws.Model, el)</span></td>
+                                <td class="gt-ro">@Metamodel.DisplayName(el.Kind)</td>
+                                <td class="gt-ro">@(el.Owner?.QualifiedName)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    };
+}

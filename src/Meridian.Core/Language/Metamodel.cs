@@ -61,6 +61,7 @@ public static class Metamodel
     private static readonly HashSet<ElementKind> PackageMembers = new()
     {
         ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
+        ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule,
     };
 
     /// <summary>Kinds that carry no name of their own in normal use.</summary>
@@ -274,6 +275,9 @@ public static class Metamodel
         ElementKind.ForeignKey => "Foreign Key",
         ElementKind.Binding => "Binding Connector",
         ElementKind.Line => "Line",
+        ElementKind.TableView => "Table View",
+        ElementKind.QueryView => "Query",
+        ElementKind.ValidationRule => "Validation Rule",
         _ => k.ToString(),
     };
 
@@ -410,6 +414,8 @@ public static class Metamodel
         if (k == ElementKind.TagDefinition) { f.Add(FieldKeys.TagType); f.Add(FieldKeys.TagValues); f.Add(FieldKeys.DefaultValue); }
         if (k == ElementKind.Column) { f.Add(FieldKeys.SqlType); f.Add(FieldKeys.PrimaryKey); f.Add(FieldKeys.Nullable); f.Add(FieldKeys.Unique); f.Add(FieldKeys.DefaultValue); }
         if (k == ElementKind.ForeignKey) { f.Add(FieldKeys.FkColumns); f.Add(FieldKeys.RefColumns); }
+        if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
+        if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
         f.Add(FieldKeys.Stereotypes);
         f.Add(FieldKeys.Documentation);
         return f;

@@ -78,6 +78,7 @@ public sealed partial class ModelValidator
                 .Select(s => Issue(Severity.Warning, "BEH-002", $"State '{s.Name}' has no incoming transition", s))),
 
         new Analysis.SuspectLinkRule(),
+        new QueryRules(),   // the model's own ValidationRule elements
     };
 
     public IReadOnlyList<ValidationIssue> Validate(ModelRepository model) =>
