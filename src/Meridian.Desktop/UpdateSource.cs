@@ -13,12 +13,49 @@ public enum UpdateSourceKind
     GitHubToken,
     /// <summary>A JSON manifest at a custom https:// address, for example a Meridian team server's /api/desktop/latest.</summary>
     Manifest,
+    /// <summary>GitLab releases of a project on gitlab.com or a self-managed instance, with an optional token for a private project.</summary>
+    GitLab,
 }
 
 /// <summary>The update source in effect. The token is decrypted only for the check and never written anywhere in clear.</summary>
-public sealed record UpdateSource(UpdateSourceKind Kind, string Repository = Updater.Repository, string? Token = null, string? ManifestUrl = null)
+/// <param name="GitLabUrl">GitLab instance address (https://gitlab.com when empty).</param>
+/// <param name="GitLabProject">GitLab project path (group/project) or numeric id.</param>
+public sealed record UpdateSource(UpdateSourceKind Kind, string Repository = Updater.Repository, string? Token = null, string? ManifestUrl = null,
+    string? GitLabUrl = null, string? GitLabProject = null)
 {
     public static readonly UpdateSource Default = new(UpdateSourceKind.GitHub);
+    public const string GitLabDotCom = "https://gitlab.com";
+
+    /// <summary>The GitLab instance root (no trailing slash, no /api/v4) when it is https, or http://localhost (testing); otherwise null.</summary>
+    public Uri? GitLabBase() =>
+        Kind == UpdateSourceKind.GitLab && ParseGitLabUrl(GitLabUrl, out var uri) is null ? uri : null;
+
+    /// <summary>Validates a GitLab address typed in Settings (empty means gitlab.com); returns an error sentence, or null.</summary>
+    public static string? ParseGitLabUrl(string? text, out Uri? uri)
+    {
+        uri = null;
+        var t = string.IsNullOrWhiteSpace(text) ? GitLabDotCom : text.Trim().TrimEnd('/');
+        if (t.EndsWith("/api/v4", StringComparison.OrdinalIgnoreCase)) t = t[..^"/api/v4".Length];
+        if (!Uri.TryCreate(t, UriKind.Absolute, out var u) || string.IsNullOrEmpty(u.Host)) return "That is not a web address.";
+        if (!string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment)) return "Enter just the GitLab address, for example https://gitlab.example.com.";
+        if (!string.IsNullOrEmpty(u.UserInfo)) return "Don't put a user name or password in the address.";
+        if (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback))
+            return "Use an https:// address (plain http is only accepted for localhost, for testing).";
+        uri = new Uri(u.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/");
+        return null;
+    }
+
+    /// <summary>Checks a GitLab project reference: a numeric id, or a path of at least two segments (group/subgroup/project).</summary>
+    public static string? ValidateGitLabProject(string? project)
+    {
+        var p = project?.Trim().Trim('/') ?? "";
+        if (p.Length == 0) return "Enter the GitLab project, for example my-group/meridian (or its numeric id).";
+        if (p.All(char.IsAsciiDigit)) return null;
+        var parts = p.Split('/');
+        return parts.Length >= 2 && parts.All(s => s.Length > 0 && s.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.') && s[0] != '.' && s[0] != '-')
+            ? null
+            : "The project must be a path like my-group/meridian (subgroups allowed) or a numeric project id.";
+    }
 
     /// <summary>The manifest address when it is https, or http://localhost (testing); otherwise null.</summary>
     public Uri? ManifestUri() =>
@@ -111,12 +148,12 @@ public sealed class UpdateTokenProtector
         catch (CryptographicException) { return null; }
     }
 
-    /// <summary>Checks a pasted token: GitHub tokens are printable ASCII without spaces.</summary>
-    public static string? Validate(string? token)
+    /// <summary>Checks a pasted token: GitHub and GitLab tokens are printable ASCII without spaces.</summary>
+    public static string? Validate(string? token, string host = "GitHub")
     {
         var t = token?.Trim() ?? "";
-        if (t.Length < 20) return "That is too short to be a GitHub token.";
-        if (t.Length > 400 || t.Any(c => c <= ' ' || c > '~')) return "That does not look like a GitHub token.";
+        if (t.Length < 20) return $"That is too short to be a {host} token.";
+        if (t.Length > 400 || t.Any(c => c <= ' ' || c > '~')) return $"That does not look like a {host} token.";
         return null;
     }
 }
