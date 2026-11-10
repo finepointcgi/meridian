@@ -69,6 +69,7 @@ public static class MermaidExporter
             ElementKind.ActivityFinalNode or ElementKind.FinalState => "stop",
             ElementKind.ForkNode => "fork",
             ElementKind.Partition => "lane",
+            ElementKind.Pseudostate => "choice",
             _ => "n",
         };
     }
@@ -89,7 +90,9 @@ public static class MermaidExporter
                 ElementKind.ActivityFinalNode => $"{id}((({Q(e.Name.Length > 0 ? e.Name : "end")})))",
                 ElementKind.DecisionNode => $"{id}{{{Q(e.Name.Length > 0 ? e.Name : " ")}}}",
                 ElementKind.ForkNode => $"{id}@{{ shape: fork, label: {Q(e.Name)} }}",
-                ElementKind.ObjectNode => $"{id}[({Q(e.DisplayName)})]",
+                ElementKind.ObjectNode when e.Get(FieldKeys.Subtype) == Subtypes.DataStore => $"{id}[({Q(e.DisplayName)})]",
+                ElementKind.ObjectNode when e.Get(FieldKeys.Subtype) == Subtypes.CentralBuffer => $"{id}@{{ shape: h-cyl, label: {Q(e.DisplayName)} }}",
+                ElementKind.ObjectNode => $"{id}@{{ shape: doc, label: {Q(e.DisplayName)} }}",
                 _ => $"{id}({Q(e.DisplayName)})",
             };
         }
@@ -149,6 +152,23 @@ public static class MermaidExporter
                 else if (id == s.Name && s.Documentation.Length == 0 && !new[] { FieldKeys.Entry, FieldKeys.DoActivity, FieldKeys.Exit }.Any(k => s.Get(k).Length > 0))
                     sb.Append(pad).Append(id).Append('\n');
             }
+            // Pseudostates: Mermaid has choice, fork, join and (in Meridian's reading) history; junctions are written as choices.
+            foreach (var p in shown.Where(e => e.Kind == ElementKind.Pseudostate && ReferenceEquals(Scope(e), scope)))
+            {
+                var kind = Pseudostates.KindOf(p);
+                var stereo = kind switch
+                {
+                    Pseudostates.Fork => "fork",
+                    Pseudostates.Join => "join",
+                    Pseudostates.ShallowHistory => "history",
+                    Pseudostates.DeepHistory => "deephistory",
+                    Pseudostates.Choice or Pseudostates.Junction => "choice",
+                    _ => null,
+                };
+                if (stereo != null) sb.Append(pad).Append("state ").Append(ids[p]).Append(" <<").Append(stereo).Append(">>\n");
+                else sb.Append(pad).Append("%% ").Append(ids[p]).Append(" is a ").Append(Subtypes.Display(kind!).ToLowerInvariant()).Append(" (no Mermaid notation)\n")
+                      .Append(pad).Append(ids[p]).Append('\n');
+            }
             // Transitions from / to this scope's [*] belong inside it; all others go at the top level after every state is declared.
             foreach (var t in transitions.Where(t => Pseudo(t.Source) && ReferenceEquals(Scope(t.Source), scope) || Pseudo(t.Target) && !Pseudo(t.Source) && ReferenceEquals(Scope(t.Target), scope)
                                                      || scope == null && !Pseudo(t.Source) && !Pseudo(t.Target)))
@@ -181,22 +201,34 @@ public static class MermaidExporter
             if (id != l.Element.Name) sb.Append(" as ").Append(Plain(l.Element.DisplayName));
             sb.Append('\n');
         }
-        // Events by time: fragment starts, messages, notes, fragment ends.
-        var events = new List<(double Y, int Order, string Text, int Depth)>();
+        // Events by time: fragment starts, operand separators, messages, notes, fragment ends.
+        var events = new List<(double Y, int Order, string Text, SeqEvent Kind)>();
         foreach (var e in d.Edges.Where(e => e.Relationship.Kind == ElementKind.Message && ids.Has(e.Source.Element) && ids.Has(e.Target.Element)))
         {
             var arrow = e.Relationship.Get(FieldKeys.MessageSort) switch { "reply" => "-->>", "asynchCall" => "-)", _ => "->>" };
-            events.Add((Notation.MessageY(e), 1, $"{ids[e.Source.Element]}{arrow}{ids[e.Target.Element]}: {Plain(e.Relationship.Name).Replace(";", "#59;")}", 0));
+            events.Add((Notation.MessageY(e), 1, $"{ids[e.Source.Element]}{arrow}{ids[e.Target.Element]}: {Plain(e.Relationship.Name).Replace(";", "#59;")}", SeqEvent.Line));
         }
         foreach (var f in d.Nodes.Where(n => n.Element.Kind == ElementKind.CombinedFragment))
         {
             var op = f.Element.Get(FieldKeys.Operator) is { Length: > 0 } o ? o : "alt";
-            var guards = f.Element.Get(FieldKeys.Guard).Split(" | ", StringSplitOptions.TrimEntries);
-            var start = new StringBuilder($"{op} {Plain(guards[0])}".TrimEnd());
             var sep = op == "par" ? "and" : op == "critical" ? "option" : "else";
-            foreach (var g in guards.Skip(1)) start.Append('\n').Append(sep).Append(' ').Append(g == "else" ? "" : Plain(g));
-            events.Add((f.Bounds.Y, 0, start.ToString(), 0));
-            events.Add((f.Bounds.Bottom, 2, "end", 0));
+            string Separator(string g) => $"{sep} {(g == "else" ? "" : Plain(g))}".TrimEnd();
+            var bands = InteractionOperands.Layout(f, f.Bounds);
+            if (bands[0].Operand != null)
+            {
+                // Real operands: each separator at the height it is drawn, so the messages fall in the right operand.
+                events.Add((f.Bounds.Y, 0, $"{op} {Plain(bands[0].Operand!.Get(FieldKeys.Guard))}".TrimEnd(), SeqEvent.Start));
+                foreach (var band in bands.Skip(1)) events.Add((band.Top, 0, Separator(band.Operand!.Get(FieldKeys.Guard)), SeqEvent.Separator));
+            }
+            else
+            {
+                // A fragment without operand elements (older files kept merged guards separated by " | ").
+                var guards = f.Element.Get(FieldKeys.Guard).Split(" | ", StringSplitOptions.TrimEntries);
+                var start = new StringBuilder($"{op} {Plain(guards[0])}".TrimEnd());
+                foreach (var g in guards.Skip(1)) start.Append('\n').Append(Separator(g));
+                events.Add((f.Bounds.Y, 0, start.ToString(), SeqEvent.Start));
+            }
+            events.Add((f.Bounds.Bottom, 2, "end", SeqEvent.End));
         }
         foreach (var c in d.Nodes.Where(n => n.Element.Kind == ElementKind.Comment))
         {
@@ -205,20 +237,23 @@ public static class MermaidExporter
             if (over.Count == 0) continue;
             var target = over.Count > 1 ? $"{over[0]},{over[^1]}" : over[0];
             var text = c.Element.Get(FieldKeys.Body) is { Length: > 0 } b ? b : c.Element.Name;
-            events.Add((c.Bounds.Y + 14, 1, $"Note over {target}: {text.Replace("\r", "").Replace("\n", "<br>").Replace(";", "#59;")}", 0));
+            events.Add((c.Bounds.Y + 14, 1, $"Note over {target}: {text.Replace("\r", "").Replace("\n", "<br>").Replace(";", "#59;")}", SeqEvent.Line));
         }
         var depth = 1;
         foreach (var ev in events.OrderBy(e => e.Y).ThenBy(e => e.Order))
         {
-            if (ev.Order == 2) depth = Math.Max(1, depth - 1);
-            foreach (var line in ev.Text.Split('\n'))
+            if (ev.Kind == SeqEvent.End) depth = Math.Max(1, depth - 1);
+            var lines = ev.Text.Split('\n');
+            for (var i = 0; i < lines.Length; i++)
             {
-                var pad = line.StartsWith("else", StringComparison.Ordinal) || line.StartsWith("and", StringComparison.Ordinal) || line.StartsWith("option", StringComparison.Ordinal) ? depth - 1 : depth;
-                sb.Append(new string(' ', 4 * Math.Max(1, pad))).Append(line.TrimEnd()).Append('\n');
+                var separator = ev.Kind == SeqEvent.Separator || ev.Kind == SeqEvent.Start && i > 0;
+                sb.Append(new string(' ', 4 * Math.Max(1, separator ? depth - 1 : depth))).Append(lines[i].TrimEnd()).Append('\n');
             }
-            if (ev.Order == 0) depth++;
+            if (ev.Kind == SeqEvent.Start) depth++;
         }
     }
+
+    private enum SeqEvent { Line, Start, Separator, End }
 
     // ================================================================== BDD / class → classDiagram
 
@@ -293,6 +328,7 @@ public static class MermaidExporter
             string S(Element x) => ids[x];
             string Card(string c) => c.Length > 0 ? $" \"{c}\"" : "";
             var mult = r.Multiplicity;
+            var src = Card(r.Get(FieldKeys.SourceMultiplicity));
             var label = r.Name.Length > 0 ? " : " + Member(Plain(r.Name)) : "";
             switch (r.Kind)
             {
@@ -302,11 +338,11 @@ public static class MermaidExporter
                 {
                     var part = r.Source.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Property && p.TypeRef == r.Target.Id);
                     var partLabel = part != null ? " : " + part.Name : label;
-                    sb.Append($"    {S(r.Source)} *--{Card(mult)} {S(r.Target)}{partLabel}\n");
+                    sb.Append($"    {S(r.Source)}{src} *--{Card(mult)} {S(r.Target)}{partLabel}\n");
                     break;
                 }
-                case ElementKind.Aggregation: sb.Append($"    {S(r.Source)} o--{Card(mult)} {S(r.Target)}{label}\n"); break;
-                case ElementKind.Association: sb.Append($"    {S(r.Source)} -->{Card(mult)} {S(r.Target)}{label}\n"); break;
+                case ElementKind.Aggregation: sb.Append($"    {S(r.Source)}{src} o--{Card(mult)} {S(r.Target)}{label}\n"); break;
+                case ElementKind.Association: sb.Append($"    {S(r.Source)}{src} -->{Card(mult)} {S(r.Target)}{label}\n"); break;
                 case ElementKind.Dependency: sb.Append($"    {S(r.Source)} ..> {S(r.Target)}{label}\n"); break;
                 default: sb.Append($"    %% {Plain(r.Source.DisplayName)} «{Metamodel.DisplayName(r.Kind)}» {Plain(r.Target.DisplayName)} has no Mermaid class notation\n"); break;
             }

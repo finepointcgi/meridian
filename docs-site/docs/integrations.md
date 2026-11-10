@@ -1,6 +1,7 @@
 # Integrations
 
-Meridian connects to issue trackers, notifies other systems through webhooks, and exposes requirements and model data
+Meridian connects to issue trackers, syncs requirements with DOORS Next and Polarion, notifies other systems through
+webhooks, and exposes requirements and model data
 to other tools through OSLC and a read-only SysML v2 API. Project owners set integrations up with **Integrations
 (issue trackers, webhooks)…** in the project menu.
 
@@ -59,29 +60,49 @@ ok = hmac.compare_digest(expected, request.headers["X-Meridian-Signature-256"])
 A 2xx response is success. Network errors, timeouts (10 s), 408, 429 and 5xx are retried after 10 s, 1 min and 5 min;
 other 4xx are not. The latest 50 attempts are shown under *Recent deliveries*.
 
-## OSLC Requirements Management (server, read-only)
+## DOORS Next and Polarion
 
-A team server is an OSLC RM 2.0 provider, so ALM tools that speak OSLC can link to Meridian requirements.
+**Integrations… → Requirements tools** connects a project to IBM DOORS Next or Siemens Polarion. Project owners add
+connections; editors can sync.
+
+* **DOORS Next**: enter the RM application URL (`https://jazz.example.com/rm`) and sign in with Jazz form login,
+  HTTP Basic or an app password. **Browse projects** and **Browse modules** pick what to import.
+* **Polarion**: enter the server URL and a personal access token. **Browse projects** and **Browse documents** pick
+  what to import; work items of type `requirement` are imported by default.
+
+**Sync now** creates or updates Meridian requirements. Each one keeps the tool's id, URL and revision (attributes
+*External ID*, *External URL*, *External revision*). When the tool changes a requirement, Meridian updates it and its
+trace links become suspect. When both sides changed it, a dialog shows the differences and you choose which version
+to keep. Syncs can also run on a schedule (every 15 minutes to daily).
+
+Optionally, Meridian publishes its «satisfy», «verify» and «trace» links back: as OSLC links in DOORS Next, and as
+linked work items or linked OSLC resources in Polarion. This is off by default and needs a team server.
+
+## OSLC provider (server)
+
+A team server is an OSLC 2.0 provider for requirements (RM) and model elements (AM), so ALM tools that speak OSLC can
+query, select, create and preview Meridian items.
 
 | Resource | URL |
 | --- | --- |
 | Root services | `/oslc/rootservices` |
 | Service provider catalog | `/oslc/catalog` |
 | Service provider | `/oslc/projects/{projectId}/provider` |
-| Query capability | `/oslc/projects/{projectId}/requirements` |
-| Requirement | `/oslc/projects/{projectId}/requirements/{elementId}` |
-| Selection dialog | `/oslc/projects/{projectId}/selector` |
+| Requirements (query, and POST to create) | `/oslc/projects/{projectId}/requirements` |
+| Model elements (query) | `/oslc/projects/{projectId}/resources` |
+| Selection dialog | `/oslc/projects/{projectId}/selector` (add `?type=resource` for model elements) |
+| Creation dialog | `/oslc/projects/{projectId}/creator` |
+| Resource shapes | `/oslc/shapes/requirement`, `/oslc/shapes/resource` |
 
-Responses are RDF/XML by default or JSON-LD (`Accept: application/ld+json`). Each requirement has its identifier,
-title, description, `satisfiedBy` and `validatedBy` links. Queries support `oslc.where` on `dcterms:identifier` and
-`dcterms:title`, `oslc.searchTerms` and paging. The selection dialog implements the OSLC delegated UI protocols.
+Responses are RDF/XML, Turtle or JSON-LD, chosen by `Accept`. Queries support `oslc.where` (`and`, comparisons,
+`in`), `oslc.select`, `oslc.orderBy`, `oslc.prefix`, `oslc.searchTerms` and paging. Link hovers in other tools show a
+preview through OSLC Compact. Authenticate with an API token; OAuth 1.0a (Jazz "friends") is not supported, so in IBM
+ELM link to Meridian items by URL.
 
 ```sh
-curl -H "Authorization: Bearer mrd_…" -H "Accept: application/ld+json" \
+curl -H "Authorization: Bearer mrd_…" -H "Accept: text/turtle" \
   "https://meridian.example.com/oslc/projects/<id>/requirements?oslc.where=dcterms:identifier=%22REQ-002%22"
 ```
-
-Not implemented: OAuth 1.0a, creation factories, resource shapes and write access.
 
 ## SysML v2 API (server, read-only)
 

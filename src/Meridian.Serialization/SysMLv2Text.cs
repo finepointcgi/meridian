@@ -208,7 +208,7 @@ public static class SysMLv2Text
                     Line(d, $"// operation {e.Name}{e.Get(FieldKeys.Signature)}");
                     return;
                 case ElementKind.CombinedFragment:
-                    Line(d, $"// {e.Get(FieldKeys.Operator)}{(e.Get(FieldKeys.Guard) is { Length: > 0 } g ? $" [{g}]" : "")}");
+                    Line(d, $"// {e.Get(FieldKeys.Operator)}{string.Join(" |", InteractionOperands.Guards(e).Select(g => g.Length > 0 ? $" [{g}]" : ""))}");
                     return;
                 case ElementKind.Action:
                 {

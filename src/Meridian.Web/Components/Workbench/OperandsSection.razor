@@ -1,0 +1,65 @@
+@inherits WorkspaceComponent
+
+@* Combined fragments: their operands, each with its guard, in order (also shown when one operand is selected). *@
+@if (Fragment is { } f)
+{
+    var ops = InteractionOperands.Of(f);
+    <div class="section-title">Operands <span class="grow"></span></div>
+    <div class="operands" data-testid="operands">
+        @if (ops.Count == 0)
+        {
+            <div style="color:var(--text-3); font-size:12px; margin-bottom:4px">One operand, guarded by the fragment's guard. Add one to split it.</div>
+        }
+        @for (var i = 0; i < ops.Count; i++)
+        {
+            var op = ops[i];
+            var index = i;
+            <div class="d-flex align-center gap-1 op-row @(ReferenceEquals(op, E) ? "on" : "")">
+                <span style="min-width:18px; font-size:12px; color:var(--text-3)">@(index + 1)</span>
+                <MudTextField @key="@(op.Id + "guard")" T="string" Class="op-guard" Placeholder="guard" Value="@op.Get(FieldKeys.Guard)"
+                              ValueChanged="v => SetGuard(op, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" />
+                @if (!Ws.ReadOnly && ops.Count > 1)
+                {
+                    <MudTooltip Text="Remove operand">
+                        <MudIconButton Class="op-remove" Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Remove(op)" />
+                    </MudTooltip>
+                }
+            </div>
+        }
+        @if (!Ws.ReadOnly)
+        {
+            <MudButton Class="op-add" Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Add(f)">Operand</MudButton>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    private Element? Fragment => E is { } e && Ws.Model.Contains(e)
+        ? e.Kind == ElementKind.CombinedFragment ? e : e.Kind == ElementKind.InteractionOperand ? e.Owner : null
+        : null;
+
+    private void SetGuard(Element op, string? value)
+    {
+        if (!Ws.Model.Contains(op)) return;
+        try { Ws.Model.Set(op, FieldKeys.Guard, value?.Trim()); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Add(Element fragment)
+    {
+        try
+        {
+            Ws.Model.AddOperand(fragment);
+            Ws.SetStatus("Added an operand (drag its dashed line on the diagram to move it, ⌘Z to undo)");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Remove(Element op)
+    {
+        try { Ws.Model.RemoveOperand(op); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}

@@ -35,7 +35,7 @@ public static class UiKinds
         ElementKind.TestCase => "TC", ElementKind.Actor => "A", ElementKind.UseCase => "UC", ElementKind.Activity => "Ac",
         ElementKind.Action => "a", ElementKind.StateMachine => "SM", ElementKind.State => "S", ElementKind.Diagram => "D",
         ElementKind.Comment => "”", ElementKind.InitialNode or ElementKind.InitialState => "●", ElementKind.ActivityFinalNode or ElementKind.FinalState => "◉",
-        ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬",
+        ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬", ElementKind.Pseudostate => "◇", ElementKind.InteractionOperand => "┄",
         ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
@@ -92,6 +92,8 @@ public static class UiKinds
         ElementKind.Lifeline => MudBlazor.Icons.Material.Outlined.HorizontalSplit,
         ElementKind.Message => MudBlazor.Icons.Material.Outlined.East,
         ElementKind.CombinedFragment => MudBlazor.Icons.Material.Outlined.CropFree,
+        ElementKind.InteractionOperand => MudBlazor.Icons.Material.Outlined.HorizontalSplit,
+        ElementKind.Pseudostate => MudBlazor.Icons.Material.Outlined.Diamond,
         ElementKind.State => MudBlazor.Icons.Material.Outlined.RoundedCorner,
         ElementKind.Comment => MudBlazor.Icons.Material.Outlined.StickyNote2,
         ElementKind.Shape => MudBlazor.Icons.Material.Outlined.Category,
@@ -144,6 +146,14 @@ public static class UiKinds
 
     public static string Icon(ElementKind k, string? subtype) => (k, subtype) switch
     {
+        (ElementKind.Pseudostate, "junction") => MudBlazor.Icons.Material.Filled.Circle,
+        (ElementKind.Pseudostate, "fork" or "join") => MudBlazor.Icons.Material.Outlined.HorizontalRule,
+        (ElementKind.Pseudostate, "shallowHistory" or "deepHistory") => MudBlazor.Icons.Material.Outlined.History,
+        (ElementKind.Pseudostate, "entryPoint") => MudBlazor.Icons.Material.Outlined.RadioButtonUnchecked,
+        (ElementKind.Pseudostate, "exitPoint") => MudBlazor.Icons.Material.Outlined.HighlightOff,
+        (ElementKind.Pseudostate, "terminate") => MudBlazor.Icons.Material.Outlined.Close,
+        (ElementKind.ObjectNode, "datastore") => MudBlazor.Icons.Material.Outlined.Storage,
+        (ElementKind.ObjectNode, "centralBuffer") => MudBlazor.Icons.Material.Outlined.Inbox,
         (ElementKind.BpmnNode, "startEvent") => MudBlazor.Icons.Material.Outlined.RadioButtonUnchecked,
         (ElementKind.BpmnNode, "endEvent") => MudBlazor.Icons.Material.Outlined.StopCircle,
         (ElementKind.BpmnNode, "intermediateEvent") => MudBlazor.Icons.Material.Outlined.TripOrigin,

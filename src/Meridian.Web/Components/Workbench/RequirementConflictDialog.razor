@@ -1,0 +1,107 @@
+@using Meridian.Web.Integrations.Requirements
+
+@* Requirements changed both in Meridian and in DOORS Next / Polarion since the last sync: shows what each side did
+   (word diff against the last synced text) and lets the user keep Meridian's version or take the tool's. *@
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.CompareArrows" /><MudText Typo="Typo.h6">Changed on both sides — @ToolName</MudText></div></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2" Style="opacity:.8">
+            These requirements were edited in Meridian and in @ToolName since the last sync. Choose which version to keep.
+            Taking the @ToolName version updates the requirement in Meridian (its trace links become suspect); keeping Meridian's
+            leaves it as it is and stops reporting the conflict.
+        </MudText>
+        <div class="d-flex gap-2 mb-2">
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => SetAll(ConflictChoice.KeepMeridian)">Keep all Meridian versions</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => SetAll(ConflictChoice.TakeRemote)">Take all @ToolName versions</MudButton>
+        </div>
+        <div class="req-conflicts" style="max-height:60vh; overflow:auto">
+            @foreach (var c in Conflicts)
+            {
+                var item = c;
+                <div class="req-conflict" style="border:1px solid var(--border, #ddd); border-radius:8px; padding:8px 10px; margin-bottom:10px">
+                    <div class="d-flex align-center gap-2">
+                        <b>@item.Identifier</b>
+                        <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis">@item.LocalTitle</span>
+                        @if (item.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || item.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <a href="@item.Url" target="_blank" rel="noopener" style="font-size:12px">Open in @ToolName</a>
+                        }
+                    </div>
+                    <MudRadioGroup T="ConflictChoice" Value="Choice(item)" ValueChanged="v => _choices[item.ElementId] = v">
+                    <div class="d-flex gap-3 mt-2" style="flex-wrap:wrap">
+                        @foreach (var (label, title, text, choice) in new[] { ("Meridian", item.LocalTitle, item.LocalText, ConflictChoice.KeepMeridian), (ToolName, item.RemoteTitle, item.RemoteText, ConflictChoice.TakeRemote) })
+                        {
+                            var side = choice;
+                            <div style="flex:1; min-width:240px">
+                                <MudRadio T="ConflictChoice" Value="side" Color="Color.Primary" Dense="true"><b>@label</b></MudRadio>
+                                <div class="diff-block" style="font-size:12.5px; white-space:pre-wrap; padding:4px 6px; background:var(--surface-2, rgba(127,127,127,.06)); border-radius:6px">
+                                    <div style="font-weight:600">@Diff(item.BaseTitle, title)</div>
+                                    <div>@Diff(item.BaseText, text)</div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    </MudRadioGroup>
+                </div>
+            }
+        </div>
+        <MudText Typo="Typo.caption" Style="opacity:.7">Struck-through text was removed and highlighted text was added since the last sync.</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Decide later</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Apply">Apply choices</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<RequirementConflict> Conflicts { get; set; } = [];
+    [Parameter] public string ToolName { get; set; } = "the tool";
+
+    private readonly Dictionary<string, ConflictChoice> _choices = new();
+
+    private ConflictChoice Choice(RequirementConflict c) => _choices.GetValueOrDefault(c.ElementId, ConflictChoice.KeepMeridian);
+
+    private void SetAll(ConflictChoice choice)
+    {
+        foreach (var c in Conflicts) _choices[c.ElementId] = choice;
+    }
+
+    private void Apply() => MudDialog.Close(DialogResult.Ok(Conflicts.ToDictionary(c => c.ElementId, Choice)));
+
+    private static RenderFragment Diff(string before, string after) => builder =>
+    {
+        var seq = 0;
+        foreach (var p in TextDiff.Words(before, after))
+        {
+            switch (p.Op)
+            {
+                case TextDiff.Op.Same:
+                    builder.AddContent(seq++, p.Text);
+                    break;
+                case TextDiff.Op.Removed:
+                    builder.OpenElement(seq++, "del");
+                    builder.AddAttribute(seq++, "style", "color:var(--mud-palette-error); opacity:.8");
+                    builder.AddContent(seq++, p.Text);
+                    builder.CloseElement();
+                    break;
+                default:
+                    builder.OpenElement(seq++, "ins");
+                    builder.AddAttribute(seq++, "style", "text-decoration:none; background:rgba(76,175,80,.22)");
+                    builder.AddContent(seq++, p.Text);
+                    builder.CloseElement();
+                    break;
+            }
+        }
+    };
+
+    /// <summary>Shows the dialog; returns the choices by element id, or null when the user decides later.</summary>
+    public static async Task<IReadOnlyDictionary<string, ConflictChoice>?> ShowAsync(IDialogService dialogs, IReadOnlyList<RequirementConflict> conflicts, string toolName)
+    {
+        var parameters = new DialogParameters<RequirementConflictDialog> { { x => x.Conflicts, conflicts }, { x => x.ToolName, toolName } };
+        var dlg = await dialogs.ShowAsync<RequirementConflictDialog>("Requirement conflicts", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseOnEscapeKey = true });
+        var result = await dlg.Result;
+        return result is { Canceled: false, Data: IReadOnlyDictionary<string, ConflictChoice> choices } ? choices : null;
+    }
+}

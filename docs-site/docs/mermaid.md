@@ -45,12 +45,12 @@ around them is ignored.
 
 | Mermaid | Meridian |
 | --- | --- |
-| `flowchart` / `graph` | an activity and its activity diagram: actions, decisions, initial and final nodes, object nodes, forks and joins, guards from link labels, subgraphs as swimlanes |
+| `flowchart` / `graph` | an activity and its activity diagram: actions, decisions, initial and final nodes, object nodes (`[(db)]` cylinders become data stores, `h-cyl` central buffers), forks and joins, guards from link labels, subgraphs as swimlanes |
 | `classDiagram` | a block definition diagram: blocks, interface blocks, enumerations, value types, properties and operations, generalization, realization, composition with part properties, aggregation, association, dependency, namespaces as packages |
-| `stateDiagram` / `stateDiagram-v2` | a state machine: states with entry, do and exit, composite states, initial and final states, transitions with trigger, guard and effect |
-| `sequenceDiagram` | an interaction: lifelines, synchronous, asynchronous and reply messages, and `loop`, `alt`, `opt`, `par`, `critical` and `break` fragments |
+| `stateDiagram` / `stateDiagram-v2` | a state machine: states with entry, do and exit, composite states, initial and final states, choice / fork / join / history pseudostates, transitions with trigger, guard and effect |
+| `sequenceDiagram` | an interaction: lifelines, synchronous, asynchronous and reply messages, and `loop`, `alt`, `opt`, `par`, `critical` and `break` fragments, with one operand per `else` / `and` / `option` branch |
 | `requirementDiagram` | requirements with id, text, risk and verification method; elements as blocks or test cases; satisfy, verify, trace, derive, refine, copy and containment |
-| `erDiagram` | blocks with typed properties, and associations with multiplicities |
+| `erDiagram` | blocks with typed properties, and associations with multiplicities at both ends |
 | `C4Context`, `C4Container`, `C4Component` | actors, blocks and dependencies |
 
 Mind maps, Gantt charts, pie charts and other types with no SysML meaning are skipped with a warning.
@@ -71,7 +71,7 @@ Inputs are cut at 4 million characters, and uploads and drops at 8 MB. Each limi
 | Requirement | `requirementDiagram` |
 
 Importing an exported diagram gives back the same elements and relationships. Layout, styles and a few details (pins,
-some comments, source-end multiplicities) are not carried.
+some comments, junction / entry / exit / terminate pseudostates) are not carried.
 
 The full support matrix, with everything that is approximated or skipped, is in
 [docs/MERMAID.md](https://github.com/finepointcgi/meridian/blob/main/docs/MERMAID.md).

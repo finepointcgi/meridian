@@ -224,7 +224,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             {
                 "diamond" => ElementKind.DecisionNode,
                 "fork" => ElementKind.ForkNode,
-                "db" => ElementKind.ObjectNode,
+                "db" or "buffer" or "object" => ElementKind.ObjectNode,
                 "initial" => ins == 0 ? ElementKind.InitialNode : ElementKind.Action,
                 "final" => outs == 0 ? ElementKind.ActivityFinalNode : ElementKind.Action,
                 "circle" => ins == 0 && outs > 0 ? ElementKind.InitialNode : outs == 0 && ins > 0 ? ElementKind.ActivityFinalNode : ElementKind.Action,
@@ -242,6 +242,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
                 _ => label.Length == 0 ? n.Id : label,
             };
             made[n.Id] = m.Create(act, kind, nm);
+            if (n.Shape is "db" or "buffer") m.Set(made[n.Id], FieldKeys.Subtype, n.Shape == "db" ? Subtypes.DataStore : Subtypes.CentralBuffer);
         }
 
         foreach (var (e, from, to) in resolved)
@@ -384,10 +385,18 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
         foreach (var n in g.Nodes.OrderBy(Depth))
         {
             var owner = n.Parent != null && made.TryGetValue(n.Parent, out var po) && po.Kind == ElementKind.State ? po : sm;
-            var kind = n.Shape switch { "initial" => ElementKind.InitialState, "final" => ElementKind.FinalState, _ => ElementKind.State };
-            if (n.Shape is "choice" or "fork" or "join" or "history" or "deephistory")
-                g.Warn(n.Line, $"«{n.Shape}» {n.Id}: Meridian has no {n.Shape} pseudostate; imported as a state named “{n.Id}”.");
-            var e = m.Create(owner, kind, kind == ElementKind.State ? MermaidSource.Name(n.Label.Length > 0 ? n.Label : n.Id) : null);
+            var pseudo = n.Shape switch
+            {
+                "choice" => Pseudostates.Choice,
+                "fork" => Pseudostates.Fork,
+                "join" => Pseudostates.Join,
+                "history" => Pseudostates.ShallowHistory,
+                "deephistory" => Pseudostates.DeepHistory,
+                _ => null,
+            };
+            var kind = pseudo != null ? ElementKind.Pseudostate : n.Shape switch { "initial" => ElementKind.InitialState, "final" => ElementKind.FinalState, _ => ElementKind.State };
+            var e = m.Create(owner, kind, kind is ElementKind.State or ElementKind.Pseudostate ? MermaidSource.Name(n.Label.Length > 0 ? n.Label : n.Id) : null);
+            if (pseudo != null) m.Set(e, FieldKeys.Subtype, pseudo);
             if (n.Props.TryGetValue("entry", out var en)) m.Set(e, FieldKeys.Entry, en);
             if (n.Props.TryGetValue("exit", out var ex)) m.Set(e, FieldKeys.Exit, ex);
             if (n.Props.TryGetValue("do", out var da)) m.Set(e, FieldKeys.DoActivity, da);
@@ -537,7 +546,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
         }
         if (r != null && x.Label.Length > 0 && x.Kind != "composition" && r.Name.Length == 0) m.Set(r, FieldKeys.Name, x.Label);
         if (r != null && x.FromCard.Length > 0 && x.Kind is "association" or "link" or "aggregation" or "composition")
-            g.WarnOnce("fromcard", x.Line, "multiplicities on the source end of a relationship are not stored (only the target end).");
+            m.Set(r, FieldKeys.SourceMultiplicity, x.FromCard);
     }
 
     private static readonly Regex MethodRx = new(@"^(?<name>[^(]*)\((?<params>[^)]*)\)\s*(?<ret>.*)$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
@@ -647,8 +656,8 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             if (Connect(g, x.Line, ElementKind.Association, a, b) is not { } r) continue;
             if (x.Label.Length > 0) m.Set(r, FieldKeys.Name, x.Label);
             if (x.ToCard.Length > 0) m.Set(r, FieldKeys.Multiplicity, x.ToCard == "0..*" ? "*" : x.ToCard);
-            if (x.FromCard.Length > 0)
-                m.Set(r, FieldKeys.Documentation, $"{a.Name} end: {x.FromCard}; {b.Name} end: {x.ToCard}" + (x.Kind == "nonIdentifying" ? " (non-identifying)" : ""));
+            if (x.FromCard.Length > 0) m.Set(r, FieldKeys.SourceMultiplicity, x.FromCard == "0..*" ? "*" : x.FromCard);
+            if (x.Kind == "nonIdentifying") m.Set(r, FieldKeys.Documentation, "Non-identifying relationship.");
         }
         return Layout(g, DiagramType.BlockDefinition, target, name, made);
     }
@@ -788,8 +797,8 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
 
         var y = 110.0;
         var messages = new List<(Relationship R, double Y)>();
-        var open = new Stack<(Element F, double Top, HashSet<string> Touched, int Depth)>();
-        var fragments = new List<(Element F, Bounds B)>();
+        var open = new Stack<(Element F, double Top, HashSet<string> Touched, int Depth, List<(Element Operand, double Y)> Separators)>();
+        var fragments = new List<(Element F, Bounds B, List<(Element Operand, double Offset)> Separators)>();
         var notes = new List<(Element C, Bounds B)>();
         foreach (var ev in g.Sequence)
         {
@@ -811,31 +820,37 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
                     var f = m.Create(inter, ElementKind.CombinedFragment);
                     m.Set(f, FieldKeys.Operator, Metamodel.FragmentOperators.Contains(fs.Operator) ? fs.Operator : "alt");
                     if (fs.Guard.Length > 0) m.Set(f, FieldKeys.Guard, fs.Guard);
-                    open.Push((f, y - 20, new HashSet<string>(StringComparer.Ordinal), open.Count));
+                    open.Push((f, y - 20, new HashSet<string>(StringComparer.Ordinal), open.Count, new List<(Element, double)>()));
                     y += 34;
                     break;
                 }
                 case MSeqFragmentElse fe:
                 {
                     if (open.Count == 0) break;
-                    var f = open.Peek().F;
-                    var guard = f.Get(FieldKeys.Guard);
-                    var operand = fe.Guard.Length > 0 ? fe.Guard : "else";
-                    m.Set(f, FieldKeys.Guard, guard.Length > 0 ? $"{guard} | {operand}" : operand);
-                    g.WarnOnce("operands", fe.Line, "fragment operands (else / and / option) were merged into one fragment; their guards are listed in its guard.");
+                    var (f, _, _, _, separators) = open.Peek();
+                    // The first separator turns what came before into the first operand (the fragment's guard moves there).
+                    if (separators.Count == 0)
+                    {
+                        var first = m.Create(f, ElementKind.InteractionOperand);
+                        m.Set(first, FieldKeys.Guard, f.Get(FieldKeys.Guard));
+                        m.Set(f, FieldKeys.Guard, null);
+                    }
+                    var operand = m.Create(f, ElementKind.InteractionOperand);
+                    m.Set(operand, FieldKeys.Guard, fe.Guard.Length > 0 ? fe.Guard : InteractionOperands.DefaultGuard(f));
+                    separators.Add((operand, y - 12));
                     y += 24;
                     break;
                 }
                 case MSeqFragmentEnd:
                 {
                     if (open.Count == 0) break;
-                    var (f, topY, touched, depth) = open.Pop();
+                    var (f, topY, touched, depth, separators) = open.Pop();
                     foreach (var outer in open) outer.Touched.UnionWith(touched);
                     var ids = touched.Count > 0 ? touched.ToList() : lx.Keys.Take(1).ToList();
                     var margin = Math.Max(30, 95 - 12 * depth);
                     var left = ids.Count > 0 ? ids.Min(Center) - margin : 40;
                     var right = ids.Count > 0 ? ids.Max(Center) + margin : 300;
-                    fragments.Add((f, new Bounds(left, topY, Math.Max(120, right - left), Math.Max(50, y - topY + 4))));
+                    fragments.Add((f, new Bounds(left, topY, Math.Max(120, right - left), Math.Max(50, y - topY + 4)), separators.Select(s => (s.Operand, s.Y - topY)).ToList()));
                     y += 26;
                     break;
                 }
@@ -854,7 +869,11 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
         }
         var height = Math.Max(380, y + 40 - 20);
         foreach (var (id, ll) in lifelines) m.AddNode(d, ll, new Bounds(lx[id].X, 20, lx[id].W, height), showRelationships: false);
-        foreach (var (f, b) in fragments) m.AddNode(d, f, b, showRelationships: false);
+        foreach (var (f, b, separators) in fragments)
+        {
+            var node = m.AddNode(d, f, b, showRelationships: false);
+            foreach (var (operand, offset) in separators) m.SetNodeStyle(d, node, InteractionOperands.StyleKey(operand), InteractionOperands.Format(offset));
+        }
         foreach (var (c, b) in notes) m.AddNode(d, c, b, showRelationships: false);
         foreach (var (r, my) in messages)
             if (m.AddEdge(d, r) is { } edge) m.SetWaypoints(d, edge, [new Pt(0, my)]);

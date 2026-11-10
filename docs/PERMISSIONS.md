@@ -71,6 +71,7 @@ The same check applies to every write path:
 | Merges (`VersionControl.CompleteMergeAsync`) | `PermissionCheck.CheckReplace`: every element the merge adds, removes, changes or moves must be editable by the author, before anything is committed; users with hidden packages can't merge |
 | Version restore (`ProjectSession.Reset`) | `CheckReplace` against the live model |
 | Code-sync accept / reject (`CodeSyncReviewService`) | Accept merges through `CompleteMergeAsync`; reject is checked with `CheckReplace`; users with hidden packages can't review code changes |
+| OSLC creation, scheduled requirements-tool sync (`ServerModelEdit`) | Edit the user's filtered model; operations submitted together through the session check; a refusal is an error (OSLC: 409) |
 | Code-sync runs and replays (`ProjectSession.ApplySystemOps`, `CodeSyncRunner.WriteAsync`) | System writes on the review branch (no user); relayed filtered. Given a user's view, `ApplySystemOps` checks every operation first, all or nothing |
 
 ## Redaction (reads)

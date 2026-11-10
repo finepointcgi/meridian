@@ -146,6 +146,8 @@ public static class XmiExchange
         // Requirement management attributes and test verdicts.
         ReqFields.Priority, ReqFields.Status, ReqFields.Owner, ReqFields.Rationale, ReqFields.VerificationMethod, ReqFields.Risk,
         ReqFields.Verdict, ReqFields.SourceFingerprint, ReqFields.TargetFingerprint,
+        // Simulation-driven verification: criteria, run settings and recorded results.
+        Core.Analysis.VerificationKeys.Criterion, .. Core.Analysis.VerificationKeys.RunKeys, .. Core.Analysis.VerificationKeys.ResultKeys,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -196,7 +198,9 @@ public static class XmiExchange
             ElementKind.Partition => ("group", "ActivityPartition"),
             ElementKind.InputPin => ("input", "InputPin"),
             ElementKind.OutputPin => ("output", "OutputPin"),
-            ElementKind.ObjectNode => ("node", "CentralBufferNode"),
+            ElementKind.ObjectNode => ("node", e.Get(FieldKeys.Subtype) == Subtypes.DataStore ? "DataStoreNode" : "CentralBufferNode"),
+            ElementKind.InteractionOperand => ("operand", "InteractionOperand"),
+            ElementKind.Pseudostate => (Pseudostates.IsConnectionPoint(e) ? "connectionPoint" : "subvertex", "Pseudostate"),
             ElementKind.Profile => ("packagedElement", "Profile"),
             ElementKind.Stereotype => ("packagedElement", "Stereotype"),
             ElementKind.Column or ElementKind.TagDefinition => ("ownedAttribute", "Property"),
@@ -223,6 +227,12 @@ public static class XmiExchange
         if (!string.IsNullOrEmpty(e.Get(FieldKeys.Visibility))) x.Add(new XAttribute("visibility", e.Get(FieldKeys.Visibility)));
         if (e.IsAbstract) x.Add(new XAttribute("isAbstract", "true"));
         if (e.Kind == ElementKind.InitialState) x.Add(new XAttribute("kind", "initial"));
+        if (e.Kind == ElementKind.Pseudostate) x.Add(new XAttribute("kind", Pseudostates.KindOf(e)!));
+        // A plain object node has no concrete UML metaclass of its own: it is written as a central buffer marked as such.
+        if (e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype).Length == 0) x.Add(new XAttribute(Meridian + "kind", nameof(ElementKind.ObjectNode)));
+        if (e.Kind == ElementKind.InteractionOperand && e.Get(FieldKeys.Guard) is { Length: > 0 } og)
+            x.Add(new XElement("guard", Type("InteractionConstraint"), new XAttribute(Xmi + "id", e.Id + "_g"),
+                new XElement("specification", Type("OpaqueExpression"), new XAttribute(Xmi + "id", e.Id + "_gs"), new XElement("body", og))));
         if (e.Kind == ElementKind.CombinedFragment)
         {
             x.Add(new XAttribute("interactionOperator", e.Get(FieldKeys.Operator) is { Length: > 0 } op ? op : "alt"));
@@ -268,7 +278,8 @@ public static class XmiExchange
             container = new XElement("region", Type("Region"), new XAttribute(Xmi + "id", e.Id + "_region"));
             x.Add(container);
         }
-        foreach (var c in e.OwnedElements) Emit(m, container, c, st, ext);
+        // Entry and exit points are connection points of their state (machine), not vertices of its region.
+        foreach (var c in e.OwnedElements) Emit(m, Pseudostates.IsConnectionPoint(c) ? x : container, c, st, ext);
         foreach (var gr in m.Outgoing(e).Where(x => x.Kind is ElementKind.Generalization or ElementKind.Include or ElementKind.Extend))
             EmitRelationship(x, gr, st);
         parent.Add(x);
@@ -380,7 +391,9 @@ public static class XmiExchange
                 if (r.Kind != ElementKind.Association) te.Add(new XAttribute("aggregation", r.Kind == ElementKind.Composition ? "composite" : "shared"));
                 AddMultiplicity(te, tgtEnd, string.IsNullOrEmpty(r.Multiplicity) ? "1" : r.Multiplicity);
                 x.Add(te);
-                x.Add(new XElement("ownedEnd", Type("Property"), new XAttribute(Xmi + "id", srcEnd), new XAttribute("type", r.Source.Id), new XAttribute("association", r.Id)));
+                var se = new XElement("ownedEnd", Type("Property"), new XAttribute(Xmi + "id", srcEnd), new XAttribute("type", r.Source.Id), new XAttribute("association", r.Id));
+                AddMultiplicity(se, srcEnd, r.Get(FieldKeys.SourceMultiplicity));
+                x.Add(se);
                 break;
             }
             default:
@@ -532,9 +545,17 @@ public static class XmiExchange
                 if (ek == ElementKind.CombinedFragment)
                 {
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Operator, Attr(c, "interactionOperator") ?? "alt");
+                    // With operands, each guard belongs to its operand (read below); the fragment keeps only a guard of its own.
+                    var hasOperands = c.Elements().Any(o => o.Name.LocalName == "operand" || XmiType(o) == "InteractionOperand");
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Guard, c.Attribute(Meridian + "guard")?.Value
-                        ?? c.Descendants().FirstOrDefault(d => d.Name.LocalName == "guard")?.Descendants().FirstOrDefault(d => d.Name.LocalName == "body")?.Value);
+                        ?? (hasOperands ? null : c.Descendants().FirstOrDefault(d => d.Name.LocalName == "guard")?.Descendants().FirstOrDefault(d => d.Name.LocalName == "body")?.Value));
                 }
+                if (ek == ElementKind.InteractionOperand)
+                    ModelRepository.SetFieldForLoad(el, FieldKeys.Guard, c.Element("guard") is { } og
+                        ? og.Descendants().FirstOrDefault(d => d.Name.LocalName == "body")?.Value ?? og.Element("specification")?.Attribute("value")?.Value : null);
+                if (ek == ElementKind.Pseudostate) ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, Attr(c, "kind"));
+                if (ek == ElementKind.ObjectNode && c.Attribute(Meridian + "kind") == null)
+                    ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, type == "DataStoreNode" ? Subtypes.DataStore : Subtypes.CentralBuffer);
                 if (ek == ElementKind.ConstraintBlock) ModelRepository.SetFieldForLoad(el, FieldKeys.Body, c.Element("ownedRule")?.Element("specification")?.Element("body")?.Value);
                 if (ek == ElementKind.Requirement && id != null && StereoEl(id, "Requirement") is { } rq)
                 {
@@ -568,7 +589,7 @@ public static class XmiExchange
         foreach (var (kind0, id, src0, tgt0, owner, x) in pending)
         {
             var kind = kind0; var src = src0; var tgt = tgt0;
-            string? mult = null;
+            string? mult = null, sourceMult = null;
             if (kind == ElementKind.Association)
             {
                 var memberEnds = (Attr(x, "memberEnd") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -597,6 +618,9 @@ public static class XmiExchange
                 }
                 mult = FormatMultiplicity(partEnd.Element("lowerValue") is { } l ? Attr(l, "value") ?? "0" : "1",
                                           partEnd.Element("upperValue") is { } u ? Attr(u, "value") ?? "0" : "1");
+                if (otherEnd.Element("lowerValue") != null || otherEnd.Element("upperValue") != null)
+                    sourceMult = FormatMultiplicity(otherEnd.Element("lowerValue") is { } sl ? Attr(sl, "value") ?? "0" : "1",
+                                                    otherEnd.Element("upperValue") is { } su ? Attr(su, "value") ?? "0" : "1");
             }
             if (src == null || tgt == null || !map.TryGetValue(src, out var s) || !map.TryGetValue(tgt, out var t))
             {
@@ -611,6 +635,7 @@ public static class XmiExchange
             var r = new Relationship(kind, s, t, id != null && !map.ContainsKey(id) ? id : null);
             ModelRepository.SetFieldForLoad(r, FieldKeys.Name, Attr(x, "name"));
             ModelRepository.SetFieldForLoad(r, FieldKeys.Multiplicity, mult);
+            ModelRepository.SetFieldForLoad(r, FieldKeys.SourceMultiplicity, sourceMult);
             var guard = x.Element("guard");
             ModelRepository.SetFieldForLoad(r, FieldKeys.Guard, guard?.Element("specification")?.Element("body")?.Value ?? guard?.Element("body")?.Value);
             ModelRepository.SetFieldForLoad(r, FieldKeys.Effect, x.Element("effect")?.Element("body")?.Value);
@@ -668,6 +693,7 @@ public static class XmiExchange
             "Interaction" => ElementKind.Interaction,
             "Lifeline" => ElementKind.Lifeline,
             "CombinedFragment" => ElementKind.CombinedFragment,
+            "InteractionOperand" => ElementKind.InteractionOperand,
             "Property" => ElementKind.Property,
             "Port" => ElementKind.Port,
             "Operation" => ElementKind.Operation,
@@ -678,7 +704,8 @@ public static class XmiExchange
             "ForkNode" or "JoinNode" => ElementKind.ForkNode,
             "State" => ElementKind.State,
             "FinalState" => ElementKind.FinalState,
-            "Pseudostate" => (Attr(x, "kind") ?? "initial") == "initial" ? ElementKind.InitialState : null,
+            "Pseudostate" => (Attr(x, "kind") ?? "initial") == "initial" ? ElementKind.InitialState
+                : Subtypes.PseudostateKinds.Contains(Attr(x, "kind")!) ? ElementKind.Pseudostate : null,
             _ => null,
         };
     }

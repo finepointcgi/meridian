@@ -47,8 +47,20 @@ public static class Subtypes
         "composition", "aggregation", "assignment", "realization", "serving", "access", "influence", "triggering", "flow", "specialization", "association",
     ];
 
+    /// <summary>State machine pseudostates (the subtype of <see cref="ElementKind.Pseudostate"/>), in palette order.</summary>
+    public static readonly IReadOnlyList<string> PseudostateKinds =
+        ["choice", "junction", "fork", "join", "shallowHistory", "deepHistory", "entryPoint", "exitPoint", "terminate"];
+
+    public const string DataStore = "datastore";
+    public const string CentralBuffer = "centralBuffer";
+
+    /// <summary>Object node kinds: a plain object node (empty), a «datastore» or a «centralBuffer» node.</summary>
+    public static readonly IReadOnlyList<string> ObjectNodeKinds = ["", DataStore, CentralBuffer];
+
     public static IReadOnlyList<string> For(ElementKind k) => k switch
     {
+        ElementKind.Pseudostate => PseudostateKinds,
+        ElementKind.ObjectNode => ObjectNodeKinds,
         ElementKind.BpmnNode => BpmnNodes,
         ElementKind.BpmnFlow => BpmnFlows,
         ElementKind.ArchiElement => ArchiElements,
@@ -61,6 +73,7 @@ public static class Subtypes
     public static string Display(string subtype)
     {
         if (string.IsNullOrEmpty(subtype)) return "";
+        if (subtype == DataStore) return "Data Store";
         var sb = new System.Text.StringBuilder();
         foreach (var c in subtype)
         {

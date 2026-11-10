@@ -11,7 +11,7 @@ namespace Meridian.Core.CodeSync;
 /// nested types inside their outer block;</item>
 /// <item>fields / properties → properties: typed by a scanned class, struct or record = part property (plus a
 /// composition), by a scanned interface = reference property (plus an association), anything else = value property
-/// with the code type as text; methods → operations;</item>
+/// with the code type as text; methods → operations (one per overload, symbol "Type.Method(int,string)", signature with parameters);</item>
 /// <item>base classes → generalizations, implemented interfaces → realizations, usage → dependencies.</item>
 /// </list>
 /// Every element it creates carries <see cref="CodeFieldKeys"/>; a re-sync matches by (repo, symbol), updates only the
@@ -23,6 +23,49 @@ public static class CodeModelMapper
 {
     /// <summary>Field set to "true" on elements whose code is gone when they are kept rather than removed.</summary>
     public const string RemovedKey = "code.removed";
+
+    /// <summary>Field set to "true" on static (class-level) properties and operations. The metamodel has no static
+    /// flag of its own, so code sync keeps it under the UML attribute name.</summary>
+    public const string IsStaticKey = "isStatic";
+
+    /// <summary>
+    /// The symbol of an operation: "Type.Method(int,List&lt;string&gt;)", the parameter types as written with whitespace
+    /// removed ("Type.Method()" without parameters, "?" for an untyped parameter). Return parameters are not part of it.
+    /// </summary>
+    public static string OperationSymbol(string typeSymbol, CodeMember method)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        var types = method.Parameters.Where(p => p.Direction != CodeParameterDirection.Return)
+            .Select(p => string.Concat((p.TypeName ?? "").Where(c => !char.IsWhiteSpace(c))))
+            .Select(t => t.Length == 0 ? "?" : t);
+        return $"{typeSymbol}.{method.Name}({string.Join(",", types)})";
+    }
+
+    /// <summary>
+    /// The operation signature in the model's notation: "(a : int, out b : string) : bool". "in" is implied, "out" and
+    /// "inout" are written; an untyped parameter is just its name. Null for a method without parameters that returns
+    /// nothing (an empty signature shows as "()").
+    /// </summary>
+    public static string? Signature(CodeMember method)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        var ret = method.TypeName;
+        var pars = new List<string>();
+        foreach (var p in method.Parameters)
+        {
+            if (p.Direction == CodeParameterDirection.Return)
+            {
+                if (IsVoid(ret)) ret = p.TypeName;
+                continue;
+            }
+            var dir = p.Direction switch { CodeParameterDirection.Out => "out ", CodeParameterDirection.InOut => "inout ", _ => "" };
+            pars.Add(string.IsNullOrWhiteSpace(p.TypeName) ? dir + p.Name : $"{dir}{p.Name} : {p.TypeName}");
+        }
+        if (pars.Count == 0 && IsVoid(ret)) return null;
+        return $"({string.Join(", ", pars)})" + (IsVoid(ret) ? "" : $" : {ret}");
+
+        static bool IsVoid(string? t) => string.IsNullOrWhiteSpace(t) || t is "void" or "None";
+    }
 
     private const string NamespacePrefix = "ns:";
 
@@ -256,12 +299,14 @@ public static class CodeModelMapper
             }
             var fields = new List<(string, string?)>();
             if (!string.IsNullOrEmpty(t.Doc)) fields.Add((FieldKeys.Documentation, t.Doc));
+            if (kind == ElementKind.Block) fields.Add((FieldKeys.IsAbstract, t.IsAbstract ? "true" : null));
             _types[t.Symbol] = Ensure(t.Symbol, kind, owner, t.Name, fields, t.File, t.Line);
         }
 
         private void EnsureMembers(CodeType t, Element te, SortedDictionary<string, bool> parts, SortedSet<string> refs, SortedSet<(string, string)> deps)
         {
             var symbols = new HashSet<string>(StringComparer.Ordinal);
+            MigrateOperations(t);
             foreach (var mem in t.Members)
             {
                 if (string.IsNullOrEmpty(mem.Name)) continue;
@@ -285,27 +330,67 @@ public static class CodeModelMapper
                     }
                     case CodeMemberKind.Method:
                     {
-                        var symbol = $"{t.Symbol}.{mem.Name}()";
+                        var symbol = OperationSymbol(t.Symbol, mem);
                         if (!Metamodel.CanOwn(te.Kind, ElementKind.Operation) || !symbols.Add(symbol)) continue;
-                        var ret = string.IsNullOrEmpty(mem.TypeName) || mem.TypeName == "void" ? null : $"() : {mem.TypeName}";
-                        Ensure(symbol, ElementKind.Operation, te, mem.Name,
-                            [(FieldKeys.Signature, ret), (FieldKeys.Visibility, ModelVisibility(mem.Visibility))], t.File, t.Line);
+                        var fields = new List<(string, string?)>
+                        {
+                            (FieldKeys.Signature, Signature(mem)), (FieldKeys.Visibility, ModelVisibility(mem.Visibility)),
+                            // Interface operations are abstract by nature; only a class's abstract operations are flagged.
+                            (FieldKeys.IsAbstract, mem.IsAbstract && te.Kind != ElementKind.InterfaceBlock ? "true" : null),
+                            (IsStaticKey, mem.IsStatic ? "true" : null),
+                        };
+                        if (!string.IsNullOrEmpty(mem.Doc)) fields.Add((FieldKeys.Documentation, mem.Doc));
+                        Ensure(symbol, ElementKind.Operation, te, mem.Name, fields, t.File, mem.Line > 0 ? mem.Line : t.Line);
                         break;
                     }
                     default:
                     {
                         var symbol = $"{t.Symbol}.{mem.Name}";
                         if (!Metamodel.CanOwn(te.Kind, ElementKind.Property) || !symbols.Add(symbol)) continue;
-                        var multiplicity = mem.IsCollection ? "*" : mem.TypeName.EndsWith('?') ? "0..1" : "1";
-                        Ensure(symbol, ElementKind.Property, te, mem.Name,
-                            [(FieldKeys.Type, target?.Id ?? mem.TypeName), (FieldKeys.Multiplicity, multiplicity), (FieldKeys.Visibility, ModelVisibility(mem.Visibility))],
-                            t.File, t.Line);
+                        var multiplicity = mem.IsCollection ? "*" : mem.IsOptional || mem.TypeName.EndsWith('?') ? "0..1" : "1";
+                        var fields = new List<(string, string?)>
+                        {
+                            (FieldKeys.Type, target?.Id ?? mem.TypeName), (FieldKeys.Multiplicity, multiplicity), (FieldKeys.Visibility, ModelVisibility(mem.Visibility)),
+                            (IsStaticKey, mem.IsStatic ? "true" : null),
+                        };
+                        if (!string.IsNullOrEmpty(mem.Doc)) fields.Add((FieldKeys.Documentation, mem.Doc));
+                        Ensure(symbol, ElementKind.Property, te, mem.Name, fields, t.File, mem.Line > 0 ? mem.Line : t.Line);
                         if (targetKind is CodeTypeKind.Class or CodeTypeKind.Struct or CodeTypeKind.Record)
                             parts[mem.TypeSymbol!] = (parts.TryGetValue(mem.TypeSymbol!, out var many) && many) || mem.IsCollection;
                         else if (targetKind == CodeTypeKind.Interface) refs.Add(mem.TypeSymbol!);
                         break;
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Keeps operations in place when their symbol changes: per method name, when exactly one existing operation of the
+        /// type has no counterpart in the code any more and at least one overload of that name is new, the existing element
+        /// is re-keyed to the first new overload (declaration order) instead of being deleted and created again. This
+        /// migrates the single "Type.Method()" operation that earlier syncs made for all overloads, and keeps an operation
+        /// (its id, diagrams and hand-made content) when a parameter type changes.
+        /// </summary>
+        private void MigrateOperations(CodeType t)
+        {
+            var methods = t.Members.Where(x => x.Kind == CodeMemberKind.Method && !string.IsNullOrEmpty(x.Name) && (x.Visibility == "public" || o.IncludeNonPublic)).ToList();
+            if (methods.Count == 0) return;
+            var current = methods.Select(x => OperationSymbol(t.Symbol, x)).ToHashSet(StringComparer.Ordinal);
+            var prefix = t.Symbol + ".";
+            foreach (var group in methods.GroupBy(x => x.Name, StringComparer.Ordinal))
+            {
+                var head = prefix + group.Key + "(";
+                var stale = _existing.Where(kv => kv.Key.StartsWith(head, StringComparison.Ordinal) && kv.Key.EndsWith(')')
+                                                 && !current.Contains(kv.Key) && kv.Value.Kind == ElementKind.Operation && m.Contains(kv.Value))
+                    .ToList();
+                if (stale.Count != 1) continue;
+                var fresh = group.Select(x => OperationSymbol(t.Symbol, x)).Where(s => !_existing.ContainsKey(s)).ToList();
+                if (fresh.Count == 0) continue;
+                var (old, e) = stale[0];
+                _existing.Remove(old);
+                _existing[fresh[0]] = e;
+                m.Set(e, CodeFieldKeys.Symbol, fresh[0]);
+                Changed(e);
             }
         }
 

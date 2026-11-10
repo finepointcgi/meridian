@@ -35,6 +35,12 @@ public sealed class Workspace : IDisposable, ISessionClient
     /// <summary>Elements highlighted by a running simulation (current tokens / active states).</summary>
     public HashSet<string> SimHighlight { get; } = new();
 
+    /// <summary>"Show variant" on diagrams (VariantView.cs) and verification results (VerificationView.cs).</summary>
+    public VariantView VariantView => _variantView ??= new(this);
+    public VerificationView Verification => _verification ??= new(this);
+    private VariantView? _variantView;
+    private VerificationView? _verification;
+
     /// <summary>Elements copied with ⌘C (pasted as duplicates with ⌘V).</summary>
     public List<Element> Clipboard { get; } = new();
 

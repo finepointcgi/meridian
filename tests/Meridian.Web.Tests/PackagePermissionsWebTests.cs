@@ -321,6 +321,28 @@ public sealed class PackagePermissionsWebTests : TestContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Server_Side_Edits_For_A_User_Oslc_And_Requirements_Sync_Are_Checked_And_Filtered()
+    {
+        var alice = await Open(_alice);
+        await Rule(PkgId("Structure"), _bob, PackageAccess.Read);
+        await Rule(_secretPkgId, _bob, PackageAccess.None);
+        await using var edit = (await Meridian.Web.Integrations.ServerModelEdit.OpenAsync(_hub, _project, _bob))!;
+
+        // The replica it edits is Bob's filtered model; changes to protected packages are refused as a whole.
+        Assert.False(await edit.EditAsync(m => m.AllElements.Any(e => e.Name == SecretName)));
+        var denied = await Assert.ThrowsAsync<PermissionDeniedException>(() => edit.EditAsync(m =>
+        {
+            m.Set(m.AllElements.First(e => e.Name == "Refuel"), FieldKeys.Documentation, "allowed alone");
+            m.Rename(m.AllElements.First(e => e.Name == "Engine"), "Synced engine");
+            return 0;
+        }));
+        Assert.Contains("Structure", denied.Message);
+        Assert.Equal("", Named(alice, "Refuel").Documentation);   // all or nothing
+        Assert.Equal(1, await edit.EditAsync(m => { m.Set(m.AllElements.First(e => e.Name == "Refuel"), FieldKeys.Documentation, "ok"); return 1; }));
+        Assert.Equal("ok", Named(alice, "Refuel").Documentation);
+    }
+
+    [Fact]
     public async Task Changing_Rules_Takes_Effect_At_Once_For_Connected_Users()
     {
         var bob = await Open(_bob);

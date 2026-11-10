@@ -43,6 +43,20 @@
                 <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newAttr)" OnClick="() => AddAttr(e)" />
             </div>
         }
+        @* Simulation-driven verification: the criterion and the last result (Analysis/Verification.cs). *@
+        var crit = e.Get(VerificationKeys.Criterion);
+        var critError = crit.Length > 0 ? VerificationCriterion.Check(crit) : null;
+        <div class="section-title">Verification criterion <span class="grow"></span></div>
+        <MudTextField @key="@(e.Id + VerificationKeys.Criterion)" T="string" Label="Criterion" Value="@crit" ValueChanged="v => Set(e, VerificationKeys.Criterion, string.IsNullOrWhiteSpace(v) ? null : v.Trim())"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" Class="vfy-crit" Error="@(critError != null)" ErrorText="@critError"
+                      HelperText="e.g. mass <= 1500 kg · mc: p95(accelTime) < 8 s · timed: final(speed) >= 25 m/s" />
+        @if (Ws.Verification.ResultOf(e) is { } vr)
+        {
+            <div style="font-size:12px; margin-top:4px" data-testid="inspector-verify-result">
+                @VerificationPanel.Badge(vr) <b>@vr.Value</b> vs @vr.Bound · margin @vr.Margin
+                <div style="color:var(--text-3)">@vr.Variant · @vr.At · @vr.Analysis</div>
+            </div>
+        }
     }
 
     if (e.Kind == ElementKind.TestCase)

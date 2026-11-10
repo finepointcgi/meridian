@@ -12,6 +12,8 @@ public enum NodeShape
     Swimlane, Event, Gateway, DataObject, Pool,
     // Appended: timing, interaction overview
     Timeline, TimeMarker, DurationMarker, InteractionUse, InlineInteraction,
+    // Appended: history, entry / exit point and terminate pseudostates (drawn by subtype)
+    Pseudostate,
 }
 
 /// <summary>A palette entry: an element or relationship kind, optionally with a subtype (BPMN, ArchiMate…).</summary>
@@ -59,7 +61,7 @@ public static class Metamodel
 
     private static readonly HashSet<ElementKind> Vertices = new()
     {
-        ElementKind.State, ElementKind.InitialState, ElementKind.FinalState,
+        ElementKind.State, ElementKind.InitialState, ElementKind.FinalState, ElementKind.Pseudostate,
     };
 
     private static readonly HashSet<ElementKind> PackageMembers = new()
@@ -74,7 +76,7 @@ public static class Metamodel
     {
         ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
         ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment, ElementKind.CombinedFragment, ElementKind.Shape,
-        ElementKind.DurationConstraint, ElementKind.TimeConstraint,
+        ElementKind.DurationConstraint, ElementKind.TimeConstraint, ElementKind.InteractionOperand, ElementKind.Pseudostate,
     };
 
     public static readonly IReadOnlyList<string> FragmentOperators = ["alt", "opt", "loop", "par", "break", "critical", "neg", "seq", "strict"];
@@ -114,6 +116,7 @@ public static class Metamodel
             ElementKind.Actor or ElementKind.UseCase => child is ElementKind.Property or ElementKind.Operation || IsBehavior(child),
             ElementKind.Interaction => child is ElementKind.Lifeline or ElementKind.CombinedFragment or ElementKind.TimingLifeline
                 or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.CommunicationLifeline,
+            ElementKind.CombinedFragment => child is ElementKind.InteractionOperand,
             ElementKind.Requirement => child is ElementKind.Requirement,  // requirement containment
             ElementKind.TestCase => child is ElementKind.Activity,
             ElementKind.Activity => IsActivityNode(child) && !IsPin(child) || child == ElementKind.Partition,
@@ -173,6 +176,18 @@ public static class Metamodel
         ],
         DiagramType.ArchiMate => Subtypes.ArchiElements.Select(s => new PaletteItem(ElementKind.ArchiElement, s)).Append(new(ElementKind.Comment)).ToList(),
         DiagramType.Whiteboard => GeneralItems.Append(new(ElementKind.Comment, Label: "Sticky note")).ToList(),
+        DiagramType.StateMachine =>
+        [
+            new(ElementKind.State), new(ElementKind.InitialState), new(ElementKind.FinalState),
+            .. Subtypes.PseudostateKinds.Select(s => new PaletteItem(ElementKind.Pseudostate, s)),
+            new(ElementKind.Comment),
+        ],
+        DiagramType.Activity =>
+        [
+            new(ElementKind.Action), new(ElementKind.InitialNode), new(ElementKind.ActivityFinalNode), new(ElementKind.DecisionNode), new(ElementKind.ForkNode),
+            new(ElementKind.Partition), new(ElementKind.ObjectNode), new(ElementKind.ObjectNode, Subtypes.DataStore, "Data Store"),
+            new(ElementKind.ObjectNode, Subtypes.CentralBuffer, "Central Buffer"), new(ElementKind.InputPin), new(ElementKind.OutputPin), new(ElementKind.Comment),
+        ],
         _ when UafViewpoints.Of(t) is { } uaf => UafViewpoints.PaletteItems(uaf),
         _ => PaletteNodes(t).Select(k => new PaletteItem(k)).ToList(),
     };
@@ -202,7 +217,7 @@ public static class Metamodel
         DiagramType.UseCase => [ElementKind.Actor, ElementKind.UseCase, ElementKind.Block, ElementKind.Package, ElementKind.Comment],
         DiagramType.Activity => [ElementKind.Action, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
                                  ElementKind.Partition, ElementKind.ObjectNode, ElementKind.InputPin, ElementKind.OutputPin, ElementKind.Comment],
-        DiagramType.StateMachine => [ElementKind.State, ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment],
+        DiagramType.StateMachine => [ElementKind.State, ElementKind.InitialState, ElementKind.FinalState, ElementKind.Pseudostate, ElementKind.Comment],
         DiagramType.Package => [ElementKind.Package, ElementKind.Profile, ElementKind.Stereotype, ElementKind.Block, ElementKind.Class, ElementKind.Interface, ElementKind.Comment],
         DiagramType.Sequence => [ElementKind.Lifeline, ElementKind.CombinedFragment, ElementKind.Comment],
         DiagramType.Database => [ElementKind.Table, ElementKind.Comment],
@@ -317,6 +332,7 @@ public static class Metamodel
         ElementKind.InlineInteraction => "Inline Interaction",
         ElementKind.CommunicationLifeline => "Lifeline",
         ElementKind.CommunicationLink => "Link",
+        ElementKind.InteractionOperand => "Operand",
         _ => k.ToString(),
     };
 
@@ -359,7 +375,6 @@ public static class Metamodel
         ElementKind.Profile => "profile",
         ElementKind.Stereotype => "stereotype",
         ElementKind.Table => "table",
-        ElementKind.ObjectNode => "centralBuffer",
         ElementKind.Feature => "feature",
         ElementKind.Configuration => "configuration",
         ElementKind.TradeStudy => "tradeStudy",
@@ -387,6 +402,7 @@ public static class Metamodel
         ElementKind.DurationConstraint => NodeShape.DurationMarker,
         ElementKind.InteractionUse => NodeShape.InteractionUse,
         ElementKind.InlineInteraction => NodeShape.InlineInteraction,
+        ElementKind.Pseudostate => NodeShape.Diamond,   // a choice; Notation.ShapeOf picks the shape of the other kinds
         _ => NodeShape.Rectangle,
     };
 
@@ -455,8 +471,10 @@ public static class Metamodel
     public static IReadOnlyList<string> EditableFields(ElementKind k)
     {
         var f = new List<string>();
-        if (k is not (ElementKind.Comment or ElementKind.CombinedFragment)) f.Add(FieldKeys.Name);
-        if (k is ElementKind.BpmnNode or ElementKind.ArchiElement or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.Shape or ElementKind.Line) f.Add(FieldKeys.Subtype);
+        if (k is not (ElementKind.Comment or ElementKind.CombinedFragment or ElementKind.InteractionOperand)) f.Add(FieldKeys.Name);
+        if (k is ElementKind.BpmnNode or ElementKind.ArchiElement or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.Shape or ElementKind.Line
+            or ElementKind.Pseudostate or ElementKind.ObjectNode) f.Add(FieldKeys.Subtype);
+        if (k == ElementKind.InteractionOperand) f.Add(FieldKeys.Guard);
         if (IsClassifier(k) && k is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype)) f.Add(FieldKeys.IsAbstract);
         if (IsClassifier(k) && k != ElementKind.Table || k is ElementKind.Property or ElementKind.Operation or ElementKind.Port) f.Add(FieldKeys.Visibility);
         if (IsTypedFeature(k)) { f.Add(FieldKeys.Type); if (k != ElementKind.Lifeline) f.Add(FieldKeys.Multiplicity); }
@@ -473,7 +491,7 @@ public static class Metamodel
         if (k == ElementKind.Partition) f.Add(FieldKeys.Represents);
         if (k == ElementKind.State) { f.Add(FieldKeys.Entry); f.Add(FieldKeys.DoActivity); f.Add(FieldKeys.Exit); }
         if (k is ElementKind.ConstraintBlock or ElementKind.Action or ElementKind.Comment) f.Add(FieldKeys.Body);
-        if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation) f.Add(FieldKeys.Multiplicity);
+        if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation) { f.Add(FieldKeys.Multiplicity); f.Add(FieldKeys.SourceMultiplicity); }
         if (k == ElementKind.Stereotype) { f.Add(FieldKeys.Metaclass); f.Add(FieldKeys.Color); }
         if (k == ElementKind.TagDefinition) { f.Add(FieldKeys.TagType); f.Add(FieldKeys.TagValues); f.Add(FieldKeys.DefaultValue); }
         if (k == ElementKind.Column) { f.Add(FieldKeys.SqlType); f.Add(FieldKeys.PrimaryKey); f.Add(FieldKeys.Nullable); f.Add(FieldKeys.Unique); f.Add(FieldKeys.DefaultValue); }
