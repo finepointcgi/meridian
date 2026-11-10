@@ -375,7 +375,9 @@ public static class Notation
     }
 
     /// <summary>Candidate orthogonal routes scored by obstacle crossings, then length and bends.</summary>
-    public static IReadOnlyList<Pt> OrthogonalAvoiding(Bounds s, Bounds t, IReadOnlyList<Bounds> obstacles)
+    public static IReadOnlyList<Pt> OrthogonalAvoiding(Bounds s, Bounds t, IReadOnlyList<Bounds> obstacles) => OrthogonalAvoiding(s, t, obstacles, false);
+
+    private static IReadOnlyList<Pt> OrthogonalAvoiding(Bounds s, Bounds t, IReadOnlyList<Bounds> obstacles, bool referenceScoring)
     {
         var candidates = new List<IReadOnlyList<Pt>> { Orthogonal(s, t) };
         var sc = s.Center; var tc = t.Center;
@@ -414,11 +416,99 @@ public static class Notation
         candidates.Add([new Pt(sc.X, s.Bottom), new Pt(sc.X, bottom), new Pt(tc.X, bottom), new Pt(tc.X, t.Bottom)]);
         candidates.Add([new Pt(s.X, sc.Y), new Pt(left, sc.Y), new Pt(left, tc.Y), new Pt(t.X, tc.Y)]);
         candidates.Add([new Pt(s.Right, sc.Y), new Pt(rightMost, sc.Y), new Pt(rightMost, tc.Y), new Pt(t.Right, tc.Y)]);
-
-        return candidates.MinBy(c => Score(c, obstacles))!;
+        return referenceScoring ? candidates.MinBy(c => FullScore(c, obstacles))! : Best(candidates, obstacles);
     }
 
-    private static double Score(IReadOnlyList<Pt> path, IReadOnlyList<Bounds> obstacles)
+    /// <summary>The original exhaustive scoring (tests compare <see cref="OrthogonalAvoiding"/> against it).</summary>
+    internal static IReadOnlyList<Pt> OrthogonalAvoidingReference(Bounds s, Bounds t, IReadOnlyList<Bounds> obstacles) =>
+        OrthogonalAvoiding(s, t, obstacles, referenceScoring: true);
+
+    private static IReadOnlyList<Pt> Best(List<IReadOnlyList<Pt>> candidates, IReadOnlyList<Bounds> obstacles)
+    {
+        // Same choice as candidates.MinBy(Score): the first candidate with the lowest score. Obstacle hits only add to a score,
+        // so a candidate whose hit-free score can't beat the best so far is skipped, and counting stops once it can't win
+        // (a 500-shape diagram has ~1,000 candidates per path and 500 obstacles: a full count is 1.5M tests per path).
+        IReadOnlyList<Pt>? best = null;
+        var bestScore = double.PositiveInfinity;
+        var index = ObstacleIndex.For(obstacles);
+        foreach (var c in candidates)
+        {
+            var score = best == null ? FullScore(c, obstacles) : Score(c, obstacles, index, bestScore);
+            if (best == null || score < bestScore) { best = c; bestScore = score; }
+        }
+        return best!;
+    }
+
+    /// <summary>The candidate's score, or +∞ as soon as it is known to be no lower than <paramref name="cutoff"/>.</summary>
+    private static double Score(IReadOnlyList<Pt> path, IReadOnlyList<Bounds> obstacles, ObstacleIndex? index, double cutoff)
+    {
+        double len = 0;
+        for (var i = 1; i < path.Count; i++) len += Math.Abs(path[i - 1].X - path[i].X) + Math.Abs(path[i - 1].Y - path[i].Y);
+        if (0 * 100_000 + len + (path.Count - 2) * 25 >= cutoff) return double.PositiveInfinity;
+        var h = 0;
+        for (var i = 1; i < path.Count; i++)
+        {
+            var a = path[i - 1]; var b = path[i];
+            if (index != null)
+            {
+                foreach (var k in index.Near(a, b))
+                    if (SegmentHits(a, b, obstacles[k]) && (++h) * 100_000 + len + (path.Count - 2) * 25 >= cutoff) return double.PositiveInfinity;
+            }
+            else
+            {
+                foreach (var o in obstacles)
+                    if (SegmentHits(a, b, o) && (++h) * 100_000 + len + (path.Count - 2) * 25 >= cutoff) return double.PositiveInfinity;
+            }
+        }
+        return h * 100_000 + len + (path.Count - 2) * 25;
+    }
+
+    /// <summary>
+    /// Obstacles bucketed by the columns and rows they span. <see cref="SegmentHits"/> only hits a rectangle whose x range (for a
+    /// vertical segment) or y range (otherwise) strictly contains the segment's line, so the bucket of that coordinate holds
+    /// every rectangle the segment can hit: counts stay exact while most rectangles are never looked at.
+    /// </summary>
+    private sealed class ObstacleIndex
+    {
+        private const double Cell = 64;
+        private readonly Dictionary<long, List<int>> _cols = new(), _rows = new();
+
+        public static ObstacleIndex? For(IReadOnlyList<Bounds> obstacles)
+        {
+            if (obstacles.Count < 48) return null;
+            var index = new ObstacleIndex();
+            for (var i = 0; i < obstacles.Count; i++)
+            {
+                var o = obstacles[i];
+                if (!Add(index._cols, o.X, o.Right, i) || !Add(index._rows, o.Y, o.Bottom, i)) return null;
+            }
+            return index;
+        }
+
+        private static bool Add(Dictionary<long, List<int>> buckets, double from, double to, int i)
+        {
+            if (!double.IsFinite(from) || !double.IsFinite(to) || Math.Abs(from) > 1e9 || Math.Abs(to) > 1e9) return false;
+            if (to < from) return true;   // an empty range never strictly contains a coordinate
+            long lo = (long)Math.Floor(from / Cell), hi = (long)Math.Floor(to / Cell);
+            if (hi - lo > 4096) return false;
+            for (var c = lo; c <= hi; c++)
+            {
+                if (!buckets.TryGetValue(c, out var list)) buckets[c] = list = new List<int>();
+                list.Add(i);
+            }
+            return true;
+        }
+
+        public IReadOnlyList<int> Near(Pt a, Pt b)
+        {
+            var vertical = Math.Abs(a.X - b.X) < 0.01;
+            var v = vertical ? a.X : a.Y;
+            if (!double.IsFinite(v) || Math.Abs(v) > 1e9) return [];   // no finite rectangle strictly contains it
+            return (vertical ? _cols : _rows).TryGetValue((long)Math.Floor(v / Cell), out var list) ? list : [];
+        }
+    }
+
+    private static double FullScore(IReadOnlyList<Pt> path, IReadOnlyList<Bounds> obstacles)
     {
         double length = 0; var hits = 0;
         for (var i = 1; i < path.Count; i++)

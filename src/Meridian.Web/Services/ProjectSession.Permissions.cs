@@ -60,7 +60,7 @@ public sealed partial class ProjectSession
     {
         if (!_access.TryGetValue(participantId, out var a))
             throw new InvalidOperationException("Join the session before reading its model.");
-        fullJson ??= ProjectFile.Serialize(_master);
+        fullJson ??= SnapshotLocked();   // cached per model change (ProjectSession.Snapshot.cs)
         return a.View.HidesAnything ? PackagePermissions.RedactJson(fullJson, a.View) : fullJson;
     }
 

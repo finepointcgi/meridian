@@ -338,7 +338,7 @@
         <div class="minimap" @onpointerdown="MiniMapClick" @onpointerdown:stopPropagation="true" @ref="_minimap">
             @{ var cb = C.ContentBounds(); var vp = C.Viewport; var shown = DiagramExtras.VisibleView(C.Diagram); }
             <svg viewBox="@F(cb.X) @F(cb.Y) @F(cb.Width) @F(cb.Height)" preserveAspectRatio="xMidYMid meet">
-                @{ var miniRoutes = EdgeRouter.RouteAll(shown, C.BoundsOf); }
+                @{ var miniRoutes = EdgeRouter.RouteAll(shown, C.MemoBounds()); }
                 @foreach (var e in shown.Edges)
                 {
                     var pts = miniRoutes[e];

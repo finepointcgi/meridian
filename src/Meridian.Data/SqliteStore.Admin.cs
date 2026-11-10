@@ -378,7 +378,7 @@ public sealed partial class SqliteStore
                 S(id), S(m.UserId), (int)m.Role);
         foreach (var v in project.Versions)
             await Run("insert into project_versions(project_id, number, message, model, author, created_at) values ($1,$2,$3,$4,(select id from users where id = $5),$6)",
-                S(id), v.Number, v.Message, v.ModelJson, v.AuthorId is { } a ? S(a) : null, v.CreatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                S(id), v.Number, v.Message, VersionBlob.Encode(v.ModelJson), v.AuthorId is { } a ? S(a) : null, v.CreatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         await tx.CommitAsync();
         return id;
     }
@@ -388,7 +388,7 @@ public sealed partial class SqliteStore
         await using var cmd = await CmdAsync("select number, message, model, author, created_at from project_versions where project_id = $1 order by number", S(projectId));
         var list = new List<VersionSnapshot>();
         await using var r = await cmd.ExecuteReaderAsync();
-        while (await r.ReadAsync()) list.Add(new VersionSnapshot(r.GetInt32(0), r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : Id(r, 3), Time(r, 4)));
+        while (await r.ReadAsync()) list.Add(new VersionSnapshot(r.GetInt32(0), r.GetString(1), VersionBlob.Decode(r.GetValue(2))!, r.IsDBNull(3) ? null : Id(r, 3), Time(r, 4)));
         return list;
     }
 

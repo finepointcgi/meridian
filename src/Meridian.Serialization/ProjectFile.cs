@@ -178,13 +178,14 @@ public static class ProjectFile
         var dtos = new List<(JsonElement dto, string id, ElementKind kind, string? ownerId)>();
         Flatten(rootDto, null, dtos);
         var byId = new Dictionary<string, Element>(dtos.Count, StringComparer.Ordinal);
+        var pool = new StringPool();
         foreach (var (dto, id, kind, _) in dtos)
         {
             if (Core.Language.Metamodel.IsRelationship(kind)) continue;
             Element el = kind == ElementKind.Diagram
                 ? new Diagram(Enum.Parse<DiagramType>(Str(dto, "diagramType")), id)
                 : new Element(kind, id);
-            ApplyFields(el, dto);
+            ApplyFields(el, dto, pool);
             byId.Add(id, el);
         }
 
@@ -195,7 +196,7 @@ public static class ProjectFile
             if (!byId.TryGetValue(Str(dto, "source"), out var s) || !byId.TryGetValue(Str(dto, "target"), out var t))
                 throw new FormatException($"Relationship {id} has a dangling end");
             var r = new Relationship(kind, s, t, id);
-            ApplyFields(r, dto);
+            ApplyFields(r, dto, pool);
             byId.Add(id, r);
         }
 
@@ -264,10 +265,32 @@ public static class ProjectFile
                 if (c.ValueKind == JsonValueKind.Object) Flatten(c, id, into);
     }
 
-    private static void ApplyFields(Element e, JsonElement dto)
+    private static void ApplyFields(Element e, JsonElement dto, StringPool pool)
     {
         if (Prop(dto, "fields") is not { ValueKind: JsonValueKind.Object } f) return;
         foreach (var kv in f.EnumerateObject())
-            ModelRepository.SetFieldForLoad(e, kv.Name, kv.Value.ValueKind == JsonValueKind.Null ? null : kv.Value.GetString());
+            ModelRepository.SetFieldForLoad(e, pool.Key(kv.Name), kv.Value.ValueKind == JsonValueKind.Null ? null : pool.Value(kv.Value.GetString()));
+    }
+
+    /// <summary>
+    /// Shares the strings that repeat across elements: field keys (the well-known ones are the interned constants, shared by
+    /// every model in the process) and short values such as type references, multiplicities and enumerations. Every open tab
+    /// holds its own replica of the model, so at 200,000 elements this saves tens of megabytes per tab.
+    /// </summary>
+    private sealed class StringPool
+    {
+        private const int MaxPooledValue = 48;
+        private readonly Dictionary<string, string> _strings = new(StringComparer.Ordinal);
+
+        public string Key(string key) => string.IsInterned(key) ?? Share(key);
+
+        public string? Value(string? value) => value is { Length: > 0 and <= MaxPooledValue } ? Share(value) : value;
+
+        private string Share(string s)
+        {
+            if (_strings.TryGetValue(s, out var shared)) return shared;
+            _strings[s] = s;
+            return s;
+        }
     }
 }

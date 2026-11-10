@@ -148,7 +148,7 @@ public static class ModelMerge
 
         public static Snapshot Of(ModelRepository m)
         {
-            var map = new Dictionary<string, FElement>(StringComparer.Ordinal);
+            var map = new Dictionary<string, FElement>(m.Count, StringComparer.Ordinal);
             void Walk(Element e)
             {
                 var fields = new Dictionary<string, string>(e.Fields, StringComparer.Ordinal);
@@ -186,12 +186,18 @@ public static class ModelMerge
             return false;
         }
 
+        /// <summary>Pre-order (an element, then each child's subtree in order), without nested iterators (O(depth) per item).</summary>
         public IEnumerable<string> Subtree(string id)
         {
-            if (this[id] is not { } e) yield break;
-            yield return id;
-            foreach (var c in e.Children)
-                foreach (var d in Subtree(c)) yield return d;
+            var stack = new Stack<string>();
+            stack.Push(id);
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                if (this[cur] is not { } e) continue;
+                yield return cur;
+                for (var i = e.Children.Count - 1; i >= 0; i--) stack.Push(e.Children[i]);
+            }
         }
     }
 
@@ -256,8 +262,10 @@ public static class ModelMerge
 
         public ModelRepository Run()
         {
-            var ids = new List<string>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
+            // Sized up front: at 200,000 elements, rehashing these sets was a good part of the merge.
+            var ids = new List<string>(o.Elements.Count + 64);
+            var seen = new HashSet<string>(o.Elements.Count + 64, StringComparer.Ordinal);
+            _out.EnsureCapacity(o.Elements.Count + 64);
             // Deterministic order: ours tree order, then theirs-only, then base-only.
             foreach (var s in new[] { o, t, b })
                 foreach (var id in s.Subtree(s.RootId))
@@ -273,7 +281,7 @@ public static class ModelMerge
 
         private HashSet<string> DecideExistence(List<string> ids)
         {
-            var keep = new HashSet<string>(StringComparer.Ordinal);
+            var keep = new HashSet<string>(ids.Count, StringComparer.Ordinal);
             var decided = new Dictionary<string, bool>(StringComparer.Ordinal);   // deletion root → kept?
             foreach (var id in ids)
             {
@@ -655,7 +663,7 @@ public static class ModelMerge
             {
                 changed = false;
                 var stack = new Stack<string>([rootId]);
-                var reach = new HashSet<string>(StringComparer.Ordinal);
+                var reach = new HashSet<string>(_out.Count, StringComparer.Ordinal);
                 while (stack.Count > 0)
                 {
                     var id = stack.Pop();
@@ -669,7 +677,7 @@ public static class ModelMerge
                 if (!reach.SetEquals(alive)) { alive = reach; changed = true; }
             } while (changed);
 
-            var made = new Dictionary<string, Element>(StringComparer.Ordinal);
+            var made = new Dictionary<string, Element>(alive.Count, StringComparer.Ordinal);
             foreach (var id in alive)
             {
                 var m = _out[id];

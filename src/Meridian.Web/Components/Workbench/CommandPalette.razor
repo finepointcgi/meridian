@@ -37,10 +37,15 @@
     private int _index;
     private ElementReference _input;
     private List<Command> _commands = new();
+    private string[] _lower = [];
+    // The last query and its ranking: the list, the key handler and Enter all ask for it (a model has 100,000+ entries).
+    private (string Query, List<Command> Result)? _filtered;
 
     public async Task Show()
     {
         _commands = Source().ToList();
+        _lower = _commands.Select(c => c.Title.ToLowerInvariant()).ToArray();   // once per opening, not per keystroke
+        _filtered = null;
         _query = "";
         _index = 0;
         Open = true;
@@ -56,7 +61,10 @@
     {
         if (string.IsNullOrWhiteSpace(_query)) return _commands.Where(c => c.Group is "Command" or "Diagram");
         var q = _query.Trim().ToLowerInvariant();
-        return _commands.Select(c => (c, score: Score(c.Title.ToLowerInvariant(), q))).Where(x => x.score > 0).OrderByDescending(x => x.score).ThenBy(x => x.c.Title.Length).Select(x => x.c);
+        if (_filtered is { } f && f.Query == q) return f.Result;
+        var result = _commands.Select((c, i) => (c, score: Score(_lower[i], q))).Where(x => x.score > 0).OrderByDescending(x => x.score).ThenBy(x => x.c.Title.Length).Select(x => x.c).ToList();
+        _filtered = (q, result);
+        return result;
     }
 
     private static int Score(string text, string q)

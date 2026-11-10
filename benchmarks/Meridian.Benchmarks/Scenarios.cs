@@ -14,9 +14,11 @@ namespace Meridian.Benchmarks;
 /// </summary>
 public sealed class Scenarios
 {
-    public Scenarios(double scale = 1.0)
+    public Scenarios(double scale = 1.0) : this(new LargeModelOptions { Scale = scale }) { }
+
+    public Scenarios(LargeModelOptions options)
     {
-        Options = new LargeModelOptions { Scale = scale };
+        Options = options;
         Model = LargeModelGenerator.Generate(Options);
         Json = ProjectFile.Serialize(Model);
         Requirements = Model.OfKind(ElementKind.Requirement).ToList();

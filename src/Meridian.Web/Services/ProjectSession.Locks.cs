@@ -148,6 +148,7 @@ public sealed partial class ProjectSession
     {
         lock (_gate)
         {
+            _snapshotSequence = -1;
             _master = ProjectFile.Deserialize(modelJson);
             Sequence++;
             MarkDirty();

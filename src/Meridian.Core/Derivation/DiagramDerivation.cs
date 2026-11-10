@@ -110,8 +110,56 @@ public static partial class DiagramDerivation
     public static IEnumerable<Element> Existing(ModelRepository m, DerivationKind kind, Element source, Element? target = null)
     {
         var id = DerivationKinds.Id(kind);
-        return m.AllElements.Where(e => e.Get(DeriveFields.Source) == source.Id && e.Get(DeriveFields.Kind) == id && e.Get(DeriveFields.Key).Length > 0
-                                        && (target == null || e.Get(DeriveFields.Target) == target.Id));
+        // Candidates come from a per-model index of derived elements by source (the ⌘K palette asks this for hundreds of
+        // sources; a scan of a 200,000-element model each time took seconds). The full predicate is still applied.
+        return DerivedIndex.Of(m).BySource(source.Id)
+            .Where(e => e.Get(DeriveFields.Source) == source.Id && e.Get(DeriveFields.Kind) == id && e.Get(DeriveFields.Key).Length > 0
+                        && (target == null || e.Get(DeriveFields.Target) == target.Id) && m.Contains(e));
+    }
+
+    /// <summary>
+    /// Elements carrying <see cref="DeriveFields.Source"/>, grouped by source id, in model order. Rebuilt lazily after any change
+    /// that could add, remove or re-point a derived element (additions, removals, resets and edits of a derive.* field).
+    /// </summary>
+    private sealed class DerivedIndex
+    {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ModelRepository, DerivedIndex> Indexes = new();
+        private readonly ModelRepository _m;
+        private readonly object _gate = new();
+        private Dictionary<string, List<Element>>? _bySource;
+
+        private DerivedIndex(ModelRepository m)
+        {
+            _m = m;
+            m.Changed += (_, c) =>
+            {
+                if (c.Kind is ChangeKind.Added or ChangeKind.Removed or ChangeKind.Reset
+                    || (c.Kind == ChangeKind.Updated && (c.Field == null || c.Field.StartsWith(DeriveFields.Prefix, StringComparison.Ordinal))))
+                    lock (_gate) _bySource = null;
+            };
+        }
+
+        public static DerivedIndex Of(ModelRepository m) => Indexes.GetValue(m, x => new DerivedIndex(x));
+
+        public IReadOnlyList<Element> BySource(string sourceId)
+        {
+            lock (_gate)
+            {
+                if (_bySource == null)
+                {
+                    var map = new Dictionary<string, List<Element>>(StringComparer.Ordinal);
+                    foreach (var e in _m.AllElements)
+                    {
+                        var s = e.Get(DeriveFields.Source);
+                        if (s.Length == 0) continue;
+                        if (!map.TryGetValue(s, out var list)) map[s] = list = new List<Element>();
+                        list.Add(e);
+                    }
+                    _bySource = map;
+                }
+                return _bySource.TryGetValue(sourceId, out var l) ? l.ToArray() : [];
+            }
+        }
     }
 
     /// <summary>The diagrams an earlier run made (the derivation's main views).</summary>

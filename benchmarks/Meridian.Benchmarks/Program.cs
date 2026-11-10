@@ -4,6 +4,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using Meridian.Benchmarks;
 using Meridian.Core.Model;
+using Meridian.Core.Samples;
 using Meridian.Serialization;
 
 // Usage:
@@ -23,7 +24,10 @@ if (args.Contains("--quick"))
     var scale = args.SkipWhile(a => a != "--scale").Skip(1).Select(s => double.Parse(s, CultureInfo.InvariantCulture)).FirstOrDefault(1.0);
     var only = args.SkipWhile(a => a != "--only").Skip(1).FirstOrDefault();
     var repeat = args.SkipWhile(a => a != "--repeat").Skip(1).Select(int.Parse).FirstOrDefault(3);
-    QuickRunner.Run(scale, only, repeat);
+    // --elements N: a Cameo-scale project (LargeModelOptions.Cameo) instead of the scaled default mix, plus the store, session,
+    // report, derivation and diagram scenarios. --postgres also runs the store scenarios against a throwaway Testcontainers server.
+    var elements = args.SkipWhile(a => a != "--elements").Skip(1).Select(int.Parse).FirstOrDefault(0);
+    await QuickRunner.RunAsync(scale, only, repeat, elements, args.Contains("--postgres"));
     return;
 }
 BenchmarkSwitcher.FromAssembly(typeof(Scenarios).Assembly).Run(args);
@@ -33,12 +37,12 @@ namespace Meridian.Benchmarks
     public static class QuickRunner
     {
         /// <summary>Times every scenario (best of <paramref name="repeat"/> runs after a warm-up); <paramref name="only"/> filters by name.</summary>
-        public static void Run(double scale, string? only = null, int repeat = 3)
+        public static async Task RunAsync(double scale, string? only = null, int repeat = 3, int elements = 0, bool postgres = false)
         {
             var sw = Stopwatch.StartNew();
-            var s = new Scenarios(scale);
+            var s = new Scenarios(elements > 0 ? LargeModelOptions.Cameo(elements) : new LargeModelOptions { Scale = scale });
             Console.WriteLine($"Model: {s.Model.AllElements.Count():N0} elements, {s.Model.Relationships.Count():N0} relationships, " +
-                              $"{s.Model.Diagrams.Count():N0} diagrams, {s.Requirements.Count:N0} requirements; .meridian {s.Json.Length / 1024 / 1024.0:0.0} MB " +
+                              $"{s.Model.Diagrams.Count():N0} diagrams, {s.Requirements.Count:N0} requirements; .meridian {s.Json.Length / 1024 / 1024.0:0.0} MB, managed heap {GC.GetTotalMemory(true) / 1024 / 1024:N0} MB " +
                               $"(setup {sw.Elapsed.TotalSeconds:0.0} s)");
             Console.WriteLine();
             Console.WriteLine($"{"Scenario",-34} {"ms",10}");
@@ -94,6 +98,11 @@ namespace Meridian.Benchmarks
             Time("SysML v2 export", s.SysmlExport);
             Time("SysML v2 parse", s.SysmlParse);
             TimeOnce("Workspace.Health (+200 edits)", m => s.Health(m));
+            if (elements == 0) return;
+
+            Console.WriteLine();
+            await using var pg = postgres ? await BenchPostgres.StartAsync() : null;
+            await CameoScenarios.RunAsync(s, Time, TimeOnce, Skip, pg?.ConnectionString);
         }
     }
 

@@ -140,7 +140,7 @@ public sealed partial class ProjectSession : IDisposable
 
     public string Snapshot()
     {
-        lock (_gate) return ProjectFile.Serialize(_master);
+        lock (_gate) return SnapshotLocked();
     }
 
     internal void Join(Presence me, ISessionClient client, ProjectRole role = ProjectRole.Editor, IReadOnlyList<Guid>? teams = null)
@@ -204,6 +204,7 @@ public sealed partial class ProjectSession : IDisposable
     private void ApplyLocked(string participantId, Guid userId, ModelOp op, bool events = true)
     {
         var probes = ProbeFiltered(participantId, op);       // what participants with hidden packages may receive (ProjectSession.Permissions.cs)
+        _snapshotSequence = -1;   // the cached snapshot (ProjectSession.Snapshot.cs) is stale from here on
         _master.ApplyRemote(op);
         ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
         if (events) Events?.OperationApplied(ProjectId, Name, userId, op, _master);
@@ -239,6 +240,7 @@ public sealed partial class ProjectSession : IDisposable
                 var view = ViewOfUser(userId) ?? throw new PermissionDeniedException("Open the project before restoring a version.");
                 if (Core.Permissions.PermissionCheck.CheckReplace(_master, restored, view) is { } why) throw new PermissionDeniedException(why);
             }
+            _snapshotSequence = -1;
             _master = restored;
             ScheduleTextRefresh();
             Sequence++;
@@ -317,7 +319,7 @@ public sealed partial class ProjectSession : IDisposable
             lock (_gate)
             {
                 if (!_dirty) return;
-                json = ProjectFile.Serialize(_master);
+                json = SnapshotLocked();
                 editor = _lastEditor;
                 _dirty = false;
             }
