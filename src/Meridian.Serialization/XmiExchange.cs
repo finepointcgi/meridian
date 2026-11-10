@@ -159,7 +159,8 @@ public static class XmiExchange
         or ElementKind.Feature or ElementKind.Configuration or ElementKind.TradeStudy
         or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes
         or ElementKind.TimingLifeline or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.InteractionUse
-        or ElementKind.InlineInteraction or ElementKind.CommunicationLifeline or ElementKind.CommunicationLink;
+        or ElementKind.InlineInteraction or ElementKind.CommunicationLifeline or ElementKind.CommunicationLink
+        or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Sequence or ElementKind.Routine or ElementKind.Trigger;
     private static XAttribute Type(string t) => new(Xmi + "type", "uml:" + t);
 
     private static void Emit(ModelRepository m, XElement parent, Element e, List<XElement> st, XElement ext)
@@ -167,7 +168,8 @@ public static class XmiExchange
         if (e.Kind == ElementKind.Diagram || e.Kind == ElementKind.Comment) { if (e.Kind == ElementKind.Comment) AddComment(parent, e); return; }
 
         // Custom stereotypes and tagged values survive a Meridian round trip through an extension.
-        foreach (var kv in e.Fields.Where(f => f.Key == FieldKeys.Stereotypes || f.Key.StartsWith(FieldKeys.TagPrefix) || f.Key.StartsWith(ReqFields.CustomPrefix, StringComparison.Ordinal) || ExtensionOnlyFields.Contains(f.Key)))
+        foreach (var kv in e.Fields.Where(f => f.Key == FieldKeys.Stereotypes || f.Key.StartsWith(FieldKeys.TagPrefix) || f.Key.StartsWith(ReqFields.CustomPrefix, StringComparison.Ordinal) || ExtensionOnlyFields.Contains(f.Key)
+                                               || f.Key.StartsWith("db.", StringComparison.Ordinal) || e.Kind == ElementKind.Column && f.Key == FieldKeys.DefaultValue))   // data-model fields (roles, keys, groups …)
             ext.Add(new XElement(Meridian + "field", new XAttribute("ref", e.Id), new XAttribute("key", kv.Key), new XAttribute("value", kv.Value)));
 
         if (e is Relationship r)

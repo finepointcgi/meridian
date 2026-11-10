@@ -302,6 +302,58 @@ public class DatabaseParsingTests
     }
 
     [Fact]
+    public void Enterprise_Architect_Data_Models_Keep_Lengths_Not_Null_Keys_And_Foreign_Keys()
+    {
+        var dir = Directory.CreateTempSubdirectory("meridian-ea-db-");
+        var path = Path.Combine(dir.FullName, "model.qea");
+        try
+        {
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+            {
+                c.Open();
+                void Exec(string sql) { using var cmd = c.CreateCommand(); cmd.CommandText = sql; cmd.ExecuteNonQuery(); }
+                Exec("create table t_package (Package_ID int, Name text, Parent_ID int, Notes text)");
+                Exec("create table t_object (Object_ID int, Object_Type text, Name text, Alias text, Note text, Package_ID int, Stereotype text, ParentID int, Classifier int, Abstract text, NType int)");
+                Exec("create table t_attribute (ID int, Object_ID int, Name text, Type text, Classifier text, LowerBound text, UpperBound text, \"Default\" text, Notes text, Scope text, Pos int, Length int, Precision int, Scale int, AllowDuplicates int)");
+                Exec("create table t_operation (OperationID int, Object_ID int, Name text, Type text, Notes text, Pos int, Stereotype text)");
+                Exec("create table t_operationparams (OperationID int, Name text, Type text, Kind text, Pos int)");
+                Exec("create table t_connector (Connector_ID int, Connector_Type text, SubType text, Stereotype text, Name text, Start_Object_ID int, End_Object_ID int, DestCard text, PDATA2 text)");
+                Exec("insert into t_package values (1,'Model',0,''),(2,'Data',1,'')");
+                Exec("insert into t_object values (10,'Class','customer','','',2,'table',0,0,'0',0),(11,'Class','orders','','',2,'table',0,0,'0',0)");
+                Exec("""
+                    insert into t_attribute values
+                    (1,10,'id','INTEGER','','1','1','','','Public',0,0,0,0,1),
+                    (2,10,'email','VARCHAR','','1','1','','','Public',1,320,0,0,1),
+                    (3,11,'id','INTEGER','','1','1','','','Public',0,0,0,0,1),
+                    (4,11,'customer_id','INTEGER','','1','1','','','Public',1,0,0,0,0),
+                    (5,11,'total','DECIMAL','','1','1','','','Public',2,0,10,2,0)
+                    """);
+                Exec("insert into t_operation values (1,10,'PK_customer','','',0,'PK'),(2,11,'PK_orders','','',0,'PK'),(3,11,'FK_orders_customer','','',1,'FK'),(4,10,'UQ_email','','',1,'unique')");
+                Exec("insert into t_operationparams values (1,'id','INTEGER','in',0),(2,'id','INTEGER','in',0),(3,'customer_id','INTEGER','in',0),(4,'email','VARCHAR','in',0)");
+                Exec("insert into t_connector values (100,'Association','','FK','FK_orders_customer',11,10,'','')");
+            }
+            var (m, _) = EaImporter.Import(path);
+            var customer = m.OfKind(ElementKind.Table).Single(t => t.Name == "customer");
+            var orders = m.OfKind(ElementKind.Table).Single(t => t.Name == "orders");
+            Assert.Equal("VARCHAR(320)", DbModel.Column(customer, "email")!.Get(FieldKeys.SqlType));
+            Assert.Equal("DECIMAL(10,2)", DbModel.Column(orders, "total")!.Get(FieldKeys.SqlType));
+            Assert.False(DbModel.IsNullable(DbModel.Column(customer, "email")!));
+            Assert.True(DbModel.IsNullable(DbModel.Column(orders, "customer_id")!));
+            Assert.True(DbModel.IsPk(DbModel.Column(customer, "id")!));
+            Assert.Equal("PK_orders", orders.Get(DbFields.PkName));
+            Assert.Contains(DbModel.Constraints(customer), k => k.Name == "UQ_email" && k.Get(DbFields.Columns) == "email");
+            var fk = m.Outgoing(orders, ElementKind.ForeignKey).Single();
+            Assert.Equal((customer, "customer_id", "id"), (fk.Target, fk.Get(FieldKeys.FkColumns), fk.Get(FieldKeys.RefColumns)));
+            Assert.Contains("REFERENCES \"customer\"", SqlDdl.Generate(m, SqlDialect.PostgreSql));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { dir.Delete(true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public void Dacpac_Without_Model_Is_Rejected()
     {
         using var ms = new MemoryStream();
@@ -510,6 +562,27 @@ public class DatabaseModelTests
         Assert.Equal("customer_id", fk.Get(FieldKeys.FkColumns));
         Assert.Equal("customer_id", ix.Get(DbFields.Columns));
         Assert.Equal("customer_key", fk.Get(FieldKeys.RefColumns));
+    }
+
+    [Fact]
+    public void Project_File_And_Xmi_Round_Trips_Keep_The_Data_Model()
+    {
+        var (m, r) = Import(DatabaseScripts.Postgres, "postgresql");
+        var g = DbModel.CreateGroup(m, r.Database, "Ordering");
+        DbModel.AddToGroup(m, m.OfKind(ElementKind.Table).Where(t => t.Name == "order"), g);
+        var before = DbExtract.FromModel(m, r.Database).Catalog;
+
+        var reloaded = ProjectFile.Deserialize(ProjectFile.Serialize(m));
+        var db2 = DbModel.Databases(reloaded).Single();
+        Assert.Empty(DbDiff.Compare(before, DbExtract.FromModel(reloaded, db2).Catalog));
+        Assert.Single(DbModel.Members(reloaded, DbModel.Groups(reloaded).Single()));
+
+        var (viaXmi, _) = XmiExchange.Import(XmiExchange.ToXml(m));
+        var db3 = DbModel.Databases(viaXmi).Single();
+        var diff = DbDiff.Compare(before, DbExtract.FromModel(viaXmi, db3).Catalog);
+        Assert.True(diff.Count == 0, string.Join("\n", diff.Select(d => d.Describe())));
+        Assert.Contains(viaXmi.OfKind(ElementKind.DbIndex), i => i.Name == "order_open_idx");
+        Assert.Contains(viaXmi.OfKind(ElementKind.Sequence), s => s.Name == "invoice_no");
     }
 
     [Fact]
