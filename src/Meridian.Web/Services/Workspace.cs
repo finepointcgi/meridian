@@ -355,6 +355,46 @@ public sealed class Workspace : IDisposable, ISessionClient
             foreach (var c in _open) c.ClearInvalidSelection();
         }
         if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open) c.ClearInvalidSelection();
+        if (change is { Kind: ChangeKind.Added, Element: Diagram created } && !Model.IsApplyingRemote) QueueCreatedDiagram(created);
+        Bump();
+    }
+
+    // ---------------------------------------------------------------- new diagrams open as tabs
+
+    /// <summary>Most diagrams one action may create and still all open as tabs; beyond this (imports), only the first opens.</summary>
+    public const int AutoOpenLimit = 3;
+
+    private readonly List<Diagram> _created = new();
+
+    /// <summary>
+    /// A diagram made here (any command, template, import, script, the assistant, SysML v2 text): open it as a tab once the
+    /// current action has finished, so its content is in place and callers that already opened it aren't disturbed.
+    /// Diagrams made by collaborators don't open on this screen.
+    /// </summary>
+    private void QueueCreatedDiagram(Diagram d)
+    {
+        _created.Add(d);
+        if (_created.Count > 1) return;   // a flush is already scheduled for this action
+        if (SynchronizationContext.Current == null) { FlushCreatedDiagrams(); return; }   // tests / no UI thread: now
+        FlushLater();
+    }
+
+    private async void FlushLater()
+    {
+        await Task.Yield();   // after the current synchronous action, on the circuit's thread
+        FlushCreatedDiagrams();
+    }
+
+    private void FlushCreatedDiagrams()
+    {
+        var created = _created.Where(Model.Contains).ToList();
+        _created.Clear();
+        if (created.Count == 0) return;
+        var toOpen = created.Count <= AutoOpenLimit ? created : created.Take(1).ToList();
+        var already = Active;
+        foreach (var d in toOpen) if (!_open.Any(c => ReferenceEquals(c.Diagram, d))) Open(d);
+        // Keep a tab the action chose to show; otherwise show the newest diagram.
+        if (already != null && toOpen.Any(d => ReferenceEquals(d, already.Diagram))) Activate(already);
         Bump();
     }
 

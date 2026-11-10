@@ -230,6 +230,9 @@ public sealed class ModelRepository
 
     private bool _applyingRemote;
 
+    /// <summary>True while an operation made by someone else is being applied (see <see cref="ApplyRemote"/>).</summary>
+    public bool IsApplyingRemote => _applyingRemote;
+
     /// <summary>Raised for every local mutation (including undo/redo), for replication to collaborators.</summary>
     public event Action<ModelOp>? OpEmitted;
 
