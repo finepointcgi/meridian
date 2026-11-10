@@ -1,0 +1,426 @@
+@using Meridian.Serialization
+@inherits WorkspaceComponent
+@implements IAsyncDisposable
+
+<link rel="stylesheet" href="css/sysml-editor.css" />
+<div class="sx-panel @(State.Expanded ? "expanded" : "")">
+    <div class="sx-bar">
+        <span class="title"><MudIcon Icon="@Icons.Material.Outlined.Code" />SysML v2</span>
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
+            <ActivatorContent>
+                <span class="sx-scope" title="@Scope.QualifiedName">
+                    <MudIcon Icon="@(Scope.Kind == ElementKind.Model ? Icons.Material.Outlined.Public : Icons.Material.Outlined.Folder)" />
+                    <span>@(Scope.Kind == ElementKind.Model ? "Whole model" : Scope.DisplayName)</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" />
+                </span>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Public" OnClick="() => SwitchScope(Ws.Model.Root)">Whole model</MudMenuItem>
+                @if (SelectionPackage() is { } sp && !ReferenceEquals(sp, Scope))
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Folder" OnClick="() => SwitchScope(sp)">Package of selection: @sp.DisplayName</MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+        <span class="sx-state @(_errors > 0 ? "bad" : State.Dirty ? "dirty" : "")">
+            <span class="dot"></span>@(State.Dirty ? "Modified — not applied" : "In sync with the model")
+        </span>
+        @if (_errors > 0) { <span class="sx-chip">@_errors error@(_errors == 1 ? "" : "s")</span> }
+        @if (_warnings > 0) { <span class="sx-chip warn">@_warnings warning@(_warnings == 1 ? "" : "s")</span> }
+        <span style="flex:1"></span>
+        <MudTooltip Text="Write element ids as /* @@id */ comments so renames and moves keep identity, diagrams and links">
+            <label class="sx-toggle"><input type="checkbox" checked="@State.ShowIds" @onchange="ToggleIds" /> Ids</label>
+        </MudTooltip>
+        <MudTooltip Text="Discard edits and reload the text from the model">
+            <button class="sx-btn" @onclick="Reload" disabled="@(!State.Dirty && !State.Stale)"><MudIcon Icon="@Icons.Material.Outlined.Refresh" />Reload</button>
+        </MudTooltip>
+        <MudTooltip Text="Parse and apply the changes to the model (one undo step)">
+            <button class="sx-btn primary" @onclick="ApplyClicked" disabled="@(Ws.ReadOnly || !State.Dirty)"><MudIcon Icon="@Icons.Material.Outlined.Check" />Apply <kbd>@(_mac ? "⌘↵" : "Ctrl+↵")</kbd></button>
+        </MudTooltip>
+        <MudTooltip Text="@(State.Expanded ? "Back to the dock" : "Full editor")">
+            <MudIconButton Size="Size.Small" Icon="@(State.Expanded ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)" OnClick="() => State.Expanded = !State.Expanded" />
+        </MudTooltip>
+    </div>
+    @if (State.Stale && State.Dirty)
+    {
+        <div class="sx-notice">
+            <MudIcon Icon="@Icons.Material.Outlined.Sync" />
+            <span>The model changed since you started editing. Applying now overwrites those changes within this scope.</span>
+            <a @onclick="Reload">Reload</a>
+            <a @onclick="() => State.Stale = false" style="color:var(--text-3)">Keep editing</a>
+        </div>
+    }
+    @if (Ws.ReadOnly)
+    {
+        <div class="sx-notice"><MudIcon Icon="@Icons.Material.Outlined.Visibility" /><span>View only — you can read but not apply text edits.</span></div>
+    }
+    <div class="sx-editor" @ref="_host"></div>
+    @if (_problems.Count > 0)
+    {
+        <div class="sx-problems">
+            @foreach (var d in _problems.Take(200))
+            {
+                var diag = d;
+                <div class="sx-problem" @onclick="() => GoTo(diag)">
+                    <MudIcon Icon="@(diag.IsError ? Icons.Material.Filled.Error : diag.Severity == SysmlSeverity.Warning ? Icons.Material.Filled.Warning : Icons.Material.Outlined.Info)"
+                             Style="@($"color:{(diag.IsError ? "var(--danger)" : diag.Severity == SysmlSeverity.Warning ? "var(--warn)" : "var(--accent)")}")" />
+                    <span class="pos">Ln @diag.Span.Line, Col @diag.Span.Column</span>
+                    <span>@diag.Message</span>
+                </div>
+            }
+        </div>
+    }
+    @if (_summary != null)
+    {
+        <div class="sx-summary" title="@_summaryDetail">@_summary</div>
+    }
+</div>
+
+@code {
+    /// <summary>Editor state that outlives the panel (the dock destroys inactive panels); owned by the workbench.</summary>
+    public sealed class EditorState
+    {
+        public string? ScopeId { get; set; }
+        public string Text { get; set; } = "";
+        public string Baseline { get; set; } = "";
+        public bool ShowIds { get; set; } = true;
+        public bool Stale { get; set; }
+        public bool Expanded { get; set; }
+        public bool Dirty => Text != Baseline;
+        internal ModelRepository? Model { get; set; }
+        internal int Request { get; private set; }
+        internal int Handled { get; set; }
+        internal string? RequestedScopeId { get; private set; }
+
+        /// <summary>Asks the panel to show this package (or the whole model when null).</summary>
+        public void RequestScope(Element? scope)
+        {
+            RequestedScopeId = scope?.Id;
+            Request++;
+        }
+    }
+
+    [Parameter, EditorRequired] public EditorState State { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    [Inject] private IDialogService Dialogs { get; set; } = default!;
+
+    private ElementReference _host;
+    private IJSObjectReference? _mod;
+    private DotNetObjectReference<SysmlTextPanel>? _self;
+    private ModelRepository? _model;
+    private SysmlDocument? _doc;
+    private List<SysmlDiagnostic> _problems = new();
+    private int _errors, _warnings;
+    private string? _summary, _summaryDetail;
+    private bool _applying, _refreshQueued, _mac = true;
+    private Element? _lastSelected;
+
+    private Element Scope => State.ScopeId != null && Ws.Model.Find(State.ScopeId) is { } s ? s : Ws.Model.Root;
+
+    private Element? SelectionPackage() =>
+        Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Attach();
+        _lastSelected = Ws.Selected;
+        if (State.Request != State.Handled && !State.Dirty)
+        {   // opened through "Edit as SysML v2 text": take the requested scope
+            State.ScopeId = State.RequestedScopeId is { } rid && Ws.Model.Find(rid) is { Kind: not ElementKind.Model } rs ? rs.Id : null;
+            State.Model = null;
+        }
+        State.Handled = State.Request;
+        // Fresh baseline if nothing is being edited; otherwise keep the buffer and flag a changed model.
+        var fresh = ExportScope();
+        if (!ReferenceEquals(State.Model, Ws.Model) || !State.Dirty || State.ScopeId != null && Ws.Model.Find(State.ScopeId) == null) Load(fresh);
+        else if (fresh != State.Baseline) State.Stale = true;
+        Reparse();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (State.Request != State.Handled)
+        {
+            State.Handled = State.Request;
+            var target = State.RequestedScopeId is { } id ? Ws.Model.Find(id) ?? Ws.Model.Root : Ws.Model.Root;
+            await SwitchScope(target);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _mod = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sysml-editor.js");
+            _self = DotNetObjectReference.Create(this);
+            _mac = await _mod.InvokeAsync<bool>("isMac");
+            await _mod.InvokeVoidAsync("create", _host, _self, State.Text, Ws.ReadOnly);
+            await PushDiagnostics();
+            if (Ws.Selected != null) await RevealElement(Ws.Selected, focus: false);
+            StateHasChanged();
+        }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }   // prerendering / tests without a JS runtime
+    }
+
+    // ------------------------------------------------------------------ model <-> text
+
+    private void Attach()
+    {
+        if (ReferenceEquals(_model, Ws.Model)) return;
+        if (_model != null) _model.Changed -= OnModelChanged;
+        _model = Ws.Model;
+        _model.Changed += OnModelChanged;
+    }
+
+    private string ExportScope() =>
+        SysMLv2Text.Export(Ws.Model, new SysMLv2ExportOptions { Scope = Scope, EmitIds = State.ShowIds }).Replace("\r\n", "\n");
+
+    private void Load(string text)
+    {
+        State.Model = Ws.Model;
+        State.Text = State.Baseline = text;
+        State.Stale = false;
+    }
+
+    private void OnModelChanged(object? sender, ModelChange change)
+    {
+        if (_applying || change.Kind == ChangeKind.DiagramChanged || _refreshQueued) return;
+        _refreshQueued = true;
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(250);
+            _refreshQueued = false;
+            await RefreshFromModel();
+        });
+    }
+
+    private async Task RefreshFromModel()
+    {
+        var fresh = ExportScope();
+        if (fresh == State.Baseline) return;
+        if (!State.Dirty)
+        {
+            Load(fresh);
+            Reparse();
+            await PushText(keepView: true);
+        }
+        else State.Stale = true;
+        StateHasChanged();
+    }
+
+    protected override void OnWorkspaceChanged()
+    {
+        if (!ReferenceEquals(_model, Ws.Model))
+        {   // another project was opened
+            Attach();
+            State.ScopeId = null;
+            Load(ExportScope());
+            Reparse();
+            _ = InvokeAsync(() => PushText(keepView: false));
+        }
+        if (!ReferenceEquals(_lastSelected, Ws.Selected))
+        {
+            _lastSelected = Ws.Selected;
+            if (Ws.Selected is { } sel) _ = InvokeAsync(() => RevealElement(sel, focus: false));
+        }
+    }
+
+    private void Reparse()
+    {
+        _doc = SysMLv2Parser.Parse(State.Text);
+        _problems = _doc.Diagnostics.OrderBy(d => d.Span.Start).ToList();
+        Count();
+    }
+
+    private void Count()
+    {
+        _errors = _problems.Count(d => d.IsError);
+        _warnings = _problems.Count(d => d.Severity == SysmlSeverity.Warning);
+    }
+
+    private async Task PushText(bool keepView)
+    {
+        if (_mod == null) return;
+        try
+        {
+            await _mod.InvokeVoidAsync("setText", _host, State.Text, keepView);
+            await PushDiagnostics();
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task PushDiagnostics()
+    {
+        if (_mod == null || _doc == null) return;
+        var list = _problems.Where(d => d.Span.Start <= State.Text.Length).Select(d => new
+        {
+            line = d.Span.Line, col = d.Span.Column, len = Math.Max(1, d.Span.Length),
+            sev = d.Severity switch { SysmlSeverity.Error => 0, SysmlSeverity.Warning => 1, _ => 2 }, msg = d.Message,
+        }).ToArray();
+        try { await _mod.InvokeVoidAsync("setDiagnostics", _host, list); }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task RevealElement(Element e, bool focus)
+    {
+        if (_mod == null || _doc == null || !Ws.Model.Contains(e)) return;
+        var spans = SysMLv2Sync.Locate(Ws.Model, Scope, _doc);
+        // Relationships and unrepresented elements: fall back to the nearest represented owner.
+        foreach (var a in e.AncestorsAndSelf())
+            if (spans.TryGetValue(a.Id, out var span))
+            {
+                try { await _mod.InvokeVoidAsync("reveal", _host, span.Start, span.End, focus); }
+                catch (JSDisconnectedException) { }
+                return;
+            }
+    }
+
+    // ------------------------------------------------------------------ JS callbacks
+
+    [JSInvokable]
+    public async Task OnEdit(string text)
+    {
+        State.Text = text;
+        Reparse();
+        if (_summary != null && State.Dirty) _summary = null;
+        await PushDiagnostics();
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnApplyShortcut(string text)
+    {
+        State.Text = text;
+        await Apply();
+    }
+
+    [JSInvokable]
+    public Task OnNavigate(int offset)
+    {
+        if (_doc == null || _doc.Text != State.Text) Reparse();
+        var e = SysMLv2Sync.ElementAt(Ws.Model, Scope, _doc!, offset);
+        if (e != null)
+        {
+            if (Shell != null) Shell.Navigate(e); else Ws.Select(e);
+            Ws.SetStatus($"{Metamodel.DisplayName(e.Kind)} {e.QualifiedName}");
+        }
+        else Ws.SetStatus(State.Dirty ? "No element there yet — apply the text first" : "No model element at that position");
+        return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------ commands
+
+    private async Task ApplyClicked()
+    {
+        if (_mod != null)
+        {
+            try { State.Text = await _mod.InvokeAsync<string?>("getText", _host) ?? State.Text; }
+            catch (JSDisconnectedException) { return; }
+        }
+        await Apply();
+    }
+
+    private async Task Apply()
+    {
+        Reparse();
+        if (_doc!.HasErrors)
+        {
+            await PushDiagnostics();
+            _summary = $"Not applied: fix {_errors} error{(_errors == 1 ? "" : "s")} first.";
+            _summaryDetail = null;
+            Ws.SetStatus(_summary);
+            if (_problems.FirstOrDefault(p => p.IsError) is { } first) await GoTo(first);
+            StateHasChanged();
+            return;
+        }
+        if (Ws.ReadOnly) return;
+        SysmlSyncResult result;
+        _applying = true;
+        try { result = SysMLv2Sync.Apply(Ws.Model, Scope, _doc); }
+        catch (InvalidOperationException ex)
+        {
+            _summary = "Could not apply: " + ex.Message;
+            StateHasChanged();
+            return;
+        }
+        finally { _applying = false; }
+
+        var n = result.Changes.Count;
+        _summary = n == 0 ? "Applied — no changes." : $"Applied {n} change{(n == 1 ? "" : "s")} (one undo step): " +
+            string.Join(" · ", result.Changes.Take(4).Select(c => c.Description)) + (n > 4 ? $" · +{n - 4} more" : "");
+        _summaryDetail = string.Join("\n", result.Changes.Select(c => c.Description));
+        foreach (var c in result.Changes) Ws.Log("SysML v2 text: " + c.Description);
+        Ws.SetStatus(n == 0 ? "SysML v2 text applied — model already up to date" : $"Applied {n} change{(n == 1 ? "" : "s")} from SysML v2 text");
+
+        // Canonical text from the model; mapping warnings stay listed (their positions refer to the applied text).
+        Load(ExportScope());
+        Reparse();
+        _problems.AddRange(result.Diagnostics.Where(d => d.Severity != SysmlSeverity.Info || result.Diagnostics.Count < 20));
+        Count();
+        await PushText(keepView: true);
+        Ws.Bump();
+    }
+
+    private async Task Reload()
+    {
+        Load(ExportScope());
+        Reparse();
+        _summary = null;
+        await PushText(keepView: true);
+    }
+
+    private async Task ToggleIds(ChangeEventArgs e)
+    {
+        var wasDirty = State.Dirty;
+        State.ShowIds = e.Value is true;
+        if (!wasDirty) await Reload();
+        else _summary = "Id comments will change on the next reload or apply.";
+    }
+
+    private async Task SwitchScope(Element scope)
+    {
+        if (ReferenceEquals(scope, Scope) && State.Model == Ws.Model) { await RevealSelectionLater(); return; }
+        if (State.Dirty)
+        {
+            var ok = await Dialogs.ShowMessageBox("Unapplied SysML v2 edits", "Switching the scope discards the text edits you haven't applied.", yesText: "Discard", cancelText: "Keep editing");
+            if (ok != true) return;
+        }
+        State.ScopeId = scope.Kind == ElementKind.Model ? null : scope.Id;
+        await Reload();
+        await RevealSelectionLater();
+        StateHasChanged();
+    }
+
+    private async Task RevealSelectionLater()
+    {
+        if (Ws.Selected is { } sel) await RevealElement(sel, focus: false);
+    }
+
+    private async Task GoTo(SysmlDiagnostic d)
+    {
+        if (_mod == null) return;
+        try { await _mod.InvokeVoidAsync("revealLine", _host, d.Span.Line, d.Span.Column); }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        base.Dispose();
+        if (_model != null) _model.Changed -= OnModelChanged;
+        if (_mod != null)
+        {
+            try
+            {
+                State.Text = await _mod.InvokeAsync<string?>("getText", _host) ?? State.Text;
+                await _mod.InvokeVoidAsync("dispose", _host);
+                await _mod.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException) { }
+        }
+        _self?.Dispose();
+    }
+}

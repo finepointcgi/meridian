@@ -170,6 +170,19 @@ public class SysMLv2SyncTests
     }
 
     [Fact]
+    public void References_Follow_A_Renamed_Definition()
+    {
+        var m = SampleModels.Vehicle();
+        var engine = m.OfKind(ElementKind.Block).Single(b => b.Name == "Engine");
+        var satisfies = m.Outgoing(engine, ElementKind.Satisfy).Count();
+        var r = Apply(m, Text(m).Replace("part def Engine ", "part def Motor "));   // only the declaration is edited
+        Assert.Single(r.Changes);
+        Assert.Equal(engine.Id, m.OfKind(ElementKind.Property).Single(p => p.Name == "engine" && p.Owner!.Name == "Vehicle").TypeRef);
+        Assert.Equal(satisfies, m.Outgoing(engine, ElementKind.Satisfy).Count());
+        Assert.Contains("part engine : Motor", Text(m));
+    }
+
+    [Fact]
     public void Lone_Rename_Without_Ids_Is_Detected()
     {
         var m = SampleModels.Vehicle();

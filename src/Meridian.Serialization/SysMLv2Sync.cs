@@ -416,7 +416,7 @@ public static class SysMLv2Sync
                     string? value = null;
                     if (d.Types.FirstOrDefault() is { } t)
                     {
-                        var hit = _names.Lookup(t, context, x => Metamodel.IsClassifier(x.Kind));
+                        var hit = L(t, context, x => Metamodel.IsClassifier(x.Kind));
                         if (hit != null) value = hit.Id;
                         else if (Metamodel.PrimitiveTypes.Contains(t.Simple) && (t.Segments.Count == 1 || t.Segments[0] == "ScalarValues")) value = t.Simple;
                         else value = t.Text;
@@ -429,7 +429,7 @@ public static class SysMLv2Sync
                 }
                 if (e.Kind == ElementKind.Action)
                 {
-                    var b = d.Types.FirstOrDefault() is { } t ? _names.Lookup(t, context, x => x.Kind == ElementKind.Activity) : null;
+                    var b = d.Types.FirstOrDefault() is { } t ? L(t, context, x => x.Kind == ElementKind.Activity) : null;
                     if (d.Types.Count > 0 && b == null) Diag(SysmlSeverity.Warning, $"Unknown action definition '{d.Types[0].Text}'", d.Types[0].Span);
                     Set(e, FieldKeys.Behavior, b?.Id);
                 }
@@ -439,8 +439,8 @@ public static class SysMLv2Sync
                     var refs = d.Specializes.Concat(!d.IsDef && e.Kind is ElementKind.Block ? d.Types : []).ToList();
                     foreach (var r in refs)
                     {
-                        var g = _names.Lookup(r, context, x => x.Kind == e.Kind && !ReferenceEquals(x, e))
-                                ?? _names.Lookup(r, context, x => Metamodel.IsClassifier(x.Kind) && !ReferenceEquals(x, e));
+                        var g = L(r, context, x => x.Kind == e.Kind && !ReferenceEquals(x, e))
+                                ?? L(r, context, x => Metamodel.IsClassifier(x.Kind) && !ReferenceEquals(x, e));
                         if (g == null) { Diag(SysmlSeverity.Warning, $"Unknown supertype '{r.Text}' of '{e.Name}'", r.Span); continue; }
                         wanted.Add(g);
                     }
@@ -591,7 +591,7 @@ public static class SysMLv2Sync
         private Element? Resolve(SysmlRef? r, Element context, string what)
         {
             if (r == null) return null;
-            var hit = _names.Lookup(r, context);
+            var hit = L(r, context, null);
             if (hit == null) Diag(SysmlSeverity.Warning, $"Unknown {what} '{r.Text}'", r.Span);
             return hit;
         }
@@ -600,6 +600,8 @@ public static class SysMLv2Sync
         {
             if (!r.IsChain) return (Resolve(r, context, "connector end"), null);
             var path = _names.LookupChain(r.Segments, context);
+            if (path == null && _renamedFrom.TryGetValue(r.Segments[0], out var renamed))
+                path = _names.LookupChain([SysmlNameIndex.ExportName(renamed), .. r.Segments.Skip(1)], context);
             if (path == null) { Diag(SysmlSeverity.Warning, $"Unknown connector end '{r.Text}'", r.Span); return (null, null); }
             return (path[^1], path.Count > 1 ? path[^2].Id : null);
         }
@@ -623,7 +625,7 @@ public static class SysMLv2Sync
                 return n;
             }
             if (!r.IsChain && r.Segments.Count == 1 && FindNode(behavior, r.Simple) is { } node) return node;
-            return _names.Lookup(r, behavior);
+            return L(r, behavior, null);
         }
 
         private void CollectFacts(IEnumerable<SysmlMember> body, Element ctx, List<Fact> into)
@@ -769,8 +771,20 @@ public static class SysMLv2Sync
 
         // -------------------------------------------------------------- helpers
 
+        /// <summary>Elements renamed by this edit, by their old name: references still using it follow the rename.</summary>
+        private readonly Dictionary<string, Element> _renamedFrom = new(StringComparer.Ordinal);
+
+        private Element? L(SysmlRef r, Element context, Func<Element, bool>? filter)
+        {
+            var hit = _names.Lookup(r, context, filter);
+            if (hit == null && !r.IsChain && _renamedFrom.TryGetValue(r.Simple, out var renamed) && m.Contains(renamed) && (filter == null || filter(renamed)))
+                hit = renamed;
+            return hit;
+        }
+
         private void Rename(Element e, string name)
         {
+            if (!string.IsNullOrEmpty(e.Name)) _renamedFrom.TryAdd(e.Name, e);
             var old = e.DisplayName;
             m.Rename(e, name);
             Change(SysmlChangeKind.Rename, $"Rename {old} → {name}");

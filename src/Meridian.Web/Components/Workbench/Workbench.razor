@@ -172,6 +172,7 @@
             <div class="ritems">
                 <button class="rbtn" @onclick="OpenReport"><MudIcon Icon="@Icons.Material.Outlined.Article" /><span class="t">Report</span></button>
                 <button class="rbtn" @onclick="ExportSysML"><MudIcon Icon="@Icons.Material.Outlined.Code" /><span class="t">SysML v2</span></button>
+                <MudTooltip Text="Edit as SysML v2 text — the selected package, live-synced with the model"><button class="rbtn @(_dockOpen && _dock == 12 ? "on" : "")" @onclick="EditAsSysml"><MudIcon Icon="@Icons.Material.Outlined.EditNote" /><span class="t">Edit text</span></button></MudTooltip>
                 <button class="rbtn" @onclick="ExportXmi"><MudIcon Icon="@Icons.Material.Outlined.SwapHoriz" /><span class="t">XMI</span></button>
                 <button class="rbtn" @onclick="GenerateCode"><MudIcon Icon="@Icons.Material.Outlined.DataObject" /><span class="t">C#</span></button>
                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
@@ -273,6 +274,7 @@
                     @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
+                    @DockTab(12, "SysML v2 text", Icons.Material.Outlined.Code, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -288,6 +290,7 @@
                             case 4: <ImpactPanel />; break;
                             case 5: <SimulationPanel />; break;
                             case 6: <ParametricsPanel />; break;
+                            case 12: <SysmlTextPanel State="_sysml" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>
