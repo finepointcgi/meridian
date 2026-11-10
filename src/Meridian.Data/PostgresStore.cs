@@ -70,6 +70,7 @@ public sealed partial class PostgresStore : IMeridianStore
         await cmd.ExecuteNonQueryAsync();
         await MigrateReviewsAsync();
         await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (PostgresStore.Integrations.cs)
+        await MigrateAdminAsync(); // enterprise administration tables: PostgresStore.Admin.cs
     }
 
     // =============================================================== users
@@ -94,14 +95,8 @@ public sealed partial class PostgresStore : IMeridianStore
         return user;
     }
 
-    public async Task<UserAccount?> VerifyUserAsync(string username, string password)
-    {
-        await using var cmd = _ds.CreateCommand("select id, username, display_name, color, password_hash from users where username = $1");
-        cmd.Parameters.Add(new() { Value = username.Trim().ToLowerInvariant() });
-        await using var r = await cmd.ExecuteReaderAsync();
-        if (!await r.ReadAsync()) return null;
-        return Accounts.VerifyPassword(password, r.GetString(4)) ? new UserAccount(r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3)) : null;
-    }
+    public async Task<UserAccount?> VerifyUserAsync(string username, string password) =>
+        (await AuthenticateAsync(username, password, LoginPolicy.MaxFailures, LoginPolicy.Lockout)).User;
 
     public async Task<UserAccount?> FindUserAsync(string username)
     {
@@ -117,7 +112,12 @@ public sealed partial class PostgresStore : IMeridianStore
     {
         await using var cmd = _ds.CreateCommand("""
             select p.id, p.name, m.role, p.updated_at, p.revision, u.display_name
-            from projects p join project_members m on m.project_id = p.id and m.user_id = $1
+            from projects p join (
+                select project_id, max(role) as role from (
+                    select project_id, role from project_members where user_id = $1
+                    union all
+                    select g.project_id, g.role from team_project_roles g join team_members t on t.team_id = g.team_id where t.user_id = $1) grants
+                group by project_id) m on m.project_id = p.id
             left join users u on u.id = p.updated_by
             order by p.updated_at desc
             """);
@@ -180,7 +180,13 @@ public sealed partial class PostgresStore : IMeridianStore
 
     public async Task<ProjectRole?> RoleOfAsync(Guid projectId, Guid userId)
     {
-        await using var cmd = _ds.CreateCommand("select role from project_members where project_id = $1 and user_id = $2");
+        // Effective role: the higher of a direct membership and any team grant.
+        await using var cmd = _ds.CreateCommand("""
+            select max(role) from (
+                select role from project_members where project_id = $1 and user_id = $2
+                union all
+                select g.role from team_project_roles g join team_members t on t.team_id = g.team_id where g.project_id = $1 and t.user_id = $2) grants
+            """);
         cmd.Parameters.Add(new() { Value = projectId });
         cmd.Parameters.Add(new() { Value = userId });
         var v = await cmd.ExecuteScalarAsync();

@@ -2,6 +2,7 @@
 @using Meridian.Core.Analysis
 @using Meridian.Serialization
 @inject IMeridianStore Db
+@inject Meridian.Web.Admin.IAuditLog Audit
 @inject Workspace Ws
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
@@ -86,6 +87,7 @@
         var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, _message!.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
         Ws.Session.NotifyVersionCommitted(n, _message!.Trim(), Ws.User);
         Snackbar.Add($"Committed version {n}", Severity.Success);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionCommit, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{n}", details: new { message = _message!.Trim() });
         _message = null;
         await Reload();
     }
@@ -103,6 +105,7 @@
         if (_selectedJson is null || _selected is null) return;
         await JS.InvokeVoidAsync("meridian.download", $"{Ws.Session?.Name} v{_selected.Number}.meridian", "application/json",
             Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_selectedJson)));
+        if (Ws.Session is { } s) await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectExport, Ws.User, s.ProjectId, s.Name, target: $"v{_selected.Number}.meridian");
     }
 
     private async Task Restore()
@@ -112,6 +115,7 @@
         if (ok != true) return;
         await Db.CommitVersionAsync(Ws.Session.ProjectId, $"Before restoring v{_selected.Number}", ProjectFile.Serialize(Ws.Model), Ws.User.Id);
         Ws.Session.Reset(_selectedJson, Ws.User.Id);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionRestore, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{_selected.Number}");
         Snackbar.Add($"Restored v{_selected.Number}", Severity.Success);
         MudDialog.Close();
     }

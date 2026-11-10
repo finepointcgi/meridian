@@ -95,6 +95,7 @@
                         @if (!Host.LocalMode)
                         {
                             <MudMenuItem Icon="@Icons.Material.Outlined.Key" OnClick="@(() => Dialogs.ShowAsync<ApiTokensDialog>("API tokens", new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }))">API tokens…</MudMenuItem>
+                            <Meridian.Web.Components.Admin.AdminMenuLink />
                             <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="SignOut">Sign out</MudMenuItem>
                         }
                     </ChildContent>

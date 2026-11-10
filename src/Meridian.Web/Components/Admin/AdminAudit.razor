@@ -1,0 +1,87 @@
+@using Meridian.Data
+@using Meridian.Web.Admin
+@inject IMeridianStore Db
+
+<div class="admin-toolbar">
+    <MudSelect T="string" @bind-Value="_action" Placeholder="All actions" Label="Action" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true" Style="max-width:170px">
+        @foreach (var p in AuditActions.Prefixes) { <MudSelectItem T="string" Value="p">@p.TrimEnd('.')</MudSelectItem> }
+    </MudSelect>
+    <MudTextField T="string" @bind-Value="_actor" Label="Actor" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:160px" Immediate="false" />
+    <MudTextField T="string" @bind-Value="_text" Label="Search target, project, details" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:260px" />
+    <MudDatePicker @bind-Date="_from" Label="From" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="max-width:150px" />
+    <MudDatePicker @bind-Date="_to" Label="To" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" Style="max-width:150px" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.FilterAlt" OnClick="Search">Apply</MudButton>
+    <span class="grow"></span>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download" Href="@CsvUrl()" Target="_blank">Export CSV</MudButton>
+</div>
+
+<div class="admin-panel" style="padding:4px 6px">
+    <table class="admin-table">
+        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Project</th><th>Target</th><th>Details</th><th>IP</th></tr></thead>
+        <tbody>
+            @foreach (var e in _page.Items)
+            {
+                <tr>
+                    <td class="muted" style="white-space:nowrap">@AdminFormat.When(e.At)</td>
+                    <td>@e.Actor</td>
+                    <td><span class="pill @Tone(e.Action)">@e.Action</span></td>
+                    <td>@(e.ProjectName ?? "")</td>
+                    <td>@(e.Target ?? "")</td>
+                    <td class="details" title="@e.DetailsJson"><code>@(e.DetailsJson ?? "")</code></td>
+                    <td class="muted"><code>@(e.Ip ?? "")</code></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (_page.Items.Count == 0) { <div class="admin-empty">No audit entries match.</div> }
+</div>
+<div class="d-flex align-center gap-3 mt-3">
+    <span class="muted">@_page.Total entries</span>
+    <span class="grow" style="flex:1"></span>
+    @if (Pages > 1)
+    {
+        <MudPagination Count="Pages" Selected="_pageIndex" SelectedChanged="Go" Size="Size.Small" BoundaryCount="1" MiddleCount="3" />
+    }
+</div>
+<div class="admin-note mt-2">The audit log is append-only: the database refuses updates and deletes to it.</div>
+
+@code {
+    private const int PageSize = 50;
+    private AuditPage _page = new([], 0);
+    private int _pageIndex = 1;
+    private string? _action, _actor, _text;
+    private DateTime? _from, _to;
+
+    private int Pages => Math.Max(1, (int)Math.Ceiling(_page.Total / (double)PageSize));
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private AuditQuery Query(int skip, int take) => new(_action, _actor, null, _text,
+        _from is { } f ? DateTime.SpecifyKind(f.Date, DateTimeKind.Local) : null,
+        _to is { } t ? DateTime.SpecifyKind(t.Date.AddDays(1), DateTimeKind.Local) : null, skip, take);
+
+    private async Task Load() => _page = await Db.QueryAuditAsync(Query((_pageIndex - 1) * PageSize, PageSize));
+
+    private async Task Search() { _pageIndex = 1; await Load(); }
+
+    private async Task Go(int page) { _pageIndex = page; await Load(); }
+
+    private string CsvUrl()
+    {
+        var q = Query(0, 0);
+        var parts = new List<string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) parts.Add($"{k}={Uri.EscapeDataString(v)}"); }
+        Add("action", q.Action); Add("actor", q.Actor); Add("text", q.Text);
+        Add("from", q.From?.ToUniversalTime().ToString("O")); Add("to", q.To?.ToUniversalTime().ToString("O"));
+        return "/admin/api/audit.csv" + (parts.Count > 0 ? "?" + string.Join("&", parts) : "");
+    }
+
+    private static string Tone(string action) => action switch
+    {
+        _ when action.EndsWith("failure") || action.EndsWith("locked") || action.EndsWith("denied") || action.EndsWith("rate-limited") || action.EndsWith("disabled") => "bad",
+        _ when action.Contains("delete") || action.Contains("disable") || action.Contains("revoke") || action.Contains("remove") || action.Contains("restore") => "warn",
+        _ when action.StartsWith("login.") || action.StartsWith("sso.") => "ok",
+        _ when action.Contains("admin") || action.StartsWith("backup.") || action.StartsWith("audit.") => "admin",
+        _ => "info",
+    };
+}

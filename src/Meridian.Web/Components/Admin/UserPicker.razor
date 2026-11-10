@@ -1,0 +1,18 @@
+@using Meridian.Data
+
+<MudAutocomplete T="UserAccount" Value="Selected" ValueChanged="OnChanged" SearchFunc="Search" ToStringFunc="@(u => u is null ? "" : $"{u.DisplayName} ({u.Username})")"
+                 Placeholder="@Placeholder" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" ResetValueOnEmptyText="true"
+                 CoerceText="false" Clearable="true" Style="min-width:260px" MaxItems="20" />
+
+@code {
+    [Parameter] public IReadOnlyList<UserAccount> Users { get; set; } = [];
+    [Parameter] public UserAccount? Selected { get; set; }
+    [Parameter] public EventCallback<UserAccount?> SelectedChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Find a user…";
+
+    private Task<IEnumerable<UserAccount>> Search(string? text, CancellationToken _) =>
+        Task.FromResult(Users.Where(u => string.IsNullOrWhiteSpace(text)
+            || u.Username.Contains(text, StringComparison.OrdinalIgnoreCase) || u.DisplayName.Contains(text, StringComparison.OrdinalIgnoreCase)));
+
+    private Task OnChanged(UserAccount? u) => SelectedChanged.InvokeAsync(u);
+}

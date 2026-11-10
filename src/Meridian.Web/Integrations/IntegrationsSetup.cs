@@ -34,6 +34,7 @@ public static class ApiAuth
         if (token is null || !token.StartsWith(ApiTokens.Marker, StringComparison.Ordinal)) return null;
         var user = await db.FindUserByApiTokenAsync(ApiTokens.Hash(token));
         if (user != null && basicUser is { Length: > 0 } && !string.Equals(basicUser.Trim(), user.Username, StringComparison.OrdinalIgnoreCase)) return null;
+        if (user != null && (await db.GetUserAsync(user.Id))?.Disabled == true) return null;   // disabled accounts lose API access too
         return user;
     }
 

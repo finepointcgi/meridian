@@ -1,0 +1,189 @@
+@using System.IO.Compression
+@using Meridian.Data
+@using Meridian.Web.Admin
+@using Microsoft.AspNetCore.Components.Forms
+@inject BackupService Backups
+@inject AdminSettings Settings
+@inject IAuditLog Audit
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@implements IDisposable
+
+<div class="admin-split" style="grid-template-columns:repeat(auto-fit, minmax(380px, 1fr))">
+    <div class="admin-panel">
+        <h3><MudIcon Icon="@Icons.Material.Outlined.CloudDownload" Style="font-size:15px" /> Download a full backup</h3>
+        <div class="admin-note">A zip of JSON: every project's latest model (including unsaved live edits), its complete version history and members.
+            Optionally the user directory — never password hashes.</div>
+        <MudCheckBox T="bool" @bind-Value="_includeUsers" Label="Include users (without passwords)" Class="mt-2" />
+        <a class="btn-primary mt-2" style="text-decoration:none; width:fit-content" href="@($"/admin/api/backup?users={(_includeUsers ? "true" : "false")}")" target="_blank" download>
+            <MudIcon Icon="@Icons.Material.Outlined.Download" Style="font-size:16px" /> Download backup
+        </a>
+    </div>
+
+    <div class="admin-panel">
+        <h3><MudIcon Icon="@Icons.Material.Outlined.SettingsBackupRestore" Style="font-size:15px" /> Restore projects</h3>
+        <div class="admin-note">Upload a Meridian backup zip, choose projects, and they are recreated with their version history. A project whose id still exists is restored as a copy.</div>
+        <div class="d-flex gap-2 align-center mt-2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.UploadFile" OnClick="PickFile" Disabled="_busy">Choose backup…</MudButton>
+            @if (_busy) { <MudProgressCircular Indeterminate="true" Size="Size.Small" /> }
+            <span class="muted">@_uploadName</span>
+        </div>
+        <div style="display:none"><InputFile id="admin-backup-file" accept=".zip,application/zip" OnChange="OnFile" /></div>
+        @if (_uploadError != null) { <MudText Typo="Typo.caption" Color="Color.Error">@_uploadError</MudText> }
+        @if (_manifest is { } m)
+        {
+            <div class="admin-note mt-3">Backup from @AdminFormat.When(m.CreatedAt) by @m.CreatedBy · @m.Projects.Count projects@(m.IncludesUsers ? " · includes users" : "")</div>
+            <div style="max-height:260px; overflow:auto" class="mt-1">
+                @foreach (var p in m.Projects)
+                {
+                    var project = p;
+                    <MudCheckBox T="bool" Value="_chosen.Contains(project.Id)" ValueChanged="v => { if (v) _chosen.Add(project.Id); else _chosen.Remove(project.Id); }"
+                                 Dense="true" Label="@($"{project.Name} — {project.Versions} versions{(project.Owner != null ? $", owner {project.Owner}" : "")}")" />
+                }
+            </div>
+            <MudCheckBox T="bool" @bind-Value="_recreateUsers" Disabled="!m.IncludesUsers" Dense="true" Label="Recreate missing member accounts (they get no password until you reset it)" />
+            <div class="d-flex gap-2 mt-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Outlined.Restore" Disabled="_chosen.Count == 0 || _busy" OnClick="Restore">Restore @_chosen.Count project@(_chosen.Count == 1 ? "" : "s")</MudButton>
+                <MudButton OnClick="() => _chosen = m.Projects.Select(x => x.Id).ToHashSet()">Select all</MudButton>
+            </div>
+        }
+        @if (_results.Count > 0)
+        {
+            <table class="admin-table mt-2">
+                <tbody>
+                    @foreach (var r in _results)
+                    {
+                        <tr>
+                            <td>@r.Name</td>
+                            <td>@if (r.Error is null) { <span class="pill ok">Restored · @r.Versions versions</span> } else { <span class="pill bad" title="@r.Error">Failed</span> <span class="muted">@r.Error</span> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+<div class="admin-panel" style="margin-top:12px">
+    <h3><MudIcon Icon="@Icons.Material.Outlined.Schedule" Style="font-size:15px" /> Scheduled backups</h3>
+    @if (Settings.Backup.Enabled)
+    {
+        <div class="admin-kv">
+            <span class="k">Folder</span><code>@Settings.Backup.Folder</code>
+            <span class="k">Every</span><span>@Settings.Backup.IntervalHours.ToString("0.##") hours, keeping the newest @Settings.Backup.Retain</span>
+            <span class="k">Users included</span><span>@(Settings.Backup.IncludeUsers ? "Yes (without passwords)" : "No")</span>
+            <span class="k">Last run</span><span>@AdminFormat.When(BackupScheduler.LastRun)@if (BackupScheduler.LastError is { } err) { <span class="pill bad" style="margin-left:8px" title="@err">Failed: @err</span> }</span>
+            <span class="k">Next run</span><span>@AdminFormat.When(BackupScheduler.NextRun)</span>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.PlayArrow" OnClick="RunNow" Disabled="_busy">Back up now</MudButton>
+        </div>
+        <table class="admin-table mt-2">
+            <thead><tr><th>File</th><th class="num">Size</th><th>Written</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var f in Backups.ListFiles())
+                {
+                    <tr>
+                        <td><code>@f.Name</code></td>
+                        <td class="num">@AdminFormat.Bytes(f.Length)</td>
+                        <td class="muted">@AdminFormat.When(f.LastWriteTimeUtc)</td>
+                        <td style="text-align:right"><a href="@($"/admin/api/backups/{Uri.EscapeDataString(f.Name)}")" target="_blank" download><MudIcon Icon="@Icons.Material.Outlined.Download" Style="font-size:17px" /></a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        <div class="admin-note">Automatic backups are off. Set <code>Meridian:Backup:Folder</code> (and optionally <code>IntervalHours</code>, <code>Retain</code>, <code>IncludeUsers</code>) in the server configuration to write a backup zip on a schedule and keep the newest N.</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminUser Me { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private const long MaxUpload = 2L * 1024 * 1024 * 1024;
+    private bool _includeUsers = true, _recreateUsers, _busy;
+    private string? _uploadName, _uploadError;
+    private FileStream? _upload;
+    private BackupService.Manifest? _manifest;
+    private HashSet<Guid> _chosen = [];
+    private IReadOnlyList<BackupService.RestoreResult> _results = [];
+
+    private async Task PickFile() => await JS.InvokeVoidAsync("meridian.click", "admin-backup-file");
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _busy = true;
+        _uploadError = null;
+        _manifest = null;
+        _results = [];
+        CloseUpload();
+        try
+        {
+            _uploadName = $"{e.File.Name} · {AdminFormat.Bytes(e.File.Size)}";
+            _upload = new FileStream(Path.GetTempFileName(), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
+            await using (var s = e.File.OpenReadStream(MaxUpload)) await s.CopyToAsync(_upload);
+            _upload.Position = 0;
+            using var zip = AdminHosting.OpenBackup(_upload);
+            _manifest = BackupService.ReadManifest(zip);
+            _chosen = _manifest.Projects.Select(p => p.Id).ToHashSet();
+            _recreateUsers = false;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or System.Text.Json.JsonException)
+        {
+            _uploadError = $"Can't read that file: {ex.Message}";
+            CloseUpload();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Restore()
+    {
+        if (_upload is null || _manifest is null) return;
+        var ok = await Dialogs.ShowMessageBox("Restore projects", $"Restore {_chosen.Count} project(s) from this backup? Existing projects are not overwritten — a project whose id is still in use comes back as a copy.", yesText: "Restore", cancelText: "Cancel");
+        if (ok != true) return;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            _upload.Position = 0;
+            using var zip = AdminHosting.OpenBackup(_upload);
+            _results = await Backups.RestoreAsync(zip, _chosen, _recreateUsers, Me.User);
+            var restored = _results.Count(r => r.Error is null);
+            Snackbar.Add($"Restored {restored} of {_results.Count} projects", restored == _results.Count ? Severity.Success : Severity.Warning);
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException)
+        {
+            _uploadError = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RunNow()
+    {
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var path = await Backups.WriteToFolderAsync();
+            Snackbar.Add($"Backup written: {Path.GetFileName(path)}", Severity.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Snackbar.Add($"Backup failed: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private void CloseUpload()
+    {
+        _upload?.Dispose();
+        _upload = null;
+    }
+
+    public void Dispose() => CloseUpload();
+}
