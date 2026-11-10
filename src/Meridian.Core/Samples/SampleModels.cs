@@ -167,6 +167,13 @@ public static class SampleModels
         var tc2 = m.Create(verification, ElementKind.TestCase, "Brake Test");
         m.Connect(ElementKind.Verify, tc2, safety);
 
+        // Simulation-driven verification: units on value properties and machine-checkable criteria (Analysis/Verification).
+        foreach (var (p, u) in new[] { (mass, "kg"), (power, "kW"), (cap, "L"), (driveForce, "N"), (topSpeed, "m/s"), (accelTime, "s"), (requiredPower, "kW") })
+            m.Set(p, ExtFieldKeys.Unit, u);
+        m.Set(accel, Analysis.VerificationKeys.Criterion, "accelTime < 8 s");
+        m.Set(range, Analysis.VerificationKeys.Criterion, "capacity * 10 km/L >= 600 km");
+        m.Set(engineReq, Analysis.VerificationKeys.Criterion, "maxPower >= 150 kW");
+
         // Diagrams
         var req = m.CreateDiagram(reqPkg, DiagramType.Requirement, "Vehicle Requirements");
         Place(m, req, perf, 40, 40); Place(m, req, accel, 40, 230); Place(m, req, range, 300, 230);

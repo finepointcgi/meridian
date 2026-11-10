@@ -45,6 +45,9 @@ public static class ModelValues
     private static readonly HashSet<string> Specials = new(StringComparer.OrdinalIgnoreCase)
         { "name", "kind", "owner", "qualifiedName", "stereotype", "type", "documentation", "id" };
 
+    /// <summary>Computed key: a requirement's last verification result with staleness ("pass", "fail (stale)" …).</summary>
+    public const string VerificationResultKey = "verificationResult";
+
     /// <summary>Normalizes aliases ("satisfies" → "rel:out:Satisfy", "doc" → "documentation").</summary>
     public static string Canonical(string key)
     {
@@ -83,6 +86,7 @@ public static class ModelValues
             case "id": return e.Id;
         }
         if (TryRel(key, out var rk, out var dir)) return string.Join(", ", Related(m, e, rk, dir).Select(ElementLabel));
+        if (key == VerificationResultKey) return Verification.LastResult(m, e)?.Label ?? "";
         if (key.StartsWith("field:", StringComparison.OrdinalIgnoreCase)) return e.Get(key[6..]);
         if (key.StartsWith(FieldKeys.TagPrefix, StringComparison.OrdinalIgnoreCase)) return TagValue(e, key[4..]);
         if (key.StartsWith("prop:", StringComparison.OrdinalIgnoreCase)) return ValueProperty(e, key[5..])?.Get(FieldKeys.DefaultValue) ?? "";
@@ -96,7 +100,7 @@ public static class ModelValues
     public static bool CanEdit(Element e, string key)
     {
         key = Canonical(key);
-        if (key is "kind" or "owner" or "qualifiedName" or "id" or "type") return false;
+        if (key is "kind" or "owner" or "qualifiedName" or "id" or "type" or VerificationResultKey) return false;
         if (TryRel(key, out _, out _)) return false;
         if (key.StartsWith("prop:", StringComparison.OrdinalIgnoreCase)) return ValueProperty(e, key[5..]) != null;
         if (key is "name" or "stereotype" or "documentation") return true;

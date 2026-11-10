@@ -176,37 +176,9 @@ public static class Variability
         return set;
     }
 
-    /// <summary>Every valid selection of the feature model (bounded; for small models and "how many products" counts).</summary>
-    public static IReadOnlyList<HashSet<Element>> EnumerateProducts(ModelRepository m, int max = 1000)
-    {
-        var features = Features(m).ToList();
-        var results = new List<HashSet<Element>>();
-        if (features.Count == 0 || features.Count > 22) return results;
-        // Depth-first over features in tree order, deciding in/out, pruning on the parent rule.
-        var order = Tree(m).Select(t => t.Feature).ToList();
-        var current = new HashSet<Element>(ReferenceEqualityComparer.Instance);
-        void Go(int i)
-        {
-            if (results.Count >= max) return;
-            if (i == order.Count)
-            {
-                if (Validate(m, current).Count == 0) results.Add(new HashSet<Element>(current, ReferenceEqualityComparer.Instance));
-                return;
-            }
-            var f = order[i];
-            var parent = Parent(m, f);
-            var parentIn = parent is null || current.Contains(parent);
-            if (parentIn)
-            {
-                current.Add(f);
-                Go(i + 1);
-                current.Remove(f);
-            }
-            if (!(parentIn && (parent is null || KindOf(f) == "mandatory"))) Go(i + 1);
-        }
-        Go(0);
-        return results;
-    }
+    /// <summary>Every valid selection of the feature model, up to <paramref name="max"/> (see <see cref="FeatureSolver"/>).</summary>
+    public static IReadOnlyList<HashSet<Element>> EnumerateProducts(ModelRepository m, int max = 1000) =>
+        Features(m).Any() ? new FeatureSolver(m).Products(max) : [];
 
     // ------------------------------------------------------------------ presence conditions / resolution
 
