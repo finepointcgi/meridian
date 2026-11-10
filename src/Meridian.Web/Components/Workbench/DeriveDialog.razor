@@ -1,0 +1,191 @@
+@* "Create from…" / "Update from source…": a derivation's plan (Meridian.Core.Derivation) as a reviewable list with checkboxes,
+   warnings and — when updating — a preview of the derived diagram with the change highlights. Create / Accept applies the
+   ticked items as ONE undoable step (done by the workbench). The optional AI fill-in only appears when the assistant is on. *@
+@using Meridian.Core.Derivation
+@inject Workspace Ws
+
+<MudDialog Class="derive-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@(_plan.IsUpdate ? Icons.Material.Outlined.Sync : Icons.Material.Outlined.AccountTree)" />
+            <MudText Typo="Typo.h6" Class="dv-title">@(_plan.IsUpdate ? $"Update from source: {Source.DisplayName}" : $"{DerivationKinds.Label(Kind)}{(Target != null ? $" for {Target.DisplayName}" : "")}")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:10px">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2)">
+                @Explanation
+            </MudText>
+            @if (Assistant != null && DerivationKinds.SupportsAi(Kind))
+            {
+                <div class="dv-ai d-flex align-center gap-2" style="flex-wrap:wrap" data-testid="derive-ai">
+                    <MudSwitch T="bool" Value="_ai" ValueChanged="AiChanged" Color="Color.Primary" Disabled="_aiBusy" Label="Fill in with AI" />
+                    @if (_aiBusy) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> <span style="color:var(--text-3); font-size:12px">@Assistant.Name is writing…</span> }
+                    else if (_aiError != null) { <span class="dv-ai-error" style="color:var(--danger); font-size:12px">@_aiError</span> }
+                    else if (_plan.AiNote != null) { <span class="dv-ai-note" style="color:var(--text-3); font-size:12px">@_plan.AiNote — review before creating.</span> }
+                </div>
+            }
+            @foreach (var w in _plan.Warnings)
+            {
+                <div class="dv-warn" style="display:flex; gap:8px; align-items:flex-start; padding:6px 10px; border-radius:8px; font-size:12.5px; background:color-mix(in srgb, var(--warn) 12%, transparent)">
+                    <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:16px; color:var(--warn)" /><span>@w</span>
+                </div>
+            }
+            @if (_preview != null)
+            {
+                <div class="dv-preview derive-preview chg-preview" style="max-height:34vh; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--canvas)">
+                    @((MarkupString)_preview)
+                </div>
+                <div class="chg-legend-inline" style="display:flex; gap:12px; font-size:12px; color:var(--text-3)">
+                    <span class="chg-sw added"><i></i>Added</span><span class="chg-sw changed"><i></i>Changed</span><span class="chg-sw removed"><i></i>Removed</span>
+                </div>
+            }
+            @if (!_plan.HasChanges)
+            {
+                <div class="dv-empty" style="padding:18px; text-align:center; color:var(--text-3)">
+                    @(_plan.IsUpdate ? "Up to date: the derived view already matches its source." : "Nothing to create from this source.")
+                </div>
+            }
+            else
+            {
+                <div class="dv-counts" style="font-size:12.5px; color:var(--text-2)">@Counts</div>
+                <div class="dv-list" style="max-height:38vh; overflow:auto; border:1px solid var(--border); border-radius:8px">
+                    <div class="dv-head" style="display:grid; grid-template-columns:28px 64px 1fr; gap:8px; align-items:center; padding:6px 10px; font-size:12px; color:var(--text-3); border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel-solid)">
+                        <input type="checkbox" title="Select all" checked="@_plan.Listed.All(i => i.Selected)" @onchange="e => SelectAll(e.Value is true)" />
+                        <span>Status</span><span>Item</span>
+                    </div>
+                    @foreach (var i in _plan.Listed)
+                    {
+                        var item = i;
+                        var (text, css) = DerivationUi.Status(item.Change);
+                        <label class="dv-row @css" data-key="@item.Key" style="display:grid; grid-template-columns:28px 64px 1fr; gap:8px; align-items:center; padding:5px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid var(--border)">
+                            <input type="checkbox" checked="@item.Selected" @onchange="e => Toggle(item, e.Value is true)" />
+                            <span class="dv-status" style="justify-self:start; font-size:11px; padding:1px 8px; border-radius:10px; border:1.5px solid var(--@(css)); @(item.Change == DerivedChange.Remove ? "border-style:dashed" : "")">@text</span>
+                            <span style="display:flex; align-items:center; gap:6px; min-width:0">
+                                <MudIcon Icon="@(item.IsDiagram ? UiKinds.DiagramIcon(item.DiagramType ?? DiagramType.Class) : UiKinds.Icon(item.Kind))" Style="font-size:16px; color:var(--accent-2)" />
+                                <span class="dv-label" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@item.Label(_plan)</span>
+                                @if (item.Note != null) { <span class="dv-note" style="color:var(--text-3); font-size:11.5px; white-space:nowrap">— @item.Note</span> }
+                            </span>
+                        </label>
+                    }
+                </div>
+                <MudText Typo="Typo.caption" Style="color:var(--text-3)">
+                    Trace links (@TraceText) keep the derived items tied to @Source.DisplayName; @(_plan.IsUpdate ? "the update" : "everything") is one undoable step.
+                </MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        @if (_plan.IsUpdate && Dismissable)
+        {
+            <MudButton Class="dv-dismiss" OnClick="Dismiss">Dismiss</MudButton>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="dv-create" Disabled="@(Ws.ReadOnly || _aiBusy || !_plan.Listed.Any(i => i.Selected))" OnClick="Create">
+            @(_plan.IsUpdate ? "Accept" : "Create")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <summary>The dialog's answer: the reviewed plan to apply, or <see cref="Dismissed"/> to accept the source change without updating.</summary>
+    public sealed record Answer(DerivationPlan Plan, bool Dismissed);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DerivationKind Kind { get; set; }
+    [Parameter] public Element Source { get; set; } = default!;
+    [Parameter] public Element? Target { get; set; }
+
+    /// <summary>The optional AI fill-in; null when the assistant is off (the switch is not shown).</summary>
+    [Parameter] public IDerivationAssistant? Assistant { get; set; }
+
+    /// <summary>Offer "Dismiss" (accept the source change without updating) on updates.</summary>
+    [Parameter] public bool Dismissable { get; set; } = true;
+
+    private DerivationPlan _plan = default!;
+    private string? _preview;
+    private bool _ai, _aiBusy;
+    private string? _aiError;
+    private DerivationOptions? _aiOptions;
+
+    protected override void OnInitialized() => Replan();
+
+    private void Replan()
+    {
+        _plan = DiagramDerivation.Plan(Ws.Model, Kind, Source, Target, _ai ? _aiOptions : null);
+        RefreshPreview();
+    }
+
+    private void RefreshPreview() => _preview = _plan.IsUpdate ? DerivationUi.Preview(Ws.Model, _plan) : null;
+
+    private string Explanation => Kind switch
+    {
+        DerivationKind.UseCasesFromRequirements => "Functional requirements become use cases (named from their “shall” phrase), with actors from stakeholders or the text, and «refine» links back.",
+        DerivationKind.ActivityFromUseCase => "The use case's steps (numbered or bulleted lines in its description) become actions in swimlanes for its actors and the system; “If …” and “Alternate: …” lines become decisions. The activity becomes the use case's behaviour.",
+        DerivationKind.SequenceFromActivity => "Swimlanes become lifelines; each hand-over between actions in different swimlanes becomes a message; decisions, loops and forks become alt, loop and par fragments; actions are «allocate»d to their swimlane's block.",
+        DerivationKind.StructureFromSequence => "Lifelines become blocks and parts of a context block; messages become operations (traced); parts that exchange messages get ports and a connector on an IBD.",
+        DerivationKind.StateMachineFromSequence or DerivationKind.StateMachineFromActivity => "The events the block receives, in order, become transitions between states. This is an approximation to refine by hand.",
+        _ => "Proposals to review one by one: «satisfy» from blocks named in a requirement's text, and a test case with «verify» for each requirement nothing verifies yet.",
+    };
+
+    private string Counts
+    {
+        get
+        {
+            var selected = _plan.Listed.Where(i => i.Selected).ToList();
+            var parts = new List<string>();
+            void Add(DerivedChange c, string word) { var n = selected.Count(i => i.Change == c); if (n > 0) parts.Add($"{n} {word}"); }
+            Add(DerivedChange.Add, _plan.IsUpdate ? "to add" : "to create");
+            Add(DerivedChange.Change, "to change");
+            Add(DerivedChange.Remove, "to remove");
+            var diagrams = selected.Count(i => i.IsDiagram && i.Change == DerivedChange.Add);
+            return (parts.Count == 0 ? "Nothing ticked" : string.Join(", ", parts)) + (diagrams > 0 ? $" — {diagrams} diagram{(diagrams == 1 ? "" : "s")}" : "")
+                   + $" (of {_plan.Listed.Count()} proposed)";
+        }
+    }
+
+    private string TraceText => Kind switch
+    {
+        DerivationKind.UseCasesFromRequirements => "«refine»",
+        DerivationKind.ActivityFromUseCase => "behaviour ownership",
+        DerivationKind.SequenceFromActivity => "«allocate», «trace»",
+        DerivationKind.StructureFromSequence => "«trace»",
+        DerivationKind.SatisfyAndVerify => "«satisfy», «verify»",
+        _ => "classifier behaviour",
+    };
+
+    private void Toggle(DerivedItem item, bool on)
+    {
+        item.Selected = on;
+        RefreshPreview();
+    }
+
+    private void SelectAll(bool on)
+    {
+        foreach (var i in _plan.Listed) i.Selected = on;
+        RefreshPreview();
+    }
+
+    private async Task AiChanged(bool on)
+    {
+        _ai = on;
+        _aiError = null;
+        if (on && _aiOptions == null && Assistant != null)
+        {
+            if (DerivationAi.Request(Ws.Model, Kind, Source) is not { } request) { _aiError = "Nothing for AI to fill in here."; _ai = false; return; }
+            _aiBusy = true;
+            StateHasChanged();
+            try
+            {
+                var answer = await Assistant.FillInAsync(request);
+                _aiOptions = DerivationAi.Validate(request, answer, Assistant.Name, out _aiError);
+                if (_aiOptions == null) _ai = false;
+            }
+            finally { _aiBusy = false; }
+        }
+        Replan();
+    }
+
+    private void Create() => MudDialog.Close(DialogResult.Ok(new Answer(_plan, false)));
+    private void Dismiss() => MudDialog.Close(DialogResult.Ok(new Answer(_plan, true)));
+}

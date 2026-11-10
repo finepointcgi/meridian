@@ -1,0 +1,61 @@
+@using Meridian.Core.Derivation
+@inherits WorkspaceComponent
+
+@* Inspector section: the MBSE chain the selection sits in (Requirements → Use case → Activity → Sequence → IBD), with
+   click-to-open for each existing link and "Create next…" for the first missing one; for a derived element, where it came
+   from and (when that changed) "Update from source…". *@
+@if (E is { } e && Ws.Model.Contains(e))
+{
+    var chain = DerivationChain.For(Ws.Model, e);
+    var origin = DiagramDerivation.Origin(Ws.Model, e);
+    if (chain.Count > 0 || origin != null)
+    {
+        <div class="section-title">Derivation chain <span class="grow"></span></div>
+        @if (chain.Count > 0)
+        {
+            <div class="derive-chain" data-testid="derive-chain">
+                @for (var i = 0; i < chain.Count; i++)
+                {
+                    var step = chain[i];
+                    if (i > 0) { <span class="arrow">→</span> }
+                    if (step.Element is { } x)
+                    {
+                        <span class="link @(step.Current ? "current" : "")" data-stage="@step.Label" title="@($"{step.Label}: {x.DisplayName} — click to open")"
+                              @onclick="() => OnOpen.InvokeAsync(step.View ?? (Element)x)">
+                            @if (step.Current) { <b>@step.Label</b> } else { @step.Label }
+                        </span>
+                    }
+                    else if (step.CreateNext is { } next && !Ws.ReadOnly)
+                    {
+                        <button class="create-next" data-stage="@step.Label" title="@next.Label" @onclick="() => OnCreate.InvokeAsync(next)">@step.Label: Create next…</button>
+                    }
+                    else
+                    {
+                        <span class="missing" data-stage="@step.Label">@step.Label</span>
+                    }
+                }
+            </div>
+        }
+        @if (origin is { } o)
+        {
+            <div class="derive-origin" style="font-size:12px; color:var(--text-3); margin-top:4px">
+                Derived (@DerivationKinds.Product(o.Kind)) from <span class="link" @onclick="() => OnOpen.InvokeAsync(o.Source)">@o.Source.DisplayName</span>
+                @if (DiagramDerivation.IsStale(Ws.Model, e) && !Ws.ReadOnly)
+                {
+                    <span> — source changed. </span>
+                    <span class="link derive-chain-update" @onclick="() => OnCreate.InvokeAsync(new DerivationOffer(o.Kind, o.Source, o.Target, DerivationKinds.Label(o.Kind), true))">Update from source…</span>
+                }
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    /// <summary>Opens a chain link: its diagram, or selects the element.</summary>
+    [Parameter] public EventCallback<Element> OnOpen { get; set; }
+
+    /// <summary>Runs a derivation (create the next link, or update from source).</summary>
+    [Parameter] public EventCallback<DerivationOffer> OnCreate { get; set; }
+}

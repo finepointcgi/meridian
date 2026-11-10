@@ -158,6 +158,20 @@
                 </MudMenu>
                 <MudTooltip Text="Automatic layout"><button class="rbtn" disabled="@(Ws.Active == null)" @onclick="() => Ws.Active?.Arrange()"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" /><span class="t">Arrange</span></button></MudTooltip>
                 <MudTooltip Text="Diagram it all out: a package overview, structure, internal structure, requirements and behavior views, laid out automatically (⌘K “Diagram the whole model”)"><button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => AutoDiagram(Ws.Selected is { Kind: ElementKind.Package } p ? p : null)"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /><span class="t">Auto-diagram</span></button></MudTooltip>
+                <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" Class="derive-menu">
+                    <ActivatorContent><MudTooltip Text="Create a diagram from the selection: use cases from requirements, activity from a use case, sequence from an activity, BDD + IBD or a state machine from a sequence"><button class="rbtn" data-testid="ribbon-create-from" disabled="@Ws.ReadOnly"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span class="t">Create from…</span></button></MudTooltip></ActivatorContent>
+                    <ChildContent>
+                        @foreach (var o in RibbonDerivations())
+                        {
+                            var offer = o;
+                            <MudMenuItem Icon="@Icons.Material.Outlined.AccountTree" OnClick="() => DeriveAsync(offer)">@offer.Label (@offer.Source.DisplayName)</MudMenuItem>
+                        }
+                        @if (!RibbonDerivations().Any())
+                        {
+                            <MudMenuItem Disabled="true">Select a use case, activity, sequence, block or requirements</MudMenuItem>
+                        }
+                    </ChildContent>
+                </MudMenu>
             </div>
         </div>
         <div class="rgroup compact">
@@ -275,6 +289,7 @@
                     <div class="tab @(Ws.ActiveView == null && ReferenceEquals(Ws.Active, ctl) ? "active" : "")" @onclick="() => Ws.Activate(ctl)" title="@ctl.Diagram.QualifiedName">
                         <MudIcon Icon="@UiKinds.DiagramIcon(ctl.Diagram.DiagramType)" Style="color:var(--accent-2)" />
                         <span>@ctl.Diagram.Name</span>
+                        @if (IsStale(ctl.Diagram)) { <span class="derive-dot" title="Its source changed: update from source" data-testid="derive-dot"></span> }
                         <span class="x" @onclick="() => Ws.Close(ctl)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
                     </div>
                 }
@@ -319,6 +334,7 @@
                     }
                     <span class="crumb current">@act.Diagram.Name</span>
                     <span class="dtype">@Metamodel.DiagramAbbreviation(act.Diagram.DiagramType).ToUpperInvariant()</span>
+                    <DerivedSourceBadge Diagram="act.Diagram" OnUpdate="UpdateFromSource" />
                     <span class="spacer"></span>
                     <MudTooltip Text="Zoom out"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Remove" OnClick="() => act.SetZoom(act.Zoom / 1.2)" /></MudTooltip>
                     <span class="zoom">@act.Zoom.ToString("P0", System.Globalization.CultureInfo.InvariantCulture)</span>

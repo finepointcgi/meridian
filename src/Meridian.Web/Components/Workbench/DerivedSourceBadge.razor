@@ -1,0 +1,22 @@
+@using Meridian.Core.Derivation
+@inject Workspace Ws
+
+@* Diagram header badge: this diagram was derived from another element, which changed since. Offers "Update from source…". *@
+@if (Diagram != null && Ws.Model.Contains(Diagram) && DiagramDerivation.Origin(Ws.Model, Diagram) is { } origin && DiagramDerivation.IsStale(Ws.Model, Diagram))
+{
+    <span class="derive-badge" data-testid="derive-badge" title="@($"{origin.Source.DisplayName} changed since this diagram was derived from it")">
+        <MudIcon Icon="@Icons.Material.Outlined.SyncProblem" Style="font-size:15px" />
+        <span>Source changed</span>
+        @if (!Ws.ReadOnly)
+        {
+            <button class="derive-update" data-testid="derive-update" @onclick="() => OnUpdate.InvokeAsync(Diagram)">Update from source…</button>
+        }
+    </span>
+}
+
+@code {
+    [Parameter] public Diagram? Diagram { get; set; }
+
+    /// <summary>Opens the update dialog for the diagram.</summary>
+    [Parameter] public EventCallback<Diagram> OnUpdate { get; set; }
+}

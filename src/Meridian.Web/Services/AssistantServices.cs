@@ -517,6 +517,10 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
         return CreateProvider() is { } provider ? new NarrativeWriter(provider, settings.Options) : null;
     }
 
+    /// <summary>The derivations' optional AI fill-in ("Fill in with AI"), or null when the assistant is off or its data notice is not accepted.</summary>
+    public Meridian.Core.Derivation.IDerivationAssistant? DerivationAssistant() =>
+        UnavailableReason != null || !Acknowledged ? null : CreateProvider() is { } provider ? new DerivationWriter(provider) : null;
+
     public ApplyResult Apply(ChangeSet set)
     {
         if (ws.ReadOnly) return new ApplyResult(false, "This project is view-only for you: ask an editor to apply these changes.", set.CreatedIds);

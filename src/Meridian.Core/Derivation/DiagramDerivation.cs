@@ -92,6 +92,20 @@ public static partial class DiagramDerivation
         return derived.Get(DeriveFields.Fingerprint) != SourceFingerprint(m, o.Kind, o.Source, o.Target);
     }
 
+    /// <summary>
+    /// "Dismiss": accepts the source as it is now without changing the derived view (its fingerprint is brought up to date, so
+    /// the "source changed" badge goes away). One undo step. Returns the number of derived items touched.
+    /// </summary>
+    public static int Dismiss(ModelRepository m, DerivationKind kind, Element source, Element? target = null)
+    {
+        var fp = SourceFingerprint(m, kind, source, target);
+        var items = Existing(m, kind, source, target).Where(e => e.Get(DeriveFields.Fingerprint) != fp).ToList();
+        if (items.Count == 0) return 0;
+        using (m.History.Transaction($"Dismiss source change of {source.DisplayName}"))
+            foreach (var e in items) m.Set(e, DeriveFields.Fingerprint, fp);
+        return items.Count;
+    }
+
     /// <summary>Elements an earlier run of this derivation made, by key.</summary>
     public static IEnumerable<Element> Existing(ModelRepository m, DerivationKind kind, Element source, Element? target = null)
     {
@@ -117,6 +131,7 @@ public static partial class DiagramDerivation
             Kind = kind, Source = source, Target = target, ProposalsOnly = kind == DerivationKind.SatisfyAndVerify,
             Title = DerivationKinds.Label(kind) + (target != null ? $" for {target.DisplayName}" : "") + $": {source.DisplayName}",
             Fingerprint = SourceFingerprint(m, kind, source, target),
+            Options = o,
         };
         var b = new PlanBuilder(plan) { Model = m };
         switch (kind)

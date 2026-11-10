@@ -86,6 +86,7 @@ public partial class Workbench
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
         list.AddRange(AutoDiagramPaletteCommands());
+        list.AddRange(DerivationPaletteCommands());   // Workbench.Derivation.cs
         list.AddRange(CodeSyncPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
@@ -391,6 +392,7 @@ public partial class Workbench
         m.AddRange(LockEntries(e));   // element locking (Workbench.VersionControl.cs)
         m.Add(MenuEntry.Sep());
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
+        m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
@@ -433,6 +435,7 @@ public partial class Workbench
             if (owned.Count > 0 || newTypes.Count > 0) m.Add(MenuEntry.Title("Diagrams"));
             foreach (var od in owned) m.Add(MenuEntry.Do($"Open “{od.Name}”", () => Ws.Open(od)));
             foreach (var t in newTypes) m.Add(MenuEntry.Do($"New {Metamodel.DisplayName(t)}", () => CreateDiagram(el, t)));
+            m.AddRange(DerivationMenuEntries(el));   // Workbench.Derivation.cs
             m.Add(MenuEntry.Sep());
         }
         if (r.Edge is { } edge)
@@ -459,6 +462,7 @@ public partial class Workbench
             m.Add(MenuEntry.Do("Select all", c.SelectAll, "⌘A"));
             m.Add(MenuEntry.Do("Arrange", c.Arrange));
             if (c.Diagram.DiagramType == DiagramType.Activity) m.Add(MenuEntry.Do("Allocate actions to swimlanes", () => SyncAllocations(c)));
+            m.AddRange(DerivationMenuEntries(c.Diagram));   // Workbench.Derivation.cs
             m.Add(MenuEntry.Do("Zoom to fit", c.ZoomToFit));
             m.Add(MenuEntry.Async("Export as SVG", ExportSvg));
             m.Add(MenuEntry.Async("Export as PNG…", ExportImage));

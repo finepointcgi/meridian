@@ -165,6 +165,9 @@ public sealed class DerivationPlan
     /// <summary>Proposals only (satisfy / verify): nothing earlier is ever offered for removal.</summary>
     public bool ProposalsOnly { get; init; }
 
+    /// <summary>The options the plan was made with (AI fill-in results), so it can be recomputed, e.g. on a copy for a preview.</summary>
+    public DerivationOptions Options { get; init; } = new();
+
     /// <summary>Which AI fill-in produced part of this plan, or null.</summary>
     public string? AiNote { get; set; }
 
