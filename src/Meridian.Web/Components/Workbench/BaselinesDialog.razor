@@ -141,7 +141,7 @@
 
     private async Task Create()
     {
-        if (Ws.Session is not { } s || Ws.User is null || string.IsNullOrWhiteSpace(_name)) return;
+        if (Ws.Session is not { } s || Ws.User is null || Ws.ReadOnly || string.IsNullOrWhiteSpace(_name)) return;
         try
         {
             var versionId = _version;
@@ -158,6 +158,7 @@
 
     private async Task Delete(BaselineInfo b)
     {
+        if (Ws.ReadOnly) return;
         var ok = await Dialogs.ShowMessageBox("Delete baseline", $"Delete the baseline “{b.Name}”? The version it tags (v{b.VersionNumber}) stays in the history.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return;
         await Db.DeleteBaselineAsync(b.Id);

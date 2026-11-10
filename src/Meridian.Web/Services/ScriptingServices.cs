@@ -8,12 +8,13 @@ namespace Meridian.Web.Services;
 /// Scripting console and plugin configuration.
 /// <list type="bullet">
 /// <item>Local/desktop mode: the console is on unless <c>Meridian:Scripting:Enabled=false</c>; plugins load from <c>{DataPath}/plugins</c>.</item>
-/// <item>Server mode: the console is OFF unless <c>Meridian:Scripting:Enabled=true</c>, and then only project owners may run scripts;
-/// plugins load only from <c>Meridian:Plugins:Path</c>.</item>
+/// <item>Server mode: the console is OFF unless <c>Meridian:Scripting:Enabled=true</c>, and then only server administrators may run
+/// scripts (every user owns the projects they create, so project ownership alone is not a trust boundary); set
+/// <c>Meridian:Scripting:AllowProjectOwners=true</c> to also let project owners run them. Plugins load only from <c>Meridian:Plugins:Path</c>.</item>
 /// </list>
 /// Scripts are arbitrary .NET code in the server process; see docs/SCRIPTING.md.
 /// </summary>
-public sealed record ScriptingSettings(bool ConsoleEnabled, bool LocalMode, bool Unrestricted, TimeSpan Timeout, string? PluginsPath)
+public sealed record ScriptingSettings(bool ConsoleEnabled, bool LocalMode, bool Unrestricted, TimeSpan Timeout, string? PluginsPath, bool AllowProjectOwners = false)
 {
     public static ScriptingSettings From(IConfiguration c, MeridianHostInfo host)
     {
@@ -26,7 +27,8 @@ public sealed record ScriptingSettings(bool ConsoleEnabled, bool LocalMode, bool
         var path = c["Meridian:Plugins:Path"] is { Length: > 0 } p ? p : host.LocalMode ? Path.Combine(host.DataPath, "plugins") : null;
         return new ScriptingSettings(enabled, host.LocalMode,
             string.Equals(c["Meridian:Scripting:Unrestricted"], "true", StringComparison.OrdinalIgnoreCase),
-            TimeSpan.FromSeconds(timeout), pluginsOn ? path : null);
+            TimeSpan.FromSeconds(timeout), pluginsOn ? path : null,
+            string.Equals(c["Meridian:Scripting:AllowProjectOwners"], "true", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Why this user may not run scripts in this workspace, or null when they may.</summary>
@@ -37,7 +39,10 @@ public sealed record ScriptingSettings(bool ConsoleEnabled, bool LocalMode, bool
                 ? "The script console is disabled (Meridian:Scripting:Enabled=false)."
                 : "The script console is disabled on this server. Scripts run arbitrary .NET code in the server process, so an administrator must opt in with Meridian:Scripting:Enabled=true.";
         if (ws.Session is null && !LocalMode) return "Open a project first.";
-        if (!LocalMode && ws.Role != ProjectRole.Owner) return "Only project owners can run scripts on this server.";
+        if (!LocalMode && !ws.IsServerAdmin && !(AllowProjectOwners && ws.Role == ProjectRole.Owner))
+            return AllowProjectOwners
+                ? "Only server administrators and project owners can run scripts on this server."
+                : "Only server administrators can run scripts on this server (scripts run arbitrary .NET code in the server process).";
         return null;
     }
 }

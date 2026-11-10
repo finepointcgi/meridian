@@ -91,7 +91,8 @@ To run with a single SQLite file instead of PostgreSQL, set `Meridian__Storage=s
 > **Security.** Scripts and plugins are arbitrary .NET code running inside the Meridian process with its permissions.
 > The script policy (no file system, process, network or reflection APIs by default) is a guard rail, **not a sandbox**.
 > The console is on by default only in the desktop app (local mode). On a server it is off unless an administrator sets
-> `Meridian:Scripting:Enabled=true`, and even then only project owners can run scripts. Plugins load only from
+> `Meridian:Scripting:Enabled=true`, and even then only server administrators can run scripts (or also project owners with
+> `Meridian:Scripting:AllowProjectOwners=true`). Plugins load only from
 > `Meridian:Plugins:Path` on a server, so only someone with access to the server's disk can install them.
 ### Administration, single sign-on and backups (server mode)
 

@@ -84,7 +84,7 @@
 
     private async Task BaselineSelected()
     {
-        if (_selected is null || Ws.Session is null || Ws.User is null) return;
+        if (_selected is null || Ws.Session is null || Ws.User is null || Ws.ReadOnly) return;
         var parameters = new DialogParameters<PromptDialog> { { x => x.Title, "New baseline" }, { x => x.Label, $"Baseline name for v{_selected.Number}" }, { x => x.Value, "" } };
         var dialog = await Dialogs.ShowAsync<PromptDialog>("New baseline", parameters);
         if (await dialog.Result is not { Canceled: false, Data: string name } || string.IsNullOrWhiteSpace(name)) return;
@@ -100,7 +100,7 @@
 
     private async Task Commit()
     {
-        if (Ws.Session is null || Ws.User is null) return;
+        if (Ws.Session is null || Ws.User is null || Ws.ReadOnly) return;
         var (_, n) = await VersionControl.CommitAsync(Db, Ws.Session, _message!, Ws.User.Id, Ws.User);
         Snackbar.Add($"Committed version {n}", Severity.Success);
         await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionCommit, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{n}", details: new { message = _message!.Trim() });
@@ -126,7 +126,7 @@
 
     private async Task Restore()
     {
-        if (_selectedJson is null || _selected is null || Ws.Session is null || Ws.User is null) return;
+        if (_selectedJson is null || _selected is null || Ws.Session is null || Ws.User is null || Ws.ReadOnly) return;
         var ok = await Dialogs.ShowMessageBox("Restore version", $"Replace the current model with v{_selected.Number} for everyone in the project? The current state is committed as a version first, so this can be undone by restoring it.", yesText: "Restore", cancelText: "Cancel");
         if (ok != true) return;
         await Db.CommitBranchVersionAsync(Ws.Session.ProjectId, Ws.Session.BranchId, $"Before restoring v{_selected.Number}", ProjectFile.Serialize(Ws.Model), Ws.User.Id);
