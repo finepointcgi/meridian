@@ -118,7 +118,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .pager-btn:disabled { opacity: .4; cursor: default; }
 
 /* ============================================================ center: tabs, breadcrumb, canvas, dock */
-.center { display: grid; grid-template-rows: 40px 38px minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.center { display: grid; grid-template-rows: 40px 38px minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; }
 .tabstrip { display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
 .tab { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 6px 0 11px; border-radius: 9px 9px 0 0; cursor: pointer; font-size: 12.5px;
   white-space: nowrap; color: var(--text-2); border: 1px solid transparent; border-bottom: none; position: relative; }
@@ -607,3 +607,13 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .var-problem { color: var(--danger); font-size: 12px; margin: 2px 0; cursor: pointer; }
 .cell-input { width: 100%; min-width: 60px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; font: inherit; font-size: 12px; }
 svg.chart { display: block; max-width: 100%; }
+
+/* ============================================================ view tabs (tables, queries, report templates) in the centre */
+.view-host { position: absolute; inset: 0; z-index: 30; overflow: auto; background: var(--panel-solid, var(--panel)); }
+.tabstrip .tab.view-tab span { font-style: normal; }
+/* Wide tables in a view tab scroll inside the tab: never let focusing a cell scroll the centre card or the tab strip away. */
+main.workbench > section.card.center, .diagram-host { overflow: clip; }
+/* The tables/query panel fits its container (a centre tab or the dock): long help lines wrap, wide tables scroll inside. */
+.gt, .gt-query, .gt-qrow, .gt-scroll { min-width: 0; max-width: 100%; }
+.gt-help { overflow-wrap: anywhere; }
+.gt-qtext { min-width: 0; max-width: 100%; box-sizing: border-box; }

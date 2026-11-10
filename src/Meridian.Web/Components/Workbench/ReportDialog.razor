@@ -192,15 +192,14 @@
         _progressText = "Cancelling…";
     }
 
-    private async Task EditTemplate()
+    /// <summary>Opens the template in the report template editor, as a tab in the workbench (this dialog closes).</summary>
+    private void EditTemplate()
     {
         if (_current == null) return;
         var template = Effective();
         if (_current.Element == null) template.Name = _current.Template.Name + " (copy)";
-        var parameters = new DialogParameters<ReportTemplateEditor> { { x => x.Template, template }, { x => x.Element, _current.Element } };
-        var dialog = await Dialogs.ShowAsync<ReportTemplateEditor>("Edit report template", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.ExtraExtraLarge, FullWidth = true, CloseOnEscapeKey = false });
-        if (await dialog.Result is { Canceled: false, Data: Element saved }) Load("model:" + saved.Id);
+        Ws.OpenView(ViewTabKind.ReportTemplate, _current.Element, template, forceNew: _current.Element == null);
+        MudDialog.Close();
     }
 
     private void Duplicate()

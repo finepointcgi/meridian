@@ -191,8 +191,8 @@
         <div class="rgroup compact">
             <div class="rlabel">Model views</div>
             <div class="ritems">
-                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(_dockOpen && _dock == 8 && _tablesRequest.Mode == TablesPanel.Mode.Table ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Tables</span></button></MudTooltip>
-                <MudTooltip Text="Model query / search builder"><button class="rbtn @(_dockOpen && _dock == 8 && _tablesRequest.Mode == TablesPanel.Mode.Query ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
+                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Tables</span></button></MudTooltip>
+                <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
             </div>
         </div>
         <div class="rgroup compact">
@@ -249,10 +249,19 @@
                 @foreach (var c in Ws.OpenDiagrams)
                 {
                     var ctl = c;
-                    <div class="tab @(ReferenceEquals(Ws.Active, ctl) ? "active" : "")" @onclick="() => Ws.Activate(ctl)" title="@ctl.Diagram.QualifiedName">
+                    <div class="tab @(Ws.ActiveView == null && ReferenceEquals(Ws.Active, ctl) ? "active" : "")" @onclick="() => Ws.Activate(ctl)" title="@ctl.Diagram.QualifiedName">
                         <MudIcon Icon="@UiKinds.DiagramIcon(ctl.Diagram.DiagramType)" Style="color:var(--accent-2)" />
                         <span>@ctl.Diagram.Name</span>
                         <span class="x" @onclick="() => Ws.Close(ctl)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                    </div>
+                }
+                @foreach (var v in Ws.OpenViews)
+                {
+                    var view = v;
+                    <div class="tab view-tab @(ReferenceEquals(Ws.ActiveView, view) ? "active" : "")" @onclick="() => Ws.ActivateView(view)" title="@view.Title">
+                        <MudIcon Icon="@ViewTabIcon(view)" Style="color:var(--accent-2)" />
+                        <span>@view.Title</span>
+                        <span class="x" @onclick="() => Ws.CloseView(view)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
                     </div>
                 }
                 <MudMenu Class="newtab" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
@@ -272,7 +281,12 @@
             <div class="crumbs">
                 <MudTooltip Text="Back"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowBack" Disabled="!Ws.CanGoBack" OnClick="Ws.GoBack" /></MudTooltip>
                 <MudTooltip Text="Forward"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowForward" Disabled="!Ws.CanGoForward" OnClick="Ws.GoForward" /></MudTooltip>
-                @if (Ws.Active is { } act)
+                @if (Ws.ActiveView is { } shownView)
+                {
+                    <span class="crumb current">@shownView.Title</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", _ => "TEMPLATE" })</span>
+                }
+                else if (Ws.Active is { } act)
                 {
                     foreach (var a in act.Diagram.AncestorsAndSelf().Skip(1).Reverse())
                     {
@@ -295,6 +309,11 @@
             </div>
 
             <div class="diagram-host">
+                @* A view tab lies over the canvas: the diagram stays mounted (no teardown, zoom and scroll kept). *@
+                @if (Ws.ActiveView is { } openView)
+                {
+                    <div class="view-host" @key="openView.Id">@ViewTabContent(openView)</div>
+                }
                 @if (Ws.Active is { } active)
                 {
                     <DiagramView C="active" OnContextMenu="ShowCanvasMenu" />
@@ -324,7 +343,6 @@
                     @DockTab(7, "Traceability table", Icons.Material.Outlined.FactCheck, null)
                     @DockTab(ReviewsDock, "Reviews", Icons.Material.Outlined.Checklist, null)
                     @DockTab(10, "Script", Icons.Material.Outlined.DataObject, null)
-                    @DockTab(8, "Tables", Icons.Material.Outlined.TableChart, null)
                     @DockTab(11, "Variants & trades", Icons.Material.Outlined.Balance, null)
                     @DockTab(12, "SysML v2 text", Icons.Material.Outlined.Code, null)
                     @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null)
@@ -346,7 +364,6 @@
                             case 7: <TraceabilityPanel />; break;
                             case ReviewsDock: <ReviewsPanel Focus="_reviewFocus" />; break;
                             case 10: <ScriptPanel />; break;
-                            case 8: <TablesPanel Open="_tablesRequest" />; break;
                             case 11: <VariantsPanel />; break;
                             case 12: <SysmlTextPanel State="_sysml" />; break;
                             case AssistantDock: <AssistantPanel Launcher="_assistant" />; break;
@@ -394,6 +411,30 @@
 </CascadingValue>
 
 @code {
+    private static string ViewTabIcon(ViewTab v) => v.Kind switch
+    {
+        ViewTabKind.Table => Icons.Material.Outlined.TableChart,
+        ViewTabKind.Query => Icons.Material.Outlined.ManageSearch,
+        _ => Icons.Material.Outlined.EditNote,
+    };
+
+    /// <summary>The content of a view tab: a table or query (TablesPanel), or the report template editor.</summary>
+    private RenderFragment ViewTabContent(ViewTab v) => __builder =>
+    {
+        if (v.Kind is ViewTabKind.Table or ViewTabKind.Query)
+        {
+            var request = v.State as TablesPanel.Request ?? new TablesPanel.Request(v.Kind == ViewTabKind.Table ? TablesPanel.Mode.Table : TablesPanel.Mode.Query, v.Element);
+            v.State = request;
+            <TablesPanel Open="request" CurrentChanged="e => { if (!ReferenceEquals(v.Element, e)) { v.Element = e; InvokeAsync(StateHasChanged); } }" />
+        }
+        else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
+        {
+            <ReportTemplateEditor Template="template" Element="v.Element"
+                                  OnSaved="e => { v.Element = e; StateHasChanged(); }" OnClose="() => Ws.CloseView(v)" />
+        }
+    };
+
+
     private RenderFragment DockTab(int index, string label, string icon, int? count) => __builder =>
     {
         <span class="dock-tab @(_dockOpen && _dock == index ? "on" : "")" @onclick="() => ToggleDock(index)">

@@ -48,10 +48,10 @@ public sealed class DrawingTests(ServerFixture f) : E2ETest(f)
         await p.Mouse.MoveAsync(gx0, gy0);
         await p.Mouse.DownAsync();
         await p.Mouse.MoveAsync(gx0 + 60, gy0 + 40, new() { Steps = 4 });
-        await p.Mouse.MoveAsync(ex - 300, ey + 220, new() { Steps = 8 });
+        await p.Mouse.MoveAsync(ex + 260, ey + 160, new() { Steps = 8 });   // right of Engine: clear of the shapes panel and the minimap
         await p.Mouse.UpAsync();
         var (gx, gy, _) = await gearbox.CenterAsync();
-        Assert.True(Math.Abs(gx - (ex - 300)) < 30, $"Gearbox should follow the drag: {gx} vs {ex - 300}");
+        Assert.True(Math.Abs(gx - (ex + 260)) < 30, $"Gearbox should follow the drag: {gx} vs {ex + 260}");
 
         // Undo puts it back where it was; redo moves it again.
         await p.Canvas().FocusAsync();

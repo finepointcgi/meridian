@@ -15,6 +15,9 @@ public static class Ui
     public static ILocator Node(this IPage p, string label) => p.Nodes().Filter(new() { Has = p.Locator("text", new() { HasTextString = label }) });
     public static ILocator Tree(this IPage p) => p.Locator("main.workbench > section.card").First.Locator(".card-body");
     public static ILocator DockBody(this IPage p) => p.Locator(".dock-body");
+    /// <summary>The content of the active view tab (table, query, report template) in the centre.</summary>
+    public static ILocator ViewTab(this IPage p) => p.Locator(".diagram-host .view-host");
+    public static ILocator Tabs(this IPage p) => p.Locator(".tabstrip .tab");
     public static ILocator Inspector(this IPage p) => p.Locator("aside.stack > section.card").First;
     public static ILocator MudDialog(this IPage p) => p.Locator(".mud-dialog").Last;
 

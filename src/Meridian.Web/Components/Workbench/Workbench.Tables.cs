@@ -1,6 +1,7 @@
 using Meridian.Core.Analysis;
 using Meridian.Core.Language;
 using Meridian.Core.Model;
+using Meridian.Web.Services;
 using MudBlazor;
 
 namespace Meridian.Web.Components.Workbench;
@@ -8,26 +9,23 @@ namespace Meridian.Web.Components.Workbench;
 /// <summary>Shell wiring for the generic tables / model query dock panel (dock tab 8).</summary>
 public partial class Workbench
 {
-    private const int TablesDock = 8;
-    private TablesPanel.Request _tablesRequest = new(TablesPanel.Mode.Table);
-
-    /// <summary>Opens the Tables dock in the given mode, optionally loading a saved table, query or rule.</summary>
+    /// <summary>Opens a generic table or model query as a tab in the centre, optionally loading a saved table, query or rule.</summary>
     public void OpenTables(TablesPanel.Mode mode = TablesPanel.Mode.Table, Element? view = null)
     {
-        _tablesRequest = new TablesPanel.Request(mode, view);
-        OpenDock(TablesDock);
+        var kind = mode == TablesPanel.Mode.Table ? ViewTabKind.Table : ViewTabKind.Query;
+        var tab = Ws.OpenView(kind, view);
+        tab.State ??= new TablesPanel.Request(mode, view);
         StateHasChanged();
     }
 
-    /// <summary>Opens a saved view element (TableView, QueryView or ValidationRule) in the Tables dock.</summary>
+    /// <summary>Opens a saved view element (TableView, QueryView or ValidationRule) in its own tab.</summary>
     public void OpenSavedView(Element view) =>
         OpenTables(view.Kind == ElementKind.TableView ? TablesPanel.Mode.Table : TablesPanel.Mode.Query, view);
 
-    private void ToggleTables(TablesPanel.Mode mode)
-    {
-        if (_dockOpen && _dock == TablesDock && _tablesRequest.Mode == mode && _tablesRequest.View == null) _dockOpen = false;
-        else OpenTables(mode);
-    }
+    private bool TablesTabActive(TablesPanel.Mode mode) =>
+        Ws.ActiveView is { } v && v.Kind == (mode == TablesPanel.Mode.Table ? ViewTabKind.Table : ViewTabKind.Query);
+
+    private void ToggleTables(TablesPanel.Mode mode) => OpenTables(mode);
 
     private IEnumerable<CommandPalette.Command> TablesPaletteCommands()
     {

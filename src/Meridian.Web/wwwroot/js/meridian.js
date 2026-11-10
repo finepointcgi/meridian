@@ -13,7 +13,7 @@ window.meridian = (() => {
     setDirty: v => { dirty = v; },
     getLast: () => { try { return localStorage.getItem("meridian.lastProject"); } catch { return null; } },
     setLast: name => { try { if (name) localStorage.setItem("meridian.lastProject", name); else localStorage.removeItem("meridian.lastProject"); } catch { } },
-    rect: el => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; },
+    rect: el => { if (!el?.getBoundingClientRect) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; },
     focus: el => el?.focus({ preventScroll: true }),
     select: el => { el?.focus(); el?.select?.(); },
     caretEnd: el => { if (!el) return; el.focus(); const n = el.value?.length ?? 0; try { el.setSelectionRange(n, n); } catch { } },

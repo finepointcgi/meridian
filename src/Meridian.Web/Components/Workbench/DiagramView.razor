@@ -706,7 +706,8 @@
 
     private async Task MiniMapClick(PointerEventArgs e)
     {
-        var r = await JS.InvokeAsync<RectDto>("meridian.rect", _minimap);
+        var r = await JS.InvokeAsync<RectDto?>("meridian.rect", _minimap);
+        if (r == null) return;   // the canvas left the page (another tab)
         var cb = C.ContentBounds();
         // preserveAspectRatio meet: compute the scale and letterbox offset used by the browser.
         var scale = Math.Min(r.Width / cb.Width, r.Height / cb.Height);

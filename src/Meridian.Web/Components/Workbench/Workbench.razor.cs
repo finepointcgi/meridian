@@ -260,6 +260,7 @@ public partial class Workbench
     {
         if (e is Diagram d) { Ws.Open(d); return; }
         if (e.Kind is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) { OpenSavedView(e); return; }
+        if (Meridian.Serialization.Reports.ReportTemplates.TryLoad(e, out var template)) { Ws.OpenView(ViewTabKind.ReportTemplate, e, template); return; }
         var owned = e.OwnedElements.OfType<Diagram>().FirstOrDefault();
         if (owned != null) Ws.Open(owned);
     }

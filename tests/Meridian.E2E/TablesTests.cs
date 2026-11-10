@@ -11,10 +11,12 @@ public sealed class TablesTests(ServerFixture f) : E2ETest(f)
         var s = await OpenAsync(F.Alice);
         var p = s.Page;
         await p.NewProjectAsync("Vehicle sample", "Tables " + Guid.NewGuid().ToString("N")[..6]);
-        var dock = p.DockBody();
+        var dock = p.ViewTab();
 
         // Run a text query for blocks.
         await p.RibbonAsync("Query");
+        // The query opens as a tab in the centre, next to the diagram tabs.
+        await Expect(p.Tabs().Filter(new() { HasTextString = "New query" })).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bactive\b"));
         await dock.Locator(".gt-seg.small button", new() { HasTextString = "Text" }).ClickAsync();
         await dock.Locator("textarea.gt-qtext").FillAsync("kind:Block");
         var status = dock.Locator(".gt-status").First;
@@ -34,7 +36,6 @@ public sealed class TablesTests(ServerFixture f) : E2ETest(f)
         await nameCell.FillAsync("Engine Mk2");
         await nameCell.PressAsync("Tab");
         await Expect(p.Tree().GetByText("Engine Mk2", new() { Exact = true })).ToBeVisibleAsync();
-        await Expect(p.Node("Engine Mk2").First).ToBeVisibleAsync();
 
         // Save the view: it becomes a model element and appears under Saved views.
         await dock.GetByRole(AriaRole.Button, new() { Name = "Save view" }).ClickAsync();
@@ -45,7 +46,21 @@ public sealed class TablesTests(ServerFixture f) : E2ETest(f)
         await Expect(p.StatusMessage()).ToContainTextAsync("Engine blocks");
         await dock.Locator("button.gt-views").ClickAsync();
         await Expect(p.Locator(".mud-popover-open .mud-menu-item", new() { HasTextString = "Engine blocks" })).ToBeVisibleAsync();
-        await p.Keyboard.PressAsync("Escape");
+        await p.Mouse.ClickAsync(5, (p.ViewportSize?.Height ?? 800) - 5);   // click away (bottom-left corner): the menu closes
+        await Expect(p.Locator(".mud-popover-open .mud-menu-item")).ToHaveCountAsync(0);
         await Expect(p.Tree().GetByText("Engine blocks").First).ToBeAttachedAsync();
+        // The tab is now titled after the saved view.
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Engine blocks" })).ToHaveCountAsync(1);
+
+        // Back on a diagram tab, the renamed block shows on the canvas; the table tab stays open.
+        await p.Tabs().Filter(new() { HasTextString = "Vehicle Structure" }).First.ClickAsync();
+        await Expect(p.Node("Engine Mk2").First).ToBeVisibleAsync();
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Engine blocks" })).ToHaveCountAsync(1);
+
+        // Closing the tab leaves the saved view in the model; double-clicking it in the tree reopens it as a tab.
+        await p.Tabs().Filter(new() { HasTextString = "Engine blocks" }).Locator(".x").ClickAsync();
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Engine blocks" })).ToHaveCountAsync(0);
+        await p.Tree().GetByText("Engine blocks").First.DblClickAsync();
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Engine blocks" })).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bactive\b"));
     }
 }

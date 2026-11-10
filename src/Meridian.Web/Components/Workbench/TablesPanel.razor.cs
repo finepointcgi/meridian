@@ -23,6 +23,11 @@ public partial class TablesPanel
 
     [Parameter] public Request? Open { get; set; }
 
+    /// <summary>Told when the saved view shown here changes (saved, opened or removed), so a tab can follow its title.</summary>
+    [Parameter] public Action<Element?>? CurrentChanged { get; set; }
+
+    private Element? _reported;
+
     [Inject] private IJSRuntime JS { get; set; } = default!;
     [Inject] private IDialogService Dialogs { get; set; } = default!;
 
@@ -132,6 +137,14 @@ public partial class TablesPanel
         _applied = Open;
         _mode = Open.Mode;
         if (Open.View != null) Load(Open.View);
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        base.OnAfterRender(firstRender);
+        if (CurrentChanged == null || ReferenceEquals(_reported, Current)) return;
+        _reported = Current;
+        CurrentChanged(Current);
     }
 
     protected override void OnWorkspaceChanged()

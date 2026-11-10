@@ -100,6 +100,8 @@ public sealed class Workspace : IDisposable, ISessionClient
         ModelVersion++;
         TreeVersion++;
         _open.Clear();
+        _views.Clear();
+        ActiveView = null;
         _back.Clear();
         _forward.Clear();
         Active = null;
@@ -290,6 +292,7 @@ public sealed class Workspace : IDisposable, ISessionClient
             _open.Add(c);
         }
         Active = c;
+        ActiveView = null;
         SharePresence();
         Bump();
         return c;
@@ -307,6 +310,7 @@ public sealed class Workspace : IDisposable, ISessionClient
     public void Activate(DiagramController c)
     {
         Active = c;
+        ActiveView = null;
         SharePresence();
         Bump();
     }
@@ -352,10 +356,56 @@ public sealed class Workspace : IDisposable, ISessionClient
         {
             if (Selected != null && !Model.Contains(Selected)) Selected = null;
             foreach (var c in _open.Where(c => !Model.Contains(c.Diagram)).ToList()) Close(c);
+            foreach (var v in _views.Where(v => v.Element != null && !Model.Contains(v.Element)).ToList()) CloseView(v);
             foreach (var c in _open) c.ClearInvalidSelection();
         }
         if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open) c.ClearInvalidSelection();
         if (change is { Kind: ChangeKind.Added, Element: Diagram created } && !Model.IsApplyingRemote) QueueCreatedDiagram(created);
+        Bump();
+    }
+
+    // ---------------------------------------------------------------- view tabs (tables, queries, report templates)
+
+    private readonly List<ViewTab> _views = new();
+
+    /// <summary>Non-diagram tabs in the centre tab strip, after the diagrams.</summary>
+    public IReadOnlyList<ViewTab> OpenViews => _views;
+
+    /// <summary>The view tab shown in the centre, or null when the active diagram is shown.</summary>
+    public ViewTab? ActiveView { get; private set; }
+
+    /// <summary>
+    /// Opens (or brings forward) a view tab. A saved element opens once; an unsaved view of a kind reuses the open unsaved
+    /// tab of that kind unless <paramref name="forceNew"/> is set.
+    /// </summary>
+    public ViewTab OpenView(ViewTabKind kind, Element? element = null, object? state = null, bool forceNew = false)
+    {
+        var tab = element != null
+            ? _views.FirstOrDefault(v => ReferenceEquals(v.Element, element))
+            : forceNew || state != null ? null : _views.FirstOrDefault(v => v.Kind == kind && v.Element == null);
+        if (tab == null)
+        {
+            tab = new ViewTab(kind) { Element = element, State = state };
+            _views.Add(tab);
+        }
+        ActiveView = tab;
+        Bump();
+        return tab;
+    }
+
+    public void ActivateView(ViewTab tab)
+    {
+        if (!_views.Contains(tab)) return;
+        ActiveView = tab;
+        Bump();
+    }
+
+    public void CloseView(ViewTab tab)
+    {
+        var i = _views.IndexOf(tab);
+        if (i < 0) return;
+        _views.RemoveAt(i);
+        if (ReferenceEquals(ActiveView, tab)) ActiveView = _views.Count == 0 ? null : _views[Math.Clamp(i - 1, 0, _views.Count - 1)];
         Bump();
     }
 
@@ -407,4 +457,25 @@ public sealed class Workspace : IDisposable, ISessionClient
         Model.History.Changed -= OnHistoryChanged;
         Model.OpEmitted -= OnLocalOp;
     }
+}
+
+/// <summary>What a view tab shows.</summary>
+public enum ViewTabKind { Table, Query, ReportTemplate }
+
+/// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
+public sealed class ViewTab(ViewTabKind kind)
+{
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public ViewTabKind Kind { get; } = kind;
+    /// <summary>The saved model element (TableView, QueryView, ValidationRule, report template), or null while unsaved.</summary>
+    public Element? Element { get; set; }
+    /// <summary>Per-tab state owned by the view (e.g. the template being edited).</summary>
+    public object? State { get; set; }
+
+    public string Title => Element is { } e ? e.DisplayName : Kind switch
+    {
+        ViewTabKind.Table => "New table",
+        ViewTabKind.Query => "New query",
+        _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
+    };
 }
