@@ -143,7 +143,9 @@ public static class ModelTables
         return sb.ToString();
     }
 
-    private static string Csv(string s) =>
+    private static string Csv(string s) => Quote(CsvSafety.Neutralize(s));
+
+    private static string Quote(string s) =>
         s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
 
     /// <summary>Column keys worth offering for rows of the given elements: fields, tagged values, stereotype properties and value properties.</summary>

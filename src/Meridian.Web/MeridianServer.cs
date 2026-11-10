@@ -28,6 +28,17 @@ public sealed record MeridianHostInfo(bool LocalMode, string DataPath, string? L
 /// </summary>
 public static class MeridianServer
 {
+    /// <summary>
+    /// Where the local-mode launch sign-in sends the window afterwards: the requested path, but never another site
+    /// ("//host" and "/\host" are protocol-relative URLs to browsers) and never back to the sign-in page.
+    /// </summary>
+    public static string LocalRedirectPath(PathString path)
+    {
+        var p = path.HasValue ? path.Value! : "/";
+        if (p == "/login" || p.Length < 1 || p[0] != '/' || (p.Length > 1 && p[1] is '/' or '\\') || p.Contains('\\')) return "/";
+        return p;
+    }
+
     public static async Task<WebApplication> CreateAsync(string[] args, Action<WebApplicationBuilder>? customize = null, WebApplicationOptions? options = null)
     {
         var builder = WebApplication.CreateBuilder(options ?? new WebApplicationOptions { Args = args });
@@ -115,7 +126,7 @@ public static class MeridianServer
                 {
                     await SignIn(http, localUser);
                     var keep = QueryString.Create(http.Request.Query.Where(q => q.Key != "launch")); // e.g. ?project=<id> from the desktop host
-                    http.Response.Redirect((http.Request.Path.HasValue && http.Request.Path != "/login" ? http.Request.Path.Value : "/") + keep);
+                    http.Response.Redirect(LocalRedirectPath(http.Request.Path) + keep);
                     return;
                 }
                 if (http.Request.Path.StartsWithSegments("/_framework") || http.Request.Path.StartsWithSegments("/_content") || Path.HasExtension(http.Request.Path.Value)) { await next(); return; }
