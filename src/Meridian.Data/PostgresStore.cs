@@ -7,7 +7,7 @@ namespace Meridian.Data;
 /// PostgreSQL system of record. Models are stored as JSON documents (jsonb) in their native project format;
 /// every version snapshot is a full document, so history, diff and restore need no replay.
 /// </summary>
-public sealed partial class PostgresStore : IMeridianStore
+public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _ds;
 
@@ -16,11 +16,33 @@ public sealed partial class PostgresStore : IMeridianStore
         _ds = NpgsqlDataSource.Create(connectionString);
     }
 
+    /// <summary>Closes the connection pool.</summary>
+    public ValueTask DisposeAsync() => _ds.DisposeAsync();
+
     // =============================================================== schema
 
+    /// <summary>
+    /// Creates or upgrades the schema. All blocks run in one transaction under an advisory lock, so several server
+    /// processes starting at once (or a crash half-way) never leave a partly migrated database or fail on catalog races.
+    /// Order matters: later blocks reference tables (and alter columns) created by earlier ones.
+    /// </summary>
     public async Task MigrateAsync()
     {
-        await using var cmd = _ds.CreateCommand("""
+        await using var conn = await _ds.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await using (var lk = new NpgsqlCommand("select pg_advisory_xact_lock(7262011)", conn, tx)) // "MRDN" schema lock
+            await lk.ExecuteNonQueryAsync();
+        await MigrateCoreAsync(conn);
+        await MigrateReviewsAsync(conn);
+        await MigrateIntegrationsAsync(conn);   // integrations, webhooks and API tokens (PostgresStore.Integrations.cs)
+        await MigrateAdminAsync(conn); // enterprise administration tables: PostgresStore.Admin.cs
+        await MigrateBranchingAsync(conn);   // branches, branch commits, baselines (PostgresStore.Branching.cs)
+        await tx.CommitAsync();
+    }
+
+    private static async Task MigrateCoreAsync(NpgsqlConnection conn)
+    {
+        await using var cmd = new NpgsqlCommand("""
             create table if not exists users (
                 id uuid primary key,
                 username text not null unique,
@@ -66,12 +88,8 @@ public sealed partial class PostgresStore : IMeridianStore
 
             create index if not exists comments_project_element on comments(project_id, element_id);
             create index if not exists members_user on project_members(user_id);
-            """);
+            """, conn);
         await cmd.ExecuteNonQueryAsync();
-        await MigrateReviewsAsync();
-        await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (PostgresStore.Integrations.cs)
-        await MigrateAdminAsync(); // enterprise administration tables: PostgresStore.Admin.cs
-        await MigrateBranchingAsync();   // branches, branch commits, baselines (PostgresStore.Branching.cs)
     }
 
     // =============================================================== users
@@ -217,19 +235,9 @@ public sealed partial class PostgresStore : IMeridianStore
 
     // =============================================================== versions
 
-    public async Task<int> CommitVersionAsync(Guid projectId, string message, string modelJson, Guid? author)
-    {
-        await using var cmd = _ds.CreateCommand("""
-            insert into project_versions(project_id, number, message, model, author)
-            values ($1, coalesce((select max(number) from project_versions where project_id = $1), 0) + 1, $2, $3, $4)
-            returning number
-            """);
-        cmd.Parameters.Add(new() { Value = projectId });
-        cmd.Parameters.Add(new() { Value = message });
-        cmd.Parameters.Add(new() { Value = modelJson, NpgsqlDbType = NpgsqlDbType.Jsonb });
-        cmd.Parameters.Add(new() { Value = (object?)author ?? DBNull.Value, NpgsqlDbType = NpgsqlDbType.Uuid });
-        return (int)(await cmd.ExecuteScalarAsync() ?? 0);
-    }
+    // Numbering is serialised per project (see CommitBranchVersionAsync); a bare max()+1 insert races with concurrent commits.
+    public async Task<int> CommitVersionAsync(Guid projectId, string message, string modelJson, Guid? author) =>
+        (await CommitBranchVersionAsync(projectId, null, message, modelJson, author)).Number;
 
     public async Task<IReadOnlyList<VersionInfo>> ListVersionsAsync(Guid projectId)
     {
@@ -258,7 +266,7 @@ public sealed partial class PostgresStore : IMeridianStore
     {
         await using var cmd = _ds.CreateCommand("""
             select c.id, c.element_id, u.id, coalesce(u.username, ''), coalesce(u.display_name, 'unknown'), coalesce(u.color, '#888'), c.body, c.resolved, c.created_at
-            from comments c left join users u on u.id = c.author where c.project_id = $1 order by c.created_at
+            from comments c left join users u on u.id = c.author where c.project_id = $1 order by c.created_at, c.id
             """);
         cmd.Parameters.Add(new() { Value = projectId });
         var list = new List<CommentInfo>();

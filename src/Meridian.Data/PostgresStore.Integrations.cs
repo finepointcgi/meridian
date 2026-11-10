@@ -7,9 +7,9 @@ public sealed partial class PostgresStore
 {
     // =============================================================== schema (integrations migration block)
 
-    private async Task MigrateIntegrationsAsync()
+    private static async Task MigrateIntegrationsAsync(NpgsqlConnection conn)
     {
-        await using var cmd = _ds.CreateCommand("""
+        await using var cmd = new NpgsqlCommand("""
             create table if not exists project_integrations (
                 id uuid primary key,
                 project_id uuid not null references projects(id) on delete cascade,
@@ -44,7 +44,7 @@ public sealed partial class PostgresStore
             create index if not exists integrations_project on project_integrations(project_id);
             create index if not exists deliveries_project on webhook_deliveries(project_id, id);
             create index if not exists api_tokens_user on api_tokens(user_id);
-            """);
+            """, conn);
         await cmd.ExecuteNonQueryAsync();
     }
 

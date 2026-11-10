@@ -191,18 +191,34 @@ public sealed partial class SqliteStore
     public async Task<UserAccount> CreateExternalUserAsync(string username, string displayName, ExternalLogin login)
     {
         var baseName = LoginPolicy.SuggestUsername(username);
-        var count = (long)(await ScalarAsync("select count(*) from users") ?? 0L);
+        await using var c = await OpenAsync();
+        // An immediate (write) transaction: two concurrent first sign-ins of one identity must not create two accounts.
+        await using var tx = c.BeginTransaction(deferred: false);
+        async Task<object?> Run(string sql, params object?[] args)
+        {
+            await using var cmd = c.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = sql;
+            for (var i = 0; i < args.Length; i++) cmd.Parameters.AddWithValue("$" + (i + 1), args[i] ?? DBNull.Value);
+            return await cmd.ExecuteScalarAsync();
+        }
+        if (await Run("select user_id from external_logins where issuer = $1 and subject = $2", login.Issuer, login.Subject) is string linked)
+        {
+            tx.Commit();
+            return (await GetUserAsync(Guid.Parse(linked)))!.User;
+        }
+        var count = (long)(await Run("select count(*) from users") ?? 0L);
         for (var attempt = 1; attempt < 200; attempt++)
         {
             var candidate = attempt == 1 ? baseName : $"{baseName}{attempt}";
             var user = new UserAccount(Guid.NewGuid(), candidate, string.IsNullOrWhiteSpace(displayName) ? candidate : displayName.Trim(), Accounts.Palette[count % Accounts.Palette.Length]);
-            try
-            {
-                await ExecAsync("insert into users(id, username, display_name, password_hash, color, created_at) values ($1,$2,$3,$4,$5,$6)",
-                    S(user.Id), user.Username, user.DisplayName, LoginPolicy.NoPassword, user.Color, Now());
-            }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19) { continue; }
-            await LinkExternalLoginAsync(user.Id, login);
+            var now = Now();
+            if (await Run("insert into users(id, username, display_name, password_hash, color, created_at) values ($1,$2,$3,$4,$5,$6) on conflict (username) do nothing returning id",
+                    S(user.Id), user.Username, user.DisplayName, LoginPolicy.NoPassword, user.Color, now) is null)
+                continue;   // taken
+            await Run("insert into external_logins(issuer, subject, provider, user_id, email, created_at) values ($1,$2,$3,$4,$5,$6)",
+                login.Issuer, login.Subject, login.Provider, S(user.Id), login.Email, now);
+            tx.Commit();
             return user;
         }
         throw new InvalidOperationException("Could not find a free username for this account.");
