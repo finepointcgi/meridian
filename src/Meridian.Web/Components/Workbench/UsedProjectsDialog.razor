@@ -101,14 +101,14 @@
                     <MudSelectItem T="LibraryPinKind" Value="LibraryPinKind.Branch">A branch head (follows it)</MudSelectItem>
                     <MudSelectItem T="LibraryPinKind" Value="LibraryPinKind.Baseline">A baseline</MudSelectItem>
                 </MudSelect>
-                <MudSelect T="string" Value="_pin" ValueChanged="PickPin" Label="@PinLabel" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_pins is null" data-testid="lib-pin">
+                <MudSelect T="string" Value="_pin" ValueChanged="PickPin" Label="@PinLabel" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_pins is null" ToStringFunc="PinText" data-testid="lib-pin">
                     @foreach (var (value, label) in PinChoices()) { <MudSelectItem T="string" Value="value">@label</MudSelectItem> }
                 </MudSelect>
-                <MudSelect T="string" Value="_package" ValueChanged="v => _package = v" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                <MudSelect T="string" Value="_package" ValueChanged="v => _package = v" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" ToStringFunc="PackageText"
                            Disabled="_packages.Count == 0 || _editing is not null" data-testid="lib-package">
                     @foreach (var (id, path) in _packages) { <MudSelectItem T="string" Value="id">@path</MudSelectItem> }
                 </MudSelect>
-                <MudSelect T="string" Value="_mount" ValueChanged="v => _mount = v" Label="Show it in" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" data-testid="lib-mount">
+                <MudSelect T="string" Value="_mount" ValueChanged="v => _mount = v" Label="Show it in" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" ToStringFunc="MountText" data-testid="lib-mount">
                     <MudSelectItem T="string" Value="@("")">The model root</MudSelectItem>
                     @foreach (var p in Ws.Model.OfKind(ElementKind.Package).Where(p => !Ws.Model.IsLibraryElement(p)).OrderBy(p => p.QualifiedName))
                     {
@@ -225,6 +225,10 @@
                 break;
         }
     }
+
+    private string PinText(string? value) => value is null ? "" : PinChoices().FirstOrDefault(c => c.Value == value).Label ?? value;
+    private string PackageText(string? id) => id is null ? "" : _packages.FirstOrDefault(p => p.Id == id).Path ?? id;
+    private string MountText(string? id) => string.IsNullOrEmpty(id) ? "The model root" : Ws.Model.Find(id)?.QualifiedName ?? id;
 
     private async Task PickPin(string? value)
     {

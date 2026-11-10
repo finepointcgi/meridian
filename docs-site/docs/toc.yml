@@ -14,6 +14,8 @@
   href: tables-queries.md
 - name: Branches, merge and baselines
   href: version-control.md
+- name: Used projects (shared libraries)
+  href: libraries.md
 - name: Reviews and comments
   href: reviews.md
 - name: SysML v2 text

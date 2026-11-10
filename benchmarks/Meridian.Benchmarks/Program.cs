@@ -76,6 +76,9 @@ namespace Meridian.Benchmarks
             Time("Generate model", s.Generate);
             Time("Save .meridian (serialize)", s.Save);
             Time("Load .meridian (deserialize)", s.Load);
+            Time("Load + 10% library (mounted)", s.LoadWithLibrary);
+            Time("Save, library mounted", s.SaveWithLibrary);
+            Time("Validate, library mounted", s.ValidateWithLibrary);
             TimeOnce("Apply 2.6k remote ops (replica)", s.ApplyOps);
             TimeOnce("500 edits + undo all + redo all", m => s.UndoRedo(m));
             TimeOnce("Delete subsystem + undo", s.DeleteUndo);

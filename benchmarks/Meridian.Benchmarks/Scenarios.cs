@@ -38,6 +38,24 @@ public sealed class Scenarios
     public IReadOnlyList<ModelOp> Ops { get; }
 
     public int Generate() => LargeModelGenerator.Generate(Options).AllElements.Count();
+
+    // Used projects (docs/LIBRARIES.md): the largest top-level package of a model a tenth of the size, mounted read-only.
+    private Meridian.Core.Libraries.LibraryPayload? _library;
+    private ModelRepository? _withLibrary;
+
+    public Meridian.Core.Libraries.LibraryPayload Library => _library ??= MakeLibrary();
+
+    private Meridian.Core.Libraries.LibraryPayload MakeLibrary()
+    {
+        var source = LargeModelGenerator.Generate(new LargeModelOptions { Scale = Math.Max(0.01, Options.Scale * 0.1), Seed = 99 });
+        var pkg = source.Root.OwnedElements.Where(e => e.Kind == ElementKind.Package).MaxBy(p => p.Descendants().Count())!;
+        var info = new Meridian.Core.Libraries.LibraryInfo("bench", Guid.NewGuid(), "Bench library", pkg.Id, Meridian.Core.Libraries.LibraryPinKind.Version, "1", "v1", "");
+        return new(info, LibraryContent.Extract(source, pkg.Id)!);
+    }
+
+    public int LoadWithLibrary() => ProjectFile.Deserialize(Json, [Library]).Count;
+    public int SaveWithLibrary() => ProjectFile.Serialize(_withLibrary ??= ProjectFile.Deserialize(Json, [Library])).Length;
+    public int ValidateWithLibrary() => new Meridian.Core.Validation.ModelValidator().Validate(_withLibrary ??= ProjectFile.Deserialize(Json, [Library])).Count;
     public int Save() => ProjectFile.Serialize(Model).Length;
     public int Load() => ProjectFile.Deserialize(Json).AllElements.Count();
 

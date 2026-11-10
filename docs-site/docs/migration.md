@@ -57,6 +57,7 @@ can always compare against it.
 | Code engineering sets (round trip with code) | **Code sync**: GitHub / GitLab pushes update a review branch you accept into `main` ([details](code-sync.md)) |
 | Environment options (look and feel, diagram defaults) | **Settings** (⌘,): theme, accent, density, grid, connector style, per user or per device ([details](settings.md)) |
 | Tags / baselines | **Baselines…** |
+| Used projects / modules (shared packages, "Use project", "Update used project") | **Used projects…**: a package of another project, read-only and pinned to a version, branch head or baseline, with update review and suspect marking; a Cameo import offers to use projects already in Meridian instead of copying them ([details](libraries.md)) |
 | Collaborator reviews and comments | **Comments** with @mentions and **Reviews** with votes and checklists |
 | OSLC / DataHub | **OSLC RM provider**, issue tracker links, webhooks |
 | Cameo AI assistant / third-party AI plugins | **AI assistant** on Claude, a local model or Claude Code; every change reviewed before it is applied ([details](ai-assistant.md)) |
@@ -81,6 +82,7 @@ can always compare against it.
 | MDG Technologies, UML profiles | **profiles and stereotypes**, and **plugins** for behaviour |
 | Document generation (RTF / DOCX templates) | **Word / PDF from template** with section presets |
 | Baselines and Compare | **Baselines…** with compare and CSV export, and **Version history** compare |
+| Shared packages, package imports across repositories, Reusable Asset Service | **Used projects…**: reuse a package of another project read-only, pinned, with update review ([details](libraries.md)) |
 | Version control (SVN, Git, TFS packages) | built-in **commits, branches and merge** for the whole project |
 | Security and user locks | **project roles** (owner, editor, viewer) and optional **element locks** |
 | Discussions, reviews | **Comments** and **Reviews** |

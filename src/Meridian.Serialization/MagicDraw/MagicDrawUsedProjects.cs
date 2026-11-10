@@ -53,7 +53,7 @@ public static partial class MagicDrawImporter
          "ISO80000", "SI_", "SI ", "SIDefinitions", "Matrix", "Validation", "Traceability", "Requirement_Customization", "MBSE", "Cameo", "UAF", "BPMN"];
 
     /// <summary>The used-project (module) name of an href such as "Standard%20Parts.mdzip#_123", or null for standard or web references.</summary>
-    internal static string? ModuleOf(string? href)
+    public static string? ModuleOf(string? href)
     {
         if (string.IsNullOrEmpty(href)) return null;
         var hash = href.IndexOf('#');

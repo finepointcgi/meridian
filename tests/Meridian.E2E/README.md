@@ -54,6 +54,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `AdminTests` | `/admin` for the admin, forbidden for a normal user, admin API protection |
 | `CollaborationTests` | two browsers on one project see each other's edits live |
 | `PermissionsTests` | Alice makes a package read-only for Bob (his edit is refused), then hidden (tree, diagrams and REST API lose it at once) |
+| `LibraryTests` | a parts library is used from the Vehicle sample, a part is typed by a library block, a new library version shows the update badge and review, and the part becomes suspect |
 | `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
 | `DocsScreenshotTests` | opt-in (`MERIDIAN_DOCS_SCREENSHOTS=1`): writes the user guide's screenshots to `docs-site/images` in the dark and the light theme |
