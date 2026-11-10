@@ -124,10 +124,10 @@ public class AssistantPanelTests : TestContext
         Assert.DoesNotContain(ws.Model.OfKind(ElementKind.Block), b => b.Name == "Gearbox");
 
         // Reject the clutch, apply the rest.
-        cut.FindAll(".ai-change")[1].QuerySelectorAll("button").Single(b => b.TextContent == "Reject").Click();
-        Assert.Contains("Apply 1", cut.Find("button.ai-apply").TextContent);
-        cut.Find("button.ai-apply").Click();
-        Assert.Contains(ws.Model.OfKind(ElementKind.Block), b => b.Name == "Gearbox");
+        cut.InvokeAsync(() => cut.FindAll(".ai-change")[1].QuerySelectorAll("button").Single(b => b.TextContent == "Reject").Click()).GetAwaiter().GetResult();
+        cut.WaitForAssertion(() => Assert.Contains("Apply 1", cut.Find("button.ai-apply").TextContent));
+        cut.InvokeAsync(() => cut.Find("button.ai-apply").Click()).GetAwaiter().GetResult();
+        cut.WaitForAssertion(() => Assert.Contains(ws.Model.OfKind(ElementKind.Block), b => b.Name == "Gearbox"));
         Assert.DoesNotContain(ws.Model.OfKind(ElementKind.Block), b => b.Name == "Clutch");
         Assert.Contains("Applied 1 change", cut.Markup);
         Assert.Empty(cut.FindAll("button.ai-apply"));
