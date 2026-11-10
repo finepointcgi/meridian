@@ -32,7 +32,7 @@ public static class DbNotation
             var fk = fkColumns.Contains(c.Name);
             var uq = DbModel.IsUnique(c);
             if (mode == "keys" && !pk && !fk) continue;
-            rows.Add(new DbColumnRow(c, pk, fk, uq, DbModel.IsNullable(c), c.Get(FieldKeys.SqlType) is { Length: > 0 } t ? t : "text"));
+            rows.Add(new DbColumnRow(c, pk, fk, uq, DbModel.IsNullable(c), c.Get(FieldKeys.SqlType) is { Length: > 0 } t ? t : DbModel.IsView(table) ? "" : "text"));
         }
         return rows;
     }

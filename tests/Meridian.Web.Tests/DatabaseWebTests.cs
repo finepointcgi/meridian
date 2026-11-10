@@ -60,8 +60,8 @@ public class DatabaseWebTests : TestContext
         var preview = provider.Find("[data-testid=db-import-preview]").TextContent;
         Assert.Contains("2 schemas", preview);
         Assert.Contains("2 tables", preview);
-        Assert.Contains("1 views", preview);
-        Assert.Contains("1 foreign keys", preview);
+        Assert.Contains("1 view ", preview);
+        Assert.Contains("1 foreign key ", preview);
         Assert.Contains("customer", preview);
         Assert.Contains("1 warning", provider.Find(".db-warnings").TextContent);
         provider.Find("[data-testid=db-import-ok]").Click();

@@ -52,8 +52,8 @@ public static partial class SvgRenderer
             var x = b.X + 6;
             if (r.PrimaryKey) KeyGlyph(sb, x, cy, PkColor);
             else if (r.ForeignKey) KeyGlyph(sb, x, cy, FkColor);
-            var markers = r.PrimaryKey && r.ForeignKey ? "PF" : r.PrimaryKey ? "" : r.ForeignKey ? "" : r.Unique ? "UQ" : "";
-            if (markers.Length > 0) Text(sb, x + (r.PrimaryKey || r.ForeignKey ? 13 : 0), baseline, markers, false, "start", size: 9, color: t.Muted);
+            if (r.PrimaryKey && r.ForeignKey) sb.Append($"<circle cx=\"{F(x + 15)}\" cy=\"{F(cy - 4)}\" r=\"2.4\" fill=\"{FkColor}\"><title>also a foreign key</title></circle>");
+            else if (r.Unique && !r.PrimaryKey && !r.ForeignKey) Text(sb, x, baseline, "UQ", false, "start", size: 8.5, color: t.Muted);
             var nameX = b.X + 24;
             var typeText = r.Type;
             var typeW = Math.Min(typeText.Length * 6.2, (b.Width - 30) * 0.45);

@@ -1,0 +1,25 @@
+/* Database modelling: import, refresh review, subject areas, inspector columns, table rows on diagrams. */
+
+.db-file-button { cursor: pointer; display: inline-flex; }
+.db-file-button input[type=file] { display: none; }
+
+.db-review-dialog, .db-import-dialog { --chg-added: var(--ok); --chg-changed: var(--warn); --chg-removed: var(--danger); }
+.db-review-dialog .chg-sw { display: inline-flex; align-items: center; gap: 5px; }
+.db-review-dialog .chg-sw i { width: 10px; height: 10px; border-radius: 3px; border: 2px solid; display: inline-block; }
+.db-review-dialog .chg-sw.added i { border-color: var(--chg-added); }
+.db-review-dialog .chg-sw.changed i { border-color: var(--chg-changed); }
+.db-review-dialog .chg-sw.removed i { border-color: var(--chg-removed); border-style: dashed; }
+.db-review-dialog .chg-dot.added { background: var(--chg-added); }
+.db-review-dialog .chg-dot.changed { background: var(--chg-changed); }
+.db-review-dialog .chg-dot.removed { background: var(--chg-removed); }
+.db-review-row:hover { background: color-mix(in srgb, var(--accent, #4f8cff) 6%, transparent); }
+.db-review-group { position: sticky; top: 0; background: var(--panel-solid, var(--mud-palette-surface)); z-index: 1; }
+
+.db-group-row:hover, .db-group-pick:hover:not([disabled]) { background: color-mix(in srgb, var(--accent, #4f8cff) 8%, transparent); }
+.db-group-pick[disabled] { opacity: .55; cursor: default; }
+
+.db-inspector .db-col-row input:focus { outline: 1px solid var(--accent, #4f8cff); }
+.db-inspector .db-pk-toggle:hover { opacity: 1 !important; }
+
+/* Column rows of table shapes highlight under the pointer (drag from a row to another table for a foreign key). */
+.diagram-host svg.main g.db-row:hover > rect:first-child { fill: color-mix(in srgb, var(--accent, #4f8cff) 10%, transparent); }

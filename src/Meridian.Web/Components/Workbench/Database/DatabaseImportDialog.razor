@@ -45,10 +45,10 @@
             {
                 <div class="db-preview" data-testid="db-import-preview" style="border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px">
                     <div style="font-weight:600; margin-bottom:4px">
-                        @DbReservedWords.DialectName(c.Dialect.Length > 0 ? c.Dialect : "postgresql") · @c.Schemas.Count schema@(c.Schemas.Count == 1 ? "" : "s") ·
-                        @c.AllTables.Count(t => !t.IsView) tables · @c.AllTables.Count(t => t.IsView) views ·
-                        @c.AllTables.Sum(t => t.ForeignKeys.Count) foreign keys · @c.AllTables.Sum(t => t.Indexes.Count) indexes
-                        @if (c.Schemas.Sum(s => s.Sequences.Count + s.Types.Count + s.Routines.Count) is > 0 and var other) { <span> · @other other objects</span> }
+                        @DbReservedWords.DialectName(c.Dialect.Length > 0 ? c.Dialect : "postgresql") · @N(c.Schemas.Count, "schema") ·
+                        @N(c.AllTables.Count(t => !t.IsView), "table") · @N(c.AllTables.Count(t => t.IsView), "view") ·
+                        @N(c.AllTables.Sum(t => t.ForeignKeys.Count), "foreign key") · @N(c.AllTables.Sum(t => t.Indexes.Count), "index", "indexes")
+                        @if (c.Schemas.Sum(s => s.Sequences.Count + s.Types.Count + s.Routines.Count) is > 0 and var other) { <span> · @N(other, "other object")</span> }
                     </div>
                     @foreach (var s in c.Schemas.Where(s => s.Tables.Count > 0))
                     {
@@ -104,6 +104,8 @@
     public sealed record Answer(DbCatalog Catalog, string Source, string? Name, Element? Refresh);
 
     private const long MaxBytes = 64L * 1024 * 1024;
+
+    private static string N(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
     private string _text = "";
     private string _dialect = "";
     private string? _fileName;

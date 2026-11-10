@@ -125,6 +125,7 @@
             </MudButton>
         }
 
+        <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
         <div class="section-title">Specification <span class="grow"></span></div>
         foreach (var key in Fields(e))
         {
@@ -233,7 +234,6 @@
         }
 
         <RequirementInspectorSection E="e" />
-        <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
         <OperandsSection E="e" />
         <DerivationChainSection E="e" OnOpen="x => Shell?.OpenChainLink(x)" OnCreate="o => Shell?.DeriveAsync(o) ?? Task.CompletedTask" />
 
