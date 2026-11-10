@@ -12,7 +12,7 @@ public sealed record Presence(string ParticipantId, UserAccount User, string? Se
 /// browser tab keeps a replica, submits its operations here, and receives everyone else's in a single global order.
 /// The authoritative model is persisted to PostgreSQL shortly after changes.
 /// </summary>
-public sealed class CollaborationHub(IMeridianStore db, ILogger<CollaborationHub> log)
+public sealed partial class CollaborationHub(IMeridianStore db, ILogger<CollaborationHub> log)
 {
     private readonly ConcurrentDictionary<Guid, ProjectSession> _sessions = new();
     private readonly SemaphoreSlim _openGate = new(1, 1);

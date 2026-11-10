@@ -1,0 +1,159 @@
+@using Meridian.Data
+@implements IDisposable
+@inject Workspace Ws
+@inject IMeridianStore Db
+@inject CollaborationHub Hub
+@inject ISnackbar Snackbar
+
+@* Title-bar bell: unread count, a dropdown inbox, live delivery through the collaboration hub. *@
+<div class="notif">
+    <MudTooltip Text="Notifications">
+        <button class="notif-btn @(_open ? "on" : "")" @onclick="Toggle" aria-label="Notifications">
+            <MudIcon Icon="@(_unread > 0 ? Icons.Material.Filled.Notifications : Icons.Material.Outlined.Notifications)" />
+            @if (_unread > 0) { <span class="notif-badge">@(_unread > 99 ? "99+" : _unread.ToString())</span> }
+        </button>
+    </MudTooltip>
+    @if (_open)
+    {
+        <div class="notif-backdrop" @onclick="() => _open = false"></div>
+        <div class="notif-pop">
+            <div class="notif-head">
+                <span class="t">Notifications</span>
+                @if (_unread > 0) { <span class="count">@_unread new</span> }
+                <span style="flex:1"></span>
+                <button class="notif-link" disabled="@(_unread == 0)" @onclick="MarkAll">Mark all read</button>
+            </div>
+            <div class="notif-list">
+                @foreach (var n in _items)
+                {
+                    var item = n;
+                    <div class="notif-item @(item.Read ? "" : "unread")" @onclick="() => Go(item)">
+                        @if (item.Actor is { } a)
+                        {
+                            <span class="avatar sm" style="background:@a.Color">@MembersDialog.Initials(a)</span>
+                        }
+                        else
+                        {
+                            <span class="notif-kind"><MudIcon Icon="@KindIcon(item.Kind)" /></span>
+                        }
+                        <div class="notif-main">
+                            <div class="notif-text">@item.Text</div>
+                            <div class="notif-meta">
+                                <MudIcon Icon="@KindIcon(item.Kind)" />
+                                @if (item.ProjectName != null) { <span>@item.ProjectName</span><span>·</span> }
+                                <span>@Ago(item.CreatedAt)</span>
+                            </div>
+                        </div>
+                        @if (!item.Read)
+                        {
+                            <MudTooltip Text="Mark read">
+                                <span class="notif-dot" @onclick="() => MarkRead(item)" @onclick:stopPropagation="true"></span>
+                            </MudTooltip>
+                        }
+                    </div>
+                }
+                @if (_items.Count == 0)
+                {
+                    <div class="notif-empty">
+                        <MudIcon Icon="@Icons.Material.Outlined.NotificationsNone" Style="font-size:30px; opacity:.5" />
+                        <div>You're all caught up.</div>
+                        <div style="font-size:11.5px">Mentions, review requests, votes and replies show up here.</div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] public Workbench Shell { get; set; } = default!;
+    [Parameter] public EventCallback<NotificationInfo> OnNavigate { get; set; }
+
+    private IDisposable? _watch;
+    private Guid? _watching;
+    private int _unread;
+    private bool _open;
+    private IReadOnlyList<NotificationInfo> _items = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Ws.User is { } me && _watching != me.Id)
+        {
+            _watch?.Dispose();
+            _watching = me.Id;
+            _watch = Hub.WatchInbox(me.Id, () => _ = InvokeAsync(Arrived));
+            await Reload();
+        }
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.User is not { } me) return;
+        _unread = await Db.UnreadNotificationCountAsync(me.Id);
+        if (_open) _items = await Db.ListNotificationsAsync(me.Id, 40);
+    }
+
+    private async Task Arrived()
+    {
+        if (Ws.User is not { } me) return;
+        var before = _unread;
+        await Reload();
+        if (_unread > before && (await Db.ListNotificationsAsync(me.Id, 1)).FirstOrDefault() is { Read: false } latest)
+            Snackbar.Add(latest.Text, Severity.Info, o => { o.Icon = KindIcon(latest.Kind); o.VisibleStateDuration = 5000; });
+        StateHasChanged();
+    }
+
+    private async Task Toggle()
+    {
+        _open = !_open;
+        if (_open && Ws.User is { } me)
+        {
+            _items = await Db.ListNotificationsAsync(me.Id, 40);
+            _unread = await Db.UnreadNotificationCountAsync(me.Id);
+        }
+    }
+
+    private async Task MarkRead(NotificationInfo n)
+    {
+        if (Ws.User is not { } me) return;
+        await Db.MarkNotificationReadAsync(n.Id, me.Id);
+        await Reload();
+    }
+
+    private async Task MarkAll()
+    {
+        if (Ws.User is not { } me) return;
+        await Db.MarkAllNotificationsReadAsync(me.Id);
+        await Reload();
+    }
+
+    private async Task Go(NotificationInfo n)
+    {
+        if (Ws.User is { } me && !n.Read) await Db.MarkNotificationReadAsync(n.Id, me.Id);
+        _open = false;
+        await Reload();
+        if (OnNavigate.HasDelegate) await OnNavigate.InvokeAsync(n);
+        else if (Shell != null) await Shell.GoToNotificationAsync(n);
+    }
+
+    public static string KindIcon(string kind) => kind switch
+    {
+        NotificationKinds.Mention => Icons.Material.Outlined.AlternateEmail,
+        NotificationKinds.ReviewRequested => Icons.Material.Outlined.RateReview,
+        NotificationKinds.ReviewVote => Icons.Material.Outlined.HowToVote,
+        NotificationKinds.ReviewState => Icons.Material.Outlined.Flag,
+        _ => Icons.Material.Outlined.ChatBubbleOutline,
+    };
+
+    public static string Ago(DateTime utc)
+    {
+        var span = DateTime.UtcNow - utc.ToUniversalTime();
+        return span.TotalMinutes < 1 ? "just now"
+            : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min ago"
+            : span.TotalDays < 1 ? $"{(int)span.TotalHours} h ago"
+            : span.TotalDays < 7 ? $"{(int)span.TotalDays} d ago"
+            : utc.ToLocalTime().ToString("MMM d");
+    }
+
+    public void Dispose() => _watch?.Dispose();
+}

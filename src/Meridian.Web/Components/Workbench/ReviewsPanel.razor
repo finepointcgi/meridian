@@ -1,0 +1,447 @@
+@using Meridian.Data
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+@inject ReviewService Reviews
+@inject MeridianHostInfo Host
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<div class="rv">
+    @* ------------------------------------------------------------ list *@
+    <div class="rv-list">
+        <div class="rv-filters">
+            @foreach (var (key, label) in Filters)
+            {
+                var k = key;
+                var n = Count(k);
+                <span class="rv-filter @(_filter == k ? "on" : "")" @onclick="() => _filter = k">@label @if (n > 0) { <span class="count">@n</span> }</span>
+            }
+            <span style="flex:1"></span>
+            <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request review of the selection")">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.AddComment" OnClick="() => Shell.RequestReview()" Disabled="Ws.Session == null" />
+            </MudTooltip>
+        </div>
+        <div class="rv-items">
+            @foreach (var r in Visible())
+            {
+                var review = r;
+                <div class="rv-item @(_current?.Id == review.Id ? "sel" : "")" @onclick="() => Show(review.Id)">
+                    <div class="d-flex align-center gap-2">
+                        <span class="rv-state @StateClass(review.State)">@ReviewRules.Label(review.State)</span>
+                        <span class="rv-title">@review.Title</span>
+                    </div>
+                    <div class="rv-meta">
+                        <span>#@review.Id · @review.Author.DisplayName · @NotificationBell.Ago(review.UpdatedAt)</span>
+                        <span style="flex:1"></span>
+                        @foreach (var rv in review.Reviewers.Take(5))
+                        {
+                            <span class="avatar xs vote-@rv.Vote.ToString().ToLowerInvariant()" style="background:@rv.User.Color" title="@($"{rv.User.DisplayName}: {VoteLabel(rv.Vote)}")">@MembersDialog.Initials(rv.User)</span>
+                        }
+                    </div>
+                </div>
+            }
+            @if (!Visible().Any())
+            {
+                <div class="rv-empty">
+                    @(_all.Count == 0 ? (Host.LocalMode ? "No review checklists yet. Select elements and create one." : "No reviews yet. Select elements and request a review.") : "Nothing matches this filter.")
+                </div>
+            }
+        </div>
+    </div>
+
+    @* ------------------------------------------------------------ detail *@
+    <div class="rv-detail">
+        @if (_current is not { } cur)
+        {
+            <div class="rv-empty center">
+                <MudIcon Icon="@Icons.Material.Outlined.RateReview" Style="font-size:36px; opacity:.4" />
+                <div>Select a review to see its scope, changes and discussion.</div>
+            </div>
+        }
+        else
+        {
+            var me = Ws.User?.Id ?? Guid.Empty;
+            var canManage = cur.Author.Id == me || Ws.Role == ProjectRole.Owner;
+            var canVote = !cur.IsClosed && (cur.IsReviewer(me) || (cur.Reviewers.Count == 0 && cur.Author.Id == me));
+            var myVote = cur.VoteOf(me);
+            <div class="rv-head">
+                <div class="d-flex align-center gap-2">
+                    <span class="rv-state @StateClass(cur.State)">@ReviewRules.Label(cur.State)</span>
+                    <span class="rv-h">@cur.Title</span>
+                    <span class="rv-sub">#@cur.Id · @cur.Author.DisplayName · @cur.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm") · @ScopeText(cur)</span>
+                </div>
+                <div class="rv-actions">
+                    @if (canVote)
+                    {
+                        <button class="rbtn @(myVote == ReviewVote.Approve ? "on ok" : "")" @onclick="() => Vote(myVote == ReviewVote.Approve ? ReviewVote.Pending : ReviewVote.Approve)">
+                            <MudIcon Icon="@Icons.Material.Outlined.CheckCircle" /><span class="t">@(Host.LocalMode ? "Mark approved" : "Approve")</span>
+                        </button>
+                        <button class="rbtn @(myVote == ReviewVote.RequestChanges ? "on warn" : "")" @onclick="() => Vote(myVote == ReviewVote.RequestChanges ? ReviewVote.Pending : ReviewVote.RequestChanges)">
+                            <MudIcon Icon="@Icons.Material.Outlined.ChangeCircle" /><span class="t">@(Host.LocalMode ? "Needs changes" : "Request changes")</span>
+                        </button>
+                    }
+                    @if (_requirements.Count > 0 && cur.State == ReviewState.Approved && !Ws.ReadOnly)
+                    {
+                        <MudTooltip Text="Set status = approved on the in-scope requirements (undoable)">
+                            <button class="rbtn" @onclick="ApplyStatus"><MudIcon Icon="@Icons.Material.Outlined.Verified" /><span class="t">Apply status (@_requirements.Count)</span></button>
+                        </MudTooltip>
+                    }
+                    @if (canManage)
+                    {
+                        <button class="rbtn" @onclick="() => SetClosed(!cur.IsClosed)">
+                            <MudIcon Icon="@(cur.IsClosed ? Icons.Material.Outlined.LockOpen : Icons.Material.Outlined.Lock)" /><span class="t">@(cur.IsClosed ? "Reopen" : "Close")</span>
+                        </button>
+                        <MudTooltip Text="Delete review"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="Delete" /></MudTooltip>
+                    }
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(cur.Description))
+            {
+                <div class="rv-desc"><MentionText Text="@cur.Description" People="_people" /></div>
+            }
+            @if (!Host.LocalMode && cur.Reviewers.Count > 0)
+            {
+                <div class="rv-reviewers">
+                    @foreach (var rv in cur.Reviewers)
+                    {
+                        <span class="rv-reviewer vote-@rv.Vote.ToString().ToLowerInvariant()">
+                            <span class="avatar xs" style="background:@rv.User.Color">@MembersDialog.Initials(rv.User)</span>
+                            @rv.User.DisplayName
+                            <MudIcon Icon="@VoteIcon(rv.Vote)" />
+                        </span>
+                    }
+                </div>
+            }
+            <div class="rv-tabs">
+                <span class="rv-tab @(_tab == 0 ? "on" : "")" @onclick="() => _tab = 0">Scope <span class="count">@_checked/@_items.Count</span></span>
+                <span class="rv-tab @(_tab == 1 ? "on" : "")" @onclick="() => _tab = 1">Changes <span class="count">@(_diff?.Count.ToString() ?? "–")</span></span>
+                <span class="rv-tab @(_tab == 2 ? "on" : "")" @onclick="() => _tab = 2">Discussion <span class="count">@_comments.Count</span></span>
+            </div>
+            <div class="rv-body">
+                @switch (_tab)
+                {
+                    case 0:
+                        @foreach (var e in _items.Take(400))
+                        {
+                            var el = e;
+                            var done = _checks.Contains(el.Id);
+                            var notes = _comments.Count(c => c.ElementId == el.Id);
+                            <div class="rv-row @(Ws.Selected == el ? "sel" : "")" @onclick="() => FocusElement(el)">
+                                <span class="rv-check @(done ? "done" : "")" title="@(done ? "Reviewed — click to undo" : "Mark as reviewed")"
+                                      @onclick="() => Check(el, !done)" @onclick:stopPropagation="true">
+                                    <MudIcon Icon="@(done ? Icons.Material.Filled.CheckBox : Icons.Material.Outlined.CheckBoxOutlineBlank)" />
+                                </span>
+                                <MudIcon Icon="@UiKinds.Icon(el.Kind)" Style="@($"font-size:15px; color:{UiKinds.Accent(el.Kind)}")" />
+                                <span class="name">@el.DisplayName</span>
+                                @if (el.Kind == ElementKind.Requirement && el.Get(ReviewScope.StatusKey) is { Length: > 0 } st) { <span class="rv-pill">@st</span> }
+                                <span class="path">@el.Owner?.QualifiedName</span>
+                                @if (notes > 0) { <span class="rv-notes"><MudIcon Icon="@Icons.Material.Outlined.ChatBubbleOutline" />@notes</span> }
+                            </div>
+                        }
+                        @if (_items.Count == 0) { <div class="rv-empty">The elements in this review no longer exist in the model.</div> }
+                        break;
+                    case 1:
+                        @if (_diff is null)
+                        {
+                            <div class="rv-empty">This review has no base version, so there is nothing to compare. The scope tab lists what to review.</div>
+                        }
+                        else if (_diff.Count == 0)
+                        {
+                            <div class="rv-empty">No changes in scope since the base version.</div>
+                        }
+                        else
+                        {
+                            foreach (var d in _diff)
+                            {
+                                var diff = d;
+                                <div class="rv-diff" @onclick="() => { if (Ws.Model.Find(diff.Id) is { } x) FocusElement(x); }">
+                                    <div class="d-flex align-center gap-2">
+                                        <span class="rv-dk @diff.Kind.ToString().ToLowerInvariant()">@diff.Kind.ToString().ToUpperInvariant()</span>
+                                        <MudIcon Icon="@UiKinds.Icon(diff.ElementKind)" Style="font-size:15px; opacity:.75" />
+                                        <span style="font-weight:500">@diff.Name</span>
+                                        <span class="path">@diff.Path</span>
+                                    </div>
+                                    @foreach (var f in diff.Fields)
+                                    {
+                                        <div class="rv-field"><b>@f.Key</b>: <span class="before">@Short(f.Before)</span> → @Short(f.After)</div>
+                                    }
+                                </div>
+                            }
+                        }
+                        break;
+                    default:
+                        <div class="rv-discuss-filter">
+                            <span class="rv-filter @(_on == null ? "on" : "")" @onclick="() => _on = null">All</span>
+                            <span class="rv-filter @(_on == "" ? "on" : "")" @onclick="@(() => _on = "")">General</span>
+                            @if (_on is { Length: > 0 } fid && Ws.Model.Find(fid) is { } fe)
+                            {
+                                <span class="rv-filter on"><MudIcon Icon="@UiKinds.Icon(fe.Kind)" Style="font-size:13px" /> @fe.DisplayName</span>
+                            }
+                        </div>
+                        var shown = Shown();
+                        var shownIds = shown.Select(c => c.Id).ToHashSet();
+                        foreach (var c in shown.Where(c => c.ParentId is null || !shownIds.Contains(c.ParentId.Value)))
+                        {
+                            @CommentView(c, false)
+                            foreach (var reply in RepliesOf(shown, c.Id))
+                            {
+                                @CommentView(reply, true)
+                            }
+                            if (_replyTo == c.Id)
+                            {
+                                <div class="reply-box"><MentionInput @bind-Value="_replyDraft" People="_people" Compact="true" Placeholder="@($"Reply to {c.Author.DisplayName}…")" OnSubmit="() => Post(c.ElementId, c.Id)" /></div>
+                            }
+                        }
+                        if (shown.Count == 0) { <div class="rv-empty">No comments yet.</div> }
+                        <MentionInput @bind-Value="_draft" People="_people" Placeholder="@(_on is { Length: > 0 } eid && Ws.Model.Find(eid) is { } target ? $"Comment on {target.DisplayName}… (@ to mention)" : "Comment on this review… (@ to mention)")"
+                                      OnSubmit="@(() => Post(string.IsNullOrEmpty(_on) ? null : _on, null))" />
+                        break;
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Opens a review in the detail view; the nonce re-focuses the same review when asked again.</summary>
+    [Parameter] public (long Id, int Nonce)? Focus { get; set; }
+
+    private static readonly (string Key, string Label)[] Filters = [("waiting", "Waiting for me"), ("mine", "Mine"), ("open", "Open"), ("closed", "Closed"), ("all", "All")];
+
+    private string _filter = "open";
+    private IReadOnlyList<ReviewInfo> _all = [];
+    private ReviewInfo? _current;
+    private IReadOnlyList<Element> _items = [];
+    private IReadOnlyList<Element> _requirements = [];
+    private IReadOnlyList<ElementDiff>? _diff;
+    private IReadOnlyList<ReviewCommentInfo> _comments = [];
+    private HashSet<string> _checks = new();
+    private int _checked;
+    private IReadOnlyList<UserAccount> _people = [];
+    private int _tab;
+    private string? _on;          // discussion filter: null = all, "" = general, else an element id
+    private string? _draft, _replyDraft;
+    private long? _replyTo;
+    private (long, int)? _focused;
+    private int _loadedComments = -1;
+    private Guid? _loadedProject;
+    private int _modelVersion = -1;
+
+    private RenderFragment CommentView(ReviewCommentInfo c, bool reply) => __builder =>
+    {
+        <div class="comment @(reply ? "reply" : "")">
+            <div class="d-flex align-center gap-2">
+                <span class="avatar sm" style="background:@c.Author.Color">@MembersDialog.Initials(c.Author)</span>
+                <span style="font-weight:600; font-size:12px">@c.Author.DisplayName</span>
+                @if (c.ElementId != null && _on != c.ElementId && Ws.Model.Find(c.ElementId) is { } ce)
+                {
+                    <span class="rv-on" @onclick="() => FocusElement(ce)">on @ce.DisplayName</span>
+                }
+                <span style="font-size:11px; color:var(--text-3)">@c.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                <span style="flex:1"></span>
+                @if (!reply)
+                {
+                    <MudTooltip Text="Reply"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => { _replyTo = _replyTo == c.Id ? null : c.Id; _replyDraft = null; }" /></MudTooltip>
+                }
+                @if (c.Author.Id == Ws.User?.Id)
+                {
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveComment(c)" />
+                }
+            </div>
+            <div class="body"><MentionText Text="@c.Body" People="_people" /></div>
+        </div>
+    };
+
+    private List<ReviewCommentInfo> Shown() => _comments.Where(c => _on == null || (_on == "" ? c.ElementId == null : c.ElementId == _on)).ToList();
+
+    private static IEnumerable<ReviewCommentInfo> RepliesOf(List<ReviewCommentInfo> all, long root)
+    {
+        var byId = all.ToDictionary(c => c.Id);
+        long RootOf(ReviewCommentInfo c)
+        {
+            var seen = new HashSet<long>();
+            while (c.ParentId is { } p && byId.TryGetValue(p, out var parent) && seen.Add(c.Id)) c = parent;
+            return c.Id;
+        }
+        return all.Where(c => c.Id != root && RootOf(c) == root);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Reload();
+        if (Focus is { } f && _focused != f)
+        {
+            _focused = f;
+            await Show(f.Id);
+        }
+    }
+
+    protected override void OnWorkspaceChanged() => _ = InvokeAsync(async () =>
+    {
+        if (_loadedComments != Ws.CommentsVersion || _loadedProject != Ws.Session?.ProjectId)
+        {
+            await Reload();
+            StateHasChanged();
+        }
+        else if (_current != null && _modelVersion != Ws.Version && _tab == 0)
+        {
+            // Live model edits change the scope list; the diff is refreshed when the review reloads.
+            Resolve();
+            StateHasChanged();
+        }
+    });
+
+    private async Task Reload()
+    {
+        _loadedComments = Ws.CommentsVersion;
+        if (_loadedProject != Ws.Session?.ProjectId) { _current = null; _loadedProject = Ws.Session?.ProjectId; }
+        _all = await Reviews.ListAsync();
+        _people = await Reviews.PeopleAsync();
+        if (_current != null) await Show(_current.Id, keepTab: true);
+    }
+
+    private IEnumerable<ReviewInfo> Visible()
+    {
+        var me = Ws.User?.Id ?? Guid.Empty;
+        return _filter switch
+        {
+            "waiting" => _all.Where(r => r.WaitingFor(me)),
+            "mine" => _all.Where(r => r.Author.Id == me),
+            "open" => _all.Where(r => !r.IsClosed),
+            "closed" => _all.Where(r => r.IsClosed),
+            _ => _all,
+        };
+    }
+
+    private int Count(string filter)
+    {
+        var me = Ws.User?.Id ?? Guid.Empty;
+        return filter switch
+        {
+            "waiting" => _all.Count(r => r.WaitingFor(me)),
+            "open" => _all.Count(r => !r.IsClosed),
+            _ => 0,
+        };
+    }
+
+    public async Task Show(long id, bool keepTab = false)
+    {
+        var review = await Reviews.Store.GetReviewAsync(id);
+        if (review is null || review.ProjectId != Ws.Session?.ProjectId) { _current = null; return; }
+        if (_current?.Id != id) { _on = null; _replyTo = null; if (!keepTab) _tab = 0; }
+        _current = review;
+        _diff = await Reviews.DiffAsync(review);
+        _comments = await Reviews.Store.ListReviewCommentsAsync(id);
+        var me = Ws.User?.Id ?? Guid.Empty;
+        _checks = (await Reviews.Store.ListReviewChecksAsync(id)).Where(c => c.UserId == me).Select(c => c.ElementId).ToHashSet();
+        Resolve();
+        if (!_all.Any(r => r.Id == id)) _filter = "all";
+    }
+
+    private void Resolve()
+    {
+        if (_current is null) return;
+        _modelVersion = Ws.Version;
+        _items = ReviewScope.Items(Ws.Model, _current, _diff);
+        _requirements = ReviewScope.Requirements(Ws.Model, _current, _diff);
+        _checked = _items.Count(e => _checks.Contains(e.Id));
+    }
+
+    private void FocusElement(Element e)
+    {
+        Shell.Navigate(e);
+        _on = e.Id;
+    }
+
+    private async Task Check(Element e, bool done)
+    {
+        if (_current is null) return;
+        if (done) _checks.Add(e.Id); else _checks.Remove(e.Id);
+        _checked = _items.Count(x => _checks.Contains(x.Id));
+        await Reviews.SetCheckedAsync(_current, e.Id, done);
+    }
+
+    private async Task Vote(ReviewVote vote)
+    {
+        if (_current is null) return;
+        var before = _current.State;
+        var updated = await Reviews.VoteAsync(_current, vote);
+        if (updated is null) return;
+        _current = updated;
+        if (before != ReviewState.Approved && updated.State == ReviewState.Approved && updated.ApplyStatus && !Ws.ReadOnly)
+            await ApplyStatus();
+        await Reload();
+    }
+
+    private async Task ApplyStatus()
+    {
+        if (_current is null) return;
+        try
+        {
+            var n = await Reviews.ApplyApprovedStatusAsync(_current);
+            Snackbar.Add(n == 0 ? "The in-scope requirements are already approved." : $"Set {n} requirement{(n == 1 ? "" : "s")} to approved — undo with ⌘Z.", Severity.Success);
+            Resolve();
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+    }
+
+    private async Task SetClosed(bool closed)
+    {
+        if (_current is null) return;
+        _current = await Reviews.SetClosedAsync(_current, closed);
+        await Reload();
+    }
+
+    private async Task Delete()
+    {
+        if (_current is null) return;
+        var ok = await Dialogs.ShowMessageBox("Delete review", $"Delete “{_current.Title}” with its votes and discussion? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Reviews.DeleteAsync(_current);
+        _current = null;
+        await Reload();
+    }
+
+    private async Task Post(string? elementId, long? parent)
+    {
+        if (_current is null) return;
+        var text = parent is null ? _draft : _replyDraft;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        await Reviews.CommentOnReviewAsync(_current, elementId, parent, text);
+        if (parent is null) _draft = null;
+        else { _replyDraft = null; _replyTo = null; }
+        await Reload();
+    }
+
+    private async Task RemoveComment(ReviewCommentInfo c)
+    {
+        await Reviews.DeleteReviewCommentAsync(c);
+        await Reload();
+    }
+
+    private static string StateClass(ReviewState s) => s switch
+    {
+        ReviewState.Approved => "approved",
+        ReviewState.ChangesRequested => "changes",
+        ReviewState.Closed => "closed",
+        _ => "open",
+    };
+
+    private static string VoteLabel(ReviewVote v) => v switch { ReviewVote.Approve => "approved", ReviewVote.RequestChanges => "requested changes", _ => "pending" };
+
+    private static string VoteIcon(ReviewVote v) => v switch
+    {
+        ReviewVote.Approve => Icons.Material.Filled.CheckCircle,
+        ReviewVote.RequestChanges => Icons.Material.Filled.ChangeCircle,
+        _ => Icons.Material.Outlined.Schedule,
+    };
+
+    private string ScopeText(ReviewInfo r) => r.ScopeKind switch
+    {
+        ReviewScopeKind.Package => $"package {Ws.Model.Find(r.ElementIds.FirstOrDefault())?.DisplayName ?? "(deleted)"}",
+        ReviewScopeKind.Versions => "version range",
+        _ => $"{r.ElementIds.Count} element{(r.ElementIds.Count == 1 ? "" : "s")}",
+    };
+
+    private static string Short(string? s) => s is null ? "∅" : s.Length > 70 ? s[..70] + "…" : s;
+}

@@ -68,6 +68,8 @@ public partial class Workbench
             C("Add UAF profile", Icons.Material.Outlined.Badge, AddUafProfile),
             CA("Import into this project (BPMN, ArchiMate, SQL, C#)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
+            CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
+            C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
         };
         list.AddRange(RequirementPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
@@ -348,6 +350,7 @@ public partial class Workbench
         if (e.Owner != null) m.Add(MenuEntry.Async("Delete", () => Delete(e), "⌦"));
         m.Add(MenuEntry.Sep());
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
+        if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
         OpenMenu(m, x, y);

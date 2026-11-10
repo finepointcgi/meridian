@@ -45,6 +45,33 @@ public interface IMeridianStore
     Task<long> AddCommentAsync(Guid projectId, string elementId, Guid author, string body);
     Task SetCommentResolvedAsync(long commentId, bool resolved);
     Task DeleteCommentAsync(long commentId);
+
+    // ---------------------------------------------------------------- reviews, threaded replies, @mentions & notifications (Reviews.cs)
+
+    Task<long> CreateReviewAsync(Guid projectId, ReviewDraft draft, Guid author);
+    Task<IReadOnlyList<ReviewInfo>> ListReviewsAsync(Guid projectId);
+    Task<ReviewInfo?> GetReviewAsync(long reviewId);
+    Task SetReviewStateAsync(long reviewId, ReviewState state);
+    Task SetReviewVoteAsync(long reviewId, Guid userId, ReviewVote vote);
+    Task DeleteReviewAsync(long reviewId);
+    Task<IReadOnlyList<ReviewCommentInfo>> ListReviewCommentsAsync(long reviewId);
+    Task<long> AddReviewCommentAsync(long reviewId, string? elementId, long? parentId, Guid author, string body);
+    Task DeleteReviewCommentAsync(long commentId);
+    Task<IReadOnlyList<ReviewCheck>> ListReviewChecksAsync(long reviewId);
+    Task SetReviewCheckAsync(long reviewId, string elementId, Guid userId, bool done);
+
+    /// <summary>Element comment threading: <paramref name="commentId"/> is a reply to <paramref name="parentId"/>.</summary>
+    Task SetCommentParentAsync(long commentId, long parentId);
+    Task<IReadOnlyDictionary<long, long>> ListCommentParentsAsync(Guid projectId);
+    /// <summary>Records who a comment mentions; <paramref name="source"/> is "comment" or "review_comment".</summary>
+    Task AddMentionsAsync(Guid projectId, string source, long sourceId, IReadOnlyCollection<Guid> userIds);
+    Task<IReadOnlyList<Guid>> ListMentionsAsync(string source, long sourceId);
+
+    Task<long> AddNotificationAsync(NotificationDraft notification);
+    Task<IReadOnlyList<NotificationInfo>> ListNotificationsAsync(Guid userId, int limit = 50);
+    Task<int> UnreadNotificationCountAsync(Guid userId);
+    Task MarkNotificationReadAsync(long notificationId, Guid userId);
+    Task MarkAllNotificationsReadAsync(Guid userId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>
