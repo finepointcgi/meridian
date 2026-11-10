@@ -1,0 +1,98 @@
+@* The refresh review: what re-importing a database's source would add, change and remove — tables, columns, keys,
+   indexes and the rest — with a check box each. Accepting applies the chosen changes as one undo step; the diagrams then
+   highlight them like code-sync reviews do. Documentation written in Meridian, subject areas and layout are kept. *@
+@using Meridian.Core.DataModeling
+@inject Workspace Ws
+
+<MudDialog Class="db-review-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.Difference" />
+            <MudText Typo="Typo.h6">Review changes to @Plan.Database.Name</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex align-center gap-3 flex-wrap" style="font-size:13px; margin-bottom:8px">
+            <span class="chg-sw added"><i></i>Added @Count(DbChangeKind.Added)</span>
+            <span class="chg-sw changed"><i></i>Changed @Count(DbChangeKind.Changed)</span>
+            <span class="chg-sw removed"><i></i>Removed @Count(DbChangeKind.Removed)</span>
+            <span style="color:var(--text-3)">from @Source</span>
+            <span style="flex:1"></span>
+            <MudButton Size="Size.Small" OnClick="() => SetAll(true)" data-testid="db-review-all">Select all</MudButton>
+            <MudButton Size="Size.Small" OnClick="() => SetAll(false)">Select none</MudButton>
+            <MudButton Size="Size.Small" OnClick="() => SetKind(DbChangeKind.Removed, false)">Keep everything removed</MudButton>
+        </div>
+        <div class="db-review-list" style="max-height:55vh; overflow:auto; border:1px solid var(--border); border-radius:8px">
+            @foreach (var g in Plan.Changes.GroupBy(c => c.Table != null ? $"{c.Schema}.{c.Table}" : c.Schema.Length > 0 ? c.Schema : "(database)"))
+            {
+                <div class="db-review-group" style="padding:6px 10px; font-weight:600; background:var(--panel-2, transparent); border-bottom:1px solid var(--border)">@g.Key</div>
+                @foreach (var c in g)
+                {
+                    var change = c;
+                    <label class="db-review-row" data-change="@change.Id" style="display:grid; grid-template-columns:auto auto 1fr auto; gap:8px; align-items:center; padding:5px 10px 5px 18px; border-bottom:1px solid var(--border); font-size:13px; cursor:pointer">
+                        <input type="checkbox" checked="@_selected.Contains(change.Id)" @onchange="e => Toggle(change, e)" />
+                        <span class="chg-dot @Css(change.Kind)" title="@change.Kind" style="width:9px; height:9px; border-radius:50%; display:inline-block"></span>
+                        <span style="min-width:0">
+                            <b>@change.Kind</b> @change.TypeName.ToLowerInvariant() <span style="font-family:var(--mono, monospace)">@change.Name</span>
+                            @if (change.Fields.Count > 0)
+                            {
+                                <span style="color:var(--text-2)"> — @string.Join("; ", change.Fields.Select(f => $"{f.Key}: {Show(f.Before)} → {Show(f.After)}"))</span>
+                            }
+                        </span>
+                        @if (change.Destructive && change.Kind == DbChangeKind.Removed)
+                        {
+                            <span style="color:var(--warn); font-size:12px" title="Removing it deletes the element (and its diagram shapes) from the model; you can undo">removes from model</span>
+                        }
+                        else { <span></span> }
+                    </label>
+                }
+            }
+        </div>
+        <MudText Typo="Typo.caption" Style="color:var(--text-3); display:block; margin-top:6px">
+            Elements are matched by the names they have in the database (renaming in Meridian keeps the match). Documentation you wrote,
+            subject areas and diagram layout are kept. The whole refresh is one undo step.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_selected.Count == 0 || Ws.ReadOnly)" OnClick="Apply" data-testid="db-review-apply">
+            Apply @_selected.Count change@(_selected.Count == 1 ? "" : "s")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public DbRefreshPlan Plan { get; set; } = default!;
+    [Parameter] public string Source { get; set; } = "the source";
+
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+
+    protected override void OnInitialized()
+    {
+        // Additions and changes are selected; removals too (the source no longer has them) — the user can keep any.
+        foreach (var c in Plan.Changes) _selected.Add(c.Id);
+    }
+
+    private int Count(DbChangeKind k) => Plan.Changes.Count(c => c.Kind == k);
+    private static string Css(DbChangeKind k) => k switch { DbChangeKind.Added => "added", DbChangeKind.Removed => "removed", _ => "changed" };
+    private static string Show(string? s) => string.IsNullOrEmpty(s) ? "(none)" : s.Length > 50 ? s[..47] + "…" : s;
+
+    private void Toggle(DbChange c, ChangeEventArgs e)
+    {
+        if (e.Value is true) _selected.Add(c.Id); else _selected.Remove(c.Id);
+    }
+
+    private void SetAll(bool on)
+    {
+        _selected.Clear();
+        if (on) foreach (var c in Plan.Changes) _selected.Add(c.Id);
+    }
+
+    private void SetKind(DbChangeKind k, bool on)
+    {
+        foreach (var c in Plan.Changes.Where(c => c.Kind == k)) if (on) _selected.Add(c.Id); else _selected.Remove(c.Id);
+    }
+
+    private void Apply() => MudDialog.Close(DialogResult.Ok((IReadOnlyList<DbChange>)Plan.Changes.Where(c => _selected.Contains(c.Id)).ToList()));
+}

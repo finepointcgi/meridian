@@ -1,0 +1,215 @@
+@* Inspector section for data models: a table's columns (inline add, one-click primary key, nullability, type), its
+   subject areas; the database fields of columns, keys, indexes, constraints, sequences, routines and triggers; a
+   database's dialect and naming convention; a subject area's colour and tables. *@
+@using Meridian.Core.DataModeling
+@inherits WorkspaceComponent
+
+@if (E is { } e && Ws.Model.Contains(e) && Relevant(e))
+{
+    var editable = !Ws.ReadOnly && Ws.CanEdit(e);
+    <div class="db-inspector" data-testid="db-inspector">
+        @if (e.Kind == ElementKind.Table)
+        {
+            <div class="section-title">Columns <span class="grow"></span></div>
+            <div class="db-columns" data-testid="db-columns">
+                @foreach (var c in DbModel.Columns(e).ToList())
+                {
+                    var col = c;
+                    var pk = DbModel.IsPk(col);
+                    var fk = DbModel.ForeignKeyColumns(Ws.Model, e).Contains(col.Name);
+                    <div class="db-col-row" data-column="@col.Name" style="display:grid; grid-template-columns:22px 1fr 110px 22px 22px; gap:4px; align-items:center; margin-bottom:2px">
+                        <button class="db-pk-toggle @(pk ? "on" : "")" title="@(pk ? "Primary key — click to remove" : "Make this the primary key (or part of it)")" disabled="@(!editable)"
+                                @onclick="() => DbModel.SetPrimaryKey(Ws.Model, col, !pk)" data-testid="db-pk-toggle"
+                                style="border:none; background:none; cursor:pointer; padding:0; color:@(pk ? "#e0a800" : fk ? "#4f8cff" : "var(--text-3)"); opacity:@(pk || fk ? 1 : .45)">
+                            <MudIcon Icon="@Icons.Material.Outlined.Key" Style="font-size:16px" />
+                        </button>
+                        <input class="db-col-name" value="@col.Name" disabled="@(!editable)" @onchange="ev => Rename(col, ev)" aria-label="Column name"
+                               style="min-width:0; font-size:12.5px; padding:3px 5px; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--text); @(pk ? "font-weight:600" : "")" />
+                        <input class="db-col-type" value="@col.Get(FieldKeys.SqlType)" disabled="@(!editable)" @onchange="ev => Set(col, FieldKeys.SqlType, ev.Value?.ToString())" aria-label="Data type" list="db-types"
+                               style="min-width:0; font-size:12px; padding:3px 5px; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--text-2); font-family:var(--mono, monospace)" />
+                        <button title="@(DbModel.IsNullable(col) ? "Nullable — click to make it NOT NULL" : "NOT NULL — click to allow NULL")" disabled="@(!editable || pk)"
+                                @onclick="() => ToggleNullable(col)"
+                                style="border:none; background:none; cursor:pointer; padding:0; font-size:12px; font-weight:700; color:@(DbModel.IsNullable(col) ? "var(--text-3)" : "var(--text)")">@(DbModel.IsNullable(col) ? "?" : "*")</button>
+                        <button title="Delete column" disabled="@(!editable)" @onclick="() => Ws.Model.Delete(col)" style="border:none; background:none; cursor:pointer; padding:0; color:var(--text-3)">
+                            <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" />
+                        </button>
+                    </div>
+                }
+                <datalist id="db-types">
+                    @foreach (var t in CommonTypes) { <option value="@t"></option> }
+                </datalist>
+            </div>
+            @if (editable)
+            {
+                <div class="d-flex gap-1 align-center mt-1">
+                    <input class="db-new-column" placeholder="+ column name" value="@_newColumn" @oninput="ev => _newColumn = ev.Value?.ToString()" @onkeydown="ev => NewColumnKey(e, ev)" data-testid="db-add-column-name"
+                           style="flex:1; min-width:0; font-size:12.5px; padding:4px 6px; border:1px dashed var(--border); border-radius:4px; background:transparent; color:var(--text)" />
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => AddColumn(e)" data-testid="db-add-column">Column</MudButton>
+                </div>
+                <div class="d-flex gap-1 flex-wrap mt-1">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Create(e, ElementKind.DbIndex)">Index</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Create(e, ElementKind.DbConstraint)">Constraint</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Create(e, ElementKind.Trigger)">Trigger</MudButton>
+                </div>
+            }
+            @Others(e)
+            <div class="section-title">Subject areas <span class="grow"></span></div>
+            <div class="trace-group" data-testid="db-table-groups">
+                @foreach (var g in DbModel.GroupsOf(Ws.Model, e))
+                {
+                    var group = g;
+                    <span class="pill" title="@group.QualifiedName" @onclick="() => Shell.Navigate(group)">
+                        <span style="width:9px; height:9px; border-radius:2px; background:@DbModel.ColorOf(group); display:inline-block; margin-right:4px"></span>
+                        <span class="t">@group.Name</span>
+                        @if (editable) { <span class="rm" title="Remove from the area" @onclick="() => DbModel.RemoveFromGroup(Ws.Model, [e], group)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span> }
+                    </span>
+                }
+                @if (editable)
+                {
+                    <span class="pill" style="cursor:pointer" @onclick="Shell.AddSelectionToGroup"><MudIcon Icon="@Icons.Material.Filled.Add" Style="font-size:14px" /><span class="t">Add to area…</span></span>
+                }
+            </div>
+        }
+
+        @if (DbModel.IsGroup(e))
+        {
+            <div class="section-title">Subject area <span class="grow"></span></div>
+            <div class="d-flex gap-1 flex-wrap mb-1">
+                @foreach (var color in DbFields.GroupColors)
+                {
+                    var c = color;
+                    <button title="@c" disabled="@(!editable)" @onclick="() => Set(e, FieldKeys.Color, c)"
+                            style="width:20px; height:20px; border-radius:5px; border:2px solid @(DbModel.ColorOf(e) == c ? "var(--text)" : "transparent"); background:@c; cursor:pointer"></button>
+                }
+            </div>
+            <div class="trace-group">
+                @foreach (var t in DbModel.Members(Ws.Model, e))
+                {
+                    var table = t;
+                    <span class="pill" @onclick="() => Shell.Navigate(table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" Style="font-size:13px" /><span class="t">@table.Name</span></span>
+                }
+            </div>
+            <MudText Typo="Typo.caption" Style="color:var(--text-3)">Package permissions on this area apply to its tables.</MudText>
+        }
+
+        @if (DbModel.IsDatabase(e))
+        {
+            <div class="section-title">Database <span class="grow"></span></div>
+            @(Choice(e, DbFields.Dialect, "Dialect (reserved words, default DDL)", DialectOptions))
+            @Choice(e, DbFields.Naming, "Naming convention (validation)", ("", "(none)"), ("snake_case", "snake_case"), ("PascalCase", "PascalCase"), ("camelCase", "camelCase"))
+            @if (e.Get(DbFields.Source) is { Length: > 0 } src)
+            {
+                <div style="font-size:12px; color:var(--text-3); margin:4px 2px">Imported from @src</div>
+            }
+            <div class="d-flex gap-1 flex-wrap mt-1">
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Shell.GenerateDdl(e)">Generate DDL…</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Shell.MigrationScript(e)">Migration script…</MudButton>
+                @if (editable) { <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Shell.RefreshFromDatabase(e)">Refresh…</MudButton> }
+            </div>
+        }
+
+        @if (e.Kind != ElementKind.Table && !DbModel.IsGroup(e) && !DbModel.IsDatabase(e))
+        {
+            @Others(e)
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+    private string? _newColumn;
+
+    private static readonly string[] CommonTypes =
+        ["integer", "bigint", "smallint", "serial", "bigserial", "numeric(10,2)", "decimal(18,2)", "real", "double precision", "boolean", "varchar(255)", "text", "char(1)",
+         "date", "time", "timestamp", "timestamptz", "uuid", "json", "jsonb", "bytea", "nvarchar(255)", "datetime2", "bit"];
+
+    private static readonly (string, string)[] DialectOptions = DbFields.Dialects.Select(d => (d, DbReservedWords.DialectName(d))).Prepend(("", "(not set: PostgreSQL)")).ToArray();
+
+    private static readonly (string, string)[] ActionOptions = DbFields.ReferentialActions.Select(a => (a, a.Length == 0 ? "(no action)" : a)).ToArray();
+
+    private static bool Relevant(Element e) => DbModel.IsDataElement(e) || e.Kind == ElementKind.ForeignKey || e.Kind == ElementKind.DataType && e.Get(DbFields.BaseType).Length > 0;
+
+    /// <summary>The element's db.* fields (the generic list leaves them out), as fitting editors.</summary>
+    private RenderFragment Others(Element e) => __builder =>
+    {
+        var fields = Metamodel.EditableFields(e.Kind).Where(k => k.StartsWith("db.", StringComparison.Ordinal) && k != DbFields.QualifiedName).ToList();
+        if (fields.Count == 0 && e.Get(DbFields.QualifiedName).Length == 0) return;
+        <div class="section-title">Database <span class="grow"></span></div>
+        foreach (var key in fields)
+        {
+            switch (key)
+            {
+                case DbFields.Identity:
+                    @Choice(e, key, "Identity", ("", "(none)"), ("always", "Generated always"), ("byDefault", "Generated by default"), ("autoIncrement", "Auto increment"))
+                    break;
+                case DbFields.OnDelete or DbFields.OnUpdate:
+                    @(Choice(e, key, DbFields.Label(key)!, ActionOptions))
+                    break;
+                case DbFields.Timing:
+                    @Choice(e, key, "Timing", ("BEFORE", "Before"), ("AFTER", "After"), ("INSTEAD OF", "Instead of"))
+                    break;
+                case DbFields.Level:
+                    @Choice(e, key, "For each", ("", "(statement)"), ("ROW", "Row"), ("STATEMENT", "Statement"))
+                    break;
+                case DbFields.Cycle:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Cycle" />
+                    break;
+                default:
+                    var multi = key is DbFields.Definition or DbFields.Expression;
+                    <MudTextField @key="@(e.Id + key)" T="string" Label="@(DbFields.Label(key) ?? key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" HelperText="@DbFields.Help(key)"
+                                  Lines="@(multi ? 3 : 1)" AutoGrow="multi" MaxLines="10" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    break;
+            }
+        }
+        if (e.Get(DbFields.QualifiedName) is { Length: > 0 } q)
+        {
+            <div style="font-size:11.5px; color:var(--text-3); margin:4px 2px" title="@DbFields.Help(DbFields.QualifiedName)">In the database: <span style="font-family:var(--mono, monospace)">@q</span></div>
+        }
+    };
+
+    private RenderFragment Choice(Element e, string key, string label, params (string Value, string Text)[] options) => __builder =>
+    {
+        <MudSelect @key="@(e.Id + key)" T="string" Label="@label" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Variant="Variant.Outlined" Margin="Margin.Dense">
+            @foreach (var (v, t) in options) { <MudSelectItem Value="@v">@t</MudSelectItem> }
+        </MudSelect>
+    };
+
+    private void Set(Element e, string key, string? value)
+    {
+        if (!Ws.Model.Contains(e)) return;
+        try { Ws.Model.Set(e, key, string.IsNullOrWhiteSpace(value) ? null : value.Trim()); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void SetFlag(Element e, string key, bool on) => Set(e, key, on ? "true" : null);
+
+    private void ToggleNullable(Element col) => Set(col, FieldKeys.Nullable, DbModel.IsNullable(col) ? null : "true");
+
+    private void Rename(Element col, ChangeEventArgs ev)
+    {
+        if (ev.Value?.ToString()?.Trim() is { Length: > 0 } name) Set(col, FieldKeys.Name, name);
+    }
+
+    private void AddColumn(Element table)
+    {
+        var name = _newColumn?.Trim();
+        DbModel.AddColumn(Ws.Model, table, string.IsNullOrEmpty(name) ? null : name);
+        _newColumn = null;
+    }
+
+    private void NewColumnKey(Element table, KeyboardEventArgs ev)
+    {
+        if (ev.Key == "Enter" && !string.IsNullOrWhiteSpace(_newColumn)) AddColumn(table);
+    }
+
+    private void Create(Element table, ElementKind kind)
+    {
+        try
+        {
+            var x = Ws.Model.Create(table, kind, $"{(kind == ElementKind.DbIndex ? "ix" : kind == ElementKind.Trigger ? "trg" : "ck")}_{table.Name}_{table.OwnedElements.Count(c => c.Kind == kind) + 1}");
+            if (kind == ElementKind.DbConstraint) Ws.Model.Set(x, FieldKeys.Subtype, DbFields.CheckConstraint);
+            Ws.Select(x);
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}

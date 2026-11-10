@@ -29,16 +29,16 @@ public sealed class DbExtract
     {
         options ??= new DbExtractOptions();
         var x = new DbExtract();
-        var db = DbModel.DatabaseOf(scope) ?? (DbModel.IsGroup(scope) ? null : scope.Descendants().FirstOrDefault(DbModel.IsDatabase));
+        var list = (tables ?? DbModel.TablesIn(m, scope)).Where(t => t.Kind == ElementKind.Table).Distinct().ToList();
+        var db = DbModel.DatabaseOf(scope) ?? list.Select(DbModel.DatabaseOf).FirstOrDefault(d => d != null) ?? (DbModel.IsGroup(scope) ? null : scope.Descendants().FirstOrDefault(DbModel.IsDatabase));
         x.Catalog.Name = db?.Name ?? scope.Name;
         x.Catalog.Dialect = db?.Get(DbFields.Dialect) ?? "";
-        var list = (tables ?? DbModel.TablesIn(m, scope)).Where(t => t.Kind == ElementKind.Table).Distinct().ToList();
         string? CommentOf(Element e) => options.SourceNames ? Null(e.Get(DbFields.Comment)) : Null(e.Documentation);
         string NameOf(Element e) => options.SourceNames && e.Get(DbFields.QualifiedName) is { Length: > 0 } q ? LastSegment(q) : e.Name;
         string SchemaName(Element e) => DbModel.SchemaOf(e) is { } s ? NameOf(s) : "";
 
         // Schemas in scope appear even when empty (a new schema is a migration step too).
-        foreach (var s in SchemasIn(scope)) Register(x, x.Catalog.Schema(NameOf(s)), s, DbPaths.Schema(NameOf(s)));
+        if (tables == null) foreach (var s in SchemasIn(scope)) Register(x, x.Catalog.Schema(NameOf(s)), s, DbPaths.Schema(NameOf(s)));
 
         foreach (var t in list)
         {

@@ -707,6 +707,27 @@ public class DatabaseGroupsAndRefreshTests
         Assert.Equal("Database", sheet[0][0]);
     }
 
+    [Theory]
+    [InlineData(Meridian.Serialization.Reports.ReportFormat.Html)]
+    [InlineData(Meridian.Serialization.Reports.ReportFormat.Docx)]
+    [InlineData(Meridian.Serialization.Reports.ReportFormat.Pdf)]
+    public void Data_Dictionary_Report_Lists_Tables_Columns_Keys_And_Subject_Areas(Meridian.Serialization.Reports.ReportFormat format)
+    {
+        var (m, r) = DatabaseModelTests.Import(DatabaseScripts.Postgres, "postgresql");
+        var order = m.OfKind(ElementKind.Table).Single(t => t.Name == "order");
+        DbModel.AddToGroup(m, [order], DbModel.CreateGroup(m, r.Database, "Ordering"));
+        var t = Meridian.Serialization.Reports.ReportTemplates.DataDictionary();
+        var doc = Meridian.Serialization.Reports.DocResolver.Resolve(m, t);
+        Assert.True(doc.Warnings.Count == 0, string.Join("; ", doc.Warnings));
+        var html = Meridian.Serialization.Reports.ReportEngine.Preview(m, t, loopLimit: 50, diagrams: false);
+        Assert.Contains("customer_id", html);
+        Assert.Contains("Store credit in EUR", html);
+        Assert.Contains("Ordering", html);
+        Assert.Contains("PK", html);
+        Assert.Contains("numeric(10,2)", html);
+        Assert.True(Meridian.Serialization.Reports.ReportEngine.Generate(m, t, format).Length > 1000);
+    }
+
     [Fact]
     public void Database_Diagram_Renders_Key_Markers_Views_And_Column_To_Column_Foreign_Keys()
     {

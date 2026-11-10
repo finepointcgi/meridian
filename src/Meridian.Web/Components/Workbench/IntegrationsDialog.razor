@@ -1,5 +1,6 @@
 @using Meridian.Data
 @using Meridian.Web.Integrations
+@using Meridian.Web.Components.Workbench.Database
 @inject IntegrationService Integrations
 @inject WebhookDispatcher Webhooks
 @inject Workspace Ws
@@ -186,6 +187,11 @@
             <MudTabPanel Text="Code repositories">
                 <CodeRepositoriesPanel CanManage="_canManage" />
             </MudTabPanel>
+
+            @* ------------------------------------------------------------ live databases (schema import and refresh) *@
+            <MudTabPanel Text="Databases">
+                <DatabasesPanel OnImport="() => MudDialog.Close()" />
+            </MudTabPanel>
         </MudTabs>
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
@@ -197,6 +203,9 @@
 
     /// <summary>Index of the Code repositories tab, for <see cref="InitialTab"/>.</summary>
     public const int CodeRepositoriesTab = 2;
+
+    /// <summary>Index of the Databases tab ("Connect to a database…").</summary>
+    public const int DatabasesTab = 4;
 
     /// <summary>Opens Integrations on the Code repositories tab ("Connect a repository" in What changed, ⌘K).</summary>
     public static Task ShowCodeRepositoriesAsync(IDialogService dialogs) =>

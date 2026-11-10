@@ -1,0 +1,54 @@
+@* Add to subject area…: the selected tables join an existing area or a new one (a table may be in several). *@
+@using Meridian.Core.DataModeling
+@inject Workspace Ws
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Workspaces" /><MudText Typo="Typo.h6">Add @Tables.Count table@(Tables.Count == 1 ? "" : "s") to a subject area</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-1" data-testid="db-add-to-group">
+            @foreach (var g in DbModel.Groups(Ws.Model))
+            {
+                var group = g;
+                var all = Tables.All(t => DbModel.InGroup(t, group));
+                <button class="db-group-pick" disabled="@all" @onclick="() => Add(group)" data-group="@group.Name"
+                        style="display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:none; color:var(--text); cursor:pointer; text-align:left">
+                    <span style="width:12px; height:12px; border-radius:3px; background:@DbModel.ColorOf(group)"></span>
+                    <span style="flex:1">@group.Name</span>
+                    <span style="color:var(--text-3); font-size:12px">@(all ? "already in it" : $"{DbModel.Members(Ws.Model, group).Count} tables")</span>
+                </button>
+            }
+            <div class="d-flex gap-2 align-center mt-2">
+                <MudTextField T="string" @bind-Value="_new" Label="New subject area" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" data-testid="db-new-group-name" />
+                <MudButton Variant="Variant.Outlined" Disabled="@string.IsNullOrWhiteSpace(_new)" OnClick="CreateAndAdd" data-testid="db-new-group-add">Create and add</MudButton>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<Element> Tables { get; set; } = [];
+    /// <summary>Where a new area goes (the database in context, or a package).</summary>
+    [Parameter] public Element? Home { get; set; }
+    private string? _new;
+
+    private void Add(Element group)
+    {
+        try { DbModel.AddToGroup(Ws.Model, Tables, group); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); return; }
+        MudDialog.Close(DialogResult.Ok(group));
+    }
+
+    private void CreateAndAdd()
+    {
+        if (string.IsNullOrWhiteSpace(_new)) return;
+        Element group;
+        using (Ws.Model.History.Transaction($"Add to {_new.Trim()}"))
+        {
+            group = DbModel.CreateGroup(Ws.Model, Home ?? Ws.Model.Root, _new.Trim());
+            DbModel.AddToGroup(Ws.Model, Tables, group);
+        }
+        MudDialog.Close(DialogResult.Ok(group));
+    }
+}

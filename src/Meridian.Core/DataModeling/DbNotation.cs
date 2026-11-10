@@ -127,5 +127,16 @@ public static class DbNotation
         return pts;
     }
 
+    /// <summary>The column whose row of the table shape <paramref name="n"/> (drawn in <paramref name="b"/>) is under <paramref name="p"/>, or null.</summary>
+    public static Element? ColumnAt(ModelRepository m, DiagramNode n, Bounds b, Pt p)
+    {
+        if (n.Element.Kind != ElementKind.Table || !b.Contains(p)) return null;
+        var top = b.Y + HeaderHeight(KeywordOf(n.Element)) + 4;
+        if (p.Y < top) return null;
+        var rows = Rows(n.Element, DbModel.ForeignKeyColumns(m, n.Element), DbModel.ShowColumnsOf(n));
+        var i = (int)Math.Floor((p.Y - top) / Notation.LineHeight);
+        return i >= 0 && i < rows.Count ? rows[i].Column : null;
+    }
+
     public static bool KeywordOf(Element table) => DbModel.TableKeyword(table) != null || table.Stereotypes.Count > 0;
 }
