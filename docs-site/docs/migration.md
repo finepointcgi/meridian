@@ -12,6 +12,8 @@ This page maps the concepts, windows and menus of **Cameo Systems Modeler / Magi
 | Older EA (`.eap`, Access) | convert to `.qea` in EA, or export XMI 2.5 from EA | |
 | DOORS, Polarion, Jama, Codebeamer | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
 
+A new, empty project offers **Open a Cameo file** in the middle of the screen as well.
+
 After importing, run **Validate** (**F7**) and look at the *Traceability table* to see what arrived. A good habit is
 to **Commit** the imported state immediately and tag it as a **baseline** (for example `Imported from Cameo`), so you
 can always compare against it.
@@ -26,6 +28,10 @@ can always compare against it.
 | Symbol properties | **Format bar** (fill, line, text colour, line width, format painter) and *Appearance on this diagram* in the inspector |
 | Display related elements / Display paths | canvas menu **Display related elements**; relationships to shown elements are added automatically |
 | Layout → Quick diagram layout | **Arrange** |
+| Create diagram from model elements, "Display related elements" in a new diagram | **Auto-diagram** (whole model, a package, or the views you tick) and the assistant's **Diagram my model** |
+| Refining a use case into an activity, an activity into a sequence (by hand) | **Create from…**: requirements → use cases → activity → sequence → BDD / IBD → state machine, with **Update from source** ([details](derivation.md)) |
+| Multiple selection, "Specification of selected elements", Symbol properties for many symbols | **Multi-select** with the bulk Inspector (colours, line style, stereotypes, shared fields) |
+| Create relations to several elements, Smart manipulator | **Link to…** / **Trace to requirement…** for a selection; lines pick their type automatically ([details](multi-select.md)) |
 | Requirement table | **Requirements → Table** |
 | Dependency matrix | **Traceability → Matrix** (rows, columns and relationship kind; click a cell to create a link) |
 | Requirements traceability / coverage analysis | **Traceability table** (gaps, suspect links, multi-level, orphans, per-package coverage) and **Coverage** |
@@ -48,9 +54,13 @@ can always compare against it.
 | Teamwork Cloud: commit, update | edits are **saved live**; **Commit** records a version; collaborators see changes in real time |
 | Teamwork Cloud: branches, merge | **Branches & merge…**: branches per project, three-way merge with conflict resolution |
 | Teamwork Cloud: element locking | optional **Lock for editing** / **Lock with contents** (server) |
+| Code engineering sets (round trip with code) | **Code sync**: GitHub / GitLab pushes update a review branch you accept into `main` ([details](code-sync.md)) |
+| Environment options (look and feel, diagram defaults) | **Settings** (⌘,): theme, accent, density, grid, connector style, per user or per device ([details](settings.md)) |
 | Tags / baselines | **Baselines…** |
 | Collaborator reviews and comments | **Comments** with @mentions and **Reviews** with votes and checklists |
 | OSLC / DataHub | **OSLC RM provider**, issue tracker links, webhooks |
+| Cameo AI assistant / third-party AI plugins | **AI assistant** on Claude, a local model or Claude Code; every change reviewed before it is applied ([details](ai-assistant.md)) |
+| Import from diagram-as-code tools | **Mermaid** import and export ([details](mermaid.md)) |
 
 ## Enterprise Architect
 
@@ -60,12 +70,14 @@ can always compare against it.
 | Properties window, docked properties, tagged values window | **Inspector** |
 | Toolbox | **Shapes panel** |
 | Quick Linker | **Hover arrows** (drag to connect, click to add a connected shape) |
-| Diagram layout tools | **Arrange**, align and distribute in the selection toolbar |
+| Diagram layout tools | **Arrange**, align and distribute in the selection toolbar; **Auto-diagram** to draw new views |
+| Multiple selection and bulk property edit | **Multi-select** with the bulk Inspector and **Link to…** ([details](multi-select.md)) |
 | Relationship Matrix | **Traceability matrix** |
 | Traceability window | **Traceability table** and **Impact** |
 | Model Search, Model Views | **Query** and **Table** in *Model views* |
 | Model Validation | **Validate** and query-based **validation rules** |
 | Requirements (internal and external), Specification Manager | requirement elements with the **requirements table**; spreadsheet round trip with preview |
+| Preferences, visual styles | **Settings** (⌘,) with light / dark / system themes and accent colours ([details](settings.md)) |
 | MDG Technologies, UML profiles | **profiles and stereotypes**, and **plugins** for behaviour |
 | Document generation (RTF / DOCX templates) | **Word / PDF from template** with section presets |
 | Baselines and Compare | **Baselines…** with compare and CSV export, and **Version history** compare |
@@ -75,7 +87,10 @@ can always compare against it.
 | Scripting (JavaScript, JScript, VBScript) | **Script console** (C#) |
 | Simulation (SysML simulation, executable state machines) | **Simulation** tabs |
 | BPMN, ArchiMate, database modeling | **BPMN**, **ArchiMate** and **ER diagrams** with BPMN XML, ArchiMate exchange and SQL DDL |
-| Code engineering | C# reverse engineering and C# skeleton generation |
+| Code engineering | C# reverse engineering and C# skeleton generation; **Code sync** from GitHub / GitLab with a review branch ([details](code-sync.md)) |
+| Model transformations (MDA style) | **Create from…** derivations along the MBSE chain ([details](derivation.md)) |
+| AI-assisted modeling | **AI assistant** (Claude, a local model or Claude Code) ([details](ai-assistant.md)) |
+| Import Mermaid / PlantUML text | **Mermaid** import and export ([details](mermaid.md)); PlantUML is not supported |
 | Pro Cloud Server, OSLC | **team server** with the OSLC RM provider and a read-only SysML v2 API |
 
 ## Things that work differently

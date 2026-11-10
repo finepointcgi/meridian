@@ -126,8 +126,7 @@ the ```` ```mermaid ```` blocks of Markdown files.
 - **Export diagram as Mermaid (.mmd)** and **Copy diagram as Mermaid** write activity, state machine, sequence, block
   definition and requirement diagrams back out.
 
-The full mapping, with everything that is approximated or skipped, is in
-[docs/MERMAID.md](https://github.com/finepointcgi/meridian/blob/main/docs/MERMAID.md) in the repository.
+See [Mermaid](mermaid.md) for the whole workflow and what each Mermaid diagram becomes.
 
 ## Images
 
