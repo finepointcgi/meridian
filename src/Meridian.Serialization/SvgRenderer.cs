@@ -77,12 +77,30 @@ public sealed record SvgTheme(
         $"<defs><filter id=\"msh\" x=\"-10%\" y=\"-10%\" width=\"125%\" height=\"135%\"><feDropShadow dx=\"0\" dy=\"2\" stdDeviation=\"2.5\" flood-color=\"{ShadowColor}\" flood-opacity=\"{ShadowOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"/></filter></defs>";
 }
 
-public static class SvgRenderer
+public static partial class SvgRenderer
 {
     private const double Line = Notation.LineHeight;
     private const double CharWidth = 6.4; // approximate advance at 12px for truncation/wrapping
     private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
     private static string E(string s) => WebUtility.HtmlEncode(s);
+
+    /// <summary>
+    /// A CSS colour from the model (shape style, stereotype colour) that is safe to write into an SVG attribute, or null.
+    /// Model values come from collaborators and imported files, and the editor inserts this markup into the page, so
+    /// anything other than a plain colour (hex, a named colour, rgb()/hsl()) is dropped rather than escaped.
+    /// </summary>
+    public static string? SafeColor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var v = value.Trim();
+        return v.Length <= 64 && SafeColorPattern().IsMatch(v) ? v : null;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,32}|(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/+-]{1,48}\))$")]
+    private static partial System.Text.RegularExpressions.Regex SafeColorPattern();
+
+    /// <summary>A colour style of a shape (fill, stroke, text), sanitised by <see cref="SafeColor"/>.</summary>
+    private static string? StyleColor(DiagramNode n, string key) => n.Style.TryGetValue(key, out var v) ? SafeColor(v) : null;
 
     /// <param name="theme">Colours (light by default).</param>
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
@@ -208,7 +226,7 @@ public static class SvgRenderer
     /// <summary>Header tint for a shape: per-shape override, stereotype colour, ArchiMate layer, then the theme default.</summary>
     public static string HeaderColor(ModelRepository m, DiagramNode n, SvgTheme t)
     {
-        if (n.Style.TryGetValue("fill", out var f) && f.Length > 0) return f;
+        if (StyleColor(n, "fill") is { } f) return f;
         if (StereotypeColor(m, n.Element) is { } sc) return sc;
         if (n.Element.Kind == ElementKind.ArchiElement)
         {
@@ -221,7 +239,7 @@ public static class SvgRenderer
     public static string? StereotypeColor(ModelRepository m, Element e)
     {
         foreach (var name in e.Stereotypes)
-            if (m.OfKind(ElementKind.Stereotype).FirstOrDefault(s => s.Name == name)?.Get(FieldKeys.Color) is { Length: > 0 } c) return c;
+            if (m.OfKind(ElementKind.Stereotype).FirstOrDefault(s => s.Name == name)?.Get(FieldKeys.Color) is { Length: > 0 } c && SafeColor(c) is { } safe) return safe;
         return null;
     }
 
@@ -240,7 +258,7 @@ public static class SvgRenderer
     {
         var pts = Notation.RouteIn(d, e, bounds, wps);
         var style = Notation.StyleOf(e.Relationship);
-        if (e.Style.TryGetValue("stroke", out var ec) && ec.Length > 0) t = t with { Edge = ec };
+        if (e.Style.TryGetValue("stroke", out var ec) && SafeColor(ec) is { } edgeColor) t = t with { Edge = edgeColor };
         var width = e.Style.TryGetValue("width", out var ew) && double.TryParse(ew, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var wv) ? wv : 1.3;
         if (e.Relationship.Kind == ElementKind.Message)
             style = e.Relationship.Get(FieldKeys.MessageSort) switch
@@ -334,8 +352,10 @@ public static class SvgRenderer
     private static void RenderNode(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
     {
         var link = DiagramExtras.LinkOf(n);
-        var anchor = t.LinkAnchors && link != null && DiagramExtras.IsExternalLink(link);
-        if (anchor) sb.Append($"<a href=\"{E(link!)}\" target=\"_blank\">");
+        // Only the normalised http(s)/mailto form is written: the raw value could be any scheme (e.g. javascript:).
+        var href = t.LinkAnchors && DiagramExtras.IsExternalLink(link) ? DiagramExtras.NormalizeLink(link) : null;
+        var anchor = href != null;
+        if (anchor) sb.Append($"<a href=\"{E(href!)}\" target=\"_blank\" rel=\"noopener noreferrer\">");
         RenderNodeCore(sb, m, d, n, b, t);
         if (link != null) LinkBadge(sb, b, link, t);
         if (anchor) sb.Append("</a>");
@@ -361,15 +381,15 @@ public static class SvgRenderer
         // Per-shape overrides from the format bar: line and text colour apply to every notation.
         if (n.Element.Kind != ElementKind.Shape)
         {
-            if (n.Style.TryGetValue("stroke", out var sc) && sc.Length > 0) t = t with { Stroke = sc, Ink = sc };
-            if (n.Style.TryGetValue("text", out var tc) && tc.Length > 0) t = t with { Text = tc, Muted = tc };
+            if (StyleColor(n, "stroke") is { } sc) t = t with { Stroke = sc, Ink = sc };
+            if (StyleColor(n, "text") is { } tc) t = t with { Text = tc, Muted = tc };
         }
         // Compartment boxes take a custom fill on their header band; simple outlines (states, actions, use cases…) on the body.
-        var fill = shape != NodeShape.Rectangle && n.Style.TryGetValue("fill", out var bf) && bf.Length > 0 ? bf : t.Fill(n.Element.Kind);
+        var fill = shape != NodeShape.Rectangle && StyleColor(n, "fill") is { } bf ? bf : t.Fill(n.Element.Kind);
         var header = HeaderColor(m, n, t);
         var stroke = t.Stroke;
         var ink = t.Ink;
-        sb.Append($"<g data-node=\"{n.Id}\">");
+        sb.Append($"<g data-node=\"{E(n.Id)}\">");
         if (n.Element.Kind == ElementKind.Shape)
         {
             RenderFreeShape(sb, n, b, c.Name, t);
@@ -534,8 +554,8 @@ public static class SvgRenderer
     /// <summary>General drawing shapes: a plain outline with centred, wrapped text (draw.io style).</summary>
     private static void RenderFreeShape(StringBuilder sb, DiagramNode n, Bounds b, string text, SvgTheme t)
     {
-        var fill = n.Style.TryGetValue("fill", out var f) && f.Length > 0 ? f : t.NodeFill;
-        var stroke = n.Style.TryGetValue("stroke", out var st) && st.Length > 0 ? st : t.Stroke;
+        var fill = StyleColor(n, "fill") ?? t.NodeFill;
+        var stroke = StyleColor(n, "stroke") ?? t.Stroke;
         var attrs = $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.4\" filter=\"url(#msh)\"";
         double x = b.X, y = b.Y, r = b.Right, bo = b.Bottom, cx = b.Center.X, cy = b.Center.Y, w = b.Width, h = b.Height;
         var textY = cy;
@@ -549,7 +569,7 @@ public static class SvgRenderer
                 {
                     var href = t.ImageHref?.Invoke(data) ?? data;
                     sb.Append($"<image href=\"{E(href)}\" x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" preserveAspectRatio=\"xMidYMid meet\"/>");
-                    if (n.Style.TryGetValue("stroke", out var border) && border.Length > 0)
+                    if (StyleColor(n, "stroke") is { } border)
                         sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"none\" stroke=\"{E(border)}\" stroke-width=\"1.4\"/>");
                 }
                 else
@@ -560,7 +580,7 @@ public static class SvgRenderer
                 }
                 // A caption goes under the picture.
                 if (!string.IsNullOrEmpty(text))
-                    WrappedCentered(sb, cx, bo + 14, Math.Max(40, w), text, n.Style.TryGetValue("text", out var cc) && cc.Length > 0 ? cc : t.Text);
+                    WrappedCentered(sb, cx, bo + 14, Math.Max(40, w), text, StyleColor(n, "text") ?? t.Text);
                 return;
             }
             case "text":
@@ -628,7 +648,7 @@ public static class SvgRenderer
                 sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" rx=\"2\" {attrs}/>");
                 break;
         }
-        var ink = n.Style.TryGetValue("text", out var tc) && tc.Length > 0 ? tc : t.Text;
+        var ink = StyleColor(n, "text") ?? t.Text;
         if (!string.IsNullOrEmpty(text)) WrappedCentered(sb, cx, textY, Math.Max(20, textW), text, ink);
     }
 

@@ -20,6 +20,7 @@ public static class HtmlReport
         var issues = new ModelValidator().Validate(model);
         sb.Append($$"""
             <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
             <title>{{E(model.Root.Name)}} — Model Report</title>
             <style>
             body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:0;color:#1d2330;background:#fff}
@@ -48,7 +49,7 @@ public static class HtmlReport
         sb.Append("<h2>Diagrams</h2>");
         foreach (var d in model.Diagrams.OrderBy(d => d.QualifiedName))
         {
-            sb.Append($"<h3 id=\"{d.Id}\">{E(d.Name)} <span class=\"kw\">{E(Metamodel.DisplayName(d.DiagramType))}</span></h3>");
+            sb.Append($"<h3 id=\"{E(d.Id)}\">{E(d.Name)} <span class=\"kw\">{E(Metamodel.DisplayName(d.DiagramType))}</span></h3>");
             if (!string.IsNullOrWhiteSpace(d.Documentation)) sb.Append($"<p>{E(d.Documentation)}</p>");
             sb.Append("<div class=\"diagram\">").Append(SvgRenderer.Render(model, d)).Append("</div>");
         }
@@ -58,7 +59,7 @@ public static class HtmlReport
         {
             sb.Append("<h2>Requirements</h2><table><tr><th>Id</th><th>Name</th><th>Text</th><th>Satisfied by</th><th>Verified by</th></tr>");
             foreach (var r in reqs)
-                sb.Append($"<tr id=\"{r.Id}\"><td>{E(r.Get(FieldKeys.RequirementId))}</td><td>{E(r.Name)}</td><td>{E(r.Get(FieldKeys.Text))}</td>" +
+                sb.Append($"<tr id=\"{E(r.Id)}\"><td>{E(r.Get(FieldKeys.RequirementId))}</td><td>{E(r.Name)}</td><td>{E(r.Get(FieldKeys.Text))}</td>" +
                           $"<td>{Links(model.Incoming(r, ElementKind.Satisfy).Select(x => x.Source))}</td><td>{Links(model.Incoming(r, ElementKind.Verify).Select(x => x.Source))}</td></tr>");
             sb.Append("</table>");
         }
@@ -76,7 +77,7 @@ public static class HtmlReport
         {
             sb.Append("<h2>Validation</h2><table><tr><th>Severity</th><th>Rule</th><th>Element</th><th>Message</th></tr>");
             foreach (var i in issues)
-                sb.Append($"<tr><td class=\"{i.Severity}\">{i.Severity}</td><td>{i.RuleId}</td><td>{E(i.Element.QualifiedName)}</td><td>{E(i.Message)}</td></tr>");
+                sb.Append($"<tr><td class=\"{i.Severity}\">{i.Severity}</td><td>{E(i.RuleId)}</td><td>{E(i.Element.QualifiedName)}</td><td>{E(i.Message)}</td></tr>");
             sb.Append("</table>");
         }
         sb.Append("</main></body></html>");
@@ -87,12 +88,12 @@ public static class HtmlReport
         sb.Append($"<div class=\"stat\"><b>{E(value)}</b><span class=\"muted\">{E(label)}</span></div>");
 
     private static string Links(IEnumerable<Element> els) =>
-        string.Join(", ", els.Select(e => $"<a href=\"#{e.Id}\">{E(e.DisplayName)}</a>"));
+        string.Join(", ", els.Select(e => $"<a href=\"#{E(e.Id)}\">{E(e.DisplayName)}</a>"));
 
     private static void ElementSpec(StringBuilder sb, ModelRepository m, Element e)
     {
         var kw = Metamodel.Keyword(e.Kind) is { } k ? $"«{k}» " : "";
-        sb.Append($"<h4 id=\"{e.Id}\"><span class=\"kw\">{E(kw)}{E(Metamodel.DisplayName(e.Kind))}</span> {E(e.DisplayName)}</h4>");
+        sb.Append($"<h4 id=\"{E(e.Id)}\"><span class=\"kw\">{E(kw)}{E(Metamodel.DisplayName(e.Kind))}</span> {E(e.DisplayName)}</h4>");
         if (!string.IsNullOrWhiteSpace(e.Documentation)) sb.Append($"<p>{E(e.Documentation)}</p>");
         var features = e.OwnedElements.Where(c => c.Kind is ElementKind.Property or ElementKind.Port or ElementKind.Operation or ElementKind.EnumerationLiteral).ToList();
         if (features.Count > 0)
@@ -114,7 +115,7 @@ public static class HtmlReport
             {
                 var outgoing = ReferenceEquals(r.Source, e);
                 var other = outgoing ? r.Target : r.Source;
-                sb.Append($"<tr><td>{Metamodel.DisplayName(r.Kind)}</td><td>{(outgoing ? "→" : "←")}</td><td><a href=\"#{other.Id}\">{E(other.QualifiedName)}</a></td></tr>");
+                sb.Append($"<tr><td>{Metamodel.DisplayName(r.Kind)}</td><td>{(outgoing ? "→" : "←")}</td><td><a href=\"#{E(other.Id)}\">{E(other.QualifiedName)}</a></td></tr>");
             }
             sb.Append("</table>");
         }
