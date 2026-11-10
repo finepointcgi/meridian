@@ -87,23 +87,23 @@ public class AssistantPanelTests : TestContext
         // One-time notice: the model is sent to Anthropic. Sending is blocked until acknowledged.
         Assert.Contains("Your model is sent to Anthropic", cut.Markup);
         Assert.True(cut.Find(".ai-input textarea").HasAttribute("disabled"));
-        cut.FindAll("button").Single(b => b.TextContent.Contains("I understand")).Click();
-        Assert.DoesNotContain("Your model is sent to Anthropic", cut.Markup);
+        cut.InvokeAsync(() => cut.FindAll("button").Single(b => b.TextContent.Contains("I understand")).Click()).GetAwaiter().GetResult();
+        cut.WaitForAssertion(() => Assert.DoesNotContain("Your model is sent to Anthropic", cut.Markup));
 
-        cut.Find(".ai-input textarea").Input("What satisfies engine power?");
-        cut.Find("button.ai-send").Click();
+        cut.InvokeAsync(() => cut.Find(".ai-input textarea").Input("What satisfies engine power?")).GetAwaiter().GetResult();
+        cut.InvokeAsync(() => cut.Find("button.ai-send").Click()).GetAwaiter().GetResult();
         cut.WaitForAssertion(() => Assert.Contains("ai-chip", cut.Markup), TimeSpan.FromSeconds(5));
         Assert.Contains("What satisfies engine power?", cut.Find(".ai-msg.user").TextContent);
         Assert.Equal("REQ-005", cut.Find(".ai-msg.assistant strong").TextContent);
         Assert.Single(_api.Bodies);
         Assert.DoesNotContain(TestKey, cut.Markup);
 
-        cut.Find("button.ai-chip").Click();
+        cut.InvokeAsync(() => cut.Find("button.ai-chip").Click()).GetAwaiter().GetResult();
         Assert.Same(engine, ws.Selected);
 
         // New chat clears the transcript.
-        cut.FindAll("button").Single(b => b.TextContent.Contains("New chat")).Click();
-        Assert.Empty(cut.FindAll(".ai-msg"));
+        cut.InvokeAsync(() => cut.FindAll("button").Single(b => b.TextContent.Contains("New chat")).Click()).GetAwaiter().GetResult();
+        cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".ai-msg")));
     }
 
     [Fact]
