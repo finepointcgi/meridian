@@ -53,6 +53,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `TemplateAndExportTests` | every project template creates a project that opens cleanly; SVG and PNG downloads |
 | `AdminTests` | `/admin` for the admin, forbidden for a normal user, admin API protection |
 | `CollaborationTests` | two browsers on one project see each other's edits live |
+| `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
 | `DocsScreenshotTests` | opt-in (`MERIDIAN_DOCS_SCREENSHOTS=1`): writes the user guide's screenshots to `docs-site/images` in the dark and the light theme |
 

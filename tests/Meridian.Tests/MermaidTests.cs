@@ -234,7 +234,9 @@ public class MermaidTests
         Assert.Equal("beep()", t.Get(FieldKeys.Effect));
         Assert.Equal(8, m.Relationships.Count(x => x.Kind == ElementKind.Transition));
         Assert.Equal(2, m.OfKind(ElementKind.Comment).Count());
-        Assert.Contains(r.Warnings, w => w.Contains("choice"));
+        var check = Assert.Single(m.OfKind(ElementKind.Pseudostate));
+        Assert.Equal(("check", Pseudostates.Choice), (check.Name, Pseudostates.KindOf(check)));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("choice"));
         Assert.Contains(r.Warnings, w => w.Contains("regions"));
         var onNode = d.NodeFor(on)!;
         Assert.All(d.Nodes.Where(n => n.Element.Owner == on), n => Assert.Equal(onNode.Id, n.ParentId));
@@ -277,12 +279,17 @@ public class MermaidTests
         var fragments = d.Nodes.Where(n => n.Element.Kind == ElementKind.CombinedFragment).ToList();
         Assert.Equal(2, fragments.Count);
         var alt = fragments.Single(f => f.Element.Get(FieldKeys.Operator) == "alt");
-        Assert.Equal("card accepted | declined", alt.Element.Get(FieldKeys.Guard));
+        Assert.Equal(["card accepted", "declined"], InteractionOperands.Guards(alt.Element));
+        Assert.Equal("", alt.Element.Get(FieldKeys.Guard));
         var okEdge = d.Edges.Single(e => e.Relationship.Name == "ok");
+        var errorEdge = d.Edges.Single(e => e.Relationship.Name == "error");
         Assert.InRange(Notation.MessageY(okEdge), alt.Bounds.Y, alt.Bounds.Bottom);
+        // Each reply lies in its own operand: the separator is drawn between them.
+        Assert.Equal(0, InteractionOperands.At(alt, alt.Bounds, Notation.MessageY(okEdge)).Index);
+        Assert.Equal(1, InteractionOperands.At(alt, alt.Bounds, Notation.MessageY(errorEdge)).Index);
         Assert.Single(d.Nodes, n => n.Element.Kind == ElementKind.Comment && n.Element.Get(FieldKeys.Body) == "PCI zone");
         Assert.Contains(r.Warnings, w => w.Contains("activation"));
-        Assert.Contains(r.Warnings, w => w.Contains("operands"));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("operands"));
     }
 
     // ================================================================== requirement diagram

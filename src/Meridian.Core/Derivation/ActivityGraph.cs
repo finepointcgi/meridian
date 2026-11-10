@@ -11,13 +11,23 @@ namespace Meridian.Core.Derivation;
 /// </summary>
 internal sealed class ActivityGraph
 {
-    public sealed record Handover(Element From, Element To, IReadOnlyList<Element> Via, IReadOnlyList<string> Guards, bool Back);
+    /// <param name="Flows">The flows taken from <paramref name="From"/> to <paramref name="To"/>, in order.</param>
+    public sealed record Handover(Element From, Element To, IReadOnlyList<Element> Via, IReadOnlyList<string> Guards, bool Back, IReadOnlyList<Relationship> Flows);
 
     public Element Activity { get; }
     public IReadOnlyList<Element> Partitions { get; }
     public IReadOnlyDictionary<Element, Element> LaneOf { get; }
     public IReadOnlyList<Element> Actions { get; }
     public IReadOnlyDictionary<Element, int> Order { get; }
+
+    /// <summary>
+    /// The order nodes run in: topological over the forward flows (back edges ignored), ties broken by <see cref="Order"/>. Unlike the
+    /// depth-first order, everything on one branch of a decision or fork comes before what follows the merge or join.
+    /// </summary>
+    public IReadOnlyDictionary<Element, int> Rank { get; }
+
+    /// <summary>Flows that close a loop.</summary>
+    public IReadOnlySet<Relationship> BackFlows { get; }
     public IReadOnlyList<Handover> Handovers { get; }
 
     /// <summary>The first action after the initial node, if any.</summary>
@@ -56,6 +66,8 @@ internal sealed class ActivityGraph
             if (!state.ContainsKey(start)) Visit(start);
         Order = order;
         BackEdges = back;
+        BackFlows = backSet;
+        Rank = Topological(m, nodes, order, backSet);
         Actions = nodes.Where(n => n.Kind is ElementKind.Action or ElementKind.InteractionUse).OrderBy(n => order.GetValueOrDefault(n, int.MaxValue)).ToList();
 
         // Hand-overs: from each action, through control nodes, to the next actions.
@@ -69,16 +81,55 @@ internal sealed class ActivityGraph
     private static IEnumerable<Handover> Next(ModelRepository m, Element from, HashSet<Relationship> backSet)
     {
         var seen = new HashSet<Element>();
-        var queue = new Queue<(Element Node, List<Element> Via, List<string> Guards, bool Back)>();
-        foreach (var f in Flows(m, from)) queue.Enqueue((f.Target, [], f.Get(FieldKeys.Guard) is { Length: > 0 } g ? [g] : [], backSet.Contains(f)));
+        var queue = new Queue<(Element Node, List<Element> Via, List<string> Guards, bool Back, List<Relationship> Path)>();
+        foreach (var f in Flows(m, from)) queue.Enqueue((f.Target, [], f.Get(FieldKeys.Guard) is { Length: > 0 } g ? [g] : [], backSet.Contains(f), [f]));
         while (queue.Count > 0)
         {
-            var (n, via, guards, isBack) = queue.Dequeue();
-            if (n.Kind is ElementKind.Action or ElementKind.InteractionUse) { yield return new Handover(from, n, via, guards, isBack); continue; }
+            var (n, via, guards, isBack, path) = queue.Dequeue();
+            if (n.Kind is ElementKind.Action or ElementKind.InteractionUse) { yield return new Handover(from, n, via, guards, isBack, path); continue; }
             if (n.Kind == ElementKind.ActivityFinalNode || !seen.Add(n)) continue;
             foreach (var f in Flows(m, n))
-                queue.Enqueue((f.Target, [.. via, n], f.Get(FieldKeys.Guard) is { Length: > 0 } g ? [.. guards, g] : guards, isBack || backSet.Contains(f)));
+                queue.Enqueue((f.Target, [.. via, n], f.Get(FieldKeys.Guard) is { Length: > 0 } g ? [.. guards, g] : guards, isBack || backSet.Contains(f), [.. path, f]));
         }
+    }
+
+    /// <summary>Kahn's algorithm over the forward flows, always taking the ready node visited first by the depth-first walk.</summary>
+    private static Dictionary<Element, int> Topological(ModelRepository m, IReadOnlyList<Element> nodes, IReadOnlyDictionary<Element, int> order, HashSet<Relationship> back)
+    {
+        var set = nodes.ToHashSet();
+        var indegree = nodes.ToDictionary(n => n, _ => 0);
+        foreach (var n in nodes)
+            foreach (var f in Flows(m, n).Where(f => !back.Contains(f) && set.Contains(f.Target)))
+                indegree[f.Target]++;
+        var ready = new PriorityQueue<Element, int>();
+        foreach (var n in nodes.Where(n => indegree[n] == 0)) ready.Enqueue(n, order.GetValueOrDefault(n, int.MaxValue));
+        var rank = new Dictionary<Element, int>();
+        while (ready.TryDequeue(out var n, out _))
+        {
+            rank[n] = rank.Count;
+            foreach (var f in Flows(m, n).Where(f => !back.Contains(f) && set.Contains(f.Target)))
+                if (--indegree[f.Target] == 0) ready.Enqueue(f.Target, order.GetValueOrDefault(f.Target, int.MaxValue));
+        }
+        foreach (var n in nodes.Where(n => !rank.ContainsKey(n)).OrderBy(n => order.GetValueOrDefault(n, int.MaxValue))) rank[n] = rank.Count;
+        return rank;
+    }
+
+    /// <summary>
+    /// The nodes reachable from <paramref name="start"/> over forward flows without passing through <paramref name="stop"/>
+    /// (the decision or fork whose branch this is).
+    /// </summary>
+    public IReadOnlySet<Element> Reachable(ModelRepository m, Element start, Element stop)
+    {
+        var seen = new HashSet<Element>();
+        var stack = new Stack<Element>();
+        stack.Push(start);
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            if (ReferenceEquals(n, stop) || !seen.Add(n)) continue;
+            foreach (var f in Flows(m, n).Where(f => !BackFlows.Contains(f))) stack.Push(f.Target);
+        }
+        return seen;
     }
 
     /// <summary>

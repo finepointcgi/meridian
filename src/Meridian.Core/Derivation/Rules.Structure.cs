@@ -27,7 +27,14 @@ internal static class InteractionReader
         foreach (var r in Messages(m, interaction))
             sb.Append("M ").Append(r.Source.Id).Append('>').Append(r.Target.Id).Append(' ').Append(r.Name).Append(' ').Append(r.Get(FieldKeys.MessageSort))
               .Append(' ').Append(r.Get(FieldKeys.Signature)).Append('\n');
-        if (target != null) sb.Append("T ").Append(target.Id);
+        if (target != null)
+        {
+            sb.Append("T ").Append(target.Id).Append('\n');
+            // The state machine reads the alternatives too: which operand each message is in.
+            foreach (var alt in ToStateMachine.FromSequence(m, interaction, target).Alts)
+                foreach (var (guard, keys) in alt.Branches)
+                    sb.Append("O ").Append(alt.Key).Append(" [").Append(guard).Append("] ").Append(string.Join(",", keys.Order(StringComparer.Ordinal))).Append('\n');
+        }
         return sb.ToString();
     }
 }
@@ -148,61 +155,3 @@ internal static class SequenceToStructure
     }
 }
 
-/// <summary>
-/// Sequence (or activity) → state machine for one block: the events the block receives, in order, become transitions
-/// between states (Idle → After first event → …). Deliberately simple and deterministic; flagged as approximate.
-/// </summary>
-internal static class ToStateMachine
-{
-    public static IReadOnlyList<string> EventsFromSequence(ModelRepository m, Element interaction, Element block) =>
-        InteractionReader.Messages(m, interaction)
-            .Where(r => !ReferenceEquals(r.Source, r.Target) && r.Target.TypeRef == block.Id && r.Name.Length > 0)
-            .Select(r => DeriveText.Identifier(r.Name)).ToList();
-
-    public static IReadOnlyList<string> EventsFromActivity(ModelRepository m, Element activity, Element block)
-    {
-        var g = new ActivityGraph(m, activity);
-        return ActivityToSequence.Messages(m, g).Where(p => p.ToLane.Get(FieldKeys.Represents) == block.Id)
-                                                .Select(p => DeriveText.Identifier(p.Action.Name)).ToList();
-    }
-
-    /// <summary>Blocks a state machine can be derived for from this source: lifeline types that receive messages, or swimlane blocks.</summary>
-    public static IEnumerable<Element> Candidates(ModelRepository m, Element source) => source.Kind switch
-    {
-        ElementKind.Interaction => InterfaceTargets(InteractionReader.Messages(m, source).Where(r => !ReferenceEquals(r.Source, r.Target)).Select(r => m.ResolveType(r.Target))),
-        ElementKind.Activity => InterfaceTargets(source.OwnedElements.Where(p => p.Kind == ElementKind.Partition).Select(p => m.Find(p.Get(FieldKeys.Represents)))),
-        _ => [],
-    };
-
-    private static IEnumerable<Element> InterfaceTargets(IEnumerable<Element?> xs) =>
-        xs.OfType<Element>().Where(t => t.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Component).Distinct();
-
-    public static void Build(ModelRepository m, PlanBuilder b, DerivationOptions o)
-    {
-        var source = b.Plan.Source;
-        var block = b.Plan.Target!;
-        var events = source.Kind == ElementKind.Interaction ? EventsFromSequence(m, source, block) : EventsFromActivity(m, source, block);
-        if (events.Count == 0)
-        {
-            b.Warn($"{block.DisplayName} receives nothing in {source.DisplayName}, so there are no events to derive states from.");
-            return;
-        }
-        var stm = b.Element("statemachine", ElementKind.StateMachine, block, $"{block.Name} states", null,
-            (FieldKeys.Documentation, $"Derived from {source.DisplayName}: one state per event {block.DisplayName} receives, in order."));
-        var sm = ItemRef.To(stm.Key);
-        b.Element("initial", ElementKind.InitialState, sm, null, new PlannedShape("diagram"));
-        b.Element("state:0", ElementKind.State, sm, "Idle", new PlannedShape("diagram"));
-        b.Rel("transition:initial", ElementKind.Transition, ItemRef.To("initial"), ItemRef.To("state:0"));
-        for (var i = 0; i < events.Count; i++)
-        {
-            b.Element($"state:{i + 1}", ElementKind.State, sm, $"After {events[i]}", new PlannedShape("diagram"));
-            b.Rel($"transition:{i + 1}", ElementKind.Transition, ItemRef.To($"state:{i}"), ItemRef.To($"state:{i + 1}"), events[i]);
-        }
-        b.Rel("transition:back", ElementKind.Transition, ItemRef.To($"state:{events.Count}"), ItemRef.To("state:0"), null);
-        if (block.OwnedElements.Any(e => e.Kind == ElementKind.StateMachine && !DeriveFields.IsDerived(e)))
-            b.Warn($"{block.DisplayName} already has a state machine; this adds another one.");
-        b.Warn("States are inferred from the order of the events only (approximate): merge states that are really the same and add guards and the transitions the sequence does not show.");
-        b.Diagram("diagram", DiagramType.StateMachine, sm, $"{block.Name} states", autoLayout: true,
-            $"The states of {block.DisplayName} as inferred from {source.DisplayName}.");
-    }
-}

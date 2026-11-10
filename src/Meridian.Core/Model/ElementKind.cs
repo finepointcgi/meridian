@@ -130,6 +130,9 @@ public enum ElementKind
     InlineInteraction,      // "sd" frame with an inline sequence (interaction overview)
     CommunicationLifeline,  // lifeline drawn as a box (communication diagram)
     CommunicationLink,      // link between communication lifelines carrying numbered messages
+    // Operands and pseudostates (appended: keep existing ordinals stable)
+    InteractionOperand,     // one operand of a combined fragment: guard; its vertical extent is a style of the fragment's shape
+    Pseudostate,            // state machine pseudostate; subtype: choice / junction / fork / join / shallowHistory / deepHistory / entryPoint / exitPoint / terminate
 }
 
 public enum DiagramType
@@ -178,6 +181,7 @@ public static class FieldKeys
     public const string RequirementId = "reqId";
     public const string Text = "text";
     public const string Guard = "guard";
+    public const string SourceMultiplicity = "sourceMultiplicity"; // associations: multiplicity at the source end (Multiplicity is the target end)
     public const string Effect = "effect";
     public const string MessageSort = "messageSort"; // synchCall / asynchCall / reply
     public const string Operator = "operator";       // combined fragments: alt / opt / loop / par / break

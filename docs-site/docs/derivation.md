@@ -42,9 +42,9 @@ goes too: unticking an action also drops the flows to it. **Create** applies wha
 | --- | --- | --- | --- |
 | Requirements | a use case diagram in a new "*Package* use cases" package | each functional requirement's "shall …" phrase names a use case ("shall allow the operator to schedule imaging passes" → **Schedule Imaging Passes**); actors come from a `stakeholder` attribute, from "allow the *X* to …", or from actors the text names | «refine» |
 | Use case | an activity owned by the use case, with its diagram | the description's numbered or bulleted lines (or sentences) become actions; a step that starts with an actor's name goes in that actor's swimlane, the rest in **System**; "If *X*, *Y*" becomes a decision; "Alternate: *X* - *Y*" branches off | the activity is the use case's behaviour |
-| Activity | an interaction and a sequence diagram | one lifeline per swimlane, one message per hand-over between swimlanes; decisions become **alt**, forks **par** and loops **loop** | «allocate» action → block |
+| Activity | an interaction and a sequence diagram | one lifeline per swimlane, one message per hand-over between swimlanes; decisions become **alt** with one guarded operand per branch, forks **par** with one operand per branch, and loops **loop** | «allocate» action → block |
 | Sequence | a BDD and an IBD | a block per lifeline, a context block with one part each, an operation per message received, ports and connectors between parts that talk | «trace» message → operation |
-| Sequence or activity | a state machine for a block you pick | the events the block receives become "After *event*" states in order (approximate: merge and add guards yourself) | owned by the block |
+| Sequence or activity | a state machine for a block you pick | the events the block receives become states in order: a call it answers is a "Handling *event*" state that returns where it came from, other events lead to "After *event*"; alternatives become guarded transitions, through a choice when they start with the same event (approximate) | owned by the block |
 | Blocks / requirements | proposals only | «satisfy» where a block's name appears in a requirement, and a "Verify *requirement*" test case with «verify» for each unverified requirement | «satisfy», «verify» |
 
 <picture>

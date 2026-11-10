@@ -83,6 +83,7 @@ public partial class Workbench
             C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
         };
         list.AddRange(RequirementPaletteCommands());
+        list.AddRange(VerificationPaletteCommands());   // Workbench.Verification.cs
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
@@ -423,6 +424,7 @@ public partial class Workbench
                 m.Add(MenuEntry.Do("Show ports on border", () => c.ShowPortsOf(n)));
                 m.Add(MenuEntry.Do("Show nested parts", () => c.ShowNestedParts(n)));
             }
+            if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));

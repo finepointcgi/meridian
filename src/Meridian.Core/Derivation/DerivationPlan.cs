@@ -110,6 +110,9 @@ public sealed class DerivedItem
     /// <summary>Messages: vertical position on the sequence diagram.</summary>
     public double? MessageY { get; set; }
 
+    /// <summary>Combined fragments: where each later operand starts (operand item key, offset from the fragment's top).</summary>
+    public List<(string OperandKey, double Offset)>? Separators { get; set; }
+
     /// <summary>Diagrams laid out by <see cref="AutoDiagrammer"/> (use case, BDD, IBD, state machine) rather than by the rule.</summary>
     public bool AutoLayout { get; init; }
 

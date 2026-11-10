@@ -1,0 +1,81 @@
+@* Variant comparison: features and model elements that differ between two configurations. *@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+@{
+    var configs = Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+}
+@if (configs.Count < 2)
+{
+    <div class="var-hint">Comparing needs two configurations; create them in the Configurations tab.</div>
+}
+else
+{
+    <div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+        <select class="dv-select" style="font-size:12.5px" value="@A?.Id" @onchange="e => _a = e.Value?.ToString()" aria-label="First configuration">
+            @foreach (var cfg in configs) { <option value="@cfg.Id">@cfg.DisplayName</option> }
+        </select>
+        <span>vs</span>
+        <select class="dv-select" style="font-size:12.5px" value="@B?.Id" @onchange="e => _b = e.Value?.ToString()" aria-label="Second configuration">
+            @foreach (var cfg in configs) { <option value="@cfg.Id">@cfg.DisplayName</option> }
+        </select>
+        @if (Compare() is { } cmp)
+        {
+            <span class="var-kind" data-testid="vcmp-summary">
+                @(cmp.Identical ? "identical" : $"{cmp.FeaturesOnlyInA.Count + cmp.FeaturesOnlyInB.Count} feature and {cmp.ElementsOnlyInA.Count + cmp.ElementsOnlyInB.Count} element differences · {cmp.CommonElements} elements in both")
+            </span>
+        }
+    </div>
+    @if (Compare() is { } c)
+    {
+        <div class="vcmp" data-testid="vcmp">
+            <div>
+                <h4>Only in <span class="only-a">@c.A.Name</span></h4>
+                @Items(c.FeaturesOnlyInA, "features", "only-a")
+                @Items(c.ElementsOnlyInA, "elements", "only-a")
+            </div>
+            <div>
+                <h4>Only in <span class="only-b">@c.B.Name</span></h4>
+                @Items(c.FeaturesOnlyInB, "features", "only-b")
+                @Items(c.ElementsOnlyInB, "elements", "only-b")
+            </div>
+        </div>
+        <div class="px-3 pb-2" style="font-size:12px; color:var(--text-3)">
+            Common features: @string.Join(", ", c.CommonFeatures.Select(f => f.Name))
+        </div>
+    }
+}
+
+@code {
+    private string? _a, _b;
+    private VariantComparison? _cache;
+    private (string?, string?, int) _cacheKey;
+
+    private List<Element> Configs => Ws.Model.OfKind(ElementKind.Configuration).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    private Element? A => Ws.Model.Find(_a) is { Kind: ElementKind.Configuration } a ? a : Configs.ElementAtOrDefault(0);
+    private Element? B => Ws.Model.Find(_b) is { Kind: ElementKind.Configuration } b ? b : Configs.ElementAtOrDefault(1);
+
+    private VariantComparison? Compare()
+    {
+        if (A is not { } a || B is not { } b) return null;
+        var key = (a.Id, b.Id, Ws.ModelVersion);
+        if (_cache != null && _cacheKey == key) return _cache;
+        _cacheKey = key;
+        return _cache = VariantComparison.Compare(Ws.Model, a, b);
+    }
+
+    private RenderFragment Items(IReadOnlyList<Element> items, string what, string css) => __builder =>
+    {
+        <div style="font-size:11.5px; color:var(--text-3); margin-top:4px">@items.Count @what</div>
+        @if (items.Count > 0)
+        {
+            <ul>
+                @foreach (var e in items.Take(200))
+                {
+                    var el = e;
+                    <li class="@css"><span class="link" @onclick="() => Shell.Navigate(el)">@UiKinds.Label(Ws.Model, el)</span></li>
+                }
+            </ul>
+        }
+    };
+}

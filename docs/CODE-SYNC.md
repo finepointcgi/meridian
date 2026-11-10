@@ -28,7 +28,10 @@ undo step**:
 | field / property typed by a scanned interface | Property (reference) typed by the interface block + Association | |
 | field / property typed by a scanned enum | Property (value) typed by the enumeration | |
 | any other field / property | Property (value) with the C# type as text (`double`, `List<int>`) | |
-| method | Operation, signature `() : ReturnType` | overloads are merged into one operation; parameters are not listed |
+| method | Operation, signature `(a : int, out b : string) : ReturnType` | one operation per overload; `in` is implied, `out` / `inout` (C# `ref`) are written; an untyped parameter is just its name; no signature for a parameterless method returning nothing |
+| abstract class / abstract method | `isAbstract = true` on the block / operation | interface operations are not flagged |
+| static field, property or method | `isStatic = true` on the property / operation | the metamodel has no static flag, so the UML attribute name is used |
+| doc comment on a member | documentation of the property / operation | only written when the code has one |
 | base class / base interface | Generalization | |
 | implemented interface | Realization | |
 | scanned type used in a body, parameter, local, `new`, static call or return type | Dependency | only with `IncludeUsageDependencies`; none when a part, reference, generalization or realization already links the pair |
@@ -38,7 +41,8 @@ Members that are not `public` are skipped unless `IncludeNonPublic` is set. A sk
 
 Every element and relationship that code sync creates carries `code.symbol`, `code.file`, `code.line`, `code.repo` and
 `code.commit`. Symbols are fully qualified with the generic arity (`Sat.Power.Battery`, `Sat.Box`1`). Members use
-`Type.Member` and operations use `Type.Method()`. Relationships use `gen:A->B`, `real:A->B`, `comp:A->B`, `ref:A->B` and
+`Type.Member` and operations use `Type.Method(int,List<string>)`: the parameter types as written, whitespace removed, `?`
+for an untyped parameter. Relationships use `gen:A->B`, `real:A->B`, `comp:A->B`, `ref:A->B` and
 `dep:A->B`.
 
 On every later sync:
@@ -58,6 +62,87 @@ On every later sync:
   a hand-made relationship. Code sync never deletes a diagram. A marked element is unmarked if its code comes back.
 - Running the same code twice changes nothing: the second `Apply` returns an empty `CodeSyncChanges` and adds no undo
   step.
+
+### Operations from earlier versions
+
+Earlier versions of code sync made one `Type.Method()` operation per method name. On the next sync, Meridian keeps that element and
+re-keys it to the first overload (in declaration order); the other overloads are added. More generally, when exactly one
+operation of a method name no longer matches the code and at least one overload of that name is new, the existing operation
+is updated in place instead of being deleted and created again. A changed parameter type therefore keeps the operation's
+id, diagrams, stereotypes and hand-made content.
+
+### Choosing the language
+
+A connection's `Language` is `auto` (the default for new connections), `csharp`, `typescript`, `java` or `python`. `auto`
+gives each file to the reader for its extension and merges the results; the host then fetches only the files that reader
+handles. Existing connections keep the language they were created with.
+
+The TypeScript, Java and Python readers are hand-written, tolerant parsers: they run no Node.js, JVM or Python process and
+never fail on code they do not understand. A part they cannot parse is skipped with a warning
+(`path: N parts could not be parsed (first at line L …)`), and the rest of the file is read. They apply the same limits as
+the C# reader (50,000 types, 2 million characters per file, 200 million in total). Output is deterministic: types are sorted
+by symbol and members are in declaration order. Usage dependencies come from names in signatures, initializers and bodies
+that resolve to a scanned type. Type parameters are never resolved as types. Collections (`List<T>`, `T[]`, `list[T]`,
+`Map<K, V>` …) map to multiplicity `*`, and optional values (`T | null`, `x?: T`, `Optional[T]`, `Optional<T>`) map to
+`0..1`.
+
+#### TypeScript
+
+| Code | Model |
+|---|---|
+| file `src/power/battery.ts` | package `src` › `power` (folders become packages; the file itself does not) |
+| `namespace A.B { … }` / `module A { … }` | packages `A` › `B` below the folder packages |
+| `class` (`abstract class`) | Block (`isAbstract`) |
+| `interface`, `type X = { … }`, `type X = A & { … }` | InterfaceBlock (the named parts of an intersection are generalizations) |
+| `enum`, `const enum` | Enumeration |
+| property, `get` / `set` accessor, constructor parameter property (`constructor(private x: T)`) | Property; `#x` and `private` are private |
+| method, overload signatures | Operation per overload signature (the implementation behind overloads is not listed again) |
+| `extends` / `implements` | Generalization / Realization |
+
+Symbols are `folder.path.Name` (`src.power.Battery`). Names resolve through the file's declarations (including enclosing
+namespaces), relative imports (named, default, `* as ns`, `import X = require(…)`), re-exports (`export * from`,
+`export { A as B } from`, `index.ts` barrels), `@/` → `src/`, and the declarations of script files (files without imports
+or exports are global). Package imports (`@acme/logging`) are not resolved. Decorators are ignored, `node_modules/` is
+skipped, and union type aliases (`type Mode = "a" | "b"`) are not types. A property without a type annotation takes its type
+from `= new X(…)`.
+
+#### Java
+
+| Code | Model |
+|---|---|
+| `package com.acme.rover;` | packages `com` › `acme` › `rover` (the package, not the folder) |
+| `class`, `record`, `enum`, `interface`, `@interface` | Block, Block, Enumeration, InterfaceBlock, InterfaceBlock |
+| nested (static) class | Block owned by the outer block (`IsStatic` in the code model) |
+| field (each declarator of `int a, b;`), record component | Property; package-private is `package` visibility |
+| method, constructor | Operation per overload; constructors are not listed; `default` / `static` interface methods are kept |
+| `extends` / `implements` | Generalization / Realization (an interface's `extends` is a generalization) |
+| enum constants | EnumerationLiterals |
+
+Symbols are `package.Outer.Inner`; generics show in the name (`Source<T>`), not in the symbol. Names resolve like javac:
+nested types of the enclosing types (and of their scanned base types), single-type imports (also of nested types), the same
+package, on-demand imports (`.*`), then fully qualified names. `target/`, `build/generated…`, `module-info.java` and
+`package-info.java` are skipped. Javadoc gives the text before the first block tag, without HTML tags.
+
+#### Python
+
+| Code | Model |
+|---|---|
+| module `src/lander/power/battery.py` | packages `lander` › `power` › `battery`: folders from the topmost folder with `__init__.py`; without any `__init__.py` the whole folder path is used |
+| `class X:` | Block |
+| class based on `Protocol` or `ABC`, or with `metaclass=ABCMeta` | InterfaceBlock; subclasses realize it |
+| class based on `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag` | Enumeration; `NAME = value` are its literals |
+| annotated class attribute, dataclass field | Property (`ClassVar[…]` is static) |
+| unannotated class attribute | static Property, type inferred from the value |
+| `self.x = …` / `self.x: T = …` in `__init__` | Property; the type is the annotation, the hint of the parameter assigned, a class call `Battery(…)`, or a literal's type |
+| `def` | Operation (without `self` / `cls`); `@staticmethod` and `@classmethod` are static; `@abstractmethod` is abstract; `@overload` signatures are the overloads |
+| `@property` | Property typed by its return hint |
+| `_x` / `__x` | protected / private |
+
+Dunder methods (`__init__`, `__repr__` …) are not operations. The docstring's first paragraph is the documentation.
+Names resolve through enclosing classes, the module, imports (absolute, relative, `as` aliases, `from x import *`),
+re-exports in `__init__.py` and imports inside functions. String annotations (`"Battery"`) and `Optional`, `Union`,
+`X | None` are understood. Virtual environments, `site-packages` and `__pycache__` are skipped. A class that only inherits
+from a scanned enum is not recognised as an enum.
 
 ## Reviewing code changes
 

@@ -449,11 +449,7 @@ public sealed class CodeSyncHostService(
     public static IPullRequestPreviews? ResolvePreviews(IServiceProvider sp) =>
         sp.GetServices<IPullRequestPreviews>().LastOrDefault() ?? ResolveRunner(sp) as IPullRequestPreviews;
 
-    public static Func<string, bool> DefaultInclude(string language) => language switch
-    {
-        "csharp" => p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
-        _ => _ => false,
-    };
+    public static Func<string, bool> DefaultInclude(string language) => Meridian.Serialization.CodeSync.CodeReaders.Include(language);
 
     public static CommitState StateOf(CodeSyncStatus status) => status switch
     {

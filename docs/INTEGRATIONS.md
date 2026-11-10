@@ -1,7 +1,8 @@
 # Integrations
 
-Meridian connects to issue trackers, notifies other systems through webhooks, follows code repositories, and
-exposes requirements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
+Meridian connects to issue trackers, notifies other systems through webhooks, follows code repositories, syncs
+requirements with IBM DOORS Next and Siemens Polarion, and exposes requirements and model elements to ALM tools
+through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
@@ -88,49 +89,206 @@ Delivery runs on a background queue (`WebhookDispatcher`). A 2xx response is suc
 attempt is recorded and the latest 50 are shown under *Recent deliveries*. Pending element batches are flushed on
 shutdown; queued retries are not persisted across restarts.
 
-## 3. OSLC Requirements Management 2.0 provider (server mode, read-only)
+## 3. OSLC 2.0 provider (server mode)
 
-Available on team servers (not the desktop app's private local server).
+Available on team servers (not the desktop app's private local server). Code: `Integrations/Oslc.cs` (documents),
+`OslcEndpoints.cs` (routes), `OslcQuery.cs` (query syntax), `OslcPages.cs` (delegated UI), `Rdf.cs` (RDF toolkit).
 
-| Resource | URL |
-|---|---|
-| Root services (no auth) | `/oslc/rootservices` → `oslc_rm:rmServiceProviders` |
-| Service provider catalog | `/oslc/catalog` (one provider per project you can read) |
-| Service provider | `/oslc/projects/{projectId}/provider` (query capability + selection dialog) |
-| Query capability | `/oslc/projects/{projectId}/requirements` |
-| Requirement | `/oslc/projects/{projectId}/requirements/{elementId}` |
-| Selection dialog | `/oslc/projects/{projectId}/selector` |
+| Resource | URL | Access |
+|---|---|---|
+| Root services | `/oslc/rootservices` → `oslc_rm:rmServiceProviders` and `oslc_am:amServiceProviders` | public |
+| Resource shapes | `/oslc/shapes/requirement`, `/oslc/shapes/resource` | public |
+| Service provider catalog | `/oslc/catalog` (one provider per project you can read) | read |
+| Service provider | `/oslc/projects/{projectId}/provider` | read |
+| RM query capability | `GET /oslc/projects/{projectId}/requirements` | read |
+| RM creation factory | `POST /oslc/projects/{projectId}/requirements` | editor, token or Basic header |
+| Requirement | `/oslc/projects/{projectId}/requirements/{elementId}` | read |
+| AM query capability | `/oslc/projects/{projectId}/resources` (blocks, parts, test cases… as `oslc_am:Resource`) | read |
+| AM resource | `/oslc/projects/{projectId}/resources/{elementId}` | read |
+| Selection dialog | `/oslc/projects/{projectId}/selector` (requirements), `?type=resource` (model elements) | read |
+| Creation dialog | `/oslc/projects/{projectId}/creator` | editor |
+| UI preview | `/oslc/projects/{projectId}/preview/{elementId}?size=small` or `large` | read |
 
-Representations: RDF/XML by default (`application/rdf+xml`), JSON-LD with `Accept: application/ld+json` (or
-`application/json`); a requirement also answers `application/x-oslc-compact+xml` (Compact) and redirects browsers
-asking for `text/html` to the element in Meridian. Responses carry `OSLC-Core-Version: 2.0`.
+The service provider has two services. **RM** (`oslc_rm:` domain): query capability and creation factory (both with
+`oslc:resourceShape`), selection and creation dialogs. **AM** (`oslc_am:` domain): query capability and selection dialog.
 
-Each `oslc_rm:Requirement` has `dcterms:identifier` (the requirement id, e.g. `REQ-002`), `dcterms:title`,
-`dcterms:description` (text + documentation), `oslc_rm:satisfiedBy` (sources of «satisfy») and
-`oslc_rm:validatedBy` (sources of «verify», e.g. test cases) as URLs that open those elements in Meridian, and
-`oslc:serviceProvider`.
+**Representations.** Every RDF resource is served as RDF/XML (the default), Turtle (`text/turtle`) or JSON-LD
+(`application/ld+json` or `application/json`), chosen by `Accept` with q-values. Turtle and JSON-LD are produced from
+the RDF/XML by Meridian's own small RDF toolkit, so there is no package dependency. Responses carry
+`OSLC-Core-Version: 2.0` and `Vary: Accept`. Single resources carry an `ETag` and answer `If-None-Match` with 304.
+Browsers that ask for `text/html` are redirected to the element in Meridian. Errors are `oslc:Error` documents
+(`oslc:statusCode`, `oslc:message`).
 
-Query parameters: `oslc.where` with `dcterms:identifier="…"`, `dcterms:title="…"` (joined by `and`) or
-`dcterms:identifier in ["…","…"]`; `oslc.searchTerms` (all terms must match identifier, title or description);
-`oslc.paging=true` / `oslc.pageSize=N` with `page=K` (`oslc:nextPage` in the response info). `oslc.select` is
-ignored (all properties are returned). Results reflect the live model.
+**Requirement properties.** `dcterms:identifier` (requirement id), `dcterms:title`, `dcterms:description` (text and
+documentation), `oslc_rm:satisfiedBy` (sources of «satisfy»), `oslc_rm:validatedBy` (sources of «verify»),
+`oslc_rm:elaboratedBy` (other end of «trace») and `oslc:serviceProvider`. Link targets are Meridian's OSLC URLs of
+those elements (AM resources or requirements). AM resources have `dcterms:identifier` (element id), `dcterms:title`,
+`dcterms:description`, `dcterms:type` (SysML kind), `mrd:kind`, `mrd:satisfies` and `mrd:verifies`
+(`mrd:` is `https://meridian.dev/ns/oslc#`).
 
-The selection dialog lists and searches requirements and returns
-`{"oslc:results":[{"oslc:label":"REQ-002 Acceleration","rdf:resource":"…"}]}` using the OSLC delegated UI
-protocols: `#oslc-core-postMessage-1.0` (posts `oslc-response:` + JSON to the parent/opener) or
-`#oslc-core-windowName-1.0`. Because the session cookie is `SameSite=Lax`, an embedding tool on another site
-should open the dialog in a window, or the user authenticates via the Basic prompt (username + password or token).
+**Query parameters** (both query capabilities):
 
-Example:
+* `oslc.where`: terms joined by `and`. Each term is `prop op value` with `= != < > <= >=`, or `prop in [v1, v2]`.
+  Values are `"strings"` (an optional `^^type` or `@lang` is ignored), numbers, `true`/`false`, `<uri>` or a prefixed
+  name. Strings compare case-insensitively; `<` and `>` compare numbers numerically. `or` and nested `prop{…}` terms
+  are refused with 400.
+* `oslc.select` (and `oslc.properties` on single resources): a property list, `*` for all; `prop{…}` selects `prop`.
+* `oslc.orderBy`: `+prop` or `-prop`, comma separated.
+* `oslc.prefix`: `p=<uri>,…`, added to the standard prefixes (`rdf rdfs xsd dcterms oslc oslc_rm oslc_am mrd`).
+* `oslc.searchTerms`: every term must match the identifier, title or description.
+* `oslc.paging=true` or `oslc.pageSize=N`, with `page=K` (`oslc:nextPage` and `oslc:totalCount` in `oslc:ResponseInfo`).
+
+Results reflect the live model, including edits in open sessions that are not saved yet.
 
 ```sh
-curl -H "Authorization: Bearer mrd_…" -H "Accept: application/ld+json" \
-  "https://meridian.example.com/oslc/projects/<id>/requirements?oslc.where=dcterms:identifier=%22REQ-002%22"
+curl -H "Authorization: Bearer mrd_…" -H "Accept: text/turtle" \
+  "https://meridian.example.com/oslc/projects/<id>/requirements?oslc.where=dcterms:identifier%3D%22REQ-002%22&oslc.select=dcterms:title"
 ```
 
-Not implemented: OAuth 1.0a (Jazz "friends"), creation factories, resource shapes, write access.
+**Creation.** `POST` an `oslc_rm:Requirement` as RDF/XML or JSON(-LD) with `dcterms:title` (required) and optional
+`dcterms:identifier` and `dcterms:description`. `?package=<element id>` chooses the package (default: the first
+package named "Requirements", else the model root). The answer is `201 Created` with `Location` and the new resource,
+or 409 if the identifier is taken. The factory requires an `Authorization` header (token or Basic). A browser cookie
+alone is refused, so other sites cannot forge requests. The change goes through the project's collaboration session:
+open tabs see it at once and it is saved like any other edit.
 
-## 4. Authentication for /api and /oslc — personal access tokens
+**Delegated dialogs.** The selection and creation dialogs implement OSLC Delegated Dialogs with the
+`#oslc-core-postMessage-1.0` protocol (posts `oslc-response:` + `{"oslc:results":[{"oslc:label","rdf:resource"}]}` to
+the parent or opener) and the `#oslc-core-windowName-1.0` protocol. The creation form carries an anti-forgery token
+bound to the user and project (Data Protection, valid 2 hours). Dialog pages run under a restrictive CSP and may be
+framed (all of `/oslc` is exempt from `X-Frame-Options`). The session cookie is `SameSite=Lax`, so a tool on another
+site should open dialogs in a window, or the user signs in at the Basic prompt (username and password or token).
+
+**Compact and UI preview.** A requirement or AM resource requested with `Accept: application/x-oslc-compact+xml`
+returns `oslc:Compact` with `dcterms:title`, `oslc:shortTitle` (requirement id or SysML kind), `oslc:icon`, and
+`oslc:smallPreview` / `oslc:largePreview` (`oslc:document`, `oslc:hintWidth`, `oslc:hintHeight`) pointing at the
+preview pages. Link hovers in ELM, Polarion and other tools then show the text and the satisfied-by / verified-by links.
+
+**Authentication.** Personal access tokens (section 5), as `Authorization: Bearer mrd_…` or as the Basic password;
+the browser session cookie for dialogs and previews; Basic username and password unless the server is single
+sign-on only. **OAuth 1.0a (Jazz "friends") is not implemented.** ELM normally connects friends with OAuth 1.0a
+consumer keys. Meridian's root services document has no `jfs:oauth*` URLs, so ELM cannot add Meridian as a friend in
+the usual way. Use the steps below instead.
+
+### Registering Meridian in IBM ELM
+
+1. Set `Meridian:PublicUrl` to the address ELM users reach Meridian at (for example `https://meridian.example.com`),
+   so every OSLC URL is absolute and public. Serve it over HTTPS with a certificate ELM trusts.
+2. Each ELM user who will create links makes a personal access token in Meridian (avatar menu → **API tokens…**).
+3. In DOORS Next, add links to Meridian requirements or model elements by URL: *Links → Add link → Satisfied By /
+   Validated By / Link To*, then paste the element's OSLC URL
+   (`https://meridian.example.com/oslc/projects/<project id>/resources/<element id>` or `…/requirements/<id>`).
+   On hover ELM fetches the Compact document; the browser asks for Basic credentials once (username and token).
+4. Some ELM versions let an administrator register a service provider catalog for a custom link type without the
+   OAuth friend step. There, register `https://meridian.example.com/oslc/catalog` to pick elements from Meridian's
+   selection dialog. Otherwise linking by URL (step 3) is the supported path.
+5. Other OSLC consumers (Polarion OSLC links, codebeamer, scripts) need the root services URL
+   `https://meridian.example.com/oslc/rootservices` and a token.
+
+## 4. Requirements tools: IBM DOORS Next and Siemens Polarion
+
+Project menu → **Integrations…** → *Requirements tools*. Project owners manage connections; editors can use
+**Sync now**. Code: `src/Meridian.Web/Integrations/Requirements/`; UI:
+`Components/Workbench/{RequirementsToolsPanel,RequirementConflictDialog}.razor`.
+
+Connections are stored as integration kind `requirements-tool`. The password or token is encrypted like every other
+integration secret and is never shown again. All HTTP goes through the guarded client `meridian-requirements-tools`.
+It applies the same address rules as issue trackers. Meridian follows redirects itself and checks each one, never
+sends credentials to another origin, and keeps each sync's cookies in a private jar.
+
+### DOORS Next (ELM / Jazz RM)
+
+| Field | Value |
+|---|---|
+| Server URL | the RM application root, e.g. `https://jazz.example.com/rm` (Meridian reads `{url}/rootservices`) |
+| Sign in with | **Jazz form login** (username and password via `j_security_check`; the session cookie lasts only for that sync), **HTTP Basic**, or **App password** (a Jazz Authorization Server app password, sent as Basic) |
+| Login URL | optional, for form login when `j_security_check` is on the JTS: `https://jazz.example.com/jts` |
+| Project | **Browse projects** follows `oslc_rm:rmServiceProviders` to the service provider catalog (project areas) |
+| Module | optional. **Browse modules** queries `rdf:type=<http://jazz.net/ns/rm#Module>`; a module is read through its `oslc_rm:uses` members |
+| Extra filter | optional `oslc.where` clause, e.g. `dcterms:title="Braking"` |
+
+Without a module, Meridian uses the project's RM query capability with `oslc.paging=true&oslc.pageSize=100`, follows
+`oslc:nextPage`, and asks for
+`oslc.select=dcterms:identifier,dcterms:title,dcterms:description,dcterms:modified,jazz_rm:primaryText,rdf:type`.
+Every request sends `OSLC-Core-Version: 2.0`. Configuration-managed projects can set `configurationContext` in the
+connection's config JSON, which is sent as `Configuration-Context` (there is no UI field for it yet).
+
+### Polarion
+
+| Field | Value |
+|---|---|
+| Server URL | `https://polarion.example.com` (Meridian calls `/polarion/rest/v1`) |
+| Token | a Polarion personal access token (Bearer) for an account that can read the work items, and write links if publishing is on |
+| Project | the project id. **Browse projects** lists `/projects` |
+| Document | optional. **Browse documents** lists the documents that hold work items of the type (from their `module` relationship) |
+| Work item type | default `requirement` |
+| Extra filter | optional Lucene query, combined with `type:<type>` by AND, e.g. `status:approved` |
+
+Work items are read from `/projects/{id}/workitems?query=…&fields[workitems]=title,description,type,status,updated,module`
+with `page[size]=100&page[number]=N`, following `links.next`.
+
+### Mapping
+
+| Meridian | DOORS Next | Polarion |
+|---|---|---|
+| requirement id | `dcterms:identifier` | work item id (`DP-12`) |
+| name | `dcterms:title` | `title` |
+| text | `jazz_rm:primaryText` (XHTML → plain text), else `dcterms:description` | `description` (HTML → plain text) |
+| attribute *External ID* | `dcterms:identifier` | work item id |
+| attribute *External URL* | resource URL | `{server}/polarion/#/project/{p}/workitem?id={id}` |
+| attribute *External revision* | `dcterms:modified` | `updated` |
+| field `externalSync` (JSON) | connection, stable external id (the resource URL), revision, the title and text both sides agreed on at the last sync, links already published | same, with external id `project/WI-ID` |
+
+New requirements go to the chosen package, or to a package named `Imported from <connection name>`. If a Meridian
+requirement with the same requirement id has no link yet, Meridian links it instead of creating a duplicate.
+Requirements that disappeared from the tool are counted ("no longer in the tool") but never deleted.
+
+### Sync, change detection and conflicts
+
+**Sync now** (⟳) fetches every requirement and applies the result to the model as one undoable step. For each linked
+requirement Meridian compares the tool's values and Meridian's values with the base from the last sync:
+
+* **Only the tool changed it.** Meridian takes the new name and text. This uses the normal edit path, so the
+  requirement's «satisfy», «verify», «trace», «refine», «deriveReqt» and «allocate» links **become suspect** through
+  the existing suspect-link mechanism (rule TRC-001; review them in the Traceability panel). A new revision with the
+  same content only updates the stored revision.
+* **Only Meridian changed it.** Meridian's version stays and is reported as "changed only in Meridian". Meridian does
+  not write requirement text back to the tool.
+* **Both changed it, differently.** This is a **conflict**: nothing is applied, and the conflict dialog shows both
+  versions as word diffs against the last synced text. *Take the tool's version* updates Meridian (its links become
+  suspect). *Keep Meridian's* keeps it and stops reporting the conflict.
+
+**Automatic sync**: manual (the default), every 15 minutes, hourly, every 4 hours or daily. A scheduled sync edits the
+live project through its collaboration session as the owner who saved the connection. If that account can no longer
+edit the project, the sync is skipped with a note. Scheduled syncs apply everything except conflicts, which wait for
+**Sync now**. The connection shows the result of its last sync: time, summary, conflicts, or the error.
+
+### Publishing links back (optional, off by default)
+
+With **Publish Meridian links** on (team servers only), each sync then publishes the links of imported requirements
+that have not been published yet (remembered in `externalSync.published`):
+
+| Meridian | DOORS Next | Polarion |
+|---|---|---|
+| «satisfy» from X | `oslc_rm:satisfiedBy` → X | linked OSLC resource, role `http://open-services.net/ns/rm#satisfiedBy` |
+| «verify» from X | `oslc_rm:validatedBy` → X | linked OSLC resource, role `…#validatedBy` |
+| «trace» with X | `oslc_rm:elaboratedBy` → X | linked OSLC resource, role `…#elaboratedBy` |
+| any of these between two requirements imported from the same Polarion project | (as above) | linked work item, role `implements`, `verifies` or `relates_to` |
+
+X is Meridian's OSLC URL of the element (section 3), or the tool's URL when X was imported too. DOORS Next is updated
+by GET and PUT of the requirement's RDF/XML with `If-Match`; a 412 is retried once, and a link that is already there
+is not written again. Polarion links are POSTed to `…/workitems/{id}/linkedworkitems` or `…/linkedoslcresources`; a
+409 counts as already there. The Polarion roles can be changed in the connection's config JSON (`linkRoles`). Set
+`Meridian:PublicUrl` so the published URLs are public; scheduled syncs publish links only when it is set.
+
+### Not verified against real servers
+
+The connectors are tested only against fake servers with hand-written, recorded-style responses. These have not been
+checked against live systems yet: form login through a Jazz Authorization Server (OIDC), whether DOORS Next accepts
+external link targets in `satisfiedBy`/`validatedBy` on PUT, reading very large modules, Polarion's role names for
+`linkedoslcresources`, and listing documents through `include=module` on older Polarion versions.
+
+## 5. Authentication for /api and /oslc — personal access tokens
 
 Both APIs accept the browser session cookie, HTTP Basic with username/password, or a **personal access token**:
 avatar menu → **API tokens…** (server mode) to create (shown once) and revoke tokens.
@@ -139,7 +297,7 @@ avatar menu → **API tokens…** (server mode) to create (shown once) and revok
 * Tokens are 256-bit random values; only their SHA-256 hash and a 12-character display prefix are stored
   (`api_tokens` table); revoked tokens stop working immediately. A token has its owner's access to every project.
 
-## 5. Code repositories (code sync)
+## 6. Code repositories (code sync)
 
 A project can follow a GitHub, GitLab or Bitbucket repository (cloud or self-hosted). When code is pushed to the chosen
 branch, Meridian reads the C# code at that commit, updates the model on a review branch, highlights what changed on the
@@ -233,5 +391,5 @@ and the webhook secret are encrypted like other integration secrets and never wr
 ## Storage
 
 New tables (created by `MigrateAsync`, in the integrations migration block of each store):
-`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`, name, config JSON, encrypted secret),
+`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`/`requirements-tool`, name, config JSON, encrypted secret),
 `webhook_deliveries` (delivery log) and `api_tokens`.

@@ -18,13 +18,15 @@ public static class Notation
     public static NodeShape ShapeOf(Element e) =>
         e.Kind == ElementKind.BpmnNode ? Subtypes.BpmnShape(e.Get(FieldKeys.Subtype))
         : e.Kind == ElementKind.Shape ? Subtypes.ShapeOutline(e.Get(FieldKeys.Subtype))
+        : e.Kind == ElementKind.Pseudostate ? Pseudostates.Shape(Pseudostates.KindOf(e))
         : IsConstraintParameter(e) ? NodeShape.SmallSquare
         : Metamodel.Shape(e.Kind);
 
     /// <summary>A parameter of a constraint block (drawn as a small square on a constraint property's border).</summary>
     public static bool IsConstraintParameter(Element e) => e.Kind == ElementKind.Property && e.Owner?.Kind == ElementKind.ConstraintBlock;
 
-    public static bool IsBorderShape(Element e) => IsBorderShape(e.Kind) || IsConstraintParameter(e);
+    public static bool IsBorderShape(Element e) => IsBorderShape(e.Kind) || IsConstraintParameter(e)
+        || Pseudostates.IsConnectionPoint(e) && e.Owner?.Kind == ElementKind.State;
 
     public static EdgeStyle StyleOf(Relationship r) => r.Kind switch
     {
@@ -40,6 +42,8 @@ public static class Notation
     public static (double W, double H) DefaultSizeOf(ElementKind kind, string? subtype) =>
         kind == ElementKind.BpmnNode && !string.IsNullOrEmpty(subtype) ? Subtypes.BpmnSize(subtype)
         : kind == ElementKind.Shape ? Subtypes.ShapeSize(subtype ?? "")
+        : kind == ElementKind.Pseudostate ? Pseudostates.Size(string.IsNullOrEmpty(subtype) ? Pseudostates.Choice : subtype)
+        : kind == ElementKind.ObjectNode && subtype == Subtypes.DataStore ? (160, 70)
         : Metamodel.DefaultSize(kind);
 
     /// <summary>Snaps a small shape (port, pin) so its centre lies on the nearest border of its container.</summary>
@@ -62,6 +66,7 @@ public static class Notation
     {
         var keywords = new List<string>();
         var kw = Metamodel.Keyword(e.Kind);
+        if (e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) is Subtypes.DataStore or Subtypes.CentralBuffer) kw = e.Get(FieldKeys.Subtype);
         if (kw != null) keywords.Add(kw);
         keywords.AddRange(e.Stereotypes);
         var keyword = keywords.Count > 0 ? string.Join(", ", keywords.Select(k => $"«{k}»")) : null;
@@ -261,7 +266,7 @@ public static class Notation
         var dy = outside.Y - c.Y;
         if (Math.Abs(dx) < 1e-9 && Math.Abs(dy) < 1e-9) return c;
 
-        if (shape is NodeShape.Ellipse or NodeShape.FilledCircle or NodeShape.BullsEye)
+        if (shape is NodeShape.Ellipse or NodeShape.FilledCircle or NodeShape.BullsEye or NodeShape.Pseudostate)
         {
             var a = b.Width / 2;
             var bb = b.Height / 2;

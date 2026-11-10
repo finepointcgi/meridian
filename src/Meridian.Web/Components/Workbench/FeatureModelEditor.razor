@@ -1,0 +1,187 @@
+@* Feature model editor: the feature tree with kinds (mandatory / optional / alternative / or), cross-tree constraints
+   (requires / excludes) and what the SAT analysis concludes (number of products, dead and core features). *@
+@using Meridian.Core.Analysis
+@using Meridian.Core.Samples
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="Ws.ReadOnly" OnClick="AddRoot" data-testid="fm-add-root">Root feature</MudButton>
+    <span style="width:12px"></span>
+    <select class="dv-select" value="@_from" @onchange="e => _from = e.Value?.ToString()" aria-label="Constraint source" disabled="@Ws.ReadOnly">
+        <option value="">feature…</option>
+        @foreach (var (f, _) in _tree) { <option value="@f.Id">@f.DisplayName</option> }
+    </select>
+    <select class="dv-select" value="@_relKind" @onchange="SetRelKind" aria-label="Constraint kind" disabled="@Ws.ReadOnly">
+        <option value="requires">requires</option>
+        <option value="excludes">excludes</option>
+    </select>
+    <select class="dv-select" value="@_to" @onchange="e => _to = e.Value?.ToString()" aria-label="Constraint target" disabled="@Ws.ReadOnly">
+        <option value="">feature…</option>
+        @foreach (var (f, _) in _tree) { <option value="@f.Id">@f.DisplayName</option> }
+    </select>
+    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(Ws.ReadOnly || string.IsNullOrEmpty(_from) || string.IsNullOrEmpty(_to) || _from == _to)" OnClick="AddConstraint">Add constraint</MudButton>
+    <span style="flex:1"></span>
+    @if (_tree.Count > 0)
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.AccountTree" Disabled="Ws.ReadOnly" OnClick="OpenDiagram">Feature diagram</MudButton>
+    }
+</div>
+
+@if (_tree.Count == 0)
+{
+    <div class="var-hint">No features yet. Add a root feature, then children; or use <b>Add example product line</b> in the Configurations tab.</div>
+}
+else
+{
+    <div class="fm-facts" data-testid="fm-facts">
+        <span>@_tree.Count features</span>
+        <span>@_constraints cross-tree constraint@(_constraints == 1 ? "" : "s")</span>
+        <span>@(_products >= ProductLimit ? $"{ProductLimit:N0}+" : _products.ToString("N0")) valid product@(_products == 1 ? "" : "s")</span>
+        @if (_dead.Count > 0) { <span style="color:var(--danger)">dead: @string.Join(", ", _dead.Select(d => d.Name))</span> }
+        @if (_core.Count > 0) { <span>core: @string.Join(", ", _core.Select(d => d.Name))</span> }
+    </div>
+    <div class="fm-tree">
+        @foreach (var (f, depth) in _tree)
+        {
+            var feature = f;
+            var root = depth == 0 && Variability.Parent(Ws.Model, feature) is null;
+            var kind = root ? "root" : Variability.KindOf(feature);
+            <div class="fm-row @(ReferenceEquals(Ws.Selected, feature) ? "sel" : "")" style="padding-left:@(depth * 18)px" data-feature="@feature.Name" @key="feature.Id" @onclick="() => Ws.Select(feature)">
+                <span class="fm-glyph @kind" title="@kind"></span>
+                <input class="fm-name" value="@feature.Name" @onchange="e => Rename(feature, e.Value?.ToString())" @onclick:stopPropagation="true" disabled="@Ws.ReadOnly" aria-label="Feature name" />
+                @if (!root)
+                {
+                    <select value="@kind" @onchange="e => SetKind(feature, e.Value?.ToString())" @onclick:stopPropagation="true" disabled="@Ws.ReadOnly" aria-label="Feature kind">
+                        @foreach (var k in ExtFieldKeys.FeatureKinds) { <option value="@k">@k</option> }
+                    </select>
+                }
+                else { <span class="var-kind">root</span> }
+                @foreach (var r in Ws.Model.Outgoing(feature).Where(r => r.Kind is ElementKind.Requires or ElementKind.Excludes).ToList())
+                {
+                    var rel = r;
+                    <span class="fm-cons @(rel.Kind == ElementKind.Excludes ? "excludes" : "")">
+                        @(rel.Kind == ElementKind.Requires ? "requires" : "excludes") @rel.Target.Name
+                        @if (!Ws.ReadOnly) { <button title="Remove constraint" @onclick:stopPropagation="true" @onclick="() => Remove(rel)">×</button> }
+                    </span>
+                }
+                <span style="flex:1"></span>
+                @if (!Ws.ReadOnly)
+                {
+                    <button class="fm-act" title="Add a child feature" @onclick:stopPropagation="true" @onclick="() => AddChild(feature)"><MudIcon Icon="@Icons.Material.Filled.Add" Style="font-size:16px" /></button>
+                    <button class="fm-act" title="Delete this feature (and its children)" @onclick:stopPropagation="true" @onclick="() => Remove(feature)"><MudIcon Icon="@Icons.Material.Outlined.Delete" Style="font-size:16px" /></button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    internal const long ProductLimit = 100_000;
+
+    private List<(Element Feature, int Depth)> _tree = new();
+    private int _constraints;
+    private long _products;
+    private IReadOnlyList<Element> _dead = [], _core = [];
+    private string? _from, _to;
+    private string _relKind = "requires";
+    private int _version = -1;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Recompute();
+    }
+
+    protected override void OnWorkspaceChanged() => Recompute();
+
+    private void Recompute()
+    {
+        if (_version == Ws.ModelVersion && _tree.Count > 0) return;
+        _version = Ws.ModelVersion;
+        _tree = Variability.Tree(Ws.Model).ToList();
+        _constraints = Ws.Model.Relationships.Count(r => r.Kind is ElementKind.Requires or ElementKind.Excludes);
+        if (_tree.Count == 0) { _products = 0; _dead = _core = []; return; }
+        var solver = new FeatureSolver(Ws.Model);
+        _products = solver.CountProducts(ProductLimit);
+        (_dead, _core) = _tree.Count <= 200 ? solver.DeadAndCore() : ([], []);
+    }
+
+    private Element FeatureOwner() =>
+        Variability.Roots(Ws.Model).FirstOrDefault()?.Owner is { } o && Metamodel.CanOwn(o.Kind, ElementKind.Feature) ? o
+        : Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package) ?? Ws.Model.Root;
+
+    private void Guard(Action a)
+    {
+        try { a(); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void AddRoot() => Guard(() =>
+    {
+        var f = Ws.Model.Create(FeatureOwner(), ElementKind.Feature, _tree.Count == 0 ? "Product" : null);
+        Ws.Model.Set(f, ExtFieldKeys.FeatureKind, "mandatory");
+        Ws.Select(f);
+    });
+
+    private void AddChild(Element parent) => Guard(() =>
+    {
+        Element child;
+        using (Ws.Model.History.Transaction("Add child feature"))
+        {
+            child = Ws.Model.Create(parent, ElementKind.Feature);
+            Ws.Model.Set(child, ExtFieldKeys.FeatureKind, "optional");
+            // Show it on feature diagrams that show the parent.
+            foreach (var d in Ws.Model.Diagrams.Where(d => d.DiagramType == DiagramType.FeatureModel).ToList())
+                if (d.Nodes.FirstOrDefault(n => ReferenceEquals(n.Element, parent)) is { } pn)
+                {
+                    var siblings = d.Nodes.Count(n => n.Element.Owner == parent);
+                    Ws.Model.AddNode(d, child, new Bounds(pn.Bounds.X + siblings * 150, pn.Bounds.Y + 110, 130, 56));
+                    ProductLineSample.EnsureDecompositionEdges(Ws.Model, d);
+                }
+        }
+        Ws.Select(child);
+    });
+
+    private void Rename(Element f, string? name) => Guard(() =>
+    {
+        name = name?.Trim();
+        if (!string.IsNullOrEmpty(name) && name != f.Name) Ws.Model.Rename(f, name);
+    });
+
+    private void SetKind(Element f, string? kind) => Guard(() =>
+    {
+        if (kind is { Length: > 0 } && ExtFieldKeys.FeatureKinds.Contains(kind) && kind != f.Get(ExtFieldKeys.FeatureKind)) Ws.Model.Set(f, ExtFieldKeys.FeatureKind, kind);
+    });
+
+    private void AddConstraint() => Guard(() =>
+    {
+        if (Ws.Model.Find(_from) is not { Kind: ElementKind.Feature } a || Ws.Model.Find(_to) is not { Kind: ElementKind.Feature } b || ReferenceEquals(a, b)) return;
+        var kind = _relKind == "excludes" ? ElementKind.Excludes : ElementKind.Requires;
+        if (Ws.Model.Outgoing(a, kind).Any(r => ReferenceEquals(r.Target, b))) return;
+        using (Ws.Model.History.Transaction($"{a.Name} {_relKind} {b.Name}"))
+        {
+            var rel = Ws.Model.Connect(kind, a, b);
+            foreach (var d in Ws.Model.Diagrams.Where(d => d.DiagramType == DiagramType.FeatureModel).ToList()) Ws.Model.AddEdge(d, rel);
+        }
+        _from = _to = null;
+    });
+
+    private void SetRelKind(ChangeEventArgs e) => _relKind = e.Value?.ToString() == "excludes" ? "excludes" : "requires";
+
+    private void Remove(Element e) => Guard(() => Ws.Model.Delete(e));
+
+    private void OpenDiagram() => Guard(() =>
+    {
+        if (Ws.Model.Diagrams.FirstOrDefault(d => d.DiagramType == DiagramType.FeatureModel) is { } existing) { Ws.Open(existing); return; }
+        var owner = Variability.Roots(Ws.Model).FirstOrDefault()?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+        Diagram d;
+        using (Ws.Model.History.Transaction("Generate feature diagram"))
+        {
+            d = Ws.Model.CreateDiagram(owner, DiagramType.FeatureModel, "Feature model");
+            foreach (var (f, _) in _tree) Ws.Model.AddNode(d, f, new Bounds(0, 0, 140, 60));
+            ProductLineSample.EnsureDecompositionEdges(Ws.Model, d);
+            Ws.Model.SetBounds(d, AutoLayout.Layered(d), "Arrange");
+        }
+        Ws.Open(d);
+    });
+}

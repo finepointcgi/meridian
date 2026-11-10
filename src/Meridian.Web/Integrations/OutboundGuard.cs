@@ -54,10 +54,17 @@ public static class OutboundGuard
         return true;
     }
 
-    /// <summary>A handler whose every connection goes through the guard.</summary>
-    public static SocketsHttpHandler CreateHandler(bool allowPrivateNetworks) => new()
+    /// <summary>
+    /// A handler whose every connection goes through the guard. It never stores cookies: the handler is pooled and shared
+    /// by every project's connections, so a cookie set for one connection must not be sent for another. Clients that
+    /// need a session cookie (Jazz form login) keep their own jar and, with <paramref name="followRedirects"/> off,
+    /// follow redirects themselves so they see every Set-Cookie.
+    /// </summary>
+    public static SocketsHttpHandler CreateHandler(bool allowPrivateNetworks, bool followRedirects = true) => new()
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        UseCookies = false,
+        AllowAutoRedirect = followRedirects,
         ConnectCallback = (context, ct) => ConnectAsync(context.DnsEndPoint, allowPrivateNetworks, ct),
     };
 

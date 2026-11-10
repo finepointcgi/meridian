@@ -264,7 +264,8 @@ public static class ReportTemplates
                 Blocks =
                 [
                     new TableBlock { Caption = "VCRM", Query = "kind:Requirement", SortBy = "reqId",
-                                     Columns = [new("reqId"), new("name"), new("verifyMethod", "Method"), new("verifiedBy", "Verified by"), new("status")] },
+                                     Columns = [new("reqId"), new("name"), new("verifyMethod", "Method"), new("verifiedBy", "Verified by"), new("status"),
+                                                new("verificationResult", "Analysis result"), new("field:verify.value", "Computed"), new("field:verify.margin", "Margin")] },
                     new TraceMatrixBlock { Caption = "Requirement × test case", RowQuery = "kind:Requirement", ColumnQuery = "kind:TestCase", RelationshipKinds = [ElementKind.Verify] },
                 ],
             },

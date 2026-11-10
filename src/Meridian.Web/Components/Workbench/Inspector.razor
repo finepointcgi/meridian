@@ -138,7 +138,7 @@
                     break;
                 case FieldKeys.Subtype:
                     <MudSelect @key="@(e.Id + key)" T="string" Label="Type" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" MaxHeight="420">
-                        @foreach (var st in Subtypes.For(e.Kind)) { <MudSelectItem Value="@st">@Subtypes.Display(st)</MudSelectItem> }
+                        @foreach (var st in Subtypes.For(e.Kind)) { <MudSelectItem Value="@st">@(st.Length == 0 ? "(plain)" : Subtypes.Display(st))</MudSelectItem> }
                     </MudSelect>
                     break;
                 case ExtFieldKeys.FeatureKind:
@@ -226,6 +226,7 @@
         }
 
         <RequirementInspectorSection E="e" />
+        <OperandsSection E="e" />
         <DerivationChainSection E="e" OnOpen="x => Shell?.OpenChainLink(x)" OnCreate="o => Shell?.DeriveAsync(o) ?? Task.CompletedTask" />
 
         if (Ws.Active is { } activeDiagram && activeDiagram.Diagram.Nodes.FirstOrDefault(n => ReferenceEquals(n.Element, e)) is { } shown && !Ws.ReadOnly)
@@ -487,7 +488,7 @@
 
     private static string Label(string key) => key switch
     {
-        FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity",
+        FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity", FieldKeys.SourceMultiplicity => "Source multiplicity",
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
         FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? key,

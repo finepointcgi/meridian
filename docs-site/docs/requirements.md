@@ -124,4 +124,4 @@ can add rules too.
 ## Exchanging requirements
 
 Requirements round-trip with spreadsheets (CSV and Excel), ReqIF 1.2 (DOORS, Polarion, Jama, Codebeamer …) and the
-OSLC RM provider on a server. See [Import and export](import-export.md#requirements) and [Integrations](integrations.md).
+live sync with DOORS Next and Polarion, and the OSLC provider on a server. See [Import and export](import-export.md#requirements) and [Integrations](integrations.md).
