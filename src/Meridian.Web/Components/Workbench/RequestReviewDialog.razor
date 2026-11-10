@@ -154,7 +154,7 @@
             if (_scope != ReviewScopeKind.Versions && _base == -1 && ids.Count > 0 && !string.IsNullOrWhiteSpace(_title))
             {
                 await s.PersistAsync();
-                var number = await Db.CommitVersionAsync(s.ProjectId, $"Baseline for review: {_title.Trim()}", ProjectFile.Serialize(Ws.Model), me.Id);
+                var number = await Db.CommitVersionAsync(s.ProjectId, $"Baseline for review: {_title.Trim()}", s.Snapshot(), me.Id);   // the authoritative model, not my (possibly filtered) replica
                 baseVersion = (await Db.ListVersionsAsync(s.ProjectId)).FirstOrDefault(v => v.Number == number)?.Id;
             }
             // In local mode a review is a personal checklist: you are its reviewer.

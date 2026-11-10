@@ -76,7 +76,7 @@ public sealed partial class DiagramController
     /// </summary>
     public IReadOnlyList<Relationship> BulkLink(ElementKind kind, Element target, bool? selectionIsSource = null)
     {
-        if (_ws.ReadOnly) return [];
+        if (ReadOnly) return [];
         var sel = LinkableSelection.Where(e => !ReferenceEquals(e, target)).ToList();
         var option = BulkLinkOptions(target).FirstOrDefault(o => o.Kind == kind && (selectionIsSource == null || o.SelectionIsSource == selectionIsSource));
         if (sel.Count == 0 || option == null)
@@ -148,7 +148,7 @@ public sealed partial class DiagramController
     private void EditStereotypes(string name, bool add)
     {
         name = name.Trim().Trim('«', '»').Trim();
-        if (_ws.ReadOnly || name.Length == 0) return;
+        if (ReadOnly || name.Length == 0) return;
         var els = SelectedElements;
         try
         {
@@ -177,7 +177,7 @@ public sealed partial class DiagramController
     /// <summary>Sets a field on every selected element (one undo step).</summary>
     public void SetSharedField(string key, string? value)
     {
-        if (_ws.ReadOnly) return;
+        if (ReadOnly) return;
         var els = SelectedElements;
         try
         {

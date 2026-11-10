@@ -148,6 +148,15 @@ public sealed class ModelRepository
         return i;
     }
 
+    /// <summary>Removes a subtree without undo, events or replication (building a redacted copy; see <see cref="Permissions.ModelRedactor"/>).</summary>
+    internal void DetachForRedaction(Element e)
+    {
+        if (e.Owner is not { } owner || !Contains(e)) return;
+        owner.Children.Remove(e);
+        UnindexRecursive(e);
+        e.Owner = null;
+    }
+
     private void SetFieldRaw(Element e, string key, string? value)
     {
         if (!Contains(e)) return;

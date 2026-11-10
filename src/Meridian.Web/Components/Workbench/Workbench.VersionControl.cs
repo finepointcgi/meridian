@@ -72,7 +72,7 @@ public partial class Workbench
         while (true)
         {
             MergePlan plan;
-            try { plan = await VersionControl.PrepareMergeAsync(Db, Hub, s.ProjectId, source, target); }
+            try { plan = await VersionControl.PrepareMergeAsync(Db, Hub, s.ProjectId, source, target, Ws.User.Id); }
             catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
 
             var dialog = await Dialogs.ShowAsync<MergeDialog>("Merge", new DialogParameters<MergeDialog> { { x => x.Plan, plan } },

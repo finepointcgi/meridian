@@ -134,7 +134,10 @@ public static class IntegrationsSetup
         var row = await db.LoadProjectAsync(projectId);
         if (row is null) return (user, null, null, Results.NotFound());
         var json = hub.Find(projectId)?.Snapshot() ?? row.Value.ModelJson;
-        return (user, hub.Find(projectId)?.Name ?? row.Value.Name, ProjectFile.Deserialize(json), null);
+        var model = ProjectFile.Deserialize(json);
+        // Package permissions: packages hidden from the caller are left out (docs/PERMISSIONS.md).
+        Meridian.Core.Permissions.ModelRedactor.Redact(model, await Services.PackagePermissions.ViewForAsync(db, projectId, user.Id));
+        return (user, hub.Find(projectId)?.Name ?? row.Value.Name, model, null);
     }
 
     private static void MapOslc(WebApplication app)

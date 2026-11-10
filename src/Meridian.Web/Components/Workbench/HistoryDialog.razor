@@ -74,7 +74,8 @@
     private VersionInfo? _selected;
     private IReadOnlyList<ElementDiff>? _diff;
     private string? _message;
-    private string? _selectedJson;
+    private string? _selectedJson;   // as I may see it (packages hidden from me left out): compared and downloaded
+    private string? _selectedRaw;    // as stored: restored (the session checks I may make every change it implies)
 
     protected override async Task OnInitializedAsync() => await Reload();
 
@@ -112,7 +113,8 @@
     {
         if (Ws.Session is null) return;
         _selected = v;
-        _selectedJson = await Db.LoadVersionAsync(Ws.Session.ProjectId, v.Id);
+        _selectedRaw = await Db.LoadVersionAsync(Ws.Session.ProjectId, v.Id);
+        _selectedJson = _selectedRaw is null ? null : PackagePermissions.RedactJson(_selectedRaw, Ws.Access);
         _diff = _selectedJson is null ? [] : ModelDiff.Compare(ProjectFile.Deserialize(_selectedJson), Ws.Model);
     }
 
@@ -126,11 +128,14 @@
 
     private async Task Restore()
     {
-        if (_selectedJson is null || _selected is null || Ws.Session is null || Ws.User is null || Ws.ReadOnly) return;
+        if (_selectedRaw is null || _selected is null || Ws.Session is null || Ws.User is null || Ws.ReadOnly) return;
         var ok = await Dialogs.ShowMessageBox("Restore version", $"Replace the current model with v{_selected.Number} for everyone in the project? The current state is committed as a version first, so this can be undone by restoring it.", yesText: "Restore", cancelText: "Cancel");
         if (ok != true) return;
-        await Db.CommitBranchVersionAsync(Ws.Session.ProjectId, Ws.Session.BranchId, $"Before restoring v{_selected.Number}", ProjectFile.Serialize(Ws.Model), Ws.User.Id);
-        Ws.Session.Reset(_selectedJson, Ws.User.Id);
+        // The authoritative model, not my replica (which leaves out packages hidden from me).
+        var current = Ws.Session.Snapshot();
+        try { Ws.Session.Reset(_selectedRaw, Ws.User.Id); }
+        catch (PermissionDeniedException ex) { Snackbar.Add(ex.Message, Severity.Warning); return; }
+        await Db.CommitBranchVersionAsync(Ws.Session.ProjectId, Ws.Session.BranchId, $"Before restoring v{_selected.Number}", current, Ws.User.Id);
         await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionRestore, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{_selected.Number}");
         Snackbar.Add($"Restored v{_selected.Number}", Severity.Success);
         MudDialog.Close();

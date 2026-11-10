@@ -81,9 +81,11 @@ public static class VersionControl
     /// Three-way merge of <paramref name="source"/> into <paramref name="target"/>. The common ancestor is the merge base the
     /// branch records: the source branch's base, or the target branch's base when main is merged into a branch.
     /// </summary>
-    public static async Task<MergePlan> PrepareMergeAsync(IMeridianStore db, CollaborationHub hub, Guid projectId, BranchRef source, BranchRef target)
+    /// <param name="actor">Who is merging: a user with hidden packages can't merge (the conflicts and changes would show them).</param>
+    public static async Task<MergePlan> PrepareMergeAsync(IMeridianStore db, CollaborationHub hub, Guid projectId, BranchRef source, BranchRef target, Guid? actor = null)
     {
         if (source.BranchId == target.BranchId) throw new InvalidOperationException("Pick a different branch to merge.");
+        await PackagePermissions.EnsureSeesEverythingAsync(db, projectId, actor, "Merging");
         var baseOwner = source.BranchId ?? target.BranchId!.Value;
         var baseJson = (await db.LoadBranchAsync(baseOwner))?.BaseJson ?? throw new InvalidOperationException("That branch no longer exists.");
         foreach (var line in new[] { source, target })
@@ -96,13 +98,18 @@ public static class VersionControl
 
     /// <summary>
     /// Writes a resolved merge: commits it as a new version on the target, makes it the target's head (live for everyone
-    /// editing it) and moves the merge base forward so the next merge only sees newer changes.
+    /// editing it) and moves the merge base forward so the next merge only sees newer changes. Package permissions: the author
+    /// must see the whole project, and every element the merge changes on the target must be editable by them
+    /// (<see cref="PermissionDeniedException"/>); a null author is the system.
     /// </summary>
     public static async Task<(long Id, int Number)> CompleteMergeAsync(IMeridianStore db, CollaborationHub hub, MergePlan plan, ModelRepository merged, string message, Guid? author)
     {
         var current = await HeadJsonAsync(db, hub, plan.ProjectId, plan.Target.BranchId);
-        if (current != plan.OursJson && ModelDiff.Compare(ProjectFile.Deserialize(plan.OursJson), ProjectFile.Deserialize(current)).Count > 0)
+        var currentModel = ProjectFile.Deserialize(current);
+        if (current != plan.OursJson && ModelDiff.Compare(ProjectFile.Deserialize(plan.OursJson), currentModel).Count > 0)
             throw new MergeOutdatedException($"“{plan.Target.Name}” changed while you were merging. Review the merge again.");
+        await PackagePermissions.EnsureSeesEverythingAsync(db, plan.ProjectId, author, "Merging");
+        await PackagePermissions.EnsureCanReplaceAsync(db, plan.ProjectId, author, currentModel, merged);
 
         var json = ProjectFile.Serialize(merged);
         var version = await db.CommitBranchVersionAsync(plan.ProjectId, plan.Target.BranchId, message.Trim(), json, author);

@@ -110,6 +110,7 @@ public sealed partial class SqliteStore : IMeridianStore
         await MigrateBranchingAsync();   // branches, branch commits, baselines (SqliteStore.Branching.cs)
         await MigratePreferencesAsync();   // per-user preferences (SqliteStore.Preferences.cs)
         await MigrateCodeSyncRunsAsync();   // code-sync review runs (SqliteStore.CodeSync.cs)
+        await MigratePermissionsAsync();   // per-package permissions (SqliteStore.Permissions.cs)
     }
 
     // =============================================================== users

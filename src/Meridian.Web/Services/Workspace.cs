@@ -69,7 +69,7 @@ public sealed class Workspace : IDisposable, ISessionClient
         _buffered.Clear();
         var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
         if (session is null) { _joining = false; return false; }
-        var replica = ProjectFile.Deserialize(session.Snapshot());
+        var replica = ProjectFile.Deserialize(session.SnapshotFor(ParticipantId));   // filtered when packages are hidden from me
         Session = session;
         Role = role;
         Install(replica);
@@ -94,12 +94,15 @@ public sealed class Workspace : IDisposable, ISessionClient
     {
         Model.Changed -= OnModelChanged;
         Model.History.Changed -= OnHistoryChanged;
+        Model.History.ActionCompleted -= FlushLocalOps;
         Model.OpEmitted -= OnLocalOp;
+        _pendingOps.Clear();
         Model = replica;
         Model.History.ReadOnly = ReadOnly;
         Model.Changed += OnModelChanged;
         Model.History.Changed += OnHistoryChanged;
         Model.OpEmitted += OnLocalOp;
+        Model.History.ActionCompleted += FlushLocalOps;
         ModelVersion++;
         TreeVersion++;
         _open.Clear();
@@ -111,7 +114,26 @@ public sealed class Workspace : IDisposable, ISessionClient
         Selected = null;
     }
 
-    private void OnLocalOp(ModelOp op) => Session?.Submit(ParticipantId, User?.Id ?? Guid.Empty, op);
+    private readonly List<ModelOp> _pendingOps = new();
+
+    /// <summary>
+    /// My operations go to the session one user action at a time (a delete with its cascades, an import, a script batch…), so
+    /// the server accepts or refuses the action as a whole (package permissions, locks) rather than part of it.
+    /// </summary>
+    private void OnLocalOp(ModelOp op)
+    {
+        if (Session is null) return;
+        if (Model.History.InAction) { _pendingOps.Add(op); return; }
+        Session.Submit(ParticipantId, User?.Id ?? Guid.Empty, op);
+    }
+
+    private void FlushLocalOps()
+    {
+        if (_pendingOps.Count == 0) return;
+        var ops = _pendingOps.ToList();
+        _pendingOps.Clear();
+        Session?.SubmitAll(ParticipantId, User?.Id ?? Guid.Empty, ops);
+    }
 
     public void LeaveSession()
     {
@@ -163,6 +185,41 @@ public sealed class Workspace : IDisposable, ISessionClient
     /// <summary>The branch being edited (null = main).</summary>
     public Guid? BranchId => Session?.BranchId;
     public string BranchName => Session?.BranchName ?? Meridian.Data.Branching.MainBranch;
+
+    // ---------------------------------------------------------------- package permissions (docs/PERMISSIONS.md)
+
+    /// <summary>My package permissions in the open project (everything without a session: local previews, tests).</summary>
+    public Meridian.Core.Permissions.AccessView Access => Session?.AccessOf(ParticipantId) ?? Meridian.Core.Permissions.AccessView.Full;
+
+    /// <summary>True when I may change <paramref name="e"/> (role and package permissions; the session enforces the same rules).</summary>
+    public bool CanEdit(Element e) => !ReadOnly && Access.CanEdit(e);
+
+    /// <summary>True when the diagram is read-only for me (view-only project, or a diagram owned by a package I can't edit).</summary>
+    public bool IsReadOnly(Diagram d) => ReadOnly || !Access.CanEdit(d);
+
+    /// <summary>Some packages' contents are hidden from me: my model is a filtered copy.</summary>
+    public bool HasHiddenPackages => Access.HidesAnything;
+
+    /// <summary>
+    /// The lock badge of a package in the tree: hidden or read-only for me, or (for those who manage it) protected by rules.
+    /// Null when the package has no rule that matters here.
+    /// </summary>
+    public (string Css, string Tip)? PermissionBadge(Element e)
+    {
+        if (e.Kind is not (ElementKind.Package or ElementKind.Model) || Session is not { } s) return null;
+        var mine = Access.ExplicitAt(e.Id);
+        if (mine == Meridian.Core.Permissions.PackageAccess.None) return ("none", "Hidden from you: you can see this package, not its contents");
+        if (mine == Meridian.Core.Permissions.PackageAccess.Read) return ("read", "Read-only for you (package permissions)");
+        var rules = s.Rules;
+        if (rules.Count == 0) return null;
+        var count = rules.Count(r => r.ElementId == e.Id);
+        if (count == 0) return null;
+        if (Access.CanManage(e)) return ("managed", $"Protected: {count} permission rule{(count == 1 ? "" : "s")} (right-click ▸ Permissions…)");
+        return Access.CanEdit(e) ? null : ("read", "Read-only for you (package permissions)");
+    }
+
+    /// <summary>A model loaded from history (versions, baselines, reviews) as I may see it.</summary>
+    public ModelRepository RedactForMe(ModelRepository model) => PackagePermissions.Redact(model, Access);
 
     /// <summary>The lock covering an element (held by anyone, including me), if any.</summary>
     public ElementLock? LockOf(Element e)
@@ -496,6 +553,7 @@ public sealed class Workspace : IDisposable, ISessionClient
         LeaveSession();
         Model.Changed -= OnModelChanged;
         Model.History.Changed -= OnHistoryChanged;
+        Model.History.ActionCompleted -= FlushLocalOps;
         Model.OpEmitted -= OnLocalOp;
     }
 }

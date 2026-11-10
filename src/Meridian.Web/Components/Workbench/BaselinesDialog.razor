@@ -121,7 +121,7 @@
         if (key == Live) return Ws.Model;
         if (Ws.Session is null || _baselines.FirstOrDefault(b => Key(b) == key) is not { } b) return null;
         var json = await Db.LoadVersionAsync(Ws.Session.ProjectId, b.VersionId);
-        return json is null ? null : ProjectFile.Deserialize(json);
+        return json is null ? null : Ws.RedactForMe(ProjectFile.Deserialize(json));   // packages hidden from me left out
     }
 
     private async Task Compare()

@@ -224,7 +224,11 @@ public static class MeridianServer
             string? json;
             if (commitId is "head" or "HEAD") json = hub.Find(projectId)?.Snapshot() ?? (await db.LoadProjectAsync(projectId))?.ModelJson;
             else json = long.TryParse(commitId, out var vid) ? await db.LoadVersionAsync(projectId, vid) : null;
-            return json is null ? (null, Results.NotFound()) : (ProjectFile.Deserialize(json), null);
+            if (json is null) return (null, Results.NotFound());
+            var model = ProjectFile.Deserialize(json);
+            // Package permissions: packages hidden from the caller are left out of every API response (docs/PERMISSIONS.md).
+            Meridian.Core.Permissions.ModelRedactor.Redact(model, await PackagePermissions.ViewForAsync(db, projectId, user.Id));
+            return (model, null);
         }
 
         var api = app.MapGroup("/api");

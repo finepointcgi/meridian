@@ -39,12 +39,37 @@ public sealed class CommandStack
     /// <summary>When set (viewer role), every edit is refused.</summary>
     public bool ReadOnly { get; set; }
 
+    private int _running;
+
+    /// <summary>
+    /// True while a command, undo, redo or transaction is in progress. Collaboration sends the replication operations of one
+    /// user action together once it is over (<see cref="ActionCompleted"/>), so the server accepts or refuses them as a whole.
+    /// </summary>
+    public bool InAction => _running > 0 || _open.Count > 0;
+
+    /// <summary>Raised when the outermost command, undo, redo or transaction has finished (also when it threw).</summary>
+    public event Action? ActionCompleted;
+
+    private void Run(Action work)
+    {
+        _running++;
+        try { work(); }
+        finally
+        {
+            _running--;
+            if (!InAction) ActionCompleted?.Invoke();
+        }
+    }
+
     public void Execute(IModelCommand command)
     {
         if (ReadOnly) throw new InvalidOperationException("This project is view-only for you.");
-        command.Do();
-        if (_open.Count > 0) { _open.Peek().AddExecuted(command); return; }
-        Push(command);
+        Run(() =>
+        {
+            command.Do();
+            if (_open.Count > 0) { _open.Peek().AddExecuted(command); return; }
+            Push(command);
+        });
     }
 
     /// <summary>Groups every command executed until disposal into one undo step.</summary>
@@ -54,13 +79,13 @@ public sealed class CommandStack
         return new TransactionScope(this);
     }
 
-    private void Close()
+    private void Close() => Run(() =>
     {
         var c = _open.Pop();
         if (c.IsEmpty) return;
         if (_open.Count > 0) _open.Peek().AddExecuted(c);
         else Push(c);
-    }
+    });
 
     private void Push(IModelCommand command)
     {
@@ -81,7 +106,7 @@ public sealed class CommandStack
         if (!CanUndo) return;
         var c = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        c.Undo();
+        Run(c.Undo);
         _redo.Add(c);
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -91,7 +116,7 @@ public sealed class CommandStack
         if (!CanRedo) return;
         var c = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
-        c.Do();
+        Run(c.Do);
         _undo.Add(c);
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -107,7 +132,9 @@ public sealed class CommandStack
     {
         _undo.Clear();
         _redo.Clear();
+        var wasOpen = _open.Count > 0;
         _open.Clear();
+        if (wasOpen && _running == 0) ActionCompleted?.Invoke();
         _savePoint = null;
         _savePointValid = true;
         Changed?.Invoke(this, EventArgs.Empty);

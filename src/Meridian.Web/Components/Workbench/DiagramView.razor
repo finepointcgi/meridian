@@ -7,7 +7,7 @@
 @inject ImageCache Images
 @inject IDialogService Dialogs
 
-<div class="canvas @(C.Tool != null ? "tool-active" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !Ws.ReadOnly ? "shapes-open" : "")"
+<div class="canvas @(C.ProtectedByPermissions ? "perm-locked" : "") @(C.Tool != null ? "tool-active" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !C.ReadOnly ? "shapes-open" : "")"
      tabindex="0" @ref="_canvas"
      @onpointerdown="Down" @onpointermove="Move" @onpointerup="Up" @onpointerleave="Leave"
      @onwheel="Wheel" @onkeydown="Key" @onkeyup="KeyUp"
@@ -19,6 +19,16 @@
             @Adorners()
         </g>
     </svg>
+
+    @if (C.ProtectedByPermissions)
+    {
+        @* Package permissions: this diagram's package is read-only for me (the server refuses edits to it too). *@
+        var protector = Ws.Access.ProtectingPackage(C.Diagram);
+        <div class="perm-readonly" data-testid="diagram-read-only" @onpointerdown:stopPropagation="true">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:14px" />
+            Read-only@(protector != null ? $" — “{protector.DisplayName}” is protected" : "")
+        </div>
+    }
 
     @if (Ws.CodeChanges is { } chg)
     {
@@ -39,7 +49,7 @@
     }
 
     @* Shapes panel (draw.io style): search, sections, click to insert, drag to place. Collapses to an icon strip. *@
-    <div class="toolbox @(_shapesOpen ? "open" : "")" style="@(Ws.ReadOnly ? "display:none" : "")"
+    <div class="toolbox @(_shapesOpen ? "open" : "")" style="@(C.ReadOnly ? "display:none" : "")"
          @onpointerdown:stopPropagation="true" @onwheel:stopPropagation="true" @onkeydown:stopPropagation="true">
         @if (_shapesOpen)
         {
@@ -94,7 +104,7 @@
         }
     </div>
 
-    @if (!Ws.ReadOnly && C.Tool == null && C.Current == DiagramController.Gesture.None && C.SelectionCount > 0
+    @if (!C.ReadOnly && C.Tool == null && C.Current == DiagramController.Gesture.None && C.SelectionCount > 0
          && C.Editing == null && C.EditingEdge == null)
     {
         var nodes = C.SelectedNodes.Count > 0;
@@ -241,7 +251,7 @@
             <button class="chip on" title="Connector type chosen automatically — click to change" @onclick="() => _connMenu = !_connMenu">
                 @(current?.Label ?? Metamodel.DisplayName(auto.Relationship.Kind)) @(alts.Count > 1 ? "▾" : "")
             </button>
-            @if (_connMenu && !Ws.ReadOnly)
+            @if (_connMenu && !C.ReadOnly)
             {
                 <div class="conn-menu">
                     @foreach (var a in alts)
@@ -286,7 +296,7 @@
 
     @if (C.Diagram.Nodes.Count == 0)
     {
-        <div class="empty-hint @(_shapesOpen && !Ws.ReadOnly ? "beside-shapes" : "")">
+        <div class="empty-hint @(_shapesOpen && !C.ReadOnly ? "beside-shapes" : "")">
             <div class="empty-teach">
                 <MudIcon Icon="@UiKinds.DiagramIcon(C.Diagram.DiagramType)" Style="font-size:44px; opacity:.5" />
                 <h3>@Metamodel.DisplayName(C.Diagram.DiagramType) is empty</h3>
@@ -420,7 +430,7 @@
 
     private async Task PickImage(double? sx = null, double? sy = null)
     {
-        if (Ws.ReadOnly) return;
+        if (C.ReadOnly) return;
         _self ??= DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("meridian.pickImage", _self, sx, sy);
     }
@@ -564,7 +574,7 @@
         _origin = (r.Left, r.Top);
         C.ViewWidth = r.Width;
         // Room for the shapes panel on the left, except on a phone-sized canvas, where the panel is hidden.
-        C.LeftInset = r.Width < 600 ? 8 : _shapesOpen && !Ws.ReadOnly ? 236 : 64;
+        C.LeftInset = r.Width < 600 ? 8 : _shapesOpen && !C.ReadOnly ? 236 : 64;
         C.ViewHeight = r.Height;
         if (C.NeedsFit && r.Width > 50) { C.InitialZoom(); StateHasChanged(); }
     }
@@ -661,7 +671,7 @@
     private void ShowShapes(bool open)
     {
         _shapesOpen = open;
-        C.LeftInset = open && !Ws.ReadOnly ? 236 : 64;
+        C.LeftInset = open && !C.ReadOnly ? 236 : 64;
     }
 
     private void TileClick(PaletteItem item, MouseEventArgs e)
@@ -969,7 +979,7 @@
         {
             var b = C.BoundsOf(n);
             builder.AddMarkupContent(seq++, $"<rect x=\"{F(b.X - 4 * zi)}\" y=\"{F(b.Y - 4 * zi)}\" width=\"{F(b.Width + 8 * zi)}\" height=\"{F(b.Height + 8 * zi)}\" rx=\"{F(7 * zi)}\" fill=\"{sel}\" fill-opacity=\"0.06\" stroke=\"{sel}\" stroke-width=\"{sw}\"/>");
-            if (C.SelectedNodes.Count == 1 && !Ws.ReadOnly && !Notation.IsBorderShape(n.Element) && C.Current == DiagramController.Gesture.None)
+            if (C.SelectedNodes.Count == 1 && !C.ReadOnly && !Notation.IsBorderShape(n.Element) && C.Current == DiagramController.Gesture.None)
                 foreach (var (i, at) in C.Handles(n))
                     builder.AddMarkupContent(seq++, $"<rect x=\"{F(at.X - hs / 2)}\" y=\"{F(at.Y - hs / 2)}\" width=\"{F(hs)}\" height=\"{F(hs)}\" rx=\"{F(2 * zi)}\" fill=\"#fff\" stroke=\"{sel}\" stroke-width=\"{sw}\" style=\"cursor:{DiagramController.HandleCursor(i)}\"/>");
         }

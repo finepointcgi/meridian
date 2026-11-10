@@ -1,0 +1,194 @@
+@using Meridian.Core.Permissions
+@using Meridian.Data
+@inject IMeridianStore Db
+@inject Workspace Ws
+@inject CollaborationHub Hub
+@inject Meridian.Web.Admin.IAuditLog Audit
+
+@* Package permission rules (docs/PERMISSIONS.md): for one package (the "Permissions…" dialog), or for every package of the
+   project (Share ▸ Package permissions). Managers of a package — project owners, and users with "manage" on it — can grant. *@
+<div class="perm-editor" data-testid="perm-editor">
+    @if (Package is { } pkg)
+    {
+        <div class="perm-hint mb-2" data-testid="perm-mine">You: <b class="perm-level">@LevelName(Ws.Access.Level(pkg))</b>@(Ws.Role == ProjectRole.Owner ? " (project owner)" : "")</div>
+    }
+    @if (_manageable.Count > 0 && Ws.Session != null)
+    {
+        <div class="d-flex gap-2 align-center flex-wrap">
+            @if (Package is null)
+            {
+                <MudSelect T="string" @bind-Value="_packageId" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:180px" data-testid="perm-package">
+                    @foreach (var p in _manageable)
+                    {
+                        <MudSelectItem Value="@p.Id">@p.QualifiedName</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            <MudSelect T="string" @bind-Value="_principal" Label="User or team" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:180px" data-testid="perm-principal">
+                @foreach (var m in _members.Where(m => m.User.Id != Ws.User?.Id || Ws.Role != ProjectRole.Owner))
+                {
+                    <MudSelectItem Value="@Key(PrincipalKind.User, m.User.Id)">@m.User.DisplayName (@m.User.Username)@(m.Role == ProjectRole.Owner ? " — owner" : "")</MudSelectItem>
+                }
+                @foreach (var t in _teams)
+                {
+                    <MudSelectItem Value="@Key(PrincipalKind.Team, t.Id)">Team: @t.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="PackageAccess" @bind-Value="_level" Label="Access" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:150px" data-testid="perm-level">
+                <MudSelectItem Value="PackageAccess.None">None (hidden)</MudSelectItem>
+                <MudSelectItem Value="PackageAccess.Read">Read</MudSelectItem>
+                <MudSelectItem Value="PackageAccess.Edit">Edit</MudSelectItem>
+                <MudSelectItem Value="PackageAccess.Manage">Manage</MudSelectItem>
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_principal is null || TargetId is null || _busy)" OnClick="Grant" data-testid="perm-grant">Grant</MudButton>
+        </div>
+    }
+    @if (_error != null) { <MudText Typo="Typo.caption" Color="Color.Error" data-testid="perm-error">@_error</MudText> }
+
+    @if (Rows.Count == 0)
+    {
+        <div class="perm-hint mt-2">@(Package is null ? "No package permissions: members have their project role everywhere." : "No rules on this package.")</div>
+    }
+    else
+    {
+        <table class="perm-table mt-2" data-testid="perm-rules">
+            <thead><tr>@if (Package is null) { <th>Package</th> }<th>Who</th><th>Access</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var r in Rows)
+                {
+                    var rule = r;
+                    var element = Ws.Model.Find(rule.ElementId);
+                    var canManage = element != null && Ws.Access.CanManage(element);
+                    <tr data-testid="perm-rule">
+                        @if (Package is null) { <td>@(element?.QualifiedName ?? "(not visible to you)")</td> }
+                        <td>@(rule.PrincipalKind == PrincipalKind.Team ? "Team: " : "")@(rule.PrincipalName.Length > 0 ? rule.PrincipalName : "(deleted)")</td>
+                        <td>
+                            @if (canManage)
+                            {
+                                <MudSelect T="PackageAccess" Value="rule.Level" ValueChanged="l => Change(rule, l)" Dense="true" Variant="Variant.Text" Style="max-width:130px">
+                                    <MudSelectItem Value="PackageAccess.None">None (hidden)</MudSelectItem>
+                                    <MudSelectItem Value="PackageAccess.Read">Read</MudSelectItem>
+                                    <MudSelectItem Value="PackageAccess.Edit">Edit</MudSelectItem>
+                                    <MudSelectItem Value="PackageAccess.Manage">Manage</MudSelectItem>
+                                </MudSelect>
+                            }
+                            else { <span class="perm-level">@LevelName(rule.Level)</span> }
+                        </td>
+                        <td>@if (canManage) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove rule" OnClick="() => Remove(rule)" data-testid="perm-remove" /> }</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    @if (Package is { } p2 && Inherited(p2) is { } inherited)
+    {
+        <div class="perm-hint mt-2">Below this package, the nearest rule wins; above it: @inherited</div>
+    }
+    <div class="perm-hint mt-2">None hides the package's contents. Read shows them, unchangeable. Edit allows changes. Manage also allows changing these rules. Project owners always manage everything.</div>
+</div>
+
+@code {
+    /// <summary>The package whose rules are shown; null for every package of the project.</summary>
+    [Parameter] public Element? Package { get; set; }
+
+    private IReadOnlyList<PackagePermission> _rules = [];
+    private IReadOnlyList<ProjectMember> _members = [];
+    private IReadOnlyList<ProjectTeam> _teams = [];
+    private List<Element> _manageable = [];
+    private string? _principal, _packageId, _error;
+    private PackageAccess _level = PackageAccess.Read;
+    private bool _busy;
+
+    private string? TargetId => Package?.Id ?? _packageId;
+
+    /// <summary>The rules shown: this package's, or (all packages) those on packages I can see.</summary>
+    private IReadOnlyList<PackagePermission> Rows => Package is { } p
+        ? _rules.Where(r => r.ElementId == p.Id).ToList()
+        : _rules.Where(r => Ws.Role == ProjectRole.Owner || Ws.Model.Find(r.ElementId) != null).ToList();
+
+    protected override async Task OnParametersSetAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        if (Ws.Session is not { } s) return;
+        _rules = await Db.ListPackagePermissionsAsync(s.ProjectId);
+        _members = await Db.MembersAsync(s.ProjectId);
+        _teams = await Db.ProjectTeamsAsync(s.ProjectId);
+        _manageable = Package is { } p
+            ? (Ws.Access.CanManage(p) && !Ws.ReadOnly ? [p] : [])
+            : Ws.ReadOnly ? [] : Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Package or ElementKind.Model && Ws.Access.CanManage(e))
+                                                    .OrderBy(e => e.QualifiedName, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string Key(PrincipalKind k, Guid id) => $"{(k == PrincipalKind.Team ? "team" : "user")}:{id}";
+
+    public static string LevelName(PackageAccess a) => a switch
+    {
+        PackageAccess.None => "none (hidden)",
+        PackageAccess.Read => "read",
+        PackageAccess.Edit => "edit",
+        _ => "manage",
+    };
+
+    private string? Inherited(Element p)
+    {
+        var parts = new List<string>();
+        for (var a = p.Owner; a != null; a = a.Owner)
+            foreach (var r in _rules.Where(r => r.ElementId == a.Id))
+                parts.Add($"{a.DisplayName}: {r.PrincipalName} {LevelName(r.Level)}");
+        return parts.Count == 0 ? null : string.Join("; ", parts);
+    }
+
+    /// <summary>Authoritative check, at the time of the change, from the store (not only the UI's state).</summary>
+    private async Task<Element?> AuthorizeAsync(string elementId)
+    {
+        if (Ws.Session is not { } s || Ws.User is not { } me) return null;
+        var view = await PackagePermissions.ViewForAsync(Db, s.ProjectId, me.Id);
+        if (Ws.Model.Find(elementId) is not { } element || element.Kind is not (ElementKind.Package or ElementKind.Model) || !view.CanManage(element))
+        {
+            _error = "Only project owners and managers of this package can change its permissions.";
+            return null;
+        }
+        return element;
+    }
+
+    private async Task Grant()
+    {
+        _error = null;
+        if (TargetId is not { } id || _principal is not { } key || Ws.Session is not { } s) return;
+        var parts = key.Split(':');
+        var kind = parts[0] == "team" ? PrincipalKind.Team : PrincipalKind.User;
+        var principal = Guid.Parse(parts[1]);
+        await Save(id, kind, principal, _level, null);
+        _principal = null;
+    }
+
+    private Task Change(PackagePermission rule, PackageAccess level) => Save(rule.ElementId, rule.PrincipalKind, rule.PrincipalId, level, rule.Level);
+
+    private async Task Save(string elementId, PrincipalKind kind, Guid principal, PackageAccess level, PackageAccess? from)
+    {
+        _busy = true;
+        try
+        {
+            if (await AuthorizeAsync(elementId) is not { } element || Ws.Session is not { } s) return;
+            await Db.SetPackagePermissionAsync(s.ProjectId, elementId, kind, principal, level, Ws.User?.Id);
+            await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.PermissionSet, Ws.User, s.ProjectId, s.Name, target: element.QualifiedName,
+                details: new { principal = $"{kind.ToString().ToLowerInvariant()}:{principal}", level = PackagePermissionCodes.Level(level), from = from is { } f ? PackagePermissionCodes.Level(f) : null });
+            await Hub.ReloadPermissionsAsync(s.ProjectId);   // takes effect at once for everyone connected
+            Ws.SetStatus($"{element.DisplayName}: permission set to {LevelName(level)}");
+            await Reload();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Remove(PackagePermission rule)
+    {
+        _error = null;
+        if (await AuthorizeAsync(rule.ElementId) is not { } element || Ws.Session is not { } s) return;
+        await Db.RemovePackagePermissionAsync(s.ProjectId, rule.ElementId, rule.PrincipalKind, rule.PrincipalId);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.PermissionRemove, Ws.User, s.ProjectId, s.Name, target: element.QualifiedName,
+            details: new { principal = $"{rule.PrincipalKind.ToString().ToLowerInvariant()}:{rule.PrincipalId}" });
+        await Hub.ReloadPermissionsAsync(s.ProjectId);
+        await Reload();
+    }
+}

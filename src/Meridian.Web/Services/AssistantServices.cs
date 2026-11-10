@@ -418,7 +418,9 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
     public AssistantSettings Settings => settings;
     public event Action? Changed;
 
-    public string Key => $"{ws.User?.Id ?? Guid.Empty}:{ws.Session?.ProjectId.ToString() ?? "local"}:{ws.BranchId?.ToString() ?? "main"}";
+    /// <summary>Conversations are per user, project and branch — and start over when packages become hidden from the user, so an
+    /// earlier conversation (which saw the whole model) isn't continued with a filtered one.</summary>
+    public string Key => $"{ws.User?.Id ?? Guid.Empty}:{ws.Session?.ProjectId.ToString() ?? "local"}:{ws.BranchId?.ToString() ?? "main"}{(ws.HasHiddenPackages ? ":filtered" : "")}";
     public Conversation Conversation => conversations.Get(Key);
 
     public string? UnavailableReason => !ws.Preferences.AssistantEnabled ? "You turned the AI assistant off in Settings ▸ AI assistant." : settings.UnavailableReason;
@@ -530,6 +532,12 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
             .Select(ws.Model.Find).OfType<Element>().FirstOrDefault(ws.IsLockedForMe);
         if (locked != null)
             return new ApplyResult(false, $"'{locked.DisplayName}' is locked by {ws.LockOf(locked)?.User.DisplayName ?? "someone else"}; nothing was applied.", set.CreatedIds);
+        // Package permissions: the session refuses edits to read-only packages; say so before anything is applied.
+        var protectedElement = set.Items.Where(set.IsEffective)
+            .SelectMany(p => new[] { p.OwnerRef, p.SubjectRef, p.SourceRef, p.TargetRef })
+            .Select(ws.Model.Find).OfType<Element>().FirstOrDefault(e => !ws.CanEdit(e));
+        if (protectedElement != null)
+            return new ApplyResult(false, ws.Access.DeniedMessage(protectedElement).Replace("your change was", "nothing was"), set.CreatedIds);
         var result = set.Apply(ws.Model);
         Conversation.NoteOutcome(set);
         ws.Log($"Assistant: {set.Outcome}");

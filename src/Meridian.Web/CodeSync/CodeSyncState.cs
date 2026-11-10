@@ -65,7 +65,8 @@ public sealed class CodeSyncState : IDisposable
         _for = (_ws.Session?.ProjectId, _ws.BranchId);
         IReadOnlyList<CodeSyncReview> reviews = [];
         string? error = null;
-        if (_ws.Session is { } s)
+        // Code-change reviews show main's whole model (names, ghosts of removed shapes): not for users with hidden packages.
+        if (_ws.Session is { } s && !_ws.HasHiddenPackages)
         {
             try { reviews = await _review.LoadAsync(s.ProjectId); }
             catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException) { error = ex.Message; }

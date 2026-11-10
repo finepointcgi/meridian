@@ -392,6 +392,7 @@ public partial class Workbench
         m.Add(MenuEntry.Async("Rename…", () => Rename(e), "F2"));
         if (e.Owner != null) m.Add(MenuEntry.Async("Delete", () => Delete(e), "⌦"));
         m.AddRange(LockEntries(e));   // element locking (Workbench.VersionControl.cs)
+        m.AddRange(PermissionEntries(e));   // package permissions (Workbench.Permissions.cs)
         m.Add(MenuEntry.Sep());
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs

@@ -78,6 +78,9 @@ public sealed partial class ProjectSession
     {
         lock (_gate)
         {
+            // Shared texts are exported from the whole model: not for participants with hidden packages (their panel works on their own filtered copy).
+            if (!_access.TryGetValue(participantId, out var a) || a.View.HidesAnything)
+                throw new PermissionDeniedException("Shared SysML v2 text isn't available when some packages are hidden from you.");
             var key = TextKey(scopeId, ids);
             if (!_texts.TryGetValue(key, out var t))
                 _texts[key] = t = new SharedText(key, scopeId, ids, CanonicalText(scopeId, ids) ?? "");
@@ -115,7 +118,8 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>True when the participant may change shared texts (not a viewer). Called under the session lock.</summary>
-    private bool CanEditText(string participantId) => _participants.TryGetValue(participantId, out var p) && p.Presence.CanEdit;
+    private bool CanEditText(string participantId) => _participants.TryGetValue(participantId, out var p) && p.Presence.CanEdit
+        && _access.TryGetValue(participantId, out var a) && !a.View.HidesAnything;
 
     /// <summary>An editor's operation, made against <paramref name="revision"/>. Viewers' operations are refused here, not
     /// only by their panel.</summary>

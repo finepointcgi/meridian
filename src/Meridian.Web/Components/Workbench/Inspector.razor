@@ -33,6 +33,13 @@
                 <div class="sub">@UiKinds.KindName(e)@(e.Owner != null ? $" · in {e.Owner.DisplayName}" : "")</div>
             </div>
         </div>
+        @if (!Ws.ReadOnly && !Ws.CanEdit(e))
+        {
+            @* Package permissions: changes here are refused by the server; say so up front. *@
+            <div class="perm-hint" data-testid="inspector-read-only" style="color:var(--warn); margin:2px 0 6px">
+                <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:12px" /> Read-only for you@(Ws.Access.ProtectingPackage(e) is { } pp ? $" — “{pp.DisplayName}” is protected" : "")
+            </div>
+        }
 
         if (e is Relationship r)
         {

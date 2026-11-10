@@ -27,7 +27,14 @@ public static class MermaidImport
             ws.SetStatus("View-only: you can't import into this project");
             return null;
         }
-        var result = MermaidImporter.Import(ws.Model, target ?? TargetFor(ws), text, options);
+        target ??= TargetFor(ws);
+        if (!ws.CanEdit(target))
+        {
+            // Package permissions: the session would refuse every element; say why instead.
+            ws.SetStatus(ws.Access.ContentsDeniedMessage(target).Replace("your change was", "nothing was"));
+            return null;
+        }
+        var result = MermaidImporter.Import(ws.Model, target, text, options);
         Report(ws, result, source);
         if (result.Diagrams.Count > 0) ws.Open(result.Diagrams[0]);
         return result;

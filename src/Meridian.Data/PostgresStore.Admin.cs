@@ -274,7 +274,11 @@ public sealed partial class PostgresStore
         return id;
     }
 
-    public Task DeleteTeamAsync(Guid teamId) => ExecAsync("delete from teams where id = $1", teamId);
+    public async Task DeleteTeamAsync(Guid teamId)
+    {
+        await ExecAsync("delete from package_permissions where principal_kind = 'team' and principal_id = $1", teamId);
+        await ExecAsync("delete from teams where id = $1", teamId);
+    }
 
     public async Task<IReadOnlyList<TeamInfo>> ListTeamsAsync(Guid organizationId)
     {

@@ -469,6 +469,7 @@ public static partial class SvgRenderer
 
     private static void RenderNode(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
     {
+        if (Core.Permissions.ModelRedactor.IsPlaceholder(n.Element)) { RenderPlaceholder(sb, b, t); return; }
         var link = DiagramExtras.LinkOf(n);
         // Only the normalised http(s)/mailto form is written: the raw value could be any scheme (e.g. javascript:).
         var href = t.LinkAnchors && DiagramExtras.IsExternalLink(link) ? DiagramExtras.NormalizeLink(link) : null;
@@ -480,6 +481,26 @@ public static partial class SvgRenderer
         finally { _fontScale = scale; }
         if (link != null) LinkBadge(sb, b, link, t);
         if (anchor) sb.Append("</a>");
+    }
+
+    /// <summary>
+    /// A shape whose element the viewer may not see (package permissions): a hatched box with a lock and no name, kind or
+    /// style of the hidden element.
+    /// </summary>
+    private static void RenderPlaceholder(StringBuilder sb, Bounds b, SvgTheme t)
+    {
+        sb.Append($"<g class=\"redacted-shape\"><rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"4\" fill=\"{t.NodeFill}\" stroke=\"{t.Muted}\" stroke-dasharray=\"5,3\"/>");
+        for (var x = b.X - b.Height; x < b.Right; x += 12)
+        {
+            var x1 = Math.Max(x, b.X); var y1 = b.Bottom - (x1 - x);
+            var x2 = Math.Min(x + b.Height, b.Right); var y2 = b.Bottom - (x2 - x);
+            sb.Append($"<line x1=\"{F(x1)}\" y1=\"{F(y1)}\" x2=\"{F(x2)}\" y2=\"{F(y2)}\" stroke=\"{t.Muted}\" stroke-opacity=\"0.25\"/>");
+        }
+        var cx = b.Center.X; var cy = b.Center.Y;
+        if (b.Width >= 28 && b.Height >= 28)
+            sb.Append($"<path d=\"M{F(cx - 6)},{F(cy - 2)} h12 v10 h-12 Z M{F(cx - 4)},{F(cy - 2)} v-3 a4,4 0 0 1 8,0 v3\" fill=\"none\" stroke=\"{t.Muted}\" stroke-width=\"1.5\"/>");
+        if (b.Height >= 44 && b.Width >= 70) Text(sb, cx, cy + 22, "Restricted", false, "middle", italic: true, size: 11, color: t.Muted);
+        sb.Append("</g>");
     }
 
     /// <summary>The small chain-link icon in the bottom-right corner of a shape that has a hyperlink.</summary>

@@ -44,6 +44,12 @@ public sealed partial class DiagramController
 
     public ModelRepository Model => _ws.Model;
     public Diagram Diagram { get; }
+
+    /// <summary>The diagram can't be changed here: a view-only project, or a diagram in a package that is read-only for me (package permissions).</summary>
+    public bool ReadOnly => _ws.IsReadOnly(Diagram);
+
+    /// <summary>Read-only because of package permissions (the project itself is editable): the canvas says so.</summary>
+    public bool ProtectedByPermissions => !_ws.ReadOnly && ReadOnly;
     public double Zoom { get; private set; } = 1;
     public double PanX { get; private set; } = 30;
     public double PanY { get; private set; } = 40;
@@ -224,7 +230,7 @@ public sealed partial class DiagramController
     /// <summary>Puts the selected shapes and connector on a layer.</summary>
     public void MoveSelectionToLayer(string layerId)
     {
-        if (_ws.ReadOnly || SelectionCount == 0) return;
+        if (ReadOnly || SelectionCount == 0) return;
         try
         {
             Model.MoveToLayer(Diagram, _selNodes.ToList(), _selEdges.ToList(), layerId);
@@ -422,7 +428,7 @@ public sealed partial class DiagramController
 
     public int HitResizeHandle(Pt p)
     {
-        if (_selNodes.Count != 1 || _ws.ReadOnly) return -1;
+        if (_selNodes.Count != 1 || ReadOnly) return -1;
         var n = _selNodes.First();
         if (Notation.IsBorderShape(n.Element)) return -1;
         var hs = HandleSize / Zoom;
@@ -451,7 +457,7 @@ public sealed partial class DiagramController
     }
 
     public bool ShowsQuickArrows(DiagramNode n) =>
-        !_ws.ReadOnly && Tool == null && Current is Gesture.None
+        !ReadOnly && Tool == null && Current is Gesture.None
         && !Notation.IsBorderShape(n.Element) && n.Element.Kind != ElementKind.Comment
         && Notation.ShapeOf(n.Element) is not (NodeShape.Swimlane or NodeShape.Pool or NodeShape.Fragment)
         && Successor(n.Element) is { } s && DefaultLink(n.Element.Kind, s.Kind) != null;
@@ -535,7 +541,7 @@ public sealed partial class DiagramController
     /// <summary>Replaces the automatically chosen connector with another type, keeping its bends and label. One undo step.</summary>
     public void SwitchAutoConnector(ConnectorChoice choice)
     {
-        if (_ws.ReadOnly || AutoConnected is not { } old || _autoEnds is not var (f, t) || !Diagram.Edges.Contains(old)) return;
+        if (ReadOnly || AutoConnected is not { } old || _autoEnds is not var (f, t) || !Diagram.Edges.Contains(old)) return;
         try
         {
             DiagramEdge? edge;
@@ -683,7 +689,7 @@ public sealed partial class DiagramController
         }
         if (button != 0) return false;
 
-        if (_ws.ReadOnly) { Tool = null; }
+        if (ReadOnly) { Tool = null; }
         if (Tool is { } tool)
         {
             if (Metamodel.IsRelationship(tool))
@@ -733,10 +739,10 @@ public sealed partial class DiagramController
         {
             var dn = HitNode(_pressModel);
             if (dn != null && HasSubDiagram(dn.Element)) { DrillRequest = dn.Element; return false; }
-            if (dn != null && !_ws.ReadOnly) { _selNodes.Clear(); _selNodes.Add(dn); Editing = dn; Notify(); return false; }
+            if (dn != null && !ReadOnly) { _selNodes.Clear(); _selNodes.Add(dn); Editing = dn; Notify(); return false; }
             var de = dn == null ? HitEdge(_pressModel) : null;
-            if (de != null && !_ws.ReadOnly) { _selNodes.Clear(); SelectedEdge = de; EditingEdge = de; Notify(); return false; }
-            if (dn == null && de == null && !_ws.ReadOnly) { QuickAddRequest = new Pt(sx, sy); return false; }
+            if (de != null && !ReadOnly) { _selNodes.Clear(); SelectedEdge = de; EditingEdge = de; Notify(); return false; }
+            if (dn == null && de == null && !ReadOnly) { QuickAddRequest = new Pt(sx, sy); return false; }
         }
 
         var wp = HitWaypoint(_pressModel);
@@ -780,7 +786,7 @@ public sealed partial class DiagramController
             _selNodes.Clear();
             SelectedEdge = edge;
             // Dragging a connector bends it: a new waypoint is inserted where it was grabbed.
-            if (!_ws.ReadOnly) { Current = Gesture.EdgeDrag; _dragEdge = edge; }
+            if (!ReadOnly) { Current = Gesture.EdgeDrag; _dragEdge = edge; }
             Notify();
             return false;
         }
@@ -1074,20 +1080,20 @@ public sealed partial class DiagramController
             case "v" or "V" when cmd:
                 Paste();
                 return true;
-            case "F2" when _selNodes.Count == 1 && !_ws.ReadOnly:
+            case "F2" when _selNodes.Count == 1 && !ReadOnly:
                 Editing = _selNodes.First();
                 return true;
-            case "F2" when SelectedEdge != null && !_ws.ReadOnly:
+            case "F2" when SelectedEdge != null && !ReadOnly:
                 EditingEdge = SelectedEdge;
                 return true;
-            case "Enter" when _selNodes.Count == 1 && !_ws.ReadOnly:
+            case "Enter" when _selNodes.Count == 1 && !ReadOnly:
                 Editing = _selNodes.First();
                 return true;
             case { Length: 1 } when (Editing != null || EditingEdge != null) && EditSeed != null && !cmd:
                 EditSeed += key;
                 return true;
             // draw.io: start typing on a selected shape to replace its label.
-            case { Length: 1 } when !cmd && !mods.HasFlag(Mods.Alt) && key != " " && !_ws.ReadOnly && (_selNodes.Count == 1 || SelectedEdge != null && _selNodes.Count == 0):
+            case { Length: 1 } when !cmd && !mods.HasFlag(Mods.Alt) && key != " " && !ReadOnly && (_selNodes.Count == 1 || SelectedEdge != null && _selNodes.Count == 0):
                 if (_selNodes.Count == 1) Editing = _selNodes.First(); else EditingEdge = SelectedEdge;
                 EditSeed = key;
                 return true;
@@ -1233,7 +1239,7 @@ public sealed partial class DiagramController
     /// <summary>Sets a style key on every selected shape (fill / stroke / text) and connector (stroke / width).</summary>
     public void SetSelectionStyle(string key, string? value)
     {
-        if (_ws.ReadOnly) return;
+        if (ReadOnly) return;
         using (Model.History.Transaction("Format"))
         {
             if (NodeStyleKeys.Contains(key))
@@ -1266,7 +1272,7 @@ public sealed partial class DiagramController
     /// <summary>Changes the outline of selected free shapes, or the style of selected plain lines.</summary>
     public void SetSelectionSubtype(ElementKind kind, string subtype)
     {
-        if (_ws.ReadOnly) return;
+        if (ReadOnly) return;
         using (Model.History.Transaction("Change style"))
         {
             foreach (var e in SelectedElements.Where(e => e.Kind == kind))
@@ -1282,7 +1288,7 @@ public sealed partial class DiagramController
     /// <summary>Sets (or clears, with null/empty) the hyperlink of every selected shape.</summary>
     public void SetSelectionLink(string? link)
     {
-        if (_ws.ReadOnly || _selNodes.Count == 0) return;
+        if (ReadOnly || _selNodes.Count == 0) return;
         try
         {
             Model.SetLink(Diagram, _selNodes.ToList(), link);
@@ -1297,7 +1303,7 @@ public sealed partial class DiagramController
     /// </summary>
     public DiagramNode? InsertImage(string dataUri, double naturalW, double naturalH, double? sx = null, double? sy = null, string? name = null)
     {
-        if (_ws.ReadOnly) return null;
+        if (ReadOnly) return null;
         try
         {
             var (w, h) = DiagramExtras.FitImageSize(naturalW, naturalH);
@@ -1354,7 +1360,7 @@ public sealed partial class DiagramController
 
     public void PasteFormat()
     {
-        if (_formatClipboard is not { } f || _ws.ReadOnly) return;
+        if (_formatClipboard is not { } f || ReadOnly) return;
         using (Model.History.Transaction("Paste format"))
         {
             foreach (var key in NodeStyleKeys.Append("textAuto"))
@@ -1468,7 +1474,7 @@ public sealed partial class DiagramController
     /// <summary>Sets the routing style of the selected connector; its manual bends are removed. One undo step.</summary>
     public void SetSelectedRouting(EdgeRouting style)
     {
-        if (SelectedEdge is not { } e || _ws.ReadOnly) return;
+        if (SelectedEdge is not { } e || ReadOnly) return;
         using (Model.History.Transaction($"Connector style: {EdgeRouter.Display(style)}"))
         {
             if (e.Waypoints.Count > 0) Model.SetWaypoints(Diagram, e, []);
@@ -1547,7 +1553,7 @@ public sealed partial class DiagramController
     /// <summary>Creates an element from a palette entry dropped or picked at a screen point.</summary>
     public void CreateAtScreen(PaletteItem item, double sx, double sy)
     {
-        if (_ws.ReadOnly) return;
+        if (ReadOnly) return;
         if (Metamodel.IsRelationship(item.Kind)) { SetTool(item); return; }
         CreateNode(item.Kind, item.Subtype, ToModel(sx, sy), stereotype: item.Stereotype);
     }
@@ -1555,7 +1561,7 @@ public sealed partial class DiagramController
     /// <summary>Click on a palette tile: insert the shape in a free spot near the middle of the view and start naming it.</summary>
     public void InsertItem(PaletteItem item)
     {
-        if (_ws.ReadOnly) return;
+        if (ReadOnly) return;
         if (Metamodel.IsRelationship(item.Kind)) { SetTool(item); return; }
         var (w, h) = Notation.DefaultSizeOf(item.Kind, item.Subtype);
         var vp = Viewport;

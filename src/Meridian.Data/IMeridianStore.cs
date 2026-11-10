@@ -175,6 +175,20 @@ public interface IMeridianStore
     Task<IReadOnlyList<CodeSyncRunRecord>> ListCodeSyncRunsAsync(Guid projectId, int limit = 50);
     /// <summary>Records a review decision: the run's status, summary and its change list (a JSON array).</summary>
     Task UpdateCodeSyncRunAsync(Guid runId, CodeSyncRunStatus status, string summary, string changesJson);
+
+    // ---------------------------------------------------------------- per-package permissions (see PackagePermissions.cs)
+    // Explicit rules (none / read / edit / manage) for a user or a team on a package and everything below it; see docs/PERMISSIONS.md.
+
+    /// <summary>Every rule of a project, with the user's display name or the team's name.</summary>
+    Task<IReadOnlyList<PackagePermission>> ListPackagePermissionsAsync(Guid projectId);
+    /// <summary>Creates or replaces the rule for one principal on one package.</summary>
+    Task SetPackagePermissionAsync(Guid projectId, string elementId, Core.Permissions.PrincipalKind kind, Guid principalId,
+                                   Core.Permissions.PackageAccess level, Guid? updatedBy);
+    Task RemovePackagePermissionAsync(Guid projectId, string elementId, Core.Permissions.PrincipalKind kind, Guid principalId);
+    /// <summary>The teams a user belongs to (team rules apply to their members).</summary>
+    Task<IReadOnlyList<Guid>> UserTeamIdsAsync(Guid userId);
+    /// <summary>Teams with a role on a project.</summary>
+    Task<IReadOnlyList<ProjectTeam>> ProjectTeamsAsync(Guid projectId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

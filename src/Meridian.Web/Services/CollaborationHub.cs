@@ -43,12 +43,30 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
                     BranchName = branchName ?? Branching.MainBranch,
                     Events = events,
                 };
+                session.InitRules(await LoadRulesAsync(projectId));
                 _sessions[key] = session;
             }
-            session.Join(me, client);
+            // Package permissions come from the store, not from the tab: the project role (a view-only tab stays view-only) and teams.
+            var role = await db.RoleOfAsync(projectId, me.User.Id) ?? (me.CanEdit ? ProjectRole.Editor : ProjectRole.Viewer);
+            if (!me.CanEdit) role = ProjectRole.Viewer;
+            var teams = session.Rules.Any(r => r.PrincipalKind == Core.Permissions.PrincipalKind.Team) ? await db.UserTeamIdsAsync(me.User.Id) : [];
+            session.Join(me, client, role, teams);
             return session;
         }
         finally { _openGate.Release(); }
+    }
+
+    private async Task<IReadOnlyList<Core.Permissions.PermissionRule>> LoadRulesAsync(Guid projectId) =>
+        (await db.ListPackagePermissionsAsync(projectId)).Select(r => r.Rule).ToList();
+
+    /// <summary>
+    /// Re-reads a project's package permissions and applies them to every live session of it (main and branches), so they take
+    /// effect at once for everyone connected.
+    /// </summary>
+    public async Task ReloadPermissionsAsync(Guid projectId)
+    {
+        var rules = await LoadRulesAsync(projectId);
+        foreach (var s in SessionsOf(projectId).ToList()) s.UpdateRules(rules);
     }
 
     /// <summary>Flushes every session (used at shutdown).</summary>
@@ -125,11 +143,12 @@ public sealed partial class ProjectSession : IDisposable
         lock (_gate) return ProjectFile.Serialize(_master);
     }
 
-    internal void Join(Presence me, ISessionClient client)
+    internal void Join(Presence me, ISessionClient client, ProjectRole role = ProjectRole.Editor, IReadOnlyList<Guid>? teams = null)
     {
         lock (_gate)
         {
             _participants[me.ParticipantId] = (me, client);
+            RegisterAccess(me.ParticipantId, me.User.Id, me.CanEdit ? role : ProjectRole.Viewer, teams ?? []);   // ProjectSession.Permissions.cs
             BroadcastPresence();
         }
     }
@@ -140,6 +159,7 @@ public sealed partial class ProjectSession : IDisposable
         lock (_gate)
         {
             _participants.Remove(participantId);
+            ForgetAccess(participantId);     // package permissions (ProjectSession.Permissions.cs)
             ReleaseLocksOf(participantId);   // element locks end when their holder leaves
             LeaveTexts(participantId);       // and so does their place in shared SysML v2 texts
             BroadcastPresence();
@@ -161,16 +181,37 @@ public sealed partial class ProjectSession : IDisposable
     {
         lock (_gate)
         {
-            if (!AllowEdit(participantId, userId, op)) return;   // element locks (ProjectSession.Locks.cs)
-            _master.ApplyRemote(op);
-            ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
-            Events?.OperationApplied(ProjectId, Name, userId, op, _master);
-            Sequence++;
-            MarkDirty();
-            _lastEditor = userId;
-            foreach (var (id, p) in _participants)
-                if (id != participantId) p.Client.RemoteOp(op);
+            if (!AllowEdit(participantId, userId, op)) return;   // role, package permissions and element locks (ProjectSession.Locks.cs)
+            ApplyLocked(participantId, userId, op);
         }
+    }
+
+    /// <summary>
+    /// Applies the operations of one user action (e.g. a delete with its cascade) all or nothing: each is checked first, and if
+    /// any is refused none is applied and the sender is resynchronised (with the reason).
+    /// </summary>
+    public void SubmitAll(string participantId, Guid userId, IReadOnlyList<ModelOp> ops)
+    {
+        lock (_gate)
+        {
+            foreach (var op in ops)
+                if (!AllowEdit(participantId, userId, op)) return;
+            foreach (var op in ops) ApplyLocked(participantId, userId, op);
+        }
+    }
+
+    /// <summary>Applies an allowed operation and relays it (under the session lock).</summary>
+    private void ApplyLocked(string participantId, Guid userId, ModelOp op)
+    {
+        var probes = ProbeFiltered(participantId, op);       // what participants with hidden packages may receive (ProjectSession.Permissions.cs)
+        _master.ApplyRemote(op);
+        ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
+        Events?.OperationApplied(ProjectId, Name, userId, op, _master);
+        Sequence++;
+        MarkDirty();
+        _lastEditor = userId;
+        foreach (var (id, p) in _participants)
+            if (id != participantId) Relay(id, p.Client, op, probes);
     }
 
     public void UpdatePresence(string participantId, string? selectedId, string? diagramId)
@@ -184,17 +225,27 @@ public sealed partial class ProjectSession : IDisposable
         }
     }
 
-    /// <summary>Replaces the whole model (version restore) for everyone.</summary>
+    /// <summary>
+    /// Replaces the whole model (version restore) for everyone. The user must be connected to this session and may only restore
+    /// changes to packages they can edit (<see cref="PermissionDeniedException"/> otherwise).
+    /// </summary>
     public void Reset(string modelJson, Guid userId)
     {
+        var restored = ProjectFile.Deserialize(modelJson);
         lock (_gate)
         {
-            _master = ProjectFile.Deserialize(modelJson);
+            if (_rules.Count > 0)
+            {
+                var view = ViewOfUser(userId) ?? throw new PermissionDeniedException("Open the project before restoring a version.");
+                if (Core.Permissions.PermissionCheck.CheckReplace(_master, restored, view) is { } why) throw new PermissionDeniedException(why);
+            }
+            _master = restored;
             ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
-            foreach (var p in _participants.Values) p.Client.Reset(modelJson);
+            _stale.Clear();
+            foreach (var (id, p) in _participants) p.Client.Reset(SnapshotLocked(id, modelJson));   // filtered per participant
         }
     }
 
@@ -290,6 +341,7 @@ public sealed partial class ProjectSession : IDisposable
     public void Dispose()
     {
         _persistTimer.Dispose();
+        _staleTimer?.Dispose();
         _textRefresh?.Dispose();
     }
 }

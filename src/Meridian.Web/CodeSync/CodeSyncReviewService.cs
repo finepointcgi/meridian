@@ -120,6 +120,8 @@ public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hu
     {
         if (await db.RoleOfAsync(projectId, user.Id) is not (ProjectRole.Editor or ProjectRole.Owner))
             throw new InvalidOperationException("Only editors and owners can accept or reject code changes.");
+        // Package permissions: the review shows (and a decision rewrites) whole models; each write is also checked element by element.
+        await PackagePermissions.EnsureSeesEverythingAsync(db, projectId, user.Id, "Reviewing code changes");
     }
 
     /// <summary>
@@ -189,8 +191,10 @@ public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hu
                 if (scope.Count == 0) { await MarkAsync(review.Runs, Stale(review, runIds, elementIds), CodeSyncChangeState.Rejected); continue; }
                 var branchId = review.Branch.BranchId!.Value;
                 if (hub.Find(projectId, branchId) is { } open) await open.PersistAsync();
-                var head = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(db, hub, projectId, branchId));
+                var headJson = await VersionControl.HeadJsonAsync(db, hub, projectId, branchId);
+                var head = ProjectFile.Deserialize(headJson);
                 CodeSyncRevert.Revert(head, review.Main, scope);
+                await PackagePermissions.EnsureCanReplaceAsync(db, projectId, user.Id, ProjectFile.Deserialize(headJson), head);
                 var json = ProjectFile.Serialize(head);
                 var message = $"Code sync: rejected {scope.Count} change{(scope.Count == 1 ? "" : "s")}";
                 if (hub.Find(projectId, branchId) is { } live)

@@ -48,6 +48,9 @@
             }
         </MudList>
         <MudText Typo="Typo.caption" Style="opacity:.65">Viewers can browse, comment and export. Editors can change the model. Owners can also manage members and delete the project.</MudText>
+        <MudDivider Class="my-3" />
+        <div class="d-flex align-center gap-2 mb-1"><MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" /><MudText Typo="Typo.subtitle2">Package permissions</MudText></div>
+        <PackagePermissionsEditor />
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
 </MudDialog>

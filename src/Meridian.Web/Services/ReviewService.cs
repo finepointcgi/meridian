@@ -41,8 +41,18 @@ public sealed class ReviewService(IMeridianStore db, CollaborationHub hub, Works
     private async Task NotifyAsync(NotificationDraft n)
     {
         if (n.UserId == Guid.Empty || n.UserId == n.ActorId) return;
+        if (!await MaySeeAsync(n.UserId, n.ProjectId, n.ElementId)) return;   // its text names the element and quotes the comment
         await db.AddNotificationAsync(n);
         hub.NotifyUser(n.UserId);
+    }
+
+    /// <summary>Package permissions: false when the element is hidden from the user (they aren't told about comments on it).</summary>
+    private async Task<bool> MaySeeAsync(Guid userId, Guid? projectId, string? elementId)
+    {
+        if (elementId is null || projectId is not { } pid) return true;
+        var view = await PackagePermissions.ViewForAsync(db, pid, userId);
+        if (!view.HidesAnything) return true;
+        return hub.Find(pid, ws.Session?.ProjectId == pid ? ws.BranchId : null) is { } s ? !s.IsHiddenFrom(view, elementId) : false;
     }
 
     private string Me => ws.User?.DisplayName ?? "Someone";
@@ -111,8 +121,9 @@ public sealed class ReviewService(IMeridianStore db, CollaborationHub hub, Works
     public async Task<(ModelRepository? Before, ModelRepository After)> ModelsAsync(ReviewInfo review)
     {
         ModelRepository? before = null, after = ws.Model;
-        if (review.BaseVersionId is { } b && await db.LoadVersionAsync(review.ProjectId, b) is { } bj) before = ProjectFile.Deserialize(bj);
-        if (review.HeadVersionId is { } h && await db.LoadVersionAsync(review.ProjectId, h) is { } hj) after = ProjectFile.Deserialize(hj);
+        // Stored versions are whole models: packages hidden from me are left out (package permissions).
+        if (review.BaseVersionId is { } b && await db.LoadVersionAsync(review.ProjectId, b) is { } bj) before = ws.RedactForMe(ProjectFile.Deserialize(bj));
+        if (review.HeadVersionId is { } h && await db.LoadVersionAsync(review.ProjectId, h) is { } hj) after = ws.RedactForMe(ProjectFile.Deserialize(hj));
         return (before, after);
     }
 

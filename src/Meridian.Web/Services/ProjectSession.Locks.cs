@@ -109,14 +109,21 @@ public sealed partial class ProjectSession
         // Only known participants with an editing role may change the model (viewers are read-only server-side too).
         if (!_participants.TryGetValue(participantId, out var me) || !me.Presence.CanEdit)
         {
-            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(ProjectFile.Serialize(_master), "This project is view-only for you — your change was not applied."); }
+            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(SnapshotLocked(participantId), "This project is view-only for you — your change was not applied."); }
+            return false;
+        }
+        // Package permissions (ProjectSession.Permissions.cs): the one server-side check every model edit passes.
+        if (PermissionProblem(participantId, op) is { } denied)
+        {
+            _rejecting.Add(participantId);
+            me.Client.Replaced(SnapshotLocked(participantId), denied);
             return false;
         }
         if (_locks.Count == 0 || Blocks(userId, op) is not { } l) return true;
         _rejecting.Add(participantId);
         var what = _master.Find(l.ElementId)?.DisplayName ?? "That element";
         if (_participants.TryGetValue(participantId, out var p))
-            p.Client.Replaced(ProjectFile.Serialize(_master), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
+            p.Client.Replaced(SnapshotLocked(participantId), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
         return false;
     }
 
@@ -132,7 +139,11 @@ public sealed partial class ProjectSession
         _rejecting.Remove(participantId);
     }
 
-    /// <summary>Replaces the whole model for everyone (a merge result), telling them why. A null user is the system (code sync).</summary>
+    /// <summary>
+    /// Replaces the whole model for everyone (a merge result), telling them why. A null user is the system (code sync). Callers
+    /// check package permissions first (<see cref="PackagePermissions.EnsureCanReplaceAsync"/>: merges, code-sync decisions);
+    /// each participant receives the model filtered for them.
+    /// </summary>
     public void Replace(string modelJson, Guid? userId, string message)
     {
         lock (_gate)
@@ -141,10 +152,11 @@ public sealed partial class ProjectSession
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
+            _stale.Clear();
             foreach (var (id, p) in _participants)
             {
                 _rejecting.Remove(id);
-                p.Client.Replaced(modelJson, message);
+                p.Client.Replaced(SnapshotLocked(id, modelJson), message);
             }
         }
     }

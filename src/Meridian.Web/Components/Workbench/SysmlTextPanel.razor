@@ -158,7 +158,7 @@
         }
         State.Handled = State.Request;
         if (State.ScopeId != null && Ws.Model.Find(State.ScopeId) == null) State.ScopeId = null;
-        if (Ws.Session != null)
+        if (Ws.Session != null && !Ws.HasHiddenPackages)   // with hidden packages the text is my own, from my filtered model
         {
             OpenShared();
             Reparse();
@@ -260,7 +260,7 @@
             {   // another project (or branch) was opened
                 CloseShared();
                 State.ScopeId = null;
-                if (Ws.Session != null)
+                if (Ws.Session != null && !Ws.HasHiddenPackages)
                 {
                     OpenShared();
                     Reparse();

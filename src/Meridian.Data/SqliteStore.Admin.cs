@@ -279,7 +279,10 @@ public sealed partial class SqliteStore
         return id;
     }
 
-    public Task DeleteTeamAsync(Guid teamId) => ExecAsync("delete from teams where id = $1", S(teamId));
+    public Task DeleteTeamAsync(Guid teamId) => ExecAsync("""
+        delete from package_permissions where principal_kind = 'team' and principal_id = $1;
+        delete from teams where id = $1;
+        """, S(teamId));
 
     public async Task<IReadOnlyList<TeamInfo>> ListTeamsAsync(Guid organizationId)
     {

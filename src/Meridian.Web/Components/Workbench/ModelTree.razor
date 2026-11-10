@@ -200,6 +200,10 @@
                         <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:11px" />@(mine ? "" : MembersDialog.Initials(lk.User))
                     </span>
                 }
+                @if (Ws.PermissionBadge(el) is { } badge)
+                {
+                    <span class="perm-badge @badge.Css" title="@badge.Tip" data-testid="perm-badge"><MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:11px" /></span>
+                }
                 @if (el.Kind != ElementKind.Model)
                 {
                     <span class="star @(Ws.Favorites.Contains(el.Id) ? "on" : "")" title="Favorite" @onclick="() => Ws.ToggleFavorite(el)" @onclick:stopPropagation="true">

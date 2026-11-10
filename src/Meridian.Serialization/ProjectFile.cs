@@ -220,7 +220,13 @@ public static class ProjectFile
                 foreach (var n in nodeArray.EnumerateArray())
                 {
                     if (n.ValueKind != JsonValueKind.Object) continue;
-                    if (!byId.TryGetValue(Str(n, "element"), out var el)) continue;
+                    var elementId = Str(n, "element");
+                    // A redacted view (package permissions) keeps hidden elements' shapes as nameless placeholders.
+                    if (!byId.TryGetValue(elementId, out var el))
+                    {
+                        if (!elementId.StartsWith(Core.Permissions.ModelRedactor.PlaceholderPrefix, StringComparison.Ordinal)) continue;
+                        el = Core.Permissions.ModelRedactor.Placeholder(elementId);
+                    }
                     var node = new DiagramNode(el, new Bounds(Num(n, "x"), Num(n, "y"), Num(n, "w"), Num(n, "h")), OptStr(n, "id"));
                     ModelRepository.SetNodeParentForLoad(node, OptStr(n, "parent"));
                     if (Prop(n, "style") is { ValueKind: JsonValueKind.Object } st)
