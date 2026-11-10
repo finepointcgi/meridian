@@ -45,7 +45,8 @@ public static class ApiAuth
             return new UserAccount(id, http.User.Identity.Name ?? "", http.User.FindFirstValue("display_name") ?? "", http.User.FindFirstValue("color") ?? "");
         if (await TokenUserAsync(http, db) is { } t) return t;
         var header = http.Request.Headers.Authorization.ToString();
-        if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) return null;
+        // Same rule as /api: "single sign-on only" also turns off username/password Basic auth.
+        if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) || Admin.AdminHosting.LocalPasswordsDisabled(http)) return null;
         try
         {
             var raw = Encoding.UTF8.GetString(Convert.FromBase64String(header[6..].Trim()));

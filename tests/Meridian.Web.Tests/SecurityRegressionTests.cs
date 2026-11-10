@@ -138,6 +138,25 @@ public sealed class SecurityRegressionTests : IAsyncLifetime
         await Assert.ThrowsAsync<HttpRequestException>(() => http.GetAsync("http://localhost:9/"));
     }
 
+    // ------------------------------------------------------------------ SR-24: "SSO only" also applies to OSLC Basic auth
+
+    private HttpContext BasicRequest(bool disableLocalPasswords)
+    {
+        var settings = new AdminSettings(new SsoOptions { DisableLocalPasswords = disableLocalPasswords }, new SecurityOptions(), new BackupOptions());
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, settings);
+        var http = new DefaultHttpContext { RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services) };
+        http.Request.Headers.Authorization = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("olga:correct horse"));
+        return http;
+    }
+
+    [Fact]
+    public async Task SR24_Oslc_Basic_Password_Auth_Respects_Disable_Local_Passwords()
+    {
+        Assert.NotNull(await ApiAuth.UserAsync(BasicRequest(disableLocalPasswords: false), _db));
+        Assert.Null(await ApiAuth.UserAsync(BasicRequest(disableLocalPasswords: true), _db));
+    }
+
     // ------------------------------------------------------------------ SR-08 / SR-10: headers and the launch redirect
 
     [Fact]

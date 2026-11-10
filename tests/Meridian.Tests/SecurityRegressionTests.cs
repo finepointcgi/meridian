@@ -153,6 +153,28 @@ public class SecurityRegressionTests
         Assert.Throws<FormatException>(() => XmiExchange.Import(doc));
     }
 
+    // ------------------------------------------------------------------ SR-14: XML parsing defaults the importers rely on
+
+    [Fact]
+    public void SR14_Xml_Imports_Do_Not_Resolve_External_Entities_And_Cap_Expansion()
+    {
+        var secret = Path.GetTempFileName();
+        File.WriteAllText(secret, "TOP-SECRET");
+        try
+        {
+            var xxe = $"<!DOCTYPE x [<!ENTITY e SYSTEM \"{new Uri(secret).AbsoluteUri}\">]><x>&e;</x>";
+            string? text = null;
+            try { text = XDocument.Parse(xxe).Root!.Value; } catch (System.Xml.XmlException) { }
+            Assert.DoesNotContain("TOP-SECRET", text ?? "");
+        }
+        finally { File.Delete(secret); }
+
+        var lol = new StringBuilder("<!DOCTYPE l [<!ENTITY l0 \"lollollollollollollollollollol\">");
+        for (var i = 1; i < 10; i++) lol.Append($"<!ENTITY l{i} \"{string.Concat(Enumerable.Repeat($"&l{i - 1};", 10))}\">");
+        lol.Append("]><l>&l9;</l>");
+        Assert.Throws<System.Xml.XmlException>(() => XDocument.Parse(lol.ToString()));
+    }
+
     // ------------------------------------------------------------------ SR-07: zip bombs in imports
 
     private static MemoryStream Zip(string entryName, long bytes)
