@@ -1,0 +1,313 @@
+@using Meridian.Data
+@using Meridian.Web.CodeSync.Hosts
+@implements IDisposable
+@inject CodeSyncHostService CodeSync
+@inject Workspace Ws
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject MeridianHostInfo HostInfo
+@inject IJSRuntime JS
+
+@if (_form is null)
+{
+    @foreach (var r in _repos)
+    {
+        var conn = r;
+        var cfg = CodeRepoConfig.Parse(conn.ConfigJson);
+        var last = cfg.LastSync;
+        <div class="integration-row" style="align-items:flex-start">
+            <MudIcon Icon="@Icons.Material.Outlined.Code" Style="font-size:18px; color:var(--accent-2); margin-top:2px" />
+            <div style="flex:1; min-width:0">
+                <div style="font-weight:600">@conn.Name <span class="integration-type">@(cfg.Host == GitHostKind.GitHub ? "GitHub" : "GitLab")</span></div>
+                <div class="integration-sub">@cfg.Display · @cfg.Branch · @(cfg.Paths.Count == 0 ? "all folders" : string.Join(", ", cfg.Paths)) · @(cfg.AutoSync ? "syncs on push" : "manual sync")</div>
+                <div class="integration-sub">
+                    @if (last is null)
+                    {
+                        <span>Not synced yet.</span>
+                    }
+                    else
+                    {
+                        <span style="@($"color:{StatusColor(last.Status)}")">@StatusLabel(last.Status)</span>
+                        <span> · @Short(last.Commit) · @last.At.ToLocalTime().ToString("MMM d HH:mm")</span>
+                        @if (last.Summary is { Length: > 0 } && last.Status is not ("queued" or "running"))
+                        {
+                            <span> · @last.Summary</span>
+                        }
+                        @if (last.ReviewUrl is { Length: > 0 } url)
+                        {
+                            <span> · <a href="@url">Review</a></span>
+                        }
+                    }
+                </div>
+            </div>
+            @if (CanManage)
+            {
+                <MudTooltip Text="Fetch the branch head and sync it now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => SyncNow(conn)" /></MudTooltip>
+                @if (!HostInfo.LocalMode)
+                {
+                    <MudTooltip Text="Webhook setup"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Webhook" OnClick="() => ShowSetup(conn, null)" /></MudTooltip>
+                }
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+            }
+        </div>
+        @if (_setup?.Id == conn.Id)
+        {
+            <div class="code-repo-setup" style="padding:8px 4px 12px 32px; font-size:12.5px">
+                @if (HostInfo.LocalMode)
+                {
+                    <div>The desktop app cannot receive webhooks. Use the sync button instead.</div>
+                }
+                else
+                {
+                    var url = CodeSyncHostService.WebhookUrl(BaseUrl, conn.Id);
+                    <div class="d-flex align-center gap-1"><b>Payload URL</b>&nbsp;<code style="overflow-wrap:anywhere">@url</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(url)" /></div>
+                    @if (_setup.Secret is { } secret)
+                    {
+                        <div class="d-flex align-center gap-1"><b>Secret</b>&nbsp;<code style="overflow-wrap:anywhere">@secret</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(secret)" /></div>
+                        <div style="opacity:.75">Copy the secret now. It is stored encrypted and not shown again.</div>
+                    }
+                    else
+                    {
+                        <div class="d-flex align-center gap-2"><b>Secret</b> <span style="opacity:.75">set (hidden)</span>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy" OnClick="() => NewSecret(conn)">New secret</MudButton></div>
+                    }
+                    @if (cfg.Host == GitHostKind.GitHub)
+                    {
+                        <div class="mt-1">In GitHub: <i>Settings → Webhooks → Add webhook</i>. Paste the URL, set content type to <code>application/json</code>, paste the secret, and choose “Just the push event”.</div>
+                    }
+                    else
+                    {
+                        <div class="mt-1">In GitLab: <i>Settings → Webhooks → Add new webhook</i>. Paste the URL, paste the secret as the secret token, and tick “Push events” for <code>@cfg.Branch</code>.</div>
+                    }
+                }
+                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => _setup = null">Close</MudButton>
+            </div>
+        }
+    }
+    @if (_repos.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Style="opacity:.7">No code repository connected. Connect GitHub or GitLab to keep a model package in step with your C# code.</MudText>
+    }
+    <div class="d-flex gap-2 mt-3 align-center">
+        @if (CanManage)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="New">Add repository</MudButton>
+        }
+        <span style="flex:1"></span>
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+    </div>
+}
+else
+{
+    var f = _form;
+    <div class="d-flex flex-column gap-2">
+        <MudSelect T="GitHostKind" Label="Host" Value="f.Host" ValueChanged="SetHost" Variant="Variant.Outlined" Margin="Margin.Dense">
+            <MudSelectItem Value="GitHostKind.GitHub">GitHub</MudSelectItem>
+            <MudSelectItem Value="GitHostKind.GitLab">GitLab</MudSelectItem>
+        </MudSelect>
+        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@f.Display" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Server URL" @bind-Value="f.BaseUrl" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      HelperText="@(f.Host == GitHostKind.GitHub ? "https://api.github.com, or https://your-server/api/v3 for GitHub Enterprise" : "https://gitlab.com, or your GitLab server")" />
+        @if (f.Host == GitHostKind.GitHub)
+        {
+            <div class="d-flex gap-2">
+                <MudTextField T="string" Label="Owner" @bind-Value="f.Owner" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField T="string" Label="Repository" @bind-Value="f.Repo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </div>
+        }
+        else
+        {
+            <MudTextField T="string" Label="Project path or id" @bind-Value="f.Project" Placeholder="group/project" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        }
+        <MudTextField T="string" Label="Branch" @bind-Value="f.Branch" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Folders to include" @bind-Value="_paths" Placeholder="src/Domain, src/Shared" HelperText="Comma separated. Empty includes the whole repository." Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Model package" @bind-Value="f.RootPackage" Placeholder="@(f.RepoName is { Length: > 0 } n ? n : "Repository name")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudSwitch T="bool" @bind-Value="f.AutoSync" Label="Sync on every push to the branch" Color="Color.Primary" />
+        <MudSwitch T="bool" @bind-Value="f.PostStatus" Label="Post a commit status (meridian/model)" Color="Color.Primary" />
+        <MudTextField T="string" Label="@(f.Host == GitHostKind.GitHub ? "Access token (Contents: read, Commit statuses: write)" : "Access token (read_repository, api for statuses)")"
+                      @bind-Value="_token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Placeholder="@(_tokenSet ? "••• set (leave empty to keep)" : "")" HelperText="Stored encrypted; never shown again after saving." autocomplete="new-password" />
+        @if (_message != null)
+        {
+            <MudAlert Severity="@(_messageOk ? Severity.Success : Severity.Error)" Dense="true">@_message</MudAlert>
+        }
+        <div class="d-flex gap-2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.NetworkCheck" Disabled="_busy" OnClick="Test">Test connection</MudButton>
+            <span style="flex:1"></span>
+            <MudButton OnClick="() => { _form = null; _message = null; }">Cancel</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Save">Save</MudButton>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool CanManage { get; set; }
+
+    private sealed record Setup(Guid Id, string? Secret);
+
+    private IReadOnlyList<IntegrationConnection> _repos = [];
+    private bool _busy;
+    private CodeRepoConfig? _form;
+    private Guid? _editId;
+    private string? _name;
+    private string? _paths;
+    private string? _token;
+    private bool _tokenSet;
+    private string? _message;
+    private bool _messageOk;
+    private Setup? _setup;
+
+    private Guid ProjectId => Ws.Session!.ProjectId;
+    private string BaseUrl => CodeSync.PublicBaseUrl ?? Nav.BaseUri.TrimEnd('/');
+
+    protected override async Task OnInitializedAsync()
+    {
+        CodeSync.NoteBaseUrl(Nav.BaseUri);
+        CodeSync.StatusChanged += OnStatusChanged;
+        await Reload();
+    }
+
+    public void Dispose() => CodeSync.StatusChanged -= OnStatusChanged;
+
+    private void OnStatusChanged(Guid id)
+    {
+        if (_repos.Any(r => r.Id == id)) _ = InvokeAsync(async () => { await Reload(); StateHasChanged(); });
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.Session is null) return;
+        _repos = await CodeSync.ListAsync(ProjectId);
+    }
+
+    private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "queued" => "Queued",
+        "running" => "Syncing…",
+        "no-changes" => "No model changes",
+        "awaiting-review" => "Changes to review",
+        "accepted" => "Synced",
+        "failed" => "Failed",
+        _ => s,
+    };
+
+    private static string StatusColor(string s) => s switch
+    {
+        "failed" => "var(--mud-palette-error)",
+        "awaiting-review" => "var(--mud-palette-warning)",
+        "no-changes" or "accepted" => "var(--mud-palette-success)",
+        _ => "inherit",
+    };
+
+    private void New()
+    {
+        _form = new CodeRepoConfig();
+        _editId = null;
+        _name = null;
+        _paths = null;
+        _token = null;
+        _tokenSet = false;
+        _message = null;
+        _setup = null;
+    }
+
+    private void Edit(IntegrationConnection c)
+    {
+        _form = CodeRepoConfig.Parse(c.ConfigJson);
+        _editId = c.Id;
+        _name = c.Name;
+        _paths = string.Join(", ", _form.Paths);
+        _token = null;
+        _tokenSet = c.ProtectedSecret != null;
+        _message = null;
+        _setup = null;
+    }
+
+    private void SetHost(GitHostKind host)
+    {
+        if (_form is null) return;
+        if (_form.BaseUrl.Trim().TrimEnd('/') == CodeRepoConfig.DefaultBaseUrl(_form.Host) || string.IsNullOrWhiteSpace(_form.BaseUrl))
+            _form.BaseUrl = CodeRepoConfig.DefaultBaseUrl(host);
+        _form.Host = host;
+    }
+
+    private CodeRepoConfig FormConfig()
+    {
+        var f = _form!.Clone();
+        f.Paths = (_paths ?? "").Split([',', '\n', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        f.Normalize();
+        return f;
+    }
+
+    private async Task Test()
+    {
+        _busy = true;
+        try
+        {
+            _message = await CodeSync.TestAsync(ProjectId, FormConfig(), _token, _editId);
+            _messageOk = true;
+        }
+        catch (GitHostException ex) { _message = ex.Message; _messageOk = false; }
+        finally { _busy = false; }
+    }
+
+    private async Task Save()
+    {
+        if (!CanManage) return;
+        _busy = true;
+        try
+        {
+            var result = await CodeSync.SaveAsync(ProjectId, _editId, _name, FormConfig(), _token);
+            _token = null;
+            _form = null;
+            _message = null;
+            Snackbar.Add("Repository saved", Severity.Success);
+            await Reload();
+            if (result.NewWebhookSecret is { } secret) _setup = new Setup(result.Connection.Id, secret);
+        }
+        catch (GitHostException ex) { _message = ex.Message; _messageOk = false; }
+        catch (InvalidOperationException ex) { _message = ex.Message; _messageOk = false; }
+        finally { _busy = false; }
+    }
+
+    private void ShowSetup(IntegrationConnection c, string? secret) => _setup = _setup?.Id == c.Id && secret is null ? null : new Setup(c.Id, secret);
+
+    private async Task NewSecret(IntegrationConnection c)
+    {
+        if (!CanManage) return;
+        _busy = true;
+        try { _setup = new Setup(c.Id, await CodeSync.RegenerateWebhookSecretAsync(ProjectId, c.Id)); }
+        catch (GitHostException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task SyncNow(IntegrationConnection c)
+    {
+        if (!CanManage) return;
+        _busy = true;
+        try
+        {
+            Snackbar.Add(await CodeSync.SyncNowAsync(ProjectId, c.Id), Severity.Info);
+            await Reload();
+        }
+        catch (GitHostException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task Copy(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); Snackbar.Add("Copied", Severity.Normal); }
+        catch (JSException) { Snackbar.Add("Copy failed; select the text instead.", Severity.Warning); }
+    }
+
+    private async Task Delete(IntegrationConnection c)
+    {
+        if (!CanManage) return;
+        await CodeSync.DeleteAsync(ProjectId, c.Id);
+        if (_setup?.Id == c.Id) _setup = null;
+        await Reload();
+    }
+}

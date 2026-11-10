@@ -176,6 +176,11 @@
                     </div>
                 }
             </MudTabPanel>
+
+            @* ------------------------------------------------------------ code repositories *@
+            <MudTabPanel Text="Code repositories">
+                <CodeRepositoriesPanel CanManage="_canManage" />
+            </MudTabPanel>
         </MudTabs>
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>

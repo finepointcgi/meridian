@@ -65,6 +65,7 @@ public static class MeridianServer
         Settings.SettingsHosting.AddMeridianSettings(builder.Services, host);   // Settings page: preferences, theme, account
         builder.Services.AddHttpContextAccessor();
         Integrations.IntegrationsSetup.AddMeridianIntegrations(builder.Services);   // issue trackers, webhooks, API tokens, OSLC
+        CodeSync.Hosts.CodeSyncHostsSetup.AddMeridianCodeSyncHosts(builder.Services);   // code repositories: webhooks, fetch, commit status
 
         // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.
         if ((builder.Configuration["Meridian:KeysPath"] is { Length: > 0 } kp ? kp : host.LocalMode ? Path.Combine(host.DataPath, "keys") : null) is { } keysPath)
@@ -275,6 +276,7 @@ public static class MeridianServer
         });
 
         Integrations.IntegrationsSetup.MapMeridianIntegrations(app);
+        CodeSync.Hosts.CodeSyncHostsSetup.MapMeridianCodeSyncHosts(app);
         await app.MapMeridianAdminAsync();
 
         app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<CollaborationHub>().FlushAllAsync().GetAwaiter().GetResult());
