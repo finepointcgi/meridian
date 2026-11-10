@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Meridian</AssemblyName>
     <RootNamespace>Meridian.Desktop</RootNamespace>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <ApplicationIcon>..\..\build\assets\meridian.ico</ApplicationIcon>
     <Product>Meridian</Product>
     <Company>Meridian</Company>
