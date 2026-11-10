@@ -1,0 +1,10 @@
+# Public API pages are generated for the stable scripting and plugin surface only.
+apiRules:
+- include:
+    uidRegex: ^Meridian\.Scripting\.(IModelApi|IElement|IRelationship|IDiagram|Fields|IMeridianPlugin|IPluginHost|PluginIssue|IssueSeverity|ScriptGlobals|ScriptEngine|ScriptEngineOptions|ScriptRunResult|ScriptOutcome|ScriptDiagnostic|IWorkbenchBridge|HeadlessBridge|ModelApi)(\.|$)
+    type: Type
+- include:
+    uidRegex: ^Meridian\.Scripting$
+    type: Namespace
+- exclude:
+    uidRegex: .*
