@@ -24,7 +24,7 @@
                 var c = _chapter!;
                 var s = c.Steps[_step];
                 <div class="tour-card" style="@CardStyle()" role="dialog" aria-label="@($"{c.Title}: {s.Title}")">
-                    <div class="tour-step">@(c.Id == Basics ? "" : c.Title + " · ")Step @(_step + 1) of @c.Steps.Length</div>
+                    <div class="tour-step"><span class="tour-kicker">@(c.Id == Basics ? "Tour" : c.Title)</span><span class="tour-count">Step @(_step + 1) of @c.Steps.Length</span></div>
                     <h3><MudIcon Icon="@s.Icon" /> @s.Title</h3>
                     <div class="tour-body">@((MarkupString)s.Html)</div>
                     <div class="tour-dots">

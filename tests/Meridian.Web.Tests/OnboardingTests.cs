@@ -77,7 +77,8 @@ public sealed class OnboardingTests : TestContext
         Assert.Equal(TourChapters.All.Select(c => c.Id), items.Select(i => i.GetAttribute("data-chapter")));
 
         cut.Find(".tour-chapter[data-chapter='mermaid']").Click();
-        cut.WaitForAssertion(() => Assert.Contains("Import Mermaid · Step 1 of 3", cut.Markup));
+        cut.WaitForAssertion(() => Assert.Equal("Import Mermaid", cut.Find(".tour-kicker").TextContent));
+        Assert.Equal("Step 1 of 3", cut.Find(".tour-count").TextContent);
         Assert.Equal("mermaid", cut.Instance.CurrentChapter);
         Assert.Contains("Paste Mermaid", cut.Find(".tour-card h3").TextContent);
         cut.Find(".tour-btn.primary").Click();
@@ -93,7 +94,7 @@ public sealed class OnboardingTests : TestContext
         Model();
         var cut = RenderComponent<OnboardingTour>();
         await cut.InvokeAsync(() => cut.Instance.StartChapterAsync("code"));
-        Assert.Contains("Connect your code · Step 1 of 3", cut.Markup);
+        Assert.Equal("Connect your code", cut.Find(".tour-kicker").TextContent);
         cut.Find(".tour-chapters-link").Click();
         Assert.Equal(OnboardingTour.Mode.Chapters, cut.Instance.Current);
         await cut.InvokeAsync(() => cut.Instance.StartChapterAsync("no-such-chapter"));
@@ -109,6 +110,7 @@ public sealed class OnboardingTests : TestContext
         var cut = RenderComponent<OnboardingTour>();
         await cut.InvokeAsync(() => cut.Instance.StartChapterAsync("generate"));
         Assert.Single(cut.FindAll(".tour-spot"));
+        Assert.Equal("left:94px; top:44px; width:92px; height:42px", cut.Find(".tour-spot").GetAttribute("style"));
 
         Viewport(390, 844);
         await cut.InvokeAsync(() => cut.Instance.StartChapterAsync("generate"));

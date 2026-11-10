@@ -93,6 +93,9 @@
 .tour-card { max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; }
 .tour-card.tour-wide { width: 380px; }
 .tour-chapters-link { margin-left: 4px; }
+.tour-card .tour-step { display: flex; gap: 10px; align-items: baseline; }
+.tour-kicker { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tour-count { flex: none; color: var(--text-3); letter-spacing: .04em; }
 .tour-chapter-list, .tour-whatsnew-list { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 12px; }
 .tour-chapter { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
   background: transparent; color: var(--text); font: 13px Inter, sans-serif; text-align: left; cursor: pointer; }
