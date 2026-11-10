@@ -12,8 +12,12 @@
         }
     </MudSelect>
     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="@(Ws.ReadOnly || !_features.Any())" OnClick="NewConfig">New configuration</MudButton>
-    <MudCheckBox T="bool" @bind-Value="_propagate" Label="Auto-select parents, mandatory &amp; required" Size="Size.Small" Dense="true" />
-    <MudCheckBox T="bool" Value="_highlight" ValueChanged="SetHighlight" Label="Highlight excluded on diagrams" Size="Size.Small" Dense="true" />
+    <MudCheckBox T="bool" @bind-Value="_propagate" Label="Propagate constraints (parents, mandatory, alternatives, requires / excludes)" Size="Size.Small" Dense="true" />
+    <label class="d-flex align-center gap-1" style="font-size:12.5px">Show on diagrams
+        <select class="dv-select" value="@(ShownHere ? Ws.VariantView.Mode.ToString() : "Off")" @onchange="e => ShowOnDiagrams(e.Value?.ToString())" disabled="@(Config == null)" data-testid="variant-display">
+            @foreach (var m in Enum.GetValues<VariantDisplay>()) { <option value="@m">@VariantView.Label(m)</option> }
+        </select>
+    </label>
     <span style="flex:1"></span>
     @if (!_features.Any())
     {
@@ -43,10 +47,13 @@ else
             {
                 var feature = f;
                 var on = _selected.Contains(feature);
-                <div class="var-feature" style="padding-left:@(depth * 16)px">
+                var st = _analysis?.States.GetValueOrDefault(feature);
+                var stCss = st?.State switch { FeatureState.Implied => "implied", FeatureState.Excluded => "excluded", _ => "" };
+                <div class="var-feature @stCss" style="padding-left:@(depth * 16)px" title="@st?.Reason">
                     <MudCheckBox T="bool" Value="on" ValueChanged="v => Toggle(feature, v)" Disabled="@(Config == null || Ws.ReadOnly)" Size="Size.Small" Dense="true" />
                     <span class="link" @onclick="() => Ws.Select(feature)">@feature.DisplayName</span>
                     <span class="var-kind">@(depth == 0 ? "root" : Variability.KindOf(feature))</span>
+                    @if (stCss.Length > 0) { <span class="var-state @stCss" title="@st!.Reason">@(stCss == "implied" ? "required" : "blocked")</span> }
                     @foreach (var r in Ws.Model.Outgoing(feature).Where(r => r.Kind is ElementKind.Requires or ElementKind.Excludes))
                     {
                         <span class="var-kind">@(r.Kind == ElementKind.Requires ? "requires" : "excludes") @r.Target.Name</span>
@@ -98,6 +105,11 @@ else
                         </MudButton>
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download" OnClick="ExportVariant">Export variant (.meridian)</MudButton>
                         <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.TableView" OnClick="ExportCsv">Inclusion CSV</MudButton>
+                        <MudTooltip Text="@(Ws.BranchId != null ? "Delete what this variant excludes from the current branch (one undo step)" : "Delete what this variant excludes from this model (one undo step); on a server, create a branch first")">
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.CallSplit" Disabled="Ws.ReadOnly" OnClick="ResolveHere">
+                                @(Ws.BranchId != null ? $"Resolve branch “{Ws.BranchName}” to variant" : "Resolve this model to variant")
+                            </MudButton>
+                        </MudTooltip>
                     </div>
                 }
             }
@@ -108,7 +120,7 @@ else
 @code {
     private string? _configId;
     private bool _propagate = true;
-    private bool _highlight;
+    private FeatureAnalysis? _analysis;
     private HashSet<Element> _selected = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyList<ConfigurationProblem> _problems = [];
     private VariantResolution? _resolution;
@@ -142,8 +154,8 @@ else
             _resolution = Variability.Resolve(Ws.Model, _selected);
         }
         else { _selected = new(ReferenceEqualityComparer.Instance); _problems = []; _resolution = null; }
-        _products = _features.Count is > 0 and <= 22 ? Variability.EnumerateProducts(Ws.Model, 5000).Count : null;
-        if (_highlight) ApplyHighlight();
+        _products = _features.Count > 0 ? (int)new FeatureSolver(Ws.Model).CountProducts(FeatureModelEditor.ProductLimit) : null;
+        _analysis = Config != null && _features.Count > 0 ? new FeatureSolver(Ws.Model).Analyze(_selected) : null;
     }
 
     private void SelectConfig(string id)
@@ -168,41 +180,43 @@ else
     private void Toggle(Element feature, bool on)
     {
         if (Config is not { } c) return;
-        var set = new HashSet<Element>(_selected, ReferenceEqualityComparer.Instance);
-        if (on)
+        HashSet<Element> set;
+        if (_propagate)
+            set = new FeatureSolver(Ws.Model).Complete(_selected, turnedOn: on ? feature : null, turnedOff: on ? null : feature);
+        else
         {
-            set.Add(feature);
-            if (_propagate)
-            {
-                // Picking an alternative deselects its siblings.
-                if (Variability.KindOf(feature) == "alternative" && Variability.Parent(Ws.Model, feature) is { } parent)
-                    foreach (var sib in Variability.Children(Ws.Model, parent).Where(s => !ReferenceEquals(s, feature) && Variability.KindOf(s) == "alternative")) RemoveSubtree(set, sib);
-                set = Variability.Propagate(Ws.Model, set);
-            }
+            set = new HashSet<Element>(_selected, ReferenceEqualityComparer.Instance);
+            if (on) set.Add(feature); else set.Remove(feature);
         }
-        else if (_propagate) RemoveSubtree(set, feature);
-        else set.Remove(feature);
+        if (_propagate && on != set.Contains(feature))
+            Ws.SetStatus($"'{feature.Name}' cannot be {(on ? "selected" : "deselected")}: {_analysis?.States.GetValueOrDefault(feature)?.Reason ?? "the feature model does not allow it"}");
         try { Ws.Model.Set(c, ExtFieldKeys.SelectedFeatures, Variability.Serialize(Variability.Tree(Ws.Model).Select(t => t.Feature).Where(set.Contains))); }
         catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
     }
 
-    private void RemoveSubtree(HashSet<Element> set, Element f)
+    /// <summary>True when the diagrams show this tab's configuration.</summary>
+    private bool ShownHere => Ws.VariantView.Active && Ws.VariantView.ConfigurationId == _configId;
+
+    private void ShowOnDiagrams(string? mode)
     {
-        set.Remove(f);
-        foreach (var c in Variability.Children(Ws.Model, f)) RemoveSubtree(set, c);
+        if (Config is not { } c || !Enum.TryParse<VariantDisplay>(mode, out var m)) return;
+        Ws.VariantView.Show(m == VariantDisplay.Off ? null : c.Id, m);
     }
 
-    private void SetHighlight(bool on)
+    /// <summary>Deletes what the variant excludes from the live model (a branch, typically): one undo step.</summary>
+    private async Task ResolveHere()
     {
-        _highlight = on;
-        if (on) ApplyHighlight();
-        else { Ws.SimHighlight.Clear(); Ws.Bump(); }
-    }
-
-    private void ApplyHighlight()
-    {
-        Ws.SimHighlight.Clear();
-        if (_resolution != null) foreach (var e in _resolution.Excluded) Ws.SimHighlight.Add(e.Id);
+        if (_resolution == null || Config is not { } c) return;
+        var n = _resolution.ExcludedRoots.Count(e => e.Owner != null);
+        if (Ws.Confirm != null && !await Ws.Confirm("Resolve to variant",
+                $"Delete the {n} element{(n == 1 ? "" : "s")} (with their contents) that '{c.Name}' excludes from {(Ws.BranchId != null ? $"branch '{Ws.BranchName}'" : "this model")}, and clear presence conditions? You can undo it."))
+            return;
+        try
+        {
+            var removed = Variability.ApplyTo(Ws.Model, _resolution);
+            Ws.SetStatus($"Resolved to variant '{c.Name}': {removed} elements removed (undo with ⌘Z)");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
     }
 
     private ModelRepository ResolvedCopy()
@@ -270,9 +284,4 @@ else
         catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
     }
 
-    public override void Dispose()
-    {
-        if (_highlight) Ws.SimHighlight.Clear();
-        base.Dispose();
-    }
 }
