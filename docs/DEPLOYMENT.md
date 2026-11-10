@@ -38,10 +38,10 @@ The image is `ghcr.io/finepointcgi/meridian:<version>`. It is published for linu
 cosign keyless signature. Verify an image before you deploy it:
 
 ```bash
-cosign verify ghcr.io/finepointcgi/meridian:0.4.0 \
+cosign verify ghcr.io/finepointcgi/meridian:0.5.0 \
   --certificate-identity-regexp '^https://github.com/finepointcgi/meridian/\.github/workflows/container\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/finepointcgi/meridian:0.4.0 --repo finepointcgi/meridian
+gh attestation verify oci://ghcr.io/finepointcgi/meridian:0.5.0 --repo finepointcgi/meridian
 ```
 
 The repository is private, so pulling needs `docker login ghcr.io` with a token that has `read:packages`
@@ -57,7 +57,7 @@ What the image provides:
 - Has a `HEALTHCHECK` that runs `dotnet Meridian.Web.dll --healthcheck`, so the image needs no curl.
 - Defines volumes at `/data/keys`, `/data/backups` and `/data/plugins`.
 - Build it yourself with:
-  `docker build --build-arg VERSION=0.4.0 --build-arg REVISION=$(git rev-parse HEAD) -t meridian:0.4.0 .`
+  `docker build --build-arg VERSION=0.5.0 --build-arg REVISION=$(git rev-parse HEAD) -t meridian:0.5.0 .`
 
 ## Install with Docker Compose
 
@@ -132,7 +132,7 @@ kubectl -n meridian create secret generic meridian-env \
   --from-literal='ConnectionStrings__Meridian=Host=pg.internal;Database=meridian;Username=meridian;Password=<pw>;SSL Mode=Require'
 
 helm upgrade --install meridian deploy/helm/meridian -n meridian \
-  --set image.tag=0.4.0 \
+  --set image.tag=0.5.0 \
   --set 'imagePullSecrets[0].name=ghcr' \
   --set ingress.host=meridian.example.com \
   --set ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt-prod \
