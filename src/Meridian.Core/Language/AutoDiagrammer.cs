@@ -97,7 +97,7 @@ public static class AutoDiagrammer
     public static readonly IReadOnlyList<DiagramType> SupportedTypes =
     [
         DiagramType.Package, DiagramType.BlockDefinition, DiagramType.Class, DiagramType.InternalBlock, DiagramType.Requirement,
-        DiagramType.Activity, DiagramType.StateMachine, DiagramType.UseCase,
+        DiagramType.Activity, DiagramType.StateMachine, DiagramType.UseCase, DiagramType.Database,
     ];
 
     private static readonly ElementKind[] BddKinds = [ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Enumeration];
@@ -172,6 +172,20 @@ public static class AutoDiagrammer
             if (!g.Any(e => e.Kind == ElementKind.UseCase)) continue;   // actors alone tell no story
             ctx.PlanGroup(plan, DiagramType.UseCase, pkg, $"{(pkg.Kind == ElementKind.Model ? "Model" : pkg.Name)} – use cases",
                 $"Who uses the system and for what ({pkg.DisplayName}).", g.ToList(), whole: false, context: items => UseCaseContext(m, items));
+        }
+
+        // Database diagrams: one per schema (tables outside a schema: per package), and one per subject area.
+        foreach (var g in content.Where(e => e.Kind == ElementKind.Table).GroupBy(t => DataModeling.DbModel.SchemaOf(t) ?? NearestPackage(t)).Where(g => g.Key != null))
+        {
+            var owner = g.Key!;
+            ctx.PlanGroup(plan, DiagramType.Database, owner, $"{(owner.Kind == ElementKind.Model ? "Model" : owner.Name)} – tables",
+                $"The tables of {owner.DisplayName} with their keys and foreign keys.", g.ToList(), whole: false);
+        }
+        foreach (var area in content.Where(DataModeling.DbModel.IsGroup))
+        {
+            var members = DataModeling.DbModel.Members(m, area).ToList();
+            if (members.Count == 0) continue;
+            ctx.PlanGroup(plan, DiagramType.Database, area, $"{area.Name} – subject area", $"The tables of the subject area {area.DisplayName}.", members, whole: true);
         }
 
         foreach (var p in plan.Diagrams) p.NodeCount = Count(Collect(m, p.Type, p.Owner, p.Elements));
@@ -396,6 +410,7 @@ public static class AutoDiagrammer
             DiagramType.Requirement => owner.Descendants().Where(e => e.Kind == ElementKind.Requirement && Mine(e)).ToList() is var reqs ? reqs.Concat(RequirementContext(m, reqs)).ToList() : [],
             DiagramType.Activity or DiagramType.StateMachine => BehaviorNodes(owner).ToList(),
             DiagramType.UseCase => owner.Descendants().Where(e => e.Kind is ElementKind.Actor or ElementKind.UseCase && Mine(e)).ToList() is var uc ? uc.Concat(UseCaseContext(m, uc)).ToList() : [],
+            DiagramType.Database => DataModeling.DbModel.TablesIn(m, owner).ToList(),
             _ => [],
         };
     }
@@ -415,6 +430,8 @@ public static class AutoDiagrammer
                 : $"{e.DisplayName} is not a state of {owner.DisplayName}.",
             DiagramType.Package => e.Kind is ElementKind.Package or ElementKind.Profile || Metamodel.IsClassifier(e.Kind) ? null
                 : $"A package diagram shows packages (and classifiers), not a {Metamodel.DisplayName(e.Kind)}.",
+            DiagramType.Database => e.Kind is ElementKind.Table or ElementKind.Class or ElementKind.Block or ElementKind.Requirement ? null
+                : $"A database diagram shows tables (and entities, blocks, requirements), not a {Metamodel.DisplayName(e.Kind)}.",
             _ when SupportedTypes.Contains(type) => Metamodel.IsClassifier(e.Kind) || e.Kind is ElementKind.Package or ElementKind.Requirement or ElementKind.TestCase ? null
                 : $"A {Metamodel.DisplayName(type)} does not show a {Metamodel.DisplayName(e.Kind)}.",
             _ => $"{Metamodel.DisplayName(type)} is not laid out automatically; supported: {string.Join(", ", SupportedTypes)}.",
@@ -679,7 +696,7 @@ public static class AutoDiagrammer
             if (Lift(l.A) is not { } a || Lift(l.B) is not { } b || ReferenceEquals(a, b)) continue;
             if (l.R.Kind is ElementKind.Requires or ElementKind.Excludes) continue;
             var st = Notation.StyleOf(l.R);
-            var targetAbove = st.TargetHead == ArrowHead.HollowTriangle || st.Dashed && l.R.Kind is not ElementKind.ObjectFlow;
+            var targetAbove = st.TargetHead == ArrowHead.HollowTriangle || st.Dashed && l.R.Kind is not ElementKind.ObjectFlow || l.R.Kind == ElementKind.ForeignKey;
             pairs.Add(targetAbove ? (b, a) : (a, b));
         }
 
@@ -691,6 +708,7 @@ public static class AutoDiagrammer
             DiagramType.StateMachine => (70.0, 70.0, 4),
             DiagramType.InternalBlock => (120.0, 50.0, 4),
             DiagramType.UseCase => (60.0, 36.0, 3),
+            DiagramType.Database => (110.0, 40.0, 5),
             _ => (60.0, 80.0, 6),
         };
         if (!topLevel) { hGap = Math.Min(hGap, 40); vGap = Math.Min(vGap, 40); perRow = Math.Min(perRow, 4); }
@@ -710,7 +728,7 @@ public static class AutoDiagrammer
         }
 
         if (pairs.Count == 0) Grid(level, hGap, vGap, type == DiagramType.Package && topLevel ? 4 : perRow);
-        else if (type == DiagramType.InternalBlock) Layered(level, pairs, index, vGap, hGap, perRow, horizontal: true);
+        else if (type is DiagramType.InternalBlock or DiagramType.Database) Layered(level, pairs, index, vGap, hGap, perRow, horizontal: true);
         else if (leftToRight) Layered(level, pairs, index, vGap, hGap + 20, perRow, horizontal: true);
         else Layered(level, pairs, index, hGap, vGap, perRow, horizontal: false);
     }

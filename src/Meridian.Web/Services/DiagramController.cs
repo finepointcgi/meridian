@@ -1787,7 +1787,7 @@ public sealed partial class DiagramController
         if (shape is NodeShape.StickFigure or NodeShape.SmallSquare or NodeShape.Diamond or NodeShape.Bar)
             return (tl.X - (w - b.Width * Zoom) / 2, tl.Y + b.Height * Zoom + 4, w, 32);
         if (n.Element.Kind == ElementKind.Comment) return (tl.X, tl.Y, w, Math.Max(60, b.Height * Zoom));
-        var y = shape == NodeShape.Rectangle && Notation.Content(Model, n.Element, Diagram.DiagramType).Keyword != null ? 18 : 2;
+        var y = shape == NodeShape.Rectangle && Notation.Content(Model, n, Diagram.DiagramType).Keyword != null ? 18 : 2;
         return (tl.X, tl.Y + y * Zoom, w, 32);
     }
 }

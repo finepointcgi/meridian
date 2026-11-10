@@ -69,6 +69,7 @@ public static class Metamodel
         ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
         ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule,
         ElementKind.Feature, ElementKind.Configuration, ElementKind.TradeStudy,
+        ElementKind.Sequence, ElementKind.Routine,
     };
 
     /// <summary>Kinds that carry no name of their own in normal use.</summary>
@@ -123,7 +124,7 @@ public static class Metamodel
             ElementKind.Action => IsPin(child),
             ElementKind.StateMachine => IsVertex(child),
             ElementKind.State => IsVertex(child),
-            ElementKind.Table => child == ElementKind.Column,
+            ElementKind.Table => child is ElementKind.Column or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Trigger,
             ElementKind.Feature => child == ElementKind.Feature,   // feature tree by containment
             _ => false,
         };
@@ -140,7 +141,8 @@ public static class Metamodel
             ElementKind.DeriveReqt or ElementKind.Copy => req(source) && req(target) ? null : $"{rel} must connect two Requirements",
             ElementKind.Include or ElementKind.Extend => source == ElementKind.UseCase && target == ElementKind.UseCase ? null : $"{rel} must connect two Use Cases",
             ElementKind.Generalization => source == target && IsClassifier(source) ? null : "Generalization must connect two classifiers of the same kind",
-            ElementKind.Realization => IsClassifier(source) && target is ElementKind.Interface or ElementKind.InterfaceBlock ? null : "Realization must target an Interface",
+            ElementKind.Realization => IsClassifier(source) && target is ElementKind.Interface or ElementKind.InterfaceBlock
+                || source == ElementKind.Table && IsClassifier(target) ? null : "Realization must target an Interface (or go from a table to the logical entity it realizes)",
             ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation =>
                 IsClassifier(source) && IsClassifier(target) ? null : $"{rel} must connect two classifiers",
             ElementKind.Transition => IsVertex(source) && IsVertex(target) && source != ElementKind.FinalState && target != ElementKind.InitialState
@@ -175,6 +177,11 @@ public static class Metamodel
             new(ElementKind.Comment),
         ],
         DiagramType.ArchiMate => Subtypes.ArchiElements.Select(s => new PaletteItem(ElementKind.ArchiElement, s)).Append(new(ElementKind.Comment)).ToList(),
+        DiagramType.Database =>
+        [
+            new(ElementKind.Table), new(ElementKind.Table, DataModeling.DbFields.View, "View"), new(ElementKind.Table, DataModeling.DbFields.MaterializedView, "Materialized View"),
+            new(ElementKind.Class, Label: "Entity (logical)", Stereotype: "entity"), new(ElementKind.Requirement), new(ElementKind.Block), new(ElementKind.Comment),
+        ],
         DiagramType.Whiteboard => GeneralItems.Append(new(ElementKind.Comment, Label: "Sticky note")).ToList(),
         DiagramType.StateMachine =>
         [
@@ -220,7 +227,7 @@ public static class Metamodel
         DiagramType.StateMachine => [ElementKind.State, ElementKind.InitialState, ElementKind.FinalState, ElementKind.Pseudostate, ElementKind.Comment],
         DiagramType.Package => [ElementKind.Package, ElementKind.Profile, ElementKind.Stereotype, ElementKind.Block, ElementKind.Class, ElementKind.Interface, ElementKind.Comment],
         DiagramType.Sequence => [ElementKind.Lifeline, ElementKind.CombinedFragment, ElementKind.Comment],
-        DiagramType.Database => [ElementKind.Table, ElementKind.Comment],
+        DiagramType.Database => [ElementKind.Table, ElementKind.Class, ElementKind.Requirement, ElementKind.Block, ElementKind.Comment],
         DiagramType.FeatureModel => [ElementKind.Feature, ElementKind.Configuration, ElementKind.Comment],
         DiagramType.Timing => [ElementKind.TimingLifeline, ElementKind.DurationConstraint, ElementKind.TimeConstraint, ElementKind.Comment],
         DiagramType.InteractionOverview => [ElementKind.InteractionUse, ElementKind.InlineInteraction, ElementKind.InitialNode, ElementKind.ActivityFinalNode,
@@ -242,7 +249,7 @@ public static class Metamodel
         DiagramType.StateMachine => [ElementKind.Transition],
         DiagramType.Package => [ElementKind.Dependency, ElementKind.Generalization, ElementKind.Realization, ElementKind.Trace],
         DiagramType.Sequence => [ElementKind.Message],
-        DiagramType.Database => [ElementKind.ForeignKey],
+        DiagramType.Database => [ElementKind.ForeignKey, ElementKind.Realization, ElementKind.Trace, ElementKind.Satisfy, ElementKind.Allocate],
         DiagramType.FeatureModel => [ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes],
         DiagramType.InteractionOverview => [ElementKind.ControlFlow],
         DiagramType.Communication => [ElementKind.CommunicationLink],
@@ -333,6 +340,8 @@ public static class Metamodel
         ElementKind.CommunicationLifeline => "Lifeline",
         ElementKind.CommunicationLink => "Link",
         ElementKind.InteractionOperand => "Operand",
+        ElementKind.DbIndex => "Index",
+        ElementKind.DbConstraint => "Constraint",
         _ => k.ToString(),
     };
 
@@ -346,7 +355,7 @@ public static class Metamodel
         DiagramType.Sequence => "Sequence Diagram",
         DiagramType.Bpmn => "BPMN Process Diagram",
         DiagramType.ArchiMate => "ArchiMate View",
-        DiagramType.Database => "Entity-Relationship Diagram",
+        DiagramType.Database => "Database Diagram (ER)",
         DiagramType.Whiteboard => "Whiteboard",
         DiagramType.FeatureModel => "Feature Model Diagram",
         DiagramType.Timing => "Timing Diagram",
@@ -378,6 +387,8 @@ public static class Metamodel
         ElementKind.Feature => "feature",
         ElementKind.Configuration => "configuration",
         ElementKind.TradeStudy => "tradeStudy",
+        ElementKind.Sequence => "sequence",
+        ElementKind.Routine => "routine",
         _ => null,
     };
 
@@ -473,7 +484,7 @@ public static class Metamodel
         var f = new List<string>();
         if (k is not (ElementKind.Comment or ElementKind.CombinedFragment or ElementKind.InteractionOperand)) f.Add(FieldKeys.Name);
         if (k is ElementKind.BpmnNode or ElementKind.ArchiElement or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.Shape or ElementKind.Line
-            or ElementKind.Pseudostate or ElementKind.ObjectNode) f.Add(FieldKeys.Subtype);
+            or ElementKind.Pseudostate or ElementKind.ObjectNode or ElementKind.Table or ElementKind.DbConstraint or ElementKind.Routine) f.Add(FieldKeys.Subtype);
         if (k == ElementKind.InteractionOperand) f.Add(FieldKeys.Guard);
         if (IsClassifier(k) && k is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype)) f.Add(FieldKeys.IsAbstract);
         if (IsClassifier(k) && k != ElementKind.Table || k is ElementKind.Property or ElementKind.Operation or ElementKind.Port) f.Add(FieldKeys.Visibility);
@@ -496,6 +507,7 @@ public static class Metamodel
         if (k == ElementKind.TagDefinition) { f.Add(FieldKeys.TagType); f.Add(FieldKeys.TagValues); f.Add(FieldKeys.DefaultValue); }
         if (k == ElementKind.Column) { f.Add(FieldKeys.SqlType); f.Add(FieldKeys.PrimaryKey); f.Add(FieldKeys.Nullable); f.Add(FieldKeys.Unique); f.Add(FieldKeys.DefaultValue); }
         if (k == ElementKind.ForeignKey) { f.Add(FieldKeys.FkColumns); f.Add(FieldKeys.RefColumns); }
+        f.AddRange(DataModeling.DbFields.EditableFields(k));
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
         f.AddRange(ExtFieldKeys.EditableFields(k));

@@ -232,7 +232,21 @@ public static class DiagramExtras
     /// What gets drawn: <paramref name="d"/> itself when it has no layers, otherwise a detached copy holding only
     /// shapes and paths on visible layers, in layer order (bottom first). The copy shares the node and edge objects.
     /// </summary>
-    public static Diagram VisibleView(Diagram d)
+    public static Diagram VisibleView(Diagram d) => SubjectAreaView(LayerView(d));
+
+    /// <summary>Database diagrams filtered to a subject area: only its tables (and other shapes), and paths between what is shown.</summary>
+    private static Diagram SubjectAreaView(Diagram d)
+    {
+        if (d.DiagramType != DiagramType.Database || d.Get(DataModeling.DbFields.GroupFilter).Length == 0) return d;
+        var view = new Diagram(d.DiagramType, d.Id) { Owner = d.Owner };
+        foreach (var kv in d.Fields) view.SetRaw(kv.Key, kv.Value);
+        view.NodeList.AddRange(d.Nodes.Where(n => !DataModeling.DbModel.FilteredOut(d, n)));
+        var shown = view.NodeList.ToHashSet();
+        view.EdgeList.AddRange(d.Edges.Where(e => shown.Contains(e.Source) && shown.Contains(e.Target)));
+        return view;
+    }
+
+    private static Diagram LayerView(Diagram d)
     {
         if (!HasLayers(d)) return d;
         var st = StateOf(d);
