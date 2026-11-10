@@ -31,8 +31,9 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(Ws.Model.Root)">Rename model…</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Disabled="true" Class="menu-heading">Import</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip">Open a file as a new project…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip, Mermaid .mmd / Markdown">Open a file as a new project…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, Mermaid (.mmd, Markdown), or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="@(() => PasteMermaid())" Disabled="Ws.ReadOnly" title="Flowcharts, class, state, sequence, requirement, ER and C4 diagrams written in Mermaid (for example by an AI assistant)">Paste Mermaid…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Badge" OnClick="AddUafProfile" Disabled="Ws.ReadOnly">Add UAF profile</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Disabled="true" Class="menu-heading">Versions &amp; team</MudMenuItem>
@@ -53,6 +54,8 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.Image" OnClick="ExportSvg" Disabled="Ws.Active == null">Export diagram as SVG</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="ExportMermaid" Disabled="!CanExportMermaid" title="Activity, state machine, sequence, block definition and requirement diagrams">Export diagram as Mermaid (.mmd)</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyMermaid" Disabled="!CanExportMermaid">Copy diagram as Mermaid</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Disabled="true" Class="menu-heading">Help</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
@@ -66,7 +69,7 @@
 
         <div class="cmdk" @onclick="() => _palette!.Show()">
             <MudIcon Icon="@Icons.Material.Outlined.Search" Style="font-size:16px" />
-            Search commands, diagrams, elements…
+            <span class="cmdk-label">Search commands, diagrams, elements…</span>
             <kbd>⌘K</kbd>
         </div>
 
@@ -244,6 +247,7 @@
                         <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="ExportDocx">Word / PDF / HTML document from template…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.OpenInNew" OnClick="OpenReport">Quick HTML model report</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.AccountTree" OnClick="ExportBpmn" Disabled="@(Ws.Active?.Diagram.DiagramType != DiagramType.Bpmn)">BPMN 2.0 XML (active diagram)</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="ExportMermaid" Disabled="!CanExportMermaid">Mermaid .mmd (active diagram)</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.Layers" OnClick="ExportArchiMate">ArchiMate exchange file</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.Assignment" OnClick="ExportReqIf">ReqIF</MudMenuItem>
                         <MudDivider />
@@ -440,9 +444,9 @@
     <OnboardingTour @ref="_tour" />
 
     <div style="display:none">
-        <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml" OnChange="OnOpenFile" />
+        <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml,.mmd,.mermaid,.md" OnChange="OnOpenFile" />
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
-        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip,.mdzip,.mdxml" multiple OnChange="OnImportInto" />
+        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
         <InputFile id="file-req-sheet" accept=".xlsx,.csv" OnChange="OnRequirementsSheetFile" />
     </div>

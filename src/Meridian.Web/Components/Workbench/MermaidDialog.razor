@@ -1,0 +1,122 @@
+@* "Paste Mermaid…" (Project menu ▸ Import, ⌘K): paste Mermaid text (a diagram, several diagrams or Markdown with
+   ```mermaid blocks, e.g. from any LLM), see what each diagram will become, then import. The import itself is done by
+   the workbench (Services/MermaidImport) as one undo step. *@
+@using Meridian.Serialization.Mermaid
+@inject Workspace Ws
+
+<MudDialog Class="mermaid-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.Schema" />
+            <MudText Typo="Typo.h6">@(FileName is { Length: > 0 } ? $"Import {FileName}" : "Paste Mermaid")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:10px">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2)">
+                Flowcharts become activity diagrams, class diagrams block definition diagrams, state diagrams state machines,
+                sequence diagrams interactions and requirement diagrams requirements. Several diagrams and Markdown with
+                <code>```mermaid</code> blocks work too.
+            </MudText>
+            <textarea class="mmd-input" spellcheck="false" rows="12" aria-label="Mermaid text"
+                      placeholder="@Placeholder"
+                      style="width:100%; min-height:220px; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12.5px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)"
+                      value="@_text" @oninput="OnInput"></textarea>
+
+            @if (_preview.Diagrams.Count > 0)
+            {
+                <div class="mmd-preview" style="border:1px solid var(--border); border-radius:8px; max-height:30vh; overflow:auto">
+                    @foreach (var d in _preview.Diagrams)
+                    {
+                        <div class="mmd-row @(d.Supported ? "" : "skipped")" style="display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; padding:6px 10px; font-size:13px; border-bottom:1px solid var(--border); @(d.Supported ? "" : "opacity:.6")">
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+                                <b class="mmd-becomes">@d.Becomes</b>
+                                <span style="color:var(--text-3)"> · @(d.Title.Length > 0 ? d.Title : d.Keyword) · line @d.Line</span>
+                            </span>
+                            <span class="mmd-counts" style="color:var(--text-2); font-size:12px">@d.Counts</span>
+                        </div>
+                    }
+                </div>
+            }
+            else if (_text.Trim().Length > 0)
+            {
+                <div class="mmd-empty" style="padding:10px; color:var(--text-3); font-size:13px">No Mermaid diagram found yet.</div>
+            }
+
+            @if (_preview.Warnings.Count > 0 && _text.Trim().Length > 0)
+            {
+                <details class="mmd-warnings" style="font-size:12px; color:var(--text-2)">
+                    <summary>@_preview.Warnings.Count warning@(_preview.Warnings.Count == 1 ? "" : "s") (also listed in Output after the import)</summary>
+                    <ul style="margin:4px 0 0 18px; padding:0">
+                        @foreach (var w in _preview.Warnings.Take(30)) { <li class="mmd-warn">@w</li> }
+                        @if (_preview.Warnings.Count > 30) { <li>… @(_preview.Warnings.Count - 30) more</li> }
+                    </ul>
+                </details>
+            }
+
+            <div class="d-flex align-center gap-4" style="flex-wrap:wrap; font-size:13px">
+                <span style="color:var(--text-3)">Existing blocks, interfaces and requirements:</span>
+                <label><input type="radio" name="mmd-match" class="mmd-new" checked="@(_match == MermaidMatchMode.CreateNew)" @onchange="() => _match = MermaidMatchMode.CreateNew" /> create new</label>
+                <label><input type="radio" name="mmd-match" class="mmd-match" checked="@(_match == MermaidMatchMode.MatchByName)" @onchange="() => _match = MermaidMatchMode.MatchByName" /> match by name (reuse)</label>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mmd-import" Disabled="@(Ws.ReadOnly || _preview.Supported == 0)" OnClick="Import">
+            @(_preview.Supported > 1 ? $"Import {_preview.Supported} diagrams" : "Import")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // Razor encodes attribute text, so the newlines come from a C# string rather than &#10; entities.
+    private const string Placeholder = "flowchart TD\n    A[Start] --> B{Ready?}\n    B -->|yes| C[Go]";
+
+    /// <summary>The dialog's answer: the text and how to import it.</summary>
+    public sealed record Answer(string Text, MermaidImportOptions Options);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Text to start with (a dropped or uploaded file).</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>The file the text came from, if any (a .md file is read as Markdown).</summary>
+    [Parameter] public string? FileName { get; set; }
+
+    private string _text = "";
+    private MermaidPreview _preview = new([], []);
+    private MermaidMatchMode _match = MermaidMatchMode.CreateNew;
+
+    private bool Markdown => MermaidImporter.IsMarkdownFile(FileName);
+
+    protected override void OnInitialized()
+    {
+        _text = Text ?? "";
+        Refresh();
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? "";
+        Refresh();
+    }
+
+    private void Refresh() => _preview = _text.Trim().Length == 0 ? new MermaidPreview([], []) : MermaidImporter.Preview(_text, Markdown);
+
+    private void Import()
+    {
+        if (_preview.Supported == 0) return;
+        MudDialog.Close(DialogResult.Ok(new Answer(_text, new MermaidImportOptions { Match = _match, Markdown = Markdown })));
+    }
+
+    /// <summary>Shows the dialog; returns the answer, or null when cancelled.</summary>
+    public static async Task<Answer?> ShowAsync(IDialogService dialogs, string? text = null, string? fileName = null)
+    {
+        var parameters = new DialogParameters<MermaidDialog> { { x => x.Text, text }, { x => x.FileName, fileName } };
+        var dialog = await dialogs.ShowAsync<MermaidDialog>("Paste Mermaid", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true, BackdropClick = false });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: Answer a } ? a : null;
+    }
+}

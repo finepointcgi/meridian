@@ -42,6 +42,10 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .cmdk { flex: 1; max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 9px;
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text-3); cursor: text; font-size: 12.5px; }
 .cmdk:hover { border-color: var(--border-strong); }
+.cmdk { min-width: 34px; overflow: hidden; }
+.cmdk > * { flex: none; }
+.cmdk .cmdk-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1279.98px) { .titlebar .cmdk kbd { display: none; } }
 .cmdk kbd, .kbd { font: 11px Inter, sans-serif; color: var(--text-3); border: 1px solid var(--border-strong); border-radius: 5px; padding: 1px 5px; margin-left: auto; }
 .tb-actions { display: flex; align-items: center; gap: 4px; }
 .btn-primary { height: 30px; padding: 0 14px; border: none; border-radius: 8px; background: var(--accent-grad); color: #fff; font: 600 12.5px Inter, sans-serif;
