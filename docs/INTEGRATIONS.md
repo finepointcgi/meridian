@@ -27,6 +27,15 @@ never logged (HTTP client header logging is redacted) and are never sent back to
 "••• set"; leave the field empty to keep the stored value. Persist the key ring (`Meridian:KeysPath`, a mounted
 volume in containers); if the keys are lost the secrets must be re-entered.
 
+### Which addresses the server will call
+
+Tracker base URLs and webhook URLs are chosen by project owners, so on a team server Meridian checks every outbound
+connection (redirects included) against the address it actually connects to. Link-local addresses (169.254.0.0/16,
+fe80::/10 — where cloud metadata services live), known metadata addresses, unspecified and multicast addresses are
+always refused. Loopback and private networks (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are refused unless
+an administrator sets `Meridian:Integrations:AllowPrivateNetworks=true` — needed for an on-premises Jira or GitHub
+Enterprise. The desktop app's local mode does not restrict addresses.
+
 ### Linked issues on elements
 
 The Inspector shows a **Linked issues** section for every element:
