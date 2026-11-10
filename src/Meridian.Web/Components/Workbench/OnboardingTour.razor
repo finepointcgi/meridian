@@ -94,6 +94,9 @@
     /// <summary>Below this width the workbench uses the phone layout (mobile.css), where the first-run tour is not started.</summary>
     public const double PhoneWidth = 900;
 
+    /// <summary>Called with a step's selector before it is measured, so the host can reveal it (e.g. its ribbon tab).</summary>
+    [Parameter] public Func<string, Task>? OnReveal { get; set; }
+
     private Meridian.Web.Settings.ThemeService? Theme => Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) as Meridian.Web.Settings.ThemeService;
 
     public enum Mode { Closed, Step, Chapters, WhatsNew }
@@ -192,7 +195,14 @@
         try
         {
             if (_chapter.Steps[_step].Selector.Length > 0 && _vp.Width >= PhoneWidth)
+            {
+                if (OnReveal is not null)
+                {
+                    await OnReveal(_chapter.Steps[_step].Selector);   // e.g. switch to the ribbon tab holding the target
+                    await Task.Yield();
+                }
                 _spot = await JS.InvokeAsync<Rect?>("meridian.rectOf", _chapter.Steps[_step].Selector);
+            }
         }
         catch (JSException) { }
         await ShowAsync();

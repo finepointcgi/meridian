@@ -656,19 +656,28 @@ internal static class Program
         var ext = Path.GetExtension(name).TrimStart('.');
         var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
         var tcs = new TaskCompletionSource<string?>();
-        _window.Invoke(async () =>
+        // Leave the web-message callback first: a modal panel run from inside it can stall the web view.
+        await Task.Run(() => _window.Invoke(async () =>
         {
             try
             {
-                var path = await _window.ShowSaveFileAsync("Save " + name, Path.Combine(Directory.Exists(downloads) ? downloads : "", name),
-                    ext.Length > 0 ? [(ext.ToUpperInvariant() + " file", [ext])] : null);
+                // Photino's macOS dialog drops the file name (it shows "Untitled"), so macOS uses NSSavePanel directly.
+                var path = OperatingSystem.IsMacOS()
+                    ? MacSavePanel.Show("Save " + name, downloads, name)
+                    : await _window.ShowSaveFileAsync("Save " + name, Path.Combine(Directory.Exists(downloads) ? downloads : "", name),
+                        ext.Length > 0 ? [(ext.ToUpperInvariant() + " file", [ext])] : null);
                 tcs.TrySetResult(path);
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
-        });
-        var target = await tcs.Task;
-        if (string.IsNullOrEmpty(target)) return;
-        if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
-        await File.WriteAllBytesAsync(target, bytes);
+        }));
+        try
+        {
+            var target = await tcs.Task;
+            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
+            if (string.IsNullOrEmpty(target)) return;
+            if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
+            await File.WriteAllBytesAsync(target, bytes);
+        }
+        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
     }
 }

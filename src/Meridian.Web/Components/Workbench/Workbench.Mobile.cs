@@ -2,7 +2,7 @@ using Meridian.Core.Model;
 
 namespace Meridian.Web.Components.Workbench;
 
-/// <summary>Entry points for the phone shell, the tablet drawers and the ribbon overflow menu (Components/Mobile).</summary>
+/// <summary>Entry points for the phone shell, and the tablet drawers (Components/Mobile).</summary>
 public partial class Workbench
 {
     /// <summary>Re-renders the shell (and so the canvas) without bumping the workspace version, e.g. after a touch pan or pinch.</summary>

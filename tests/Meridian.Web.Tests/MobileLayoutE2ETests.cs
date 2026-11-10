@@ -140,11 +140,11 @@ public class MobileLayoutE2ETests
     private static async Task Tablet(IPage page, string name)
     {
         Assert.True(await page.IsVisibleAsync(".titlebar"));
-        Assert.True(await page.IsVisibleAsync(".ribbon .r-overflow"));
+        Assert.True(await page.IsVisibleAsync(".ribbon .rtabs"));
         Assert.False(await page.IsVisibleAsync(".m-bottomnav"));
         Assert.False(await page.IsVisibleAsync(".workbench > section.card:first-child"));   // drawers start closed
-        var more = await page.Locator(".ribbon .r-overflow").BoundingBoxAsync();
-        Assert.True(more!.X + more.Width <= page.ViewportSize!.Width + 1);
+        // Tabbed ribbon: every tab and the showing group fit without scrolling sideways.
+        Assert.True(await page.EvaluateAsync<bool>("() => { const r = document.querySelector('.ribbon'); return r.scrollWidth <= r.clientWidth + 1 && [...r.querySelectorAll('.rtab, .rgroup.active .rbtn')].every(e => e.getBoundingClientRect().right <= innerWidth + 1); }"));
         await Shot(page, name);
 
         await page.Locator(".t-drawer-btn").First.ClickAsync();
@@ -152,7 +152,7 @@ public class MobileLayoutE2ETests
         var tree = page.Locator(".workbench > section.card:first-child");
         Assert.True(await tree.IsVisibleAsync());
         var box = await tree.BoundingBoxAsync();
-        Assert.True(box!.X >= 0 && box.X + box.Width <= page.ViewportSize.Width);
+        Assert.True(box!.X >= 0 && box.X + box.Width <= page.ViewportSize!.Width);
         await Shot(page, name + "-left-drawer");
         await page.Locator(".t-scrim").ClickAsync(new() { Position = new() { X = page.ViewportSize.Width - 60, Y = 300 } });
         await page.WaitForTimeoutAsync(400);

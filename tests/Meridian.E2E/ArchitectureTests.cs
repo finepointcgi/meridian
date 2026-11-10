@@ -61,6 +61,7 @@ public sealed class ArchitectureTests(ServerFixture f) : E2ETest(f)
         await Expect(row).ToContainTextAsync("Engine uses BrakeSystem");
         await Expect(row.Locator("a.loc")).ToHaveAttributeAsync("href", $"https://github.com/acme/car/blob/89abcdef0123456789abcdef0123456789abcdef/{path}#L7");
         await Expect(tab.Locator("h3.arch-rule")).ToContainTextAsync("Dependency not allowed");
+        await p.RibbonTabAsync("code");
         await Expect(p.Locator("nav.ribbon button.arch-ribbon")).ToBeVisibleAsync();
 
         // "Show on diagram": the red dashed edge between Engine and BrakeSystem.

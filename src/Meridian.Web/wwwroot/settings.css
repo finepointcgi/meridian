@@ -10,9 +10,8 @@ body.m-font-large .mud-dialog { zoom: 1.12; }
 
 /* ---------------------------------------------------------------- density */
 .app.compact .titlebar { height: 40px; gap: 10px; }
-.app.compact .ribbon { top: 40px; height: 48px; padding-top: 3px; padding-bottom: 3px; }
+.app.compact .ribbon { top: 40px; height: 48px; grid-template-rows: 18px minmax(0, 1fr); padding-top: 1px; padding-bottom: 2px; }
 .app.compact .rbtn { height: 26px; }
-.app.compact .rgroup .rlabel { padding-bottom: 0; }
 .app.compact .workbench { top: 88px; bottom: 24px; padding: 6px 6px 0; }
 .app.compact .statusbar { height: 24px; }
 .app.compact .center { grid-template-rows: 34px 32px minmax(0, 1fr) auto; }
