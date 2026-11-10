@@ -17,3 +17,6 @@ Requires the ASP.NET Core 10 runtime. Run:
 Put it behind HTTPS (a reverse proxy such as Caddy or nginx) for anything beyond
 a trusted network. Set Meridian__KeysPath to a persistent folder so sign-ins
 survive restarts. A Dockerfile and docker-compose.yml are in the source repository.
+
+Production deployment (Docker Compose with Caddy, Helm, backups, monitoring):
+see docs/DEPLOYMENT.md in the source repository. Health endpoints: /healthz, /readyz.

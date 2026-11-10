@@ -1,0 +1,20 @@
+Meridian {{ .Chart.AppVersion }} is deployed as {{ include "meridian.fullname" . }}.
+
+{{- if .Values.ingress.enabled }}
+URL: https://{{ .Values.ingress.host }}
+{{- else }}
+Port-forward: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "meridian.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+Health:  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+Logs:    kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "meridian.fullname" . }} -f
+
+{{- if not .Values.meridian.security.allowRegistration }}
+Self-registration is off. Create the first administrator by listing it in meridian.security.admins and registering
+it once with allowRegistration=true, or through SSO (see docs/DEPLOYMENT.md, "First administrator").
+{{- end }}
+{{- if include "meridian.scaledOut" . }}
+
+WARNING: more than one replica. Blazor Server needs sticky sessions (ingress affinity annotations are set by default
+for ingress-nginx) and live collaboration on one project must stay on one pod. Read docs/DEPLOYMENT.md, "Scaling".
+{{- end }}

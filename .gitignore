@@ -10,3 +10,7 @@ artifacts/
 .claude/
 # Local dev settings hold test passwords: copy appsettings.Development.example.json instead.
 src/Meridian.Web/appsettings.Development.json
+# Deployment secrets: copy .env.example instead.
+.env
+# Helm chart dependencies are fetched with `helm dependency build`.
+deploy/helm/meridian/charts/

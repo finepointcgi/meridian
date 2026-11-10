@@ -1,0 +1,124 @@
+name: Container image
+# On a version tag (v*), build the server image for linux/amd64 and linux/arm64, push it to GHCR, attach an SBOM and
+# SLSA provenance attestation, and sign it with cosign keyless (GitHub OIDC; no keys to manage).
+# Verify a published image:
+#   cosign verify ghcr.io/finepointcgi/meridian:<version> \
+#     --certificate-identity-regexp '^https://github.com/finepointcgi/meridian/\.github/workflows/container\.yml@refs/tags/v' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Push the image (otherwise build only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/finepointcgi/meridian
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write        # push to GHCR
+      id-token: write        # cosign keyless + attestations (OIDC)
+      attestations: write    # GitHub artifact attestations
+    env:
+      PUSH: ${{ github.event_name == 'push' || inputs.push }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=sha,format=long
+          flavor: |
+            latest=auto
+          labels: |
+            org.opencontainers.image.title=Meridian
+            org.opencontainers.image.documentation=https://github.com/finepointcgi/meridian/blob/main/docs/DEPLOYMENT.md
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        if: env.PUSH == 'true'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (cosign keyless)
+        if: env.PUSH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Sign the manifest-list digest once per tag name (signatures are stored by digest).
+          images=""
+          for tag in ${TAGS}; do images="${images} ${tag}@${DIGEST}"; done
+          cosign sign --yes ${images}
+
+      - name: GitHub build provenance attestation
+        if: env.PUSH == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        if: env.PUSH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### Published ${IMAGE_NAME}"
+            echo ""
+            echo "Digest: \`${DIGEST}\`"
+            echo ""
+            echo "Tags:"
+            for tag in ${TAGS}; do echo "- \`${tag}\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"

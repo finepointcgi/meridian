@@ -1,0 +1,232 @@
+# Meridian Helm chart values. Runbook: docs/DEPLOYMENT.md.
+#
+# SCALING: Meridian is a Blazor Server app. Each browser tab holds a live circuit (WebSocket) on ONE pod, and the
+# live-collaboration session of a project lives in the memory of the pod that opened it. Keep replicaCount: 1
+# (the default) unless you have read "Scaling" in docs/DEPLOYMENT.md. Running more than one replica requires
+#   1. sticky sessions at the ingress (configured below for ingress-nginx), and
+#   2. a shared Data Protection key store (persistence.keys with ReadWriteMany, or an existingClaim on shared storage),
+# and users editing the same project at the same time must land on the same pod.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/finepointcgi/meridian
+  # Defaults to the chart appVersion. Pin a digest in production with `digest: sha256:...`.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+podAnnotations: {}
+podLabels: {}
+
+# One process holds each project's live session: never run old and new pods side by side.
+strategy:
+  type: Recreate
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1654
+  runAsGroup: 1654
+  fsGroup: 1654
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+# Writable scratch space (exports, backup zips, fontconfig cache) on top of the read-only root filesystem.
+tmpVolume:
+  sizeLimit: 1Gi
+
+terminationGracePeriodSeconds: 30   # time to flush live sessions to the database on shutdown
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  periodSeconds: 5
+  failureThreshold: 36   # up to 3 minutes for first-start database migrations
+
+service:
+  type: ClusterIP
+  port: 80
+  # ClientIP gives sticky sessions for traffic that does not come through the ingress (e.g. a LoadBalancer Service).
+  sessionAffinity: None
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Sticky sessions (required for Blazor Server with more than one replica; harmless with one).
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/affinity-mode: persistent
+    nginx.ingress.kubernetes.io/session-cookie-name: meridian-route
+    nginx.ingress.kubernetes.io/session-cookie-secure: "true"
+    nginx.ingress.kubernetes.io/session-cookie-samesite: Lax
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+    # Long-lived WebSockets (Blazor circuits) and large model imports / backup restores.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 512m
+    # Traefik equivalent: traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+  host: meridian.example.com
+  tls:
+    enabled: true
+    secretName: ""   # defaults to <release>-meridian-tls (created by cert-manager)
+
+# --------------------------------------------------------------------------------------------- Meridian settings
+meridian:
+  # https://<ingress.host> by default; used for OSLC / integration links.
+  publicUrl: ""
+  # Ingress controllers terminate TLS and set X-Forwarded-*: needed for correct https redirect URLs (SSO).
+  # Make sure the pods are reachable only through the ingress (see networkPolicy).
+  trustForwardedHeaders: true
+  security:
+    allowRegistration: false
+    admins: []            # usernames that are always administrators
+    maxFailedLogins: 5
+    lockoutMinutes: 15
+    loginAttemptsPerMinute: 10
+  sso:
+    disableLocalPasswords: false
+    # Each provider: name, displayName, authority, clientId, scopes, claimMappings, autoProvision.
+    # Client secrets go in secrets.ssoClientSecrets (same order) or an existingSecret key
+    # Meridian__Sso__Providers__<N>__ClientSecret. Redirect URI: https://<host>/signin-oidc-<name>
+    providers: []
+    # - name: entra
+    #   displayName: Microsoft
+    #   authority: https://login.microsoftonline.com/<tenant-id>/v2.0
+    #   clientId: 00000000-0000-0000-0000-000000000000
+  backup:
+    # In-app scheduled backups (zip of all projects) into the backups volume. Set intervalHours: 0 to disable.
+    intervalHours: 24
+    retain: 14
+    includeUsers: true
+  scripting:
+    enabled: false        # the script console runs arbitrary .NET code in the server process
+  plugins:
+    enabled: true
+  logging:
+    format: json          # json | simple
+    requests: true        # method, path, status, duration only
+    level: Information
+  telemetry:
+    otlpEndpoint: ""      # e.g. http://otel-collector.observability:4317
+    protocol: grpc        # grpc | http/protobuf
+    exportLogs: false
+  # Extra environment variables (name/value or valueFrom), appended last.
+  extraEnv: []
+
+# Secrets. Prefer existingSecret (managed by External Secrets, Sealed Secrets, SOPS...) in production.
+secrets:
+  existingSecret: ""      # must contain ConnectionStrings__Meridian (unless the bundled postgresql is used)
+  ssoClientSecrets: []    # one per meridian.sso.providers entry, same order
+
+# External PostgreSQL (used when postgresql.enabled is false and secrets.existingSecret is empty).
+externalDatabase:
+  host: ""
+  port: 5432
+  database: meridian
+  username: meridian
+  password: ""
+  # Extra Npgsql connection-string options.
+  options: "SSL Mode=Require;Trust Server Certificate=false;Maximum Pool Size=50"
+
+# Bundled PostgreSQL (Bitnami chart). Disabled by default.
+postgresql:
+  enabled: false
+  auth:
+    username: meridian
+    database: meridian
+    # Set password, or existingSecret with key "password" (Bitnami convention).
+    password: ""
+    existingSecret: ""
+  primary:
+    persistence:
+      size: 10Gi
+  # Bitnami moved free images out of docker.io/bitnami in 2025. If the default image cannot be pulled, point at a
+  # mirror you trust (and, for chart >= 16.7, set global.security.allowInsecureImages=true), e.g.:
+  # image:
+  #   repository: bitnamilegacy/postgresql
+
+persistence:
+  # Data Protection keys (sign-in cookies, antiforgery). Losing them signs everyone out.
+  # More than one replica: ReadWriteMany (NFS, EFS, Azure Files, CephFS) or an existingClaim on shared storage.
+  keys:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    size: 64Mi
+  backups:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    size: 10Gi
+  plugins:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessModes: ["ReadWriteOnce"]
+    size: 256Mi
+
+podDisruptionBudget:
+  # Only rendered when more than one replica can run (a PDB on a single replica would block node drains).
+  enabled: true
+  maxUnavailable: 1
+
+autoscaling:
+  # Read the SCALING note at the top first.
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+networkPolicy:
+  # Allow ingress only from the ingress controller namespace (and same-namespace pods for probes/monitoring).
+  enabled: false
+  ingressControllerNamespace: ingress-nginx
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

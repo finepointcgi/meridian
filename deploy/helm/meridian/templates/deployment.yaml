@@ -1,0 +1,131 @@
+{{- if include "meridian.scaledOut" . }}
+{{- $keys := .Values.persistence.keys }}
+{{- if and $keys.enabled (not $keys.existingClaim) (not (has "ReadWriteMany" $keys.accessModes)) }}
+{{- fail "More than one replica needs a shared Data Protection key store: set persistence.keys.accessModes to [ReadWriteMany] or persistence.keys.existingClaim to a shared volume (see docs/DEPLOYMENT.md, Scaling)." }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "meridian.fullname" . }}
+  labels:
+    {{- include "meridian.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "meridian.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "meridian.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "meridian.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: meridian
+          image: {{ include "meridian.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "meridian.fullname" . }}
+            - secretRef:
+                name: {{ .Values.secrets.existingSecret | default (include "meridian.secretName" .) }}
+          env:
+            {{- if or .Values.postgresql.enabled (not .Values.secrets.existingSecret) }}
+            - name: MERIDIAN_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "meridian.dbPasswordSecret" . | nindent 18 }}
+            {{- if .Values.postgresql.enabled }}
+            - name: ConnectionStrings__Meridian
+              value: "Host={{ include "meridian.dbHost" . }};Port=5432;Database={{ .Values.postgresql.auth.database }};Username={{ .Values.postgresql.auth.username }};Password=$(MERIDIAN_DB_PASSWORD)"
+            {{- else }}
+            - name: ConnectionStrings__Meridian
+              value: "Host={{ include "meridian.dbHost" . }};Port={{ .Values.externalDatabase.port }};Database={{ .Values.externalDatabase.database }};Username={{ .Values.externalDatabase.username }};Password=$(MERIDIAN_DB_PASSWORD);{{ .Values.externalDatabase.options }}"
+            {{- end }}
+            {{- end }}
+            {{- with .Values.meridian.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: keys
+              mountPath: /data/keys
+            - name: backups
+              mountPath: /data/backups
+            - name: plugins
+              mountPath: /data/plugins
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit }}
+        {{- range $name := list "keys" "backups" "plugins" }}
+        {{- $p := index $.Values.persistence $name }}
+        - name: {{ $name }}
+          {{- if $p.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $p.existingClaim | default (printf "%s-%s" (include "meridian.fullname" $) $name) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

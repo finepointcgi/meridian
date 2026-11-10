@@ -78,6 +78,10 @@ dotnet run --project src/Meridian.Web --urls http://localhost:5180
 In development, the users listed under `DevSeed` are created when the server starts. Change their passwords
 in your local `appsettings.Development.json`, which git ignores.
 
+For production (HTTPS with Caddy, Kubernetes with Helm, backups, upgrades, scaling, monitoring and a hardening
+checklist), follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. Signed multi-arch images are published to
+`ghcr.io/finepointcgi/meridian` for every release tag.
+
 To run with a single SQLite file instead of PostgreSQL, set `Meridian__Storage=sqlite` and
 `Meridian__DataPath=<folder>`.
 

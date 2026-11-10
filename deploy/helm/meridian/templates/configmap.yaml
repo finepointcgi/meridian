@@ -1,0 +1,52 @@
+{{- $m := .Values.meridian -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "meridian.fullname" . }}
+  labels:
+    {{- include "meridian.labels" . | nindent 4 }}
+data:
+  Meridian__PublicUrl: {{ $m.publicUrl | default (printf "https://%s" .Values.ingress.host) | quote }}
+  Meridian__KeysPath: /data/keys
+  Meridian__DataPath: /data
+  Meridian__Security__TrustForwardedHeaders: {{ $m.trustForwardedHeaders | quote }}
+  Meridian__Security__AllowRegistration: {{ $m.security.allowRegistration | quote }}
+  Meridian__Security__MaxFailedLogins: {{ $m.security.maxFailedLogins | quote }}
+  Meridian__Security__LockoutMinutes: {{ $m.security.lockoutMinutes | quote }}
+  Meridian__Security__LoginAttemptsPerMinute: {{ $m.security.loginAttemptsPerMinute | quote }}
+  Meridian__Admins: {{ join "," $m.security.admins | quote }}
+  Meridian__Sso__DisableLocalPasswords: {{ $m.sso.disableLocalPasswords | quote }}
+  {{- range $i, $p := $m.sso.providers }}
+  Meridian__Sso__Providers__{{ $i }}__Name: {{ required "sso provider name is required" $p.name | quote }}
+  Meridian__Sso__Providers__{{ $i }}__DisplayName: {{ $p.displayName | default $p.name | quote }}
+  Meridian__Sso__Providers__{{ $i }}__Authority: {{ required "sso provider authority is required" $p.authority | quote }}
+  Meridian__Sso__Providers__{{ $i }}__ClientId: {{ required "sso provider clientId is required" $p.clientId | quote }}
+  {{- if hasKey $p "autoProvision" }}
+  Meridian__Sso__Providers__{{ $i }}__AutoProvision: {{ $p.autoProvision | quote }}
+  {{- end }}
+  {{- range $j, $s := $p.scopes }}
+  Meridian__Sso__Providers__{{ $i }}__Scopes__{{ $j }}: {{ $s | quote }}
+  {{- end }}
+  {{- range $k, $v := $p.claimMappings }}
+  Meridian__Sso__Providers__{{ $i }}__ClaimMappings__{{ $k | title }}: {{ $v | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if and .Values.persistence.backups.enabled (gt (float64 $m.backup.intervalHours) 0.0) }}
+  Meridian__Backup__Folder: /data/backups
+  {{- end }}
+  Meridian__Backup__IntervalHours: {{ $m.backup.intervalHours | quote }}
+  Meridian__Backup__Retain: {{ $m.backup.retain | quote }}
+  Meridian__Backup__IncludeUsers: {{ $m.backup.includeUsers | quote }}
+  Meridian__Scripting__Enabled: {{ $m.scripting.enabled | quote }}
+  Meridian__Plugins__Enabled: {{ $m.plugins.enabled | quote }}
+  {{- if .Values.persistence.plugins.enabled }}
+  Meridian__Plugins__Path: /data/plugins
+  {{- end }}
+  Meridian__Logging__Format: {{ $m.logging.format | quote }}
+  Meridian__Logging__Requests: {{ $m.logging.requests | quote }}
+  Logging__LogLevel__Default: {{ $m.logging.level | quote }}
+  {{- if $m.telemetry.otlpEndpoint }}
+  Meridian__Telemetry__OtlpEndpoint: {{ $m.telemetry.otlpEndpoint | quote }}
+  Meridian__Telemetry__Protocol: {{ $m.telemetry.protocol | quote }}
+  Meridian__Telemetry__ExportLogs: {{ $m.telemetry.exportLogs | quote }}
+  {{- end }}

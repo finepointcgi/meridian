@@ -1,0 +1,156 @@
+# Meridian production stack: Caddy (automatic HTTPS) → Meridian → PostgreSQL 17.
+#
+#   cp .env.example .env            # then edit: MERIDIAN_DOMAIN, ACME_EMAIL/CADDY_TLS, POSTGRES_PASSWORD
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml --profile backup up -d      # + scheduled pg_dump sidecar
+#   docker compose -f docker-compose.prod.yml --profile otel up -d        # + OpenTelemetry collector
+#
+# Only Caddy publishes ports. Meridian and PostgreSQL are reachable only on the internal "backend" network, which is
+# why Meridian may trust X-Forwarded-* headers (they can only come from Caddy). Full runbook: docs/DEPLOYMENT.md.
+
+name: ${COMPOSE_PROJECT_NAME:-meridian}
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+
+services:
+  db:
+    <<: *restart
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-meridian}
+      POSTGRES_USER: ${POSTGRES_USER:-meridian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [backend]
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  meridian:
+    <<: [*restart, *hardening]
+    image: ${MERIDIAN_IMAGE:-ghcr.io/finepointcgi/meridian}:${MERIDIAN_VERSION:-latest}
+    build:
+      context: .
+      args:
+        VERSION: ${MERIDIAN_VERSION:-0.0.0-local}
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    environment:
+      ConnectionStrings__Meridian: "Host=db;Port=5432;Database=${POSTGRES_DB:-meridian};Username=${POSTGRES_USER:-meridian};Password=${POSTGRES_PASSWORD};Maximum Pool Size=${MERIDIAN_DB_POOL_SIZE:-50}"
+      Meridian__PublicUrl: "https://${MERIDIAN_DOMAIN:?set MERIDIAN_DOMAIN in .env}"
+      Meridian__KeysPath: /data/keys
+      Meridian__Backup__Folder: /data/backups
+      Meridian__Backup__IntervalHours: ${MERIDIAN_BACKUP_INTERVAL_HOURS:-24}
+      Meridian__Backup__Retain: ${MERIDIAN_BACKUP_RETAIN:-14}
+      Meridian__Plugins__Path: /data/plugins
+      Meridian__Plugins__Enabled: ${MERIDIAN_PLUGINS_ENABLED:-true}
+      Meridian__Scripting__Enabled: ${MERIDIAN_SCRIPTING_ENABLED:-false}
+      Meridian__Security__TrustForwardedHeaders: "true"
+      Meridian__Security__AllowRegistration: ${MERIDIAN_ALLOW_REGISTRATION:-false}
+      Meridian__Admins: ${MERIDIAN_ADMINS:-}
+      Meridian__Security__MaxFailedLogins: ${MERIDIAN_MAX_FAILED_LOGINS:-5}
+      Meridian__Security__LockoutMinutes: ${MERIDIAN_LOCKOUT_MINUTES:-15}
+      Meridian__Security__LoginAttemptsPerMinute: ${MERIDIAN_LOGIN_ATTEMPTS_PER_MINUTE:-10}
+      Meridian__Sso__DisableLocalPasswords: ${MERIDIAN_SSO_DISABLE_LOCAL_PASSWORDS:-false}
+      Meridian__Sso__Providers__0__Name: ${MERIDIAN_SSO_NAME:-}
+      Meridian__Sso__Providers__0__DisplayName: ${MERIDIAN_SSO_DISPLAY_NAME:-}
+      Meridian__Sso__Providers__0__Authority: ${MERIDIAN_SSO_AUTHORITY:-}
+      Meridian__Sso__Providers__0__ClientId: ${MERIDIAN_SSO_CLIENT_ID:-}
+      Meridian__Sso__Providers__0__ClientSecret: ${MERIDIAN_SSO_CLIENT_SECRET:-}
+      Meridian__Logging__Format: ${MERIDIAN_LOG_FORMAT:-json}
+      Meridian__Logging__Requests: ${MERIDIAN_LOG_REQUESTS:-true}
+      Meridian__Telemetry__OtlpEndpoint: ${MERIDIAN_OTLP_ENDPOINT:-}
+      Meridian__Telemetry__ExportLogs: ${MERIDIAN_OTLP_EXPORT_LOGS:-false}
+      Logging__LogLevel__Default: ${MERIDIAN_LOG_LEVEL:-Information}
+    volumes:
+      - meridian-keys:/data/keys
+      - meridian-backups:/data/backups
+      - meridian-plugins:/data/plugins:ro
+    networks: [backend, egress]   # egress: SSO discovery, issue trackers, webhooks
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/Meridian.Web.dll", "--healthcheck", "http://127.0.0.1:8080/readyz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    stop_grace_period: 30s   # lets the server flush live collaboration sessions to the database
+
+  caddy:
+    <<: *restart
+    image: caddy:2.10-alpine
+    depends_on:
+      meridian:
+        condition: service_healthy
+    environment:
+      MERIDIAN_DOMAIN: ${MERIDIAN_DOMAIN}
+      CADDY_TLS: ${CADDY_TLS:-${ACME_EMAIL:?set ACME_EMAIL (or CADDY_TLS=internal) in .env}}
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+      - "${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./deploy/compose/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [backend, egress]
+
+  # ---------------------------------------------------------------- optional: scheduled pg_dump with retention
+  backup:
+    <<: *restart
+    profiles: ["backup"]
+    image: postgres:17-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/usr/local/bin/pg-backup.sh"]
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-meridian}
+      PGUSER: ${POSTGRES_USER:-meridian}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_INTERVAL_SECONDS: ${PG_BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETAIN_DAYS: ${PG_BACKUP_RETAIN_DAYS:-14}
+    volumes:
+      - ./deploy/compose/pg-backup.sh:/usr/local/bin/pg-backup.sh:ro
+      - pg-backups:/backups
+    networks: [backend]
+
+  # ---------------------------------------------------------------- optional: OpenTelemetry collector
+  # Set MERIDIAN_OTLP_ENDPOINT=http://otel-collector:4317 and edit deploy/compose/otel-collector.yaml to forward
+  # to your tracing/metrics backend.
+  otel-collector:
+    <<: [*restart, *hardening]
+    profiles: ["otel"]
+    image: otel/opentelemetry-collector-contrib:0.129.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    read_only: true
+    volumes:
+      - ./deploy/compose/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    networks: [backend, egress]
+
+networks:
+  backend:
+    internal: true    # PostgreSQL and the backup sidecar live only here: no published ports, no internet route
+  egress: {}          # outbound internet for Caddy (ACME), Meridian (SSO, integrations) and the collector
+
+volumes:
+  pg-data:
+  pg-backups:
+  meridian-keys:
+  meridian-backups:
+  meridian-plugins:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: meridian
+description: Meridian MBSE modeling server (SysML, BPMN, ArchiMate) with live collaboration, on PostgreSQL.
+type: application
+version: 0.1.0
+appVersion: "0.2.0"
+home: https://github.com/finepointcgi/meridian
+sources:
+  - https://github.com/finepointcgi/meridian
+keywords: [mbse, sysml, modeling, blazor]
+maintainers:
+  - name: finepointcgi
+dependencies:
+  # Bundled database for evaluation and small installs. Disabled by default: point externalDatabase at a managed
+  # PostgreSQL (RDS, Cloud SQL, Azure Database, CloudNativePG, ...) in production. Fetch with `helm dependency build`.
+  - name: postgresql
+    version: 16.7.27          # PostgreSQL 17.x
+    repository: oci://registry-1.docker.io/bitnamicharts
+    condition: postgresql.enabled
