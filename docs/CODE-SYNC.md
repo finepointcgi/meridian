@@ -134,3 +134,5 @@ status colours, so they read in light and dark mode.
   run's changes were rejected.
 - Runs are stored in the `code_sync_runs` table (SQLite and PostgreSQL), one row per push, with the change list as JSON.
 - The model root's `codeSync.rootPackage` field names the package code is mapped into (default `Code`).
+- `CodeSyncEvents.RunCompleted` is raised with `(request, outcome)` after each run that did not fail. The architecture
+  check subscribes to it and posts its own `meridian/architecture` status ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)).
