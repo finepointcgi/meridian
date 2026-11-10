@@ -209,6 +209,7 @@
                 </MudMenu>
             </div>
         </div>
+        <PluginsMenu @ref="_plugins" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
     </nav>
 
     @* ================================================================ workspace *@
@@ -293,6 +294,7 @@
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
                     @DockTab(7, "Traceability table", Icons.Material.Outlined.FactCheck, null)
                     @DockTab(ReviewsDock, "Reviews", Icons.Material.Outlined.Checklist, null)
+                    @DockTab(10, "Script", Icons.Material.Outlined.DataObject, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -310,6 +312,7 @@
                             case 6: <ParametricsPanel />; break;
                             case 7: <TraceabilityPanel />; break;
                             case ReviewsDock: <ReviewsPanel Focus="_reviewFocus" />; break;
+                            case 10: <ScriptPanel />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>

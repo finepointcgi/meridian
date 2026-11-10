@@ -72,6 +72,7 @@ public partial class Workbench
             C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
         };
         list.AddRange(RequirementPaletteCommands());
+        list.AddRange(ScriptingPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;

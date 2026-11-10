@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sample Meridian plugin. Build it, then copy bin/<Configuration>/net10.0/ into the plugins folder as plugins/HelloPlugin/
+    (local mode: <data path>/plugins; server mode: Meridian:Plugins:Path). See docs/PLUGINS.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The host provides Meridian.Scripting at run time: compile against it, but don't copy it (or its dependencies) to the output. -->
+    <ProjectReference Include="..\..\src\Meridian.Scripting\Meridian.Scripting.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

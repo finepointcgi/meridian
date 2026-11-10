@@ -1,0 +1,48 @@
+@using Meridian.Scripting
+@inject PluginManager Plugins
+@inject ScriptingSettings Settings
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><MudText Typo="Typo.h6">Plugins &amp; scripting</MudText></div></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Style="opacity:.75">
+            Meridian @(typeof(PluginsDialog).Assembly.GetName().Version?.ToString(3)) · plugin/scripting API @ModelApi.Version ·
+            plugins folder: <code>@(Plugins.Folder ?? (Settings.LocalMode ? "(disabled)" : "(not configured: set Meridian:Plugins:Path)"))</code>
+        </MudText>
+        <MudSimpleTable Dense="true" Style="font-size:12.5px; margin-top:10px">
+            <thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Contributes</th></tr></thead>
+            <tbody>
+                @foreach (var p in Plugins.Plugins)
+                {
+                    <tr>
+                        <td title="@p.AssemblyPath">@p.Name</td>
+                        <td>@p.Version</td>
+                        <td style="color:@(p.Loaded ? "var(--ok)" : "var(--danger)")">@(p.Loaded ? "Loaded" : "Failed: " + p.Error)</td>
+                        <td>@(p.Loaded ? $"{p.Commands} commands · {p.Rules} rules · {p.Exporters} exporters · {p.Importers} importers" : "")</td>
+                    </tr>
+                }
+                @if (Plugins.Plugins.Count == 0)
+                {
+                    <tr><td colspan="4" style="opacity:.7">No plugins loaded. Copy a plugin's build output to the plugins folder and restart Meridian (see docs/PLUGINS.md).</td></tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <MudAlert Severity="@(Settings.ConsoleEnabled ? Severity.Warning : Severity.Info)" Dense="true" Class="mt-3">
+            @if (Settings.ConsoleEnabled)
+            {
+                @(Settings.LocalMode
+                    ? "The script console is enabled (local mode). Scripts and plugins run as .NET code with this app's permissions; the script policy is a guard rail, not a sandbox."
+                    : "The script console is enabled on this server for project owners. Scripts run inside the server process; the script policy is a guard rail, not a sandbox.")
+            }
+            else
+            {
+                @("The script console is disabled" + (Settings.LocalMode ? "." : " on this server (enable with Meridian:Scripting:Enabled=true; owners only)."))
+            }
+        </MudAlert>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+}

@@ -46,6 +46,7 @@ public static class MeridianServer
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddScoped<ReviewService>();
+        builder.Services.AddMeridianScripting(builder.Configuration, host);   // script console + plugins (docs/SCRIPTING.md, docs/PLUGINS.md)
         builder.Services.AddHttpContextAccessor();
 
         // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.

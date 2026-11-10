@@ -1,0 +1,154 @@
+@using Meridian.Scripting
+@inherits WorkspaceComponent
+@inject ScriptConsole Console
+
+@* Script console (dock 10): C# scripts against the Meridian scripting API. See docs/SCRIPTING.md. *@
+<div class="script-panel">
+    @if (Console.DenialReason is { } reason)
+    {
+        <div class="script-banner off">
+            <MudIcon Icon="@Icons.Material.Outlined.Lock" Style="font-size:16px" />
+            <span>@reason</span>
+        </div>
+    }
+    else
+    {
+        <div class="script-bar">
+            <select class="script-select" title="Saved scripts (stored in the model)" @onchange="OnPick">
+                <option value="">Saved scripts…</option>
+                @foreach (var s in _saved)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
+            <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
+                <ActivatorContent><button class="script-btn" title="Example scripts"><MudIcon Icon="@Icons.Material.Outlined.MenuBook" />Examples</button></ActivatorContent>
+                <ChildContent>
+                    @foreach (var ex in ExampleScripts.All)
+                    {
+                        var example = ex;
+                        <MudMenuItem OnClick="() => Console.Load(example)">@example.Name</MudMenuItem>
+                    }
+                </ChildContent>
+            </MudMenu>
+            <input class="script-name" @bind="Console.Name" @bind:event="oninput" title="Script name" />
+            <button class="script-btn primary" disabled="@Console.Running" @onclick="Run" title="Run (Ctrl/⌘+Enter) — one undo step"><MudIcon Icon="@Icons.Material.Filled.PlayArrow" />Run</button>
+            <button class="script-btn" disabled="@(!Console.Running)" @onclick="Console.Cancel" title="Cancel the running script"><MudIcon Icon="@Icons.Material.Outlined.Stop" />Cancel</button>
+            <label class="script-timeout" title="Time limit">
+                <MudIcon Icon="@Icons.Material.Outlined.Timer" Style="font-size:15px" />
+                <input type="number" min="1" max="3600" @bind="Console.TimeoutSeconds" /> s
+            </label>
+            <button class="script-btn" disabled="@Ws.ReadOnly" @onclick="Save" title="Save the script in the model (Scripts package)"><MudIcon Icon="@Icons.Material.Outlined.Save" />Save</button>
+            <button class="script-btn" disabled="@(Ws.ReadOnly || _savedId == null)" @onclick="Delete" title="Delete the saved script"><MudIcon Icon="@Icons.Material.Outlined.Delete" /></button>
+            <button class="script-btn" @onclick="Console.Clear" title="Clear output"><MudIcon Icon="@Icons.Material.Outlined.ClearAll" /></button>
+            <span style="flex:1"></span>
+            <span class="script-warn" title="Scripts are compiled C# running inside the Meridian @(Console.Settings.LocalMode ? "app" : "server") process. A policy blocks file, process, network and reflection APIs by default, but this is not a sandbox: only run scripts you trust.">
+                <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:15px" />
+                @(Console.Settings.LocalMode ? "Runs C# on this computer — not a sandbox" : "Runs C# on the server process (owners only) — not a sandbox")
+            </span>
+        </div>
+        <div class="script-main">
+            <div class="script-editor">
+                <pre class="script-gutter">@for (var i = 1; i <= LineCount; i++) {<span class="@(Console.ErrorLines.Contains(i) ? "err" : "")">@i</span>@("\n")}</pre>
+                <textarea class="script-code" spellcheck="false" wrap="off" rows="@(LineCount + 1)"
+                          @bind="Console.Code" @bind:event="oninput" @onkeydown="Key"
+                          placeholder="// C# script. Globals: Model, Selection, Log(...), Status(...), Download(...)"></textarea>
+            </div>
+            <div class="script-output">
+                @foreach (var line in Console.Output)
+                {
+                    <div class="sline @line.Kind">@line.Text</div>
+                }
+                @if (Console.Running) { <div class="sline info">⏳ running… (Cancel stops it at the next loop iteration or API call)</div> }
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .script-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .script-banner { display: flex; gap: 8px; align-items: center; padding: 12px 14px; color: var(--text-2); }
+    .script-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    .script-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--border-strong);
+                  background: var(--panel-2); color: var(--text); font-size: 12px; cursor: pointer; }
+    .script-btn .mud-icon-root { font-size: 16px; }
+    .script-btn:disabled { opacity: .45; cursor: default; }
+    .script-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .script-select, .script-name, .script-timeout input { height: 26px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--panel-2); color: var(--text); font-size: 12px; padding: 0 6px; }
+    .script-name { width: 180px; }
+    .script-timeout { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: 12px; }
+    .script-timeout input { width: 58px; }
+    .script-warn { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--warn); }
+    .script-main { flex: 1; display: flex; min-height: 0; }
+    .script-editor { flex: 3; display: flex; overflow: auto; min-width: 0; border-right: 1px solid var(--border); background: var(--canvas); }
+    .script-gutter, .script-code { font: 12px/18px "JetBrains Mono", Menlo, Consolas, monospace; margin: 0; padding: 8px 0; }
+    .script-gutter { min-width: 38px; padding-right: 8px; text-align: right; color: var(--text-3); user-select: none; position: sticky; left: 0; background: var(--canvas); }
+    .script-gutter .err { color: var(--danger); font-weight: 700; }
+    .script-code { flex: 1; min-width: 400px; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: var(--text); padding-left: 8px; tab-size: 4; white-space: pre; }
+    .script-output { flex: 2; overflow: auto; padding: 8px 12px; font: 11.5px/17px "JetBrains Mono", Menlo, Consolas, monospace; min-width: 0; }
+    .script-output .sline { white-space: pre-wrap; word-break: break-word; color: var(--text-2); }
+    .script-output .sline.error { color: var(--danger); }
+    .script-output .sline.warn { color: var(--warn); }
+    .script-output .sline.result { color: var(--ok); }
+    .script-output .sline.info { color: var(--text-3); }
+</style>
+
+@code {
+    private IReadOnlyList<SavedScript> _saved = [];
+    private string? _savedId;
+
+    private int LineCount => Math.Max(1, Console.Code.Count(c => c == '\n') + 1);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Console.Changed += OnConsoleChanged;
+        Refresh();
+    }
+
+    protected override void OnWorkspaceChanged() => Refresh();
+
+    private void Refresh() => _saved = ScriptLibrary.List(Ws.Model);
+
+    private void OnConsoleChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey)) await Run();
+    }
+
+    private async Task Run() => await Console.RunAsync();
+
+    private void OnPick(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        if (_saved.FirstOrDefault(s => s.Id == id) is { } s)
+        {
+            _savedId = s.Id;
+            Console.Load(s);
+        }
+    }
+
+    private void Save()
+    {
+        if (Ws.ReadOnly) return;
+        _savedId = ScriptLibrary.Save(Ws.Model, Console.Name, Console.Code);
+        Refresh();
+        Ws.SetStatus($"Saved script {Console.Name} in the model");
+    }
+
+    private void Delete()
+    {
+        if (_savedId is null || Ws.ReadOnly) return;
+        ScriptLibrary.Delete(Ws.Model, _savedId);
+        _savedId = null;
+        Refresh();
+        Ws.SetStatus("Deleted the saved script");
+    }
+
+    public override void Dispose()
+    {
+        Console.Changed -= OnConsoleChanged;
+        base.Dispose();
+    }
+}
