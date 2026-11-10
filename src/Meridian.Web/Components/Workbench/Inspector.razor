@@ -137,6 +137,9 @@
                         @foreach (var st in Subtypes.For(e.Kind)) { <MudSelectItem Value="@st">@Subtypes.Display(st)</MudSelectItem> }
                     </MudSelect>
                     break;
+                case ExtFieldKeys.FeatureKind:
+                    @Choice(e, key, "Feature kind (relative to parent)", ("", "Optional (default)"), ("mandatory", "Mandatory"), ("optional", "Optional"), ("alternative", "Alternative (exactly one)"), ("or", "Or (at least one)"))
+                    break;
                 case FieldKeys.PortKind:
                     @Choice(e, key, "Port kind", ("", "(unspecified)"), ("proxy", "Proxy port"), ("full", "Full port"))
                     break;
@@ -476,7 +479,7 @@
         FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity",
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
-        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => key,
+        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => ExtFieldKeys.Label(key) ?? key,
     };
 
     private static string? Help(string key) => key switch
@@ -486,6 +489,6 @@
         FieldKeys.Stereotypes => "Comma separated",
         Meridian.Core.Analysis.ViewFields.Query => "e.g. kind:Block in:Structure where mass > 50 and not has:satisfy",
         Meridian.Core.Analysis.ViewFields.Message => "Placeholders: {name}, {owner}, {mass} …",
-        _ => null,
+        _ => ExtFieldKeys.Help(key),
     };
 }

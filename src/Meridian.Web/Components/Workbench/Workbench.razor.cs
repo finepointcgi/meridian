@@ -56,6 +56,7 @@ public partial class Workbench
             C("Requirements table", Icons.Material.Outlined.TableRows, () => OpenDock(1)),
             C("Simulate", Icons.Material.Outlined.PlayCircle, () => OpenDock(5)),
             C("Parametrics", Icons.Material.Outlined.Functions, () => OpenDock(6)),
+            C("Variants, configurations & trade studies", Icons.Material.Outlined.Balance, () => OpenDock(11)),
             C("Impact analysis of selection", Icons.Material.Outlined.CallSplit, ImpactOfSelection),
             C("Toggle light / dark mode", Icons.Material.Outlined.DarkMode, ToggleTheme),
             C("Arrange active diagram", Icons.Material.Outlined.AutoAwesomeMosaic, () => Ws.Active?.Arrange()),
@@ -159,6 +160,12 @@ public partial class Workbench
         Ws.Log($"Opened “{Ws.Session!.Name}” as {role.Value.ToString().ToLowerInvariant()}");
         Ws.SetStatus(role == ProjectRole.Viewer ? "View-only: you can browse, comment and export, but not edit." : $"Opened {Ws.Session.Name}");
     }
+
+    /// <summary>Creates and opens a new project from a model (used by panels, e.g. resolved variants).</summary>
+    public Task<Guid?> CreateProjectFromModel(ModelRepository model, string name) => CreateProjectFrom(model, name);
+
+    /// <summary>Offers a text file for download (used by panels' exports).</summary>
+    public Task DownloadTextFile(string fileName, string mime, string text) => DownloadText(fileName, mime, text);
 
     private async Task<Guid?> CreateProjectFrom(ModelRepository model, string name)
     {

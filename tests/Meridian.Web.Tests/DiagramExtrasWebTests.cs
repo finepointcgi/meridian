@@ -183,10 +183,10 @@ public class DiagramExtrasWebTests : TestContext
     {
         Services.GetRequiredService<Workspace>().UseLocalModel(SampleModels.Vehicle());
         var cut = RenderComponent<OnboardingTour>();
-        cut.InvokeAsync(() => cut.Instance.StartAsync());
-        Assert.Contains("Step 1 of", cut.Markup);
+        cut.InvokeAsync(() => cut.Instance.StartAsync()).GetAwaiter().GetResult();
+        cut.WaitForAssertion(() => Assert.Contains("Step 1 of", cut.Markup));
         cut.Find(".tour-btn.primary").Click();
-        Assert.Contains("Step 2 of", cut.Markup);
+        cut.WaitForAssertion(() => Assert.Contains("Step 2 of", cut.Markup));
         cut.Find(".tour-skip").Click();
         cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".tour")));
     }

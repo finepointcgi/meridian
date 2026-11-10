@@ -129,6 +129,7 @@ public static class XmiExchange
         FieldKeys.TagType, FieldKeys.TagValues, FieldKeys.Color, FieldKeys.SqlType, FieldKeys.PrimaryKey, FieldKeys.Nullable,
         FieldKeys.Unique, FieldKeys.FkColumns, FieldKeys.RefColumns,
         Core.Analysis.ViewFields.Query, Core.Analysis.ViewFields.Columns, Core.Analysis.ViewFields.Severity, Core.Analysis.ViewFields.Message,
+        .. ExtFieldKeys.All,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -136,7 +137,9 @@ public static class XmiExchange
         or ElementKind.ArchiElement or ElementKind.Table or ElementKind.Column or ElementKind.TagDefinition
         or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.ForeignKey or ElementKind.Binding
         or ElementKind.Shape or ElementKind.Line
-        or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule;
+        or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule
+        or ElementKind.Feature or ElementKind.Configuration or ElementKind.TradeStudy
+        or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes;
     private static XAttribute Type(string t) => new(Xmi + "type", "uml:" + t);
 
     private static void Emit(ModelRepository m, XElement parent, Element e, List<XElement> st, XElement ext)

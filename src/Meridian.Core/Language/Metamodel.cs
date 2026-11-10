@@ -2,7 +2,7 @@ using Meridian.Core.Model;
 
 namespace Meridian.Core.Language;
 
-public enum ArrowHead { None, Open, HollowTriangle, FilledDiamond, HollowDiamond, Filled, Dot, CrowsFoot, Bar }
+public enum ArrowHead { None, Open, HollowTriangle, FilledDiamond, HollowDiamond, Filled, Dot, CrowsFoot, Bar, HollowDot }
 
 public sealed record EdgeStyle(bool Dashed, ArrowHead TargetHead, ArrowHead SourceHead, string? Keyword, bool Dotted = false);
 
@@ -31,6 +31,7 @@ public static class Metamodel
         ElementKind.Trace, ElementKind.DeriveReqt, ElementKind.Copy, ElementKind.Include, ElementKind.Extend,
         ElementKind.Transition, ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate, ElementKind.Connector,
         ElementKind.Message, ElementKind.Binding, ElementKind.BpmnFlow, ElementKind.ArchiRelation, ElementKind.ForeignKey, ElementKind.Line,
+        ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes,
     };
 
     private static readonly HashSet<ElementKind> Classifiers = new()
@@ -62,6 +63,7 @@ public static class Metamodel
     {
         ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
         ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule,
+        ElementKind.Feature, ElementKind.Configuration, ElementKind.TradeStudy,
     };
 
     /// <summary>Kinds that carry no name of their own in normal use.</summary>
@@ -114,6 +116,7 @@ public static class Metamodel
             ElementKind.StateMachine => IsVertex(child),
             ElementKind.State => IsVertex(child),
             ElementKind.Table => child == ElementKind.Column,
+            ElementKind.Feature => child == ElementKind.Feature,   // feature tree by containment
             _ => false,
         };
     }
@@ -144,6 +147,8 @@ public static class Metamodel
             ElementKind.BpmnFlow => source is ElementKind.BpmnNode or ElementKind.BpmnPool && target is ElementKind.BpmnNode or ElementKind.BpmnPool ? null : "BPMN flows connect BPMN elements",
             ElementKind.ArchiRelation => source == ElementKind.ArchiElement && target == ElementKind.ArchiElement ? null : "ArchiMate relationships connect ArchiMate elements",
             ElementKind.ForeignKey => source == ElementKind.Table && target == ElementKind.Table ? null : "Foreign keys connect two tables",
+            ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes =>
+                source == ElementKind.Feature && target == ElementKind.Feature ? null : $"{DisplayName(rel)} must connect two Features",
             _ => null, // Dependency, Refine, Trace, Allocate: any to any
         };
     }
@@ -192,6 +197,7 @@ public static class Metamodel
         DiagramType.Package => [ElementKind.Package, ElementKind.Profile, ElementKind.Stereotype, ElementKind.Comment],
         DiagramType.Sequence => [ElementKind.Lifeline, ElementKind.CombinedFragment, ElementKind.Comment],
         DiagramType.Database => [ElementKind.Table, ElementKind.Comment],
+        DiagramType.FeatureModel => [ElementKind.Feature, ElementKind.Configuration, ElementKind.Comment],
         _ => [],
     };
 
@@ -208,6 +214,7 @@ public static class Metamodel
         DiagramType.Package => [ElementKind.Dependency, ElementKind.Generalization],
         DiagramType.Sequence => [ElementKind.Message],
         DiagramType.Database => [ElementKind.ForeignKey],
+        DiagramType.FeatureModel => [ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes],
         _ => [],
     };
 
@@ -218,7 +225,7 @@ public static class Metamodel
         DiagramType.Activity => owner == ElementKind.Activity,
         DiagramType.StateMachine => owner == ElementKind.StateMachine,
         DiagramType.Sequence => owner == ElementKind.Interaction,
-        DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard => owner is ElementKind.Model or ElementKind.Package,
+        DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard or DiagramType.FeatureModel => owner is ElementKind.Model or ElementKind.Package,
         _ => IsNamespace(owner),
     };
 
@@ -238,6 +245,7 @@ public static class Metamodel
         DiagramType.ArchiMate => "archi",
         DiagramType.Database => "erd",
         DiagramType.Whiteboard => "board",
+        DiagramType.FeatureModel => "fm",
         _ => "diagram",
     };
 
@@ -278,6 +286,8 @@ public static class Metamodel
         ElementKind.TableView => "Table View",
         ElementKind.QueryView => "Query",
         ElementKind.ValidationRule => "Validation Rule",
+        ElementKind.TradeStudy => "Trade Study",
+        ElementKind.FeatureDecomposition => "Feature Decomposition",
         _ => k.ToString(),
     };
 
@@ -293,6 +303,7 @@ public static class Metamodel
         DiagramType.ArchiMate => "ArchiMate View",
         DiagramType.Database => "Entity-Relationship Diagram",
         DiagramType.Whiteboard => "Whiteboard",
+        DiagramType.FeatureModel => "Feature Model Diagram",
         _ => $"{t} Diagram",
     };
 
@@ -316,6 +327,9 @@ public static class Metamodel
         ElementKind.Stereotype => "stereotype",
         ElementKind.Table => "table",
         ElementKind.ObjectNode => "centralBuffer",
+        ElementKind.Feature => "feature",
+        ElementKind.Configuration => "configuration",
+        ElementKind.TradeStudy => "tradeStudy",
         _ => null,
     };
 
@@ -358,6 +372,8 @@ public static class Metamodel
         _ when k is ElementKind.Property or ElementKind.ObjectNode => (160, 60),
         _ when k == ElementKind.ArchiElement => (150, 70),
         _ when k == ElementKind.Table => (200, 120),
+        _ when k is ElementKind.Configuration or ElementKind.TradeStudy => (200, 110),
+        _ when k == ElementKind.Feature => (140, 60),
         _ => (180, 110),
     };
 
@@ -384,6 +400,9 @@ public static class Metamodel
         ElementKind.Binding => new(false, ArrowHead.None, ArrowHead.None, "equal"),
         ElementKind.Message => new(false, ArrowHead.Filled, ArrowHead.None, null),
         ElementKind.ForeignKey => new(false, ArrowHead.Bar, ArrowHead.CrowsFoot, null),
+        ElementKind.FeatureDecomposition => new(false, ArrowHead.Dot, ArrowHead.None, null),
+        ElementKind.Requires => new(true, ArrowHead.Open, ArrowHead.None, "requires"),
+        ElementKind.Excludes => new(true, ArrowHead.Open, ArrowHead.Open, "excludes"),
         _ => new(false, ArrowHead.None, ArrowHead.None, null),
     };
 
@@ -416,6 +435,7 @@ public static class Metamodel
         if (k == ElementKind.ForeignKey) { f.Add(FieldKeys.FkColumns); f.Add(FieldKeys.RefColumns); }
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
+        f.AddRange(ExtFieldKeys.EditableFields(k));
         f.Add(FieldKeys.Stereotypes);
         f.Add(FieldKeys.Documentation);
         return f;

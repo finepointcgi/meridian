@@ -581,3 +581,12 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .vc-bitem.on { border-color: var(--mud-palette-primary); background: rgba(79, 140, 255, .07); }
 .vc-diffscroll { max-height: 56vh; overflow: auto; padding-right: 4px; }
 @media (max-width: 900px) { .vc-baselines { grid-template-columns: 1fr; } .vc-pane:first-child { border-right: none; padding-right: 0; } .vc-crow { grid-template-columns: 1fr; } }
+/* Variants, trade studies, timed simulation, Monte Carlo */
+.var-hint { padding: 4px 14px 14px; color: var(--text-3); font-size: 12.5px; }
+.var-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px; padding: 0 12px 12px; }
+.var-tree { max-height: 340px; overflow: auto; }
+.var-feature { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-height: 26px; }
+.var-kind { font-size: 10.5px; color: var(--text-3); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+.var-problem { color: var(--danger); font-size: 12px; margin: 2px 0; cursor: pointer; }
+.cell-input { width: 100%; min-width: 60px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; font: inherit; font-size: 12px; }
+svg.chart { display: block; max-width: 100%; }

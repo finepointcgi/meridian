@@ -1,0 +1,164 @@
+@using Meridian.Core.Analysis
+@using System.Globalization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="Behaviors (run together)" MultiSelection="true" SelectedValues="_behaviorIds" SelectedValuesChanged="ids => _behaviorIds = ids.ToList()"
+               Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:280px" MaxHeight="360"
+               MultiSelectionTextFunc="@(ids => string.Join(", ", ids.Select(id => Ws.Model.Find(id)?.DisplayName ?? "?")))">
+        @foreach (var b in Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Activity or ElementKind.StateMachine).OrderBy(e => e.Name))
+        {
+            <MudSelectItem Value="@b.Id">@b.DisplayName · @Metamodel.DisplayName(b.Kind)</MudSelectItem>
+        }
+    </MudSelect>
+    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RestartAlt" Disabled="@(_behaviorIds.Count == 0)" OnClick="Start">@(_sim == null ? "Start" : "Restart")</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SkipNext" Disabled="@(_sim == null || _sim.Finished || _playing)" OnClick="Step">Next event</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@(_playing ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)" Disabled="@(_sim == null || _sim.Finished)" OnClick="TogglePlay">@(_playing ? "Pause" : "Play")</MudButton>
+    <MudSelect T="double" Label="Speed" @bind-Value="_speed" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:110px">
+        @foreach (var s in new[] { 0.5, 1, 2, 5, 10, 50, 200 }) { <MudSelectItem Value="@s">@s.ToString(CultureInfo.InvariantCulture)×</MudSelectItem> }
+    </MudSelect>
+    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FastForward" Disabled="@(_sim == null || _sim.Finished)" OnClick="RunAll">Run to completion</MudButton>
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Stop" Disabled="_sim == null" OnClick="Stop">Stop</MudButton>
+    @if (_sim != null)
+    {
+        <MudChip T="string" Size="Size.Small" Color="@(_sim.Finished ? Color.Success : Color.Info)" Variant="Variant.Outlined">
+            t = @_sim.Clock.ToString("0.###", CultureInfo.InvariantCulture) s · @_sim.EventsProcessed events@(_sim.NextEventTime is { } n && !_sim.Finished ? $" · next @ {n:0.###}s" : "")
+        </MudChip>
+    }
+</div>
+@if (_sim != null)
+{
+    <div class="d-flex align-center gap-2 px-3 pb-2 flex-wrap">
+        <span style="font-size:12px; color:var(--text-3)">Send signal:</span>
+        @foreach (var s in _signals)
+        {
+            var sig = s;
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Outlined.Bolt" OnClick="() => Inject(sig)">@sig</MudButton>
+        }
+        <MudTextField T="string" @bind-Value="_custom" Placeholder="signal name" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:160px" />
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Send" Disabled="@string.IsNullOrWhiteSpace(_custom)" OnClick="() => Inject(_custom!)" />
+    </div>
+    <div class="px-3" style="overflow-x:auto">@((MarkupString)SvgCharts.Timeline(_sim.Spans, _sim.Signals, _sim.Clock))</div>
+    <div style="display:grid; grid-template-columns: 220px 1fr; gap:12px; padding:6px 12px 12px">
+        <div>
+            <div class="section-label" style="padding-left:0">Variables</div>
+            @foreach (var (name, value) in _sim.Variables.OrderBy(v => v.Key).ToList())
+            {
+                <div class="d-flex" style="font-size:12px; gap:8px"><span style="min-width:90px; color:var(--text-2)">@name</span><b>@value.ToString("G6", CultureInfo.InvariantCulture)</b></div>
+            }
+        </div>
+        <pre class="output" style="margin:0; max-height:220px; overflow:auto; border:1px solid var(--border); border-radius:8px">@string.Join("\n", _sim.Trace.TakeLast(400))</pre>
+    </div>
+}
+else
+{
+    <div class="var-hint">
+        Runs activities and state machines together on one simulation clock. Give actions a <b>Duration</b> (<code>2s</code>, <code>200ms</code>, <code>1 min</code>,
+        or an expression), make them <b>send a signal</b> on completion or <b>accept an event</b>; name transitions with a signal, <code>after(5s)</code>
+        or <code>when(temp &lt; 50)</code>. Guards and bodies are evaluated against the owning block's value properties. Each event runs to completion;
+        the timeline shows actions, waits and states as bars and signals as arrows.
+    </div>
+}
+
+@code {
+    private List<string> _behaviorIds = new();
+    private DiscreteEventSimulation? _sim;
+    private double _speed = 5;
+    private bool _playing;
+    private CancellationTokenSource? _cts;
+    private string? _custom;
+    private List<string> _signals = new();
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        var first = Ws.Model.AllElements.FirstOrDefault(e => e.Kind is ElementKind.Activity or ElementKind.StateMachine && e.OwnedElements.Any(a => a.Get(ExtFieldKeys.Duration).Length > 0))
+                    ?? Ws.Model.AllElements.FirstOrDefault(e => e.Kind is ElementKind.Activity or ElementKind.StateMachine);
+        if (first != null)
+            _behaviorIds = (first.Owner?.OwnedElements ?? []).Where(e => e.Kind is ElementKind.Activity or ElementKind.StateMachine).Select(e => e.Id).DefaultIfEmpty(first.Id).ToList();
+    }
+
+    private void Start()
+    {
+        StopPlaying();
+        var behaviors = _behaviorIds.Select(Ws.Model.Find).OfType<Element>().ToList();
+        if (behaviors.Count == 0) return;
+        _sim = new DiscreteEventSimulation(Ws.Model, behaviors);
+        _signals = behaviors.SelectMany(b => b.Descendants())
+            .SelectMany(e => e is Relationship { Kind: ElementKind.Transition } t
+                ? (DiscreteEventSimulation.ParseTrigger(t.Name) is (DiscreteEventSimulation.TriggerKind.Signal, var n) ? [n] : Array.Empty<string>())
+                : new[] { e.Get(ExtFieldKeys.AcceptEvent) })
+            .Where(s => s.Length > 0).Distinct().OrderBy(s => s).ToList();
+        if (behaviors.Count == 1) Ws.DrillDown(behaviors[0]);
+        _sim.Start();
+        Sync();
+    }
+
+    private void Step() { _sim?.Step(); Sync(); }
+
+    private void RunAll()
+    {
+        StopPlaying();
+        _sim?.RunToCompletion();
+        Sync();
+    }
+
+    private void Inject(string signal)
+    {
+        _sim?.Inject(signal);
+        _sim?.RunUntil(_sim.Clock);
+        Sync();
+    }
+
+    private async Task TogglePlay()
+    {
+        if (_playing) { StopPlaying(); return; }
+        if (_sim == null) return;
+        _playing = true;
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        try
+        {
+            while (!ct.IsCancellationRequested && _sim is { Finished: false } sim)
+            {
+                await Task.Delay(100, ct);
+                // Advance the clock in real time × speed, processing every event that falls in the slice.
+                var until = sim.Clock + 0.1 * _speed;
+                if (sim.NextEventTime is null) sim.RunToCompletion();
+                else sim.RunUntil(until);
+                Sync();
+                StateHasChanged();
+            }
+        }
+        catch (TaskCanceledException) { }
+        _playing = false;
+        StateHasChanged();
+    }
+
+    private void StopPlaying()
+    {
+        _cts?.Cancel();
+        _playing = false;
+    }
+
+    private void Stop()
+    {
+        StopPlaying();
+        _sim = null;
+        Ws.SimHighlight.Clear();
+        Ws.Bump();
+    }
+
+    private void Sync()
+    {
+        Ws.SimHighlight.Clear();
+        if (_sim != null) foreach (var e in _sim.Active) Ws.SimHighlight.Add(e.Id);
+        Ws.Bump();
+    }
+
+    public override void Dispose()
+    {
+        StopPlaying();
+        base.Dispose();
+    }
+}

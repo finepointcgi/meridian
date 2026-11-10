@@ -1,0 +1,78 @@
+@using Meridian.Serialization
+@inherits WorkspaceComponent
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <label class="mud-button-root mud-button mud-button-outlined mud-button-outlined-size-small" style="cursor:pointer; padding:3px 10px; @(Ws.ReadOnly ? "opacity:.5; pointer-events:none" : "")">
+        <InputFile accept=".fmu,.xml" OnChange="OnFile" style="display:none" />
+        Choose FMU or modelDescription.xml…
+    </label>
+    @if (_md != null)
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Input" Disabled="Ws.ReadOnly" OnClick="Import">
+            Import as block into @(Target.DisplayName)
+        </MudButton>
+    }
+</div>
+@if (_error != null) { <div class="var-problem" style="margin:0 14px">⚠ @_error</div> }
+@if (_md is { } md)
+{
+    <div class="px-3" style="font-size:12.5px">
+        <b>@md.ModelName</b> · FMI @md.FmiVersion · @(md.CoSimulation ? "Co-Simulation" : "") @(md.ModelExchange ? "Model Exchange" : "")
+        @if (md.Binaries.Count > 0) { <span style="color:var(--text-3)"> · binaries: @string.Join(", ", md.Binaries.Select(System.IO.Path.GetDirectoryName).Distinct())</span> }
+    </div>
+    <table class="req-table" style="margin:6px 12px 8px; width:calc(100% - 24px)">
+        <thead><tr><th>Variable</th><th>Causality</th><th>Type</th><th>Unit</th><th>Start</th><th>Becomes</th></tr></thead>
+        <tbody>
+            @foreach (var v in md.Variables)
+            {
+                <tr>
+                    <td>@v.Name</td><td>@v.Causality</td><td>@v.Type</td><td>@v.Unit</td><td>@v.Start</td>
+                    <td style="color:var(--text-3)">@(v.Causality switch { "input" => "in port", "output" => "out port", "independent" => "—", _ when v.Name.StartsWith("der(") => "—", _ => "value property" })</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+<div class="var-hint">
+    Imports an FMU's interface (FMI 2.0 or 3.0 <code>modelDescription.xml</code>): inputs and outputs become in / out proxy ports, parameters
+    and locals become value properties with their start values, and units are kept, so the block can type parts and be wired in internal
+    block diagrams. <b>Co-simulation is not implemented</b>: the FMU's native binaries are not loaded or executed.
+</div>
+
+@code {
+    private FmiModelDescription? _md;
+    private string? _fileName;
+    private string? _error;
+
+    private Element Target => Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _error = null; _md = null;
+        try
+        {
+            await using var s = e.File.OpenReadStream(200 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            ms.Position = 0;
+            _md = FmiImport.Read(ms);
+            _fileName = e.File.Name;
+        }
+        catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException)
+        {
+            _error = $"Could not read {e.File.Name}: {ex.Message}";
+        }
+    }
+
+    private void Import()
+    {
+        if (_md == null) return;
+        try
+        {
+            var block = FmiImport.CreateBlock(Ws.Model, Target, _md, _fileName);
+            Ws.Select(block);
+            Ws.SetStatus($"Imported FMU '{_md.ModelName}' as block {block.Name} (interface only)");
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+}
