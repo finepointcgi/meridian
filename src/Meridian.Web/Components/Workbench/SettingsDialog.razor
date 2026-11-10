@@ -1,4 +1,5 @@
 @using Meridian.Web.Settings
+@using Meridian.Assistant.Providers
 @implements IDisposable
 @inject ThemeService Theme
 @inject Workspace Ws
@@ -206,14 +207,35 @@
         yield return new(SettingsSection.Editor, "Keyboard shortcuts", null, Scope.User, ShortcutTable, "keys hotkeys keyboard reference");
 
         // ---------------------------------------------------------------- AI assistant
-        yield return new(SettingsSection.Assistant, "Use the AI assistant", "Off hides its answers for you; nothing is sent to Anthropic.", Scope.User,
+        var provider = Ai?.Provider ?? AssistantProvider.Anthropic;
+        yield return new(SettingsSection.Assistant, "Use the AI assistant",
+            provider == AssistantProvider.Local ? "Off hides its answers for you; nothing is sent to the model server." : "Off hides its answers for you; nothing is sent to Anthropic.", Scope.User,
             Toggle("ai", P.AssistantEnabled, v => Set(p => p.AssistantEnabled = v)), "claude ai enable disable");
-        yield return new(SettingsSection.Assistant, "Model", "Which Claude model answers.", Scope.User, ModelPicker, "claude opus sonnet haiku fable");
         if (Host.LocalMode)
-            yield return new(SettingsSection.Assistant, "Anthropic API key", "Stored encrypted on this computer; never shown again or sent to the browser.", Scope.Device, KeyForm, "secret token anthropic key", "api-key");
+            yield return new(SettingsSection.Assistant, "Provider", "Who answers: Claude through your API key, a model on a local or self-hosted server, or your own Claude Code login.", Scope.Device,
+                ProviderPicker, "provider local ollama lm studio openai llama claude code", "ai-provider");
         else
-            yield return new(SettingsSection.Assistant, "Anthropic API key", null, Scope.Server, ServerKeyStatus, "secret token anthropic key", "api-key");
-        yield return new(SettingsSection.Assistant, "Privacy", null, Scope.User, PrivacyNotice, "privacy data anthropic sent");
+            yield return new(SettingsSection.Assistant, "Provider", null, Scope.Server, ServerProviderStatus, "provider local ollama openai", "ai-provider");
+        if (provider == AssistantProvider.Anthropic)
+        {
+            yield return new(SettingsSection.Assistant, "Model", "Which Claude model answers.", Scope.User, ModelPicker, "claude opus sonnet haiku fable");
+            if (Host.LocalMode)
+                yield return new(SettingsSection.Assistant, "Anthropic API key", "Stored encrypted on this computer; never shown again or sent to the browser.", Scope.Device, KeyForm, "secret token anthropic key", "api-key");
+            else
+                yield return new(SettingsSection.Assistant, "Anthropic API key", null, Scope.Server, ServerKeyStatus, "secret token anthropic key", "api-key");
+        }
+        else if (provider == AssistantProvider.Local)
+        {
+            if (Host.LocalMode)
+                yield return new(SettingsSection.Assistant, "Local model server", "An OpenAI-compatible server: Ollama, LM Studio, llama.cpp server, vLLM or LocalAI.", Scope.Device, LocalForm,
+                    "ollama lm studio llama vllm localai base url model context tokens temperature tool calling api key test connection", "ai-local");
+            else
+                yield return new(SettingsSection.Assistant, "Local model server", null, Scope.Server, ServerLocalStatus, "ollama model server base url test connection", "ai-local");
+        }
+        else if (Host.LocalMode)
+            yield return new(SettingsSection.Assistant, "Claude Code", "Uses the Claude Code installed on this computer and its login; no API key needed.", Scope.Device, ClaudeCodeForm,
+                "claude code cli login path model", "ai-claude-code");
+        yield return new(SettingsSection.Assistant, "Privacy", null, Scope.User, PrivacyNotice, "privacy data anthropic sent local");
 
         // ---------------------------------------------------------------- account
         if (!Host.LocalMode && Ws.User != null)
@@ -404,10 +426,262 @@
         "To answer, the assistant sends your question, the selection, the active diagram, a project summary and whatever model content it looks up " +
         "to Anthropic's API (Claude). Don't use it for content you may not share with that service.";
 
+    public const string LocalPrivacyText =
+        "To answer, the assistant sends your question, the selection, the active diagram, a project summary and whatever model content it looks up " +
+        "to the model server configured for this installation. Nothing is sent to Anthropic or any other AI service.";
+
+    public const string ClaudeCodePrivacyText =
+        "To answer, the assistant runs Claude Code on this computer with your own Claude Code login. Your question, the selection, the active diagram, " +
+        "a project summary and whatever model content it looks up go to Anthropic through that login, under the terms of your Claude plan.";
+
     private RenderFragment PrivacyNotice => __builder =>
     {
-        <div class="settings-privacy"><MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" /><div><b>Your model is sent to Anthropic.</b> @PrivacyText</div></div>
+        switch (Ai?.Provider ?? AssistantProvider.Anthropic)
+        {
+            case AssistantProvider.Local:
+                <div class="settings-privacy"><MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" /><div><b>Your model stays on the configured model server.</b> @LocalPrivacyText</div></div>
+                break;
+            case AssistantProvider.ClaudeCode:
+                <div class="settings-privacy"><MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" /><div><b>Your model is sent to Anthropic through Claude Code.</b> @ClaudeCodePrivacyText</div></div>
+                break;
+            default:
+                <div class="settings-privacy"><MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" /><div><b>Your model is sent to Anthropic.</b> @PrivacyText</div></div>
+                break;
+        }
     };
+
+    // ---------------------------------------------------------------- AI: provider, local model server, Claude Code
+
+    private AssistantService? AiService => Services.GetService(typeof(AssistantService)) as AssistantService;
+
+    private RenderFragment ProviderPicker => __builder =>
+    {
+        if (Ai is not { } ai) return;
+        var options = new List<(AssistantProvider, string)> { (AssistantProvider.Anthropic, "Claude (Anthropic)"), (AssistantProvider.Local, "Local / OpenAI-compatible") };
+        // Claude Code is offered when its CLI is on this computer (found without running it).
+        if (ai.ClaudeCodePath() != null || ai.Provider == AssistantProvider.ClaudeCode) options.Add((AssistantProvider.ClaudeCode, "Claude Code (your login)"));
+        @Seg("ai-provider", ai.Provider, options.ToArray(), v => { ai.SetProvider(v); Ws.Bump(); return Task.CompletedTask; })
+    };
+
+    private RenderFragment ServerProviderStatus => __builder =>
+    {
+        var ai = Ai;
+        <div class="settings-hint ai-provider-status">
+            @(ai is null ? "Not available." : ai.Provider switch
+            {
+                AssistantProvider.Local => $"Local model server ({(ai.Local.Model is { Length: > 0 } m ? m : "no model set")}), configured by the server administrator.",
+                AssistantProvider.ClaudeCode => "Claude Code is configured, but it is only available in the desktop app.",
+                _ => "Claude (Anthropic), configured by the server administrator.",
+            })
+        </div>
+    };
+
+    private string _lUrl = "", _lModel = "", _lKey = "", _lTemp = "";
+    private int _lCtx, _lMax;
+    private ToolCallingMode _lTools;
+    private bool _localLoaded, _localBusy, _localOk;
+    private string? _localMessage;
+    private IReadOnlyList<LocalModelInfo> _localModels = [];
+
+    private void LoadLocal()
+    {
+        if (_localLoaded || Ai is not { } ai) return;
+        var s = ai.Local;
+        (_lUrl, _lModel, _lCtx, _lMax, _lTools) = (s.BaseUrl, s.Model, s.ContextWindow, s.MaxTokens, s.ToolCalling);
+        _lTemp = s.Temperature?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        _localLoaded = true;
+    }
+
+    private RenderFragment LocalForm => __builder =>
+    {
+        if (Ai is not { } ai) return;
+        LoadLocal();
+        <div class="settings-local">
+            <div class="settings-inline">
+                <input class="settings-input ai-local-url" aria-label="Base URL" placeholder="@LocalModelOptions.OllamaUrl" value="@_lUrl" @oninput="e => _lUrl = e.Value?.ToString() ?? string.Empty" />
+                <button class="settings-btn ai-preset-ollama" title="Ollama's default address" @onclick="() => _lUrl = LocalModelOptions.OllamaUrl">Ollama</button>
+                <button class="settings-btn ai-preset-lmstudio" title="LM Studio's default address" @onclick="() => _lUrl = LocalModelOptions.LmStudioUrl">LM Studio</button>
+            </div>
+            <div class="settings-inline">
+                <input class="settings-input ai-local-model" list="ai-local-models" aria-label="Model" placeholder="Model, e.g. qwen2.5:14b" value="@_lModel" @oninput="e => _lModel = e.Value?.ToString() ?? string.Empty" />
+                <datalist id="ai-local-models">
+                    @foreach (var m in _localModels) { <option value="@m.Id">@m.Id</option> }
+                </datalist>
+                <button class="settings-btn ai-local-refresh" disabled="@_localBusy" @onclick="RefreshModels">Find models</button>
+            </div>
+            <div class="settings-inline">
+                <label class="settings-hint">Context window <input class="settings-input narrow ai-local-ctx" type="number" min="2048" step="1024" value="@_lCtx" @onchange="e => _lCtx = int.TryParse(e.Value?.ToString(), out var v) ? v : _lCtx" /></label>
+                <label class="settings-hint">Max output tokens <input class="settings-input narrow ai-local-max" type="number" min="256" step="256" value="@_lMax" @onchange="e => _lMax = int.TryParse(e.Value?.ToString(), out var v) ? v : _lMax" /></label>
+                <label class="settings-hint">Temperature <input class="settings-input narrow ai-local-temp" type="number" min="0" max="2" step="0.1" placeholder="default" value="@_lTemp" @onchange="e => _lTemp = e.Value?.ToString() ?? string.Empty" /></label>
+            </div>
+            <div class="settings-inline">
+                <span class="settings-hint">Model supports tool calling</span>
+                @Seg("ai-local-tools", _lTools, [(ToolCallingMode.Auto, "Auto-detect"), (ToolCallingMode.Native, "Yes"), (ToolCallingMode.Text, "No (text protocol)")], v => { _lTools = v; return Task.CompletedTask; })
+            </div>
+            <div class="settings-inline">
+                <input class="settings-input ai-local-key" type="password" autocomplete="off" aria-label="API key (optional)"
+                       placeholder="@(ai.Local.HasApiKey ? "An API key is saved (type to replace)" : "API key (optional; most local servers need none)")" value="@_lKey" @oninput="e => _lKey = e.Value?.ToString() ?? string.Empty" />
+                @if (ai.Local.HasApiKey) { <button class="settings-btn danger" @onclick="RemoveLocalKey">Remove key</button> }
+            </div>
+            <div class="settings-inline">
+                <button class="settings-btn primary ai-local-save" disabled="@_localBusy" @onclick="SaveLocal">Save</button>
+                <button class="settings-btn ai-local-test" disabled="@(_localBusy || string.IsNullOrWhiteSpace(_lUrl))" @onclick="TestLocal">Test connection</button>
+                @if (_localBusy) { <span class="settings-hint">Working…</span> }
+            </div>
+            @if (_localMessage != null) { <div class="settings-hint ai-local-message @(_localOk ? "ok" : "bad")" role="status">@_localMessage</div> }
+        </div>
+    };
+
+    private double? ParseTemp() =>
+        double.TryParse(_lTemp, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : null;
+
+    private void SaveLocal()
+    {
+        if (Ai is not { } ai) return;
+        try
+        {
+            ai.SaveLocal(_lUrl, _lModel, _lCtx, _lMax, ParseTemp(), _lTools);
+            if (_lKey.Trim().Length > 0) ai.SaveLocalApiKey(_lKey);
+            _lKey = "";
+            _lUrl = ai.Local.BaseUrl;
+            (_localOk, _localMessage) = (true, string.IsNullOrWhiteSpace(_lModel) ? "Saved. Pick a model to turn the assistant on." : "Saved.");
+            Ws.Bump();
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { (_localOk, _localMessage) = (false, e.Message); }
+    }
+
+    private void RemoveLocalKey()
+    {
+        Ai?.SaveLocalApiKey(null);
+        (_localOk, _localMessage) = (true, "API key removed.");
+    }
+
+    /// <summary>Probes the address typed in the form (desktop) without saving it.</summary>
+    private OpenAiCompatibleProvider? DraftProvider()
+    {
+        if (Ai is not { } ai || AiService is not { } svc) return null;
+        if (ai.DraftLocalOptions(_lUrl, _lModel) is not { } o) { (_localOk, _localMessage) = (false, "Enter an http:// or https:// address, such as http://localhost:11434/v1."); return null; }
+        if (_lKey.Trim().Length > 0) o = o with { ApiKey = _lKey.Trim() };
+        return svc.LocalProvider(o with { ToolCalling = _lTools });
+    }
+
+    private async Task RefreshModels()
+    {
+        if (DraftProvider() is not { } p) return;
+        _localBusy = true;
+        StateHasChanged();
+        try
+        {
+            var list = await p.ListModelsAsync();
+            _localModels = list.Models;
+            (_localOk, _localMessage) = list.Error != null ? (false, list.Error)
+                : list.Models.Count == 0 ? (false, list.IsOllama ? "Ollama has no models yet. Run `ollama pull qwen2.5:14b` (for example)." : "The server lists no models.")
+                : (true, $"Found {list.Models.Count} model(s). Pick one from the Model list.");
+            if (string.IsNullOrWhiteSpace(_lModel) && list.Models.Count == 1) _lModel = list.Models[0].Id;
+        }
+        finally { _localBusy = false; }
+    }
+
+    private async Task TestLocal()
+    {
+        if (DraftProvider() is not { } p) return;
+        _localBusy = true;
+        StateHasChanged();
+        try
+        {
+            var result = await p.TestConnectionAsync();
+            _localModels = result.Models;
+            (_localOk, _localMessage) = (result.Ok, result.Message);
+            if (_lTools == ToolCallingMode.Auto && result.SupportsTools is { } tools) _localMessage += tools ? " Tool calling: native." : " Tool calling: text protocol.";
+        }
+        finally { _localBusy = false; }
+    }
+
+    private RenderFragment ServerLocalStatus => __builder =>
+    {
+        var ai = Ai;
+        if (ai is null) { <div class="settings-hint">Not available.</div> return; }
+        var s = ai.Local;
+        <div class="settings-local">
+            <div class="settings-hint">Model: <b>@(s.Model is { Length: > 0 } m ? m : "not set")</b> · configured by the server administrator (Meridian:AI:Local:*).</div>
+            @if (Ws.IsServerAdmin)
+            {
+                <div class="settings-hint">Server: <code>@(LocalModelOptions.NormalizeBaseUrl(s.BaseUrl)?.AbsoluteUri ?? "not set")</code> · tool calling: @s.ToolCalling · context @s.ContextWindow.ToString("N0") tokens</div>
+                <div class="settings-inline">
+                    <button class="settings-btn ai-local-test" disabled="@(_localBusy || ai.LocalOptions() == null)" @onclick="TestConfigured">Test connection</button>
+                    @if (_localBusy) { <span class="settings-hint">Working…</span> }
+                </div>
+                @if (_localMessage != null) { <div class="settings-hint ai-local-message @(_localOk ? "ok" : "bad")" role="status">@_localMessage</div> }
+            }
+        </div>
+    };
+
+    /// <summary>Server administrators: tests the configured server (never an address from the browser).</summary>
+    private async Task TestConfigured()
+    {
+        if (!Ws.IsServerAdmin || AiService?.LocalProvider() is not { } p) return;
+        _localBusy = true;
+        StateHasChanged();
+        try
+        {
+            var result = await p.TestConnectionAsync();
+            (_localOk, _localMessage) = (result.Ok, result.Message + (result.Models.Count > 0 ? $" Models: {string.Join(", ", result.Models.Take(12).Select(m => m.Id))}." : ""));
+        }
+        finally { _localBusy = false; }
+    }
+
+    private string? _ccPath, _ccModel, _ccMessage;
+    private bool _ccLoaded, _ccBusy, _ccOk;
+
+    private RenderFragment ClaudeCodeForm => __builder =>
+    {
+        if (Ai is not { } ai) return;
+        if (!_ccLoaded) { (_ccPath, _ccModel) = ai.ClaudeCode; _ccLoaded = true; }
+        var found = ai.ClaudeCodePath();
+        <div class="settings-local">
+            <div class="settings-hint ai-cc-found">
+                @if (found != null) { <span>Found <code>@found</code>@(ai.DetectedClaudeCode is { } d && d.Path == found ? $" ({d.Version})" : "").</span> }
+                else { <span>@ClaudeCodeProvider.NotInstalled</span> }
+            </div>
+            <div class="settings-inline">
+                <input class="settings-input ai-cc-path" aria-label="Path to claude" placeholder="Path to claude (leave empty to find it automatically)" value="@_ccPath" @oninput="e => _ccPath = e.Value?.ToString()" />
+            </div>
+            <div class="settings-inline">
+                <input class="settings-input ai-cc-model" aria-label="Claude Code model" placeholder="Model (empty: Claude Code's default)" value="@_ccModel" @oninput="e => _ccModel = e.Value?.ToString()" />
+                <button class="settings-btn primary ai-cc-save" @onclick="SaveClaudeCode">Save</button>
+                <button class="settings-btn ai-cc-check" disabled="@_ccBusy" @onclick="CheckClaudeCode">Check installation</button>
+            </div>
+            @if (_ccMessage != null) { <div class="settings-hint @(_ccOk ? "ok" : "bad")" role="status">@_ccMessage</div> }
+            <div class="settings-hint">This uses your own Claude Code install and login. Check Anthropic's terms for your plan before using it this way.</div>
+        </div>
+    };
+
+    private void SaveClaudeCode()
+    {
+        try { Ai?.SaveClaudeCode(_ccPath, _ccModel); (_ccOk, _ccMessage) = (true, "Saved."); Ws.Bump(); }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { (_ccOk, _ccMessage) = (false, e.Message); }
+    }
+
+    /// <summary>Runs <c>claude --version</c> and <c>claude auth status</c> (neither spends tokens).</summary>
+    private async Task CheckClaudeCode()
+    {
+        if (Ai is not { } ai) return;
+        _ccBusy = true;
+        StateHasChanged();
+        try
+        {
+            var install = await ai.DetectClaudeCodeAsync(refresh: true);
+            if (install == null) { (_ccOk, _ccMessage) = (false, ClaudeCodeProvider.NotInstalled); return; }
+            var loggedIn = await ClaudeCodeLocator.IsLoggedInAsync(install.Path);
+            (_ccOk, _ccMessage) = loggedIn switch
+            {
+                false => (false, $"Claude Code {install.Version} is installed but not signed in. " + ClaudeCodeProvider.NotLoggedIn),
+                true => (true, $"Claude Code {install.Version} is installed and signed in."),
+                _ => (true, $"Claude Code {install.Version} is installed. If it is not signed in, the first question will say so."),
+            };
+        }
+        finally { _ccBusy = false; }
+    }
 
     // ---------------------------------------------------------------- account
 

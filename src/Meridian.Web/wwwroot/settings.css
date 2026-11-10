@@ -114,6 +114,10 @@ body .mud-popover .mud-menu-item .mud-menu-item-text { color: inherit; }
 .settings-input { width: 280px; }
 .settings-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .settings-key, .settings-password { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.settings-local { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; max-width: 620px; }
+.settings-local .settings-input.narrow { width: 96px; margin-left: 4px; }
+.settings-local label.settings-hint { display: inline-flex; align-items: center; }
+.settings-local code { font-size: 12px; word-break: break-all; }
 .settings-btn { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--panel-solid); color: var(--text);
   font: 500 13px Inter, sans-serif; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
 .settings-btn:hover:not(:disabled) { background: var(--hover); }
@@ -140,7 +144,7 @@ body .mud-popover .mud-menu-item .mud-menu-item-text { color: inherit; }
   .settings-body { padding: 4px 16px 20px; }
   .settings-row { grid-template-columns: 1fr; gap: 10px; }
   .settings-control, .accent-picker, .settings-inline { justify-content: flex-start; }
-  .settings-key, .settings-password { align-items: stretch; }
+  .settings-key, .settings-password, .settings-local { align-items: stretch; }
   .settings-input { width: 100%; }
   .settings-title { flex-wrap: wrap; }
   .settings-search { width: 100%; margin-left: 0; }

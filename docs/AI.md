@@ -24,8 +24,22 @@ Settings (configuration keys, all optional):
 | `Meridian:AI:Model` | `claude-opus-5-5` | The Claude model to use. |
 | `Meridian:AI:MaxTokens` | `16000` | The output limit per model call. |
 | `Meridian:AI:ServerSideFallbacks` | `true` | Server-side refusal fallbacks (see below). |
+| `Meridian:AI:Provider` | `Anthropic` | `Anthropic`, `Local` (an OpenAI-compatible server) or `ClaudeCode` (desktop / local mode only). In desktop mode this is the default until the user picks a provider in Settings. |
+| `Meridian:AI:Local:BaseUrl` | none | The local server's OpenAI-compatible base URL, such as `http://localhost:11434/v1` (Ollama) or `http://localhost:1234/v1` (LM Studio). |
+| `Meridian:AI:Local:Model` | none | The model name, such as `qwen2.5:14b`. |
+| `Meridian:AI:Local:ApiKey` | none | Optional key for servers that want one. |
+| `Meridian:AI:Local:ContextWindow` | `32768` | The model's context window in tokens. |
+| `Meridian:AI:Local:MaxTokens` | `4096` | The output limit per call. |
+| `Meridian:AI:Local:Temperature` | `0.2` | Sampling temperature. |
+| `Meridian:AI:Local:ToolCalling` | `Auto` | `Auto`, `Native` or `Text` (the JSON-in-text protocol). |
+| `Meridian:AI:Local:TimeoutSeconds` | `300` | How long to wait for the first token (a cold model has to load). |
+| `Meridian:AI:ClaudeCode:Path` / `:Model` | none | Desktop only: path to `claude` and the model to pass (default: Claude Code's own). |
 
 When the assistant is unavailable, the panel says why and how to turn it on.
+
+The assistant can also run on a **local model** (Ollama, LM Studio and other OpenAI-compatible servers) or, in the
+desktop app, through **your own Claude Code login**. See [Using a local model](#using-a-local-model) and
+[Using Claude Code](#using-claude-code-desktop). The panel header always shows the active provider and model.
 
 ### Roles
 
@@ -33,9 +47,115 @@ Anyone who can open a project can ask the assistant questions. Only users who ca
 proposed change set. Viewers see the proposals with the Apply button turned off. A change set that touches an
 element locked by a collaborator is refused. On a branch, changes apply to that branch like any other edit.
 
+## Using a local model
+
+Meridian can talk to any server with an OpenAI-compatible `/v1/chat/completions` endpoint: **Ollama**, **LM Studio**,
+the **llama.cpp** server, **vLLM** and **LocalAI**. It uses plain HTTP with streaming (server-sent events) and OpenAI
+function calling, with no extra SDK. With a local model, **your model content stays on that server**: nothing is sent to
+Anthropic, and the privacy notice says so.
+
+### Ollama
+
+1. Install Ollama from <https://ollama.com> and start it (the app, or `ollama serve`).
+2. Pull a model that does tool calling, for example `ollama pull qwen2.5:14b`.
+3. Ollama's default context window is small. The system prompt and tool list alone take several thousand tokens, so
+   start Ollama with a larger window, for example `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`, and set the same
+   *context window* in Meridian.
+4. In **Settings ▸ AI assistant** choose **Local / OpenAI-compatible**, click **Ollama** (it fills in
+   `http://localhost:11434/v1`), click **Find models**, pick the model, then click **Save**. **Test connection** checks
+   that the server answers, that the model is installed and whether it supports tool calling.
+
+### LM Studio
+
+1. Install LM Studio, download a model, and start the local server (*Developer ▸ Start server*, default port 1234).
+2. In **Settings ▸ AI assistant** choose **Local / OpenAI-compatible**, click **LM Studio** (`http://localhost:1234/v1`),
+   then **Find models**, pick the loaded model and **Save**.
+
+Other servers work the same way: enter the base URL (it usually ends in `/v1`). Some servers want an API key; the key is
+optional and stored encrypted like the Anthropic key.
+
+### Choosing a model
+
+Quality varies a lot between local models, and the assistant depends on tool calling. Models that are known to handle
+tools reasonably well include, for example, **Qwen 2.5 / Qwen 3 Instruct** (14B and larger), **Llama 3.1 / 3.3
+Instruct** (70B does much better than 8B) and **Mistral Small**. Small models answer questions fine but often make
+mistakes in multi-step actions such as *Diagram my model* or *Generate requirements*. Every proposal still goes through
+the usual review card, so nothing reaches your model unchecked.
+
+### Settings
+
+| Setting | Meaning |
+| --- | --- |
+| Base URL | The OpenAI-compatible endpoint, such as `http://localhost:11434/v1`. A bare `host:port` gets `/v1` added. |
+| Model | Pick one from **Find models** (the server's `/v1/models`, plus Ollama's `/api/tags`), or type any name. |
+| API key | Optional. Sent as `Authorization: Bearer …` to that server only. |
+| Context window | The model's context size in tokens (default 32768). Older tool results are shortened to fit; if the conversation still doesn't fit, you're asked to start a new chat. |
+| Max output tokens | Per model call (default 4096). |
+| Temperature | Default 0.2. Leave it empty to use the server's default. |
+| Model supports tool calling | **Auto-detect** (default), **Yes** or **No**. Auto asks Ollama's `/api/show` for the model's capabilities, and otherwise tries native tool calling and switches to the text protocol if the server refuses tools. |
+
+### How tools work on a local model
+
+- **Native tool calling.** The assistant's tools are sent as OpenAI `tools` (the same JSON schemas Claude gets), and
+  results go back as `role: tool` messages. Every tool input is validated against its schema before the tool runs.
+- **Text protocol** for models without tool calling. The system prompt lists the tools with their schemas and asks the
+  model to reply with a fenced JSON block, `{"tool": "...", "arguments": {...}}` (or an array of them). Meridian parses
+  it leniently (fences, `<tool_call>` tags, trailing commas, arguments sent as a string), validates every call against
+  the tool's schema, and if a call is malformed or doesn't match the schema, asks the model once to correct it. If the
+  second try is still invalid, the panel shows a warning and nothing runs. The JSON blocks are never shown in the chat.
+- **Prompts.** The local path uses the same system prompt as Claude, plus a few lines of format guidance.
+- **Slow models.** A local model may need to load first, so Meridian waits up to 5 minutes for the first token
+  (`Meridian:AI:Local:TimeoutSeconds`) and 2 minutes between tokens. The panel shows what is happening (waiting for the
+  model, thinking, preparing a tool call). **Stop** cancels at any time.
+- **Errors.** Clear messages for a server that isn't running ("Could not connect to the local model server… Start
+  Ollama"), a model that isn't installed ("Model 'x' isn't installed — run `ollama pull x`"), a wrong base URL, a
+  rejected key and timeouts.
+
+### On a server
+
+On a team server the administrator configures the local model with configuration keys (see the table above and
+`docs/DEPLOYMENT.md`); users can't change the provider or the address, and see the provider and model read-only.
+Administrators also see the address and a **Test connection** button, which only ever tests the configured server.
+Requests go through an HTTP client that only allows the configured base URL's scheme, host and port, with redirects
+turned off, so nothing can make the server call another address. Private and loopback addresses are allowed because the
+administrator chose the address explicitly.
+
+## Using Claude Code (desktop)
+
+If Claude Code is installed on the computer that runs Meridian (the desktop app, or Meridian in local mode), the
+assistant can use it instead of an API key: choose **Claude Code (your login)** in **Settings ▸ AI assistant**. The
+option is offered only when the `claude` command is found (on `PATH`, in `~/.claude/local`, `~/.local/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin` or `%APPDATA%\npm`), and you can set the path yourself. **Check installation**
+runs `claude --version` and `claude auth status`, neither of which uses tokens. If Claude Code is missing or not signed
+in, the panel explains how to install it and sign in (`claude`, or `claude auth login`).
+
+**This uses your own local Claude Code install and your own login**, so usage counts against your Claude plan or your
+Claude Code account. Check Anthropic's terms for your plan before using it this way. Model content is sent to Anthropic
+through that login, and the privacy notice says so.
+
+How it runs:
+
+- Each question starts `claude -p --output-format stream-json --input-format stream-json --verbose
+  --include-partial-messages` in a new, empty temporary folder (deleted afterwards), never in your home or project
+  folder. Text streams into the panel as it arrives; **Stop** kills the process tree.
+- Claude Code's own tools are switched off: `--tools ""` disables every built-in tool, `--disallowedTools` lists Bash,
+  Edit, Write, Read, WebFetch, WebSearch and the other file and shell tools as well, `--permission-mode dontAsk` denies
+  anything not explicitly allowed without prompting, and `--allowedTools` lists only Meridian's tools.
+- Meridian's tools are served to it as an MCP server on `127.0.0.1` with a random port and a random per-question bearer
+  token (`--strict-mcp-config --mcp-config` with a temporary file that is deleted afterwards). The endpoint rejects
+  requests without the token, with a non-loopback `Host` header or with a browser `Origin`.
+- Tool calls run in Meridian exactly as with the API: inputs are validated against their schemas and write tools only
+  propose changes, which arrive as the usual review card.
+- `--append-system-prompt` adds Meridian's system prompt, `--max-turns` bounds the tool rounds, and `--model` is passed
+  only when you choose a model (by default Claude Code uses its own default). Earlier questions of the chat are sent as
+  a short transcript, because each question runs a fresh Claude Code session.
+
+Claude Code is never used on a team server.
+
 ## Privacy
 
-**Using the assistant sends model content to Anthropic.** Each question includes:
+**With Claude (the default) or Claude Code, using the assistant sends model content to Anthropic.** With a local model,
+the same content goes to the configured model server instead. Each question includes:
 
 - a project summary (element counts, top-level packages, requirement coverage),
 - the active diagram (its name and the names and ids of the elements on it),
@@ -179,3 +299,18 @@ rollback, and the message loop against a fake HTTP handler (`AssistantFakes.cs`)
 `tests/Meridian.Tests/AutoDiagramAssistantTests.cs` covers `plan_diagrams`, `create_diagrams`, the "Diagram my model"
 turn, the SDD figures and the narrative writer, with the same fake handler.
 `tests/Meridian.Web.Tests/AssistantPanelTests.cs` covers the panel. The tests never call the real API.
+`tests/Meridian.Tests/LocalModelProviderTests.cs` covers the OpenAI-compatible provider against a fake server
+(`LocalModelFakes.cs`: SSE streams with tool calls, the multi-turn tool loop, the text protocol with retry and schema
+errors, model discovery, unreachable servers, missing models, timeouts and the host allow-list).
+`tests/Meridian.Tests/ClaudeCodeProviderTests.cs` runs the Claude Code provider against a fake `claude` shell script
+that records its arguments and emits recorded stream-json, including an MCP tool call round trip; the real CLI is never
+run. `tests/Meridian.Web.Tests/LocalAssistantSettingsTests.cs` covers the settings and panel for the local provider.
+
+## Code layout
+
+- `src/Meridian.Assistant/Providers/ChatModels.cs`: the provider abstraction (`IChatProvider`, provider-neutral
+  messages, tool definitions and streaming callbacks).
+- `AnthropicChatProvider.cs`: Claude through the Anthropic SDK (the original request, unchanged).
+- `OpenAiCompatibleProvider.cs`, `TextToolProtocol.cs`, `LocalModelHttp.cs`: local models, the JSON-in-text tool
+  protocol and the host-restricted HTTP client.
+- `ClaudeCodeProvider.cs`, `LoopbackMcpServer.cs`: Claude Code and the loopback MCP server for Meridian's tools.
