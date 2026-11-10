@@ -89,6 +89,7 @@ public partial class Workbench
         list.AddRange(AutoDiagramPaletteCommands());
         list.AddRange(DerivationPaletteCommands());   // Workbench.Derivation.cs
         list.AddRange(CodeSyncPaletteCommands());
+        list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {

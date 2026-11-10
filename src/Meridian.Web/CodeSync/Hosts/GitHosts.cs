@@ -33,7 +33,27 @@ public interface IGitHost
 /// <summary>Builds host clients over a supplied <see cref="HttpClient"/> (tests pass one with a fake handler).</summary>
 public static class GitHostFactory
 {
-    public const string StatusContext = "meridian/model";
+    /// <summary>The context of the code-sync status ("meridian/model").</summary>
+    public const string ModelStatusContext = "meridian/model";
+
+    private static readonly AsyncLocal<string?> CurrentContext = new();
+
+    /// <summary>The context hosts post commit statuses under: <see cref="ModelStatusContext"/>, unless a caller
+    /// switched it for its own status with <see cref="UseStatusContext"/> (the architecture check posts "meridian/architecture").</summary>
+    public static string StatusContext => CurrentContext.Value ?? ModelStatusContext;
+
+    /// <summary>Posts made in this async flow, until disposed, use <paramref name="context"/> as the status context.</summary>
+    public static IDisposable UseStatusContext(string context)
+    {
+        var previous = CurrentContext.Value;
+        CurrentContext.Value = context;
+        return new Restore(() => CurrentContext.Value = previous);
+    }
+
+    private sealed class Restore(Action undo) : IDisposable
+    {
+        public void Dispose() => undo();
+    }
 
     public static IGitHost Create(CodeRepoConfig config, string token, HttpClient http, SnapshotLimits? limits = null) => config.Host switch
     {

@@ -450,6 +450,16 @@ public sealed class Workspace : IDisposable, ISessionClient
         Bump();
     }
 
+    /// <summary>Architecture violations drawn on diagrams as red dashed edges (set by
+    /// <see cref="Meridian.Web.CodeSync.Conformance.ArchitectureState"/>); null when hidden or there are none.</summary>
+    public IReadOnlyList<Meridian.Serialization.ViolationEdge>? ArchitectureViolations { get; private set; }
+
+    public void SetArchitectureViolations(IReadOnlyList<Meridian.Serialization.ViolationEdge>? edges)
+    {
+        ArchitectureViolations = edges;
+        Bump();
+    }
+
     // ---------------------------------------------------------------- new diagrams open as tabs
 
     /// <summary>Most diagrams one action may create and still all open as tabs; beyond this (imports), only the first opens.</summary>
@@ -501,7 +511,7 @@ public sealed class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -518,6 +528,7 @@ public sealed class ViewTab(ViewTabKind kind)
         ViewTabKind.Table => "New custom table",
         ViewTabKind.Query => "New query",
         ViewTabKind.CodeChanges => "What changed",
+        ViewTabKind.Architecture => "Architecture",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
 }
