@@ -435,7 +435,7 @@ public partial class Workbench
             if (owned.Count > 0 || newTypes.Count > 0) m.Add(MenuEntry.Title("Diagrams"));
             foreach (var od in owned) m.Add(MenuEntry.Do($"Open “{od.Name}”", () => Ws.Open(od)));
             foreach (var t in newTypes) m.Add(MenuEntry.Do($"New {Metamodel.DisplayName(t)}", () => CreateDiagram(el, t)));
-            m.AddRange(DerivationMenuEntries(el));   // Workbench.Derivation.cs
+            m.AddRange(DerivationMenuEntries(el) is { Count: > 0 } derive ? derive : DerivationMenuEntries(c.Diagram));   // Workbench.Derivation.cs
             m.Add(MenuEntry.Sep());
         }
         if (r.Edge is { } edge)

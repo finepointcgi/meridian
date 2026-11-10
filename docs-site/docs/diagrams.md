@@ -111,6 +111,35 @@ Combined fragments (`alt`, `opt`, `loop`, `par`, `break`, `critical`, `neg`, `se
 - **ER**: tables with typed columns, primary keys, nullable and unique flags, and foreign keys. Generate SQL DDL for
   PostgreSQL, MySQL, SQL Server or SQLite, and import DDL.
 
+## Create diagrams from diagrams
+
+Meridian can derive the next view of the MBSE chain from the one you have, and the derived view keeps its trace links:
+
+**Requirements → Use case → Activity → Sequence → BDD / IBD (→ State machine)**
+
+Right-click a requirements package, use case, activity, interaction or block (in the model explorer or on a diagram) and
+pick an entry under **Create from…**. The same entries are in **Ribbon ▸ Diagram ▸ Create from…** and in ⌘K ("Create
+activity from use case", "Create sequence from activity", …).
+
+| From | Creates | Link kept |
+| --- | --- | --- |
+| Requirements | use cases named after each functional requirement's "shall …" phrase, with actors | «refine» |
+| Use case | an activity with swimlanes; the steps come from the use case's description (numbered lines, "If …", "Alternate: …") | the activity is the use case's behaviour |
+| Activity | a sequence diagram: one lifeline per swimlane, one message per hand-over between swimlanes, and alt / loop / par fragments | «allocate» action → block |
+| Sequence | a BDD and an IBD: a block per lifeline, a context block with parts, an operation per message, and ports with connectors | «trace» message → operation |
+| Sequence or activity | a state machine for a chosen block, built from the events it receives (approximate) | classifier behaviour |
+| Blocks / requirements | «satisfy» and test case «verify» proposals, each reviewed one by one | «satisfy», «verify» |
+
+A dialog lists what will be created, with checkboxes and warnings, and **Create** applies it as one undo step. When a
+source changes, its derived diagrams show a **Source changed** badge. **Update from source…** previews the differences
+with green (added), amber (changed) and dashed (removed) highlights. It never touches what you added yourself and never
+moves the shapes you placed. The inspector's **Derivation chain** shows where the selection sits in the chain and offers
+**Create next…**. When the AI assistant is on, **Fill in with AI** can write a use case's steps or name the messages.
+You review its output in the same dialog before anything is created.
+
+The full reference, covering every mapping, the stored `derive.*` fields and how updates are matched, is
+`docs/DERIVATION.md` in the source repository.
+
 ## Whiteboards
 
 A whiteboard is free drawing: general shapes, sticky notes and lines. The *Flowchart* and *Mind map* diagram templates
