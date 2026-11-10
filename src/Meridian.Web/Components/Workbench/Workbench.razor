@@ -13,6 +13,7 @@
             <span class="logo"><MudIcon Icon="@Icons.Material.Filled.Hub" Style="font-size:16px; color:#fff" /></span>
             Meridian
         </div>
+        <TabletDrawers />
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
             <ActivatorContent>
                 <div class="project">
@@ -228,6 +229,7 @@
             </div>
         </div>
         <PluginsMenu @ref="_plugins" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
+        <RibbonOverflow />
     </nav>
 
     @* ================================================================ workspace *@
@@ -364,6 +366,9 @@
         <span class="item">@Counts()</span>
         <span class="item"><MudIcon Icon="@Icons.Material.Outlined.CloudDone" Style="font-size:14px" /> @SavedText()</span>
     </footer>
+
+    @* ================================================================ phone / tablet shell (Components/Mobile, mobile.css) *@
+    <MobileShell />
 
     <ContextMenu Entries="_menu" X="_menuX" Y="_menuY" OnClose="() => _menu = null" />
     <CommandPalette @ref="_palette" Source="PaletteCommands" />

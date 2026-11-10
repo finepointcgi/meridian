@@ -1,0 +1,106 @@
+@inherits MobileComponent
+
+@* Phone model browser: the containment tree as a list you drill into, one level at a time. *@
+@{ var container = Container; }
+<div class="m-list-view">
+    <div class="m-list-head">
+        @if (_query is { Length: > 0 })
+        {
+            <span class="m-head-title">Search</span>
+        }
+        else if (container.Owner is { } parent)
+        {
+            <button class="m-icon-btn" aria-label="@($"Back to {parent.DisplayName}")" @onclick="() => Ui.DrillTo(parent)"><MudIcon Icon="@Icons.Material.Filled.ArrowBack" /></button>
+            <div class="m-head-text">
+                <span class="m-head-title">@container.DisplayName</span>
+                <span class="m-head-sub">@Path(container)</span>
+            </div>
+            <button class="m-icon-btn" aria-label="Details" @onclick="() => ShowDetails(container)"><MudIcon Icon="@Icons.Material.Outlined.Info" /></button>
+        }
+        else
+        {
+            <span class="m-head-title">@container.DisplayName</span>
+        }
+    </div>
+    <div class="m-search">
+        <MudIcon Icon="@Icons.Material.Outlined.Search" />
+        <input type="search" placeholder="Search elements" value="@_query" aria-label="Search elements"
+               @oninput="e => _query = e.Value?.ToString()" />
+    </div>
+    <ul class="m-list" role="list">
+        @foreach (var e in Items(container))
+        {
+            var el = e;
+            var children = ChildCount(el);
+            var drill = children > 0 && el is not Diagram && _query is not { Length: > 0 };
+            <li class="m-row @(ReferenceEquals(Ui.ModelHighlight, el) || ReferenceEquals(Ws.Selected, el) ? "sel" : "")" data-id="@el.Id">
+                <button class="m-row-main" @onclick="() => Tap(el, drill)">
+                    @KindIcon.For(el)
+                    <span class="m-row-text">
+                        <span class="m-row-title">@Title(el)</span>
+                        <span class="m-row-sub">@Subtitle(el, children)</span>
+                    </span>
+                    @if (drill) { <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="m-chev" /> }
+                </button>
+                @if (drill || el is Diagram)
+                {
+                    <button class="m-icon-btn" aria-label="@($"Details of {el.DisplayName}")" @onclick="() => ShowDetails(el)"><MudIcon Icon="@Icons.Material.Outlined.Info" /></button>
+                }
+            </li>
+        }
+    </ul>
+    @if (!Items(container).Any())
+    {
+        <div class="m-empty">@(_query is { Length: > 0 } ? "No elements match." : "This element has no owned elements.")</div>
+    }
+</div>
+
+@code {
+    private string? _query;
+
+    private Element Container => Ui.ModelContainer is { } c && Ws.Model.Contains(c) ? c : Ws.Model.Root;
+
+    private IEnumerable<Element> Items(Element container)
+    {
+        if (_query is { Length: > 0 } q)
+            return Ws.Model.AllElements
+                .Where(e => e is not Relationship && e.Kind != ElementKind.Model && (e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                            e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId).Contains(q, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).Take(100);
+        return container.OwnedElements.Where(e => e is not Relationship)
+            .OrderBy(e => e.Kind is ElementKind.Package or ElementKind.Model ? 0 : e is Diagram ? 1 : 2)
+            .ThenBy(e => e.Kind == ElementKind.Requirement ? e.Get(FieldKeys.RequirementId) : e.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int ChildCount(Element e) => e.OwnedElements.Count(c => c is not Relationship);
+
+    private static string Title(Element e) =>
+        e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } id ? $"{id} {e.Name}" : e.DisplayName;
+
+    private static string Subtitle(Element e, int children)
+    {
+        var kind = e is Diagram d ? Metamodel.DisplayName(d.DiagramType) : Metamodel.DisplayName(e.Kind);
+        return children > 0 && e is not Diagram ? $"{kind} · {children} item{(children == 1 ? "" : "s")}" : kind;
+    }
+
+    private static string Path(Element e) =>
+        string.Join(" › ", e.AncestorsAndSelf().Skip(1).Reverse().Select(a => a.DisplayName));
+
+    private void Tap(Element e, bool drill)
+    {
+        if (e is Diagram diagram)
+        {
+            Ws.Open(diagram);
+            Ui.Show(MobileUiState.View.Diagram);
+            return;
+        }
+        if (drill) { Ui.DrillTo(e); return; }
+        ShowDetails(e);
+    }
+
+    private void ShowDetails(Element e)
+    {
+        Ws.Select(e);
+        Ui.OpenSheet(e);
+    }
+}

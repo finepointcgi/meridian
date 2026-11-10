@@ -1,0 +1,208 @@
+@inherits MobileComponent
+@inject IJSRuntime JS
+
+@*
+    Phone and tablet shell, rendered beside the desktop layout. mobile.css hides the ribbon and the three columns under
+    900px; this adds the top bar, the full-screen views and the bottom navigation. On tablets it adds the drawer scrim.
+    On any touch screen it handles canvas gestures (js/mobile.js) and shows the element sheet and long-press menu.
+    The data-* attributes are read by mobile.css (:has) to open drawers and hide edit chrome in view-only mode.
+*@
+<div class="m-shell" data-layout="@Ui.Current.ToString().ToLowerInvariant()" data-view="@Ui.ActiveView.ToString().ToLowerInvariant()"
+     data-mode="@(Ui.EditMode ? "edit" : "view")" data-left="@(Ui.LeftDrawer ? "open" : "closed")" data-right="@(Ui.RightDrawer ? "open" : "closed")">
+    @if (Ui.IsPhone)
+    {
+        <MobileTopBar />
+        @if (Ui.ActiveView == MobileUiState.View.Diagram)
+        {
+            <div class="m-diagram-bar">
+                <button class="m-pill-btn m-diagram-name" @onclick="() => _picker = true" aria-label="Choose diagram">
+                    @if (Ws.Active is { } act)
+                    {
+                        <MudIcon Icon="@UiKinds.DiagramIcon(act.Diagram.DiagramType)" />
+                        <span>@act.Diagram.Name</span>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Outlined.Schema" />
+                        <span>Choose a diagram</span>
+                    }
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" />
+                </button>
+                @if (Ws.Active != null)
+                {
+                    <button class="m-icon-btn m-float" aria-label="Zoom to fit" @onclick="Fit"><MudIcon Icon="@Icons.Material.Outlined.FitScreen" /></button>
+                }
+                @ModeToggle()
+            </div>
+        }
+        else
+        {
+            <section class="m-view" aria-label="@Ui.ActiveView">
+                @switch (Ui.ActiveView)
+                {
+                    case MobileUiState.View.Model: <MobileModelList />; break;
+                    case MobileUiState.View.Requirements: <MobileRequirements />; break;
+                    case MobileUiState.View.Reviews: <div class="m-reviews"><ReviewsPanel /></div>; break;
+                    case MobileUiState.View.Comments: <MobileComments />; break;
+                }
+            </section>
+        }
+        <MobileBottomNav />
+        @if (_picker)
+        {
+            <div class="m-scrim" @onclick="() => _picker = false"></div>
+            <div class="m-action-sheet m-picker" role="dialog" aria-label="Diagrams">
+                <div class="m-action-title"><span>Diagrams</span></div>
+                <div class="m-picker-list">
+                    @foreach (var d in Ws.Model.Diagrams.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var diagram = d;
+                        <button class="m-menu-item @(ReferenceEquals(Ws.Active?.Diagram, diagram) ? "on" : "")" @onclick="() => OpenDiagram(diagram)">
+                            <MudIcon Icon="@UiKinds.DiagramIcon(diagram.DiagramType)" />
+                            <span class="m-row-text"><span class="m-row-title">@diagram.Name</span><span class="m-row-sub">@diagram.Owner?.DisplayName</span></span>
+                        </button>
+                    }
+                </div>
+                <button class="m-menu-item cancel" @onclick="() => _picker = false">Cancel</button>
+            </div>
+        }
+    }
+    else if (Ui.IsTablet)
+    {
+        @if (Ui.LeftDrawer || Ui.RightDrawer)
+        {
+            <div class="t-scrim" @onclick="Ui.CloseDrawers"></div>
+        }
+        <div class="t-canvas-tools">@ModeToggle()</div>
+    }
+    <MobileElementSheet />
+    <MobileActionMenu />
+</div>
+
+@code {
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<MobileShell>? _self;
+    private bool _picker;
+    private bool _sentEdit;
+
+    private RenderFragment ModeToggle() => __builder =>
+    {
+        <div class="m-mode" role="group" aria-label="Touch mode">
+            <button class="@(Ui.EditMode ? "" : "on")" aria-pressed="@(Ui.EditMode ? "false" : "true")" @onclick="() => SetEdit(false)">
+                <MudIcon Icon="@Icons.Material.Outlined.Visibility" /><span>View only</span>
+            </button>
+            <button class="@(Ui.EditMode ? "on" : "")" aria-pressed="@(Ui.EditMode ? "true" : "false")" disabled="@Ws.ReadOnly" @onclick="() => SetEdit(true)">
+                <MudIcon Icon="@Icons.Material.Outlined.Edit" /><span>Edit</span>
+            </button>
+        </div>
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _self = DotNetObjectReference.Create(this);
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/mobile.js");
+                if (_module != null) await _module.InvokeVoidAsync("install", _self, MobileUiState.PhoneMaxWidth, MobileUiState.TabletMaxWidth);
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException) { _module = null; }
+        }
+        if (_module != null && _sentEdit != Ui.EditMode)
+        {
+            _sentEdit = Ui.EditMode;
+            try { await _module.InvokeVoidAsync("setEditMode", Ui.EditMode); }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { }
+        }
+    }
+
+    private void SetEdit(bool edit) => Ui.SetEditMode(edit && !Ws.ReadOnly);
+
+    private void Fit()
+    {
+        if (Ws.Active is not { } c) return;
+        c.LeftInset = Ui.EditMode ? c.LeftInset : 8;
+        c.ZoomToFit();
+        Shell?.Repaint();
+    }
+
+    private void OpenDiagram(Diagram d)
+    {
+        _picker = false;
+        Ws.Open(d);
+    }
+
+    // ------------------------------------------------------------------ browser callbacks (js/mobile.js)
+
+    /// <summary>The viewport width, on load and whenever it crosses a breakpoint.</summary>
+    [JSInvokable]
+    public void OnViewport(double width) => Ui.SetViewport(width);
+
+    /// <summary>Tap at canvas coordinates: select what is there and show its properties; tapping empty canvas clears.</summary>
+    [JSInvokable]
+    public string? TouchTap(double sx, double sy)
+    {
+        var hit = HitAt(sx, sy);
+        if (hit is null)
+        {
+            Ui.CloseSheet();
+            if (Ws.Selected != null) Ws.Select(null);
+            return null;
+        }
+        Ws.Select(hit);
+        Ui.OpenSheet(hit);
+        return hit.Id;
+    }
+
+    /// <summary>Long press at canvas coordinates: select what is there and open the action menu.</summary>
+    [JSInvokable]
+    public bool TouchLongPress(double sx, double sy)
+    {
+        if (HitAt(sx, sy) is not { } hit) return false;
+        Ws.Select(hit);
+        Ui.OpenMenu(hit);
+        return true;
+    }
+
+    /// <summary>
+    /// Pinch / pan finished: the gesture maps a screen point p to c1 + scale·(p − c0). Zoom is clamped as on the desktop,
+    /// keeping the pinch centre fixed.
+    /// </summary>
+    [JSInvokable]
+    public void TouchTransform(double scale, double c0x, double c0y, double c1x, double c1y)
+    {
+        if (Ws.Active is not { } c || !double.IsFinite(scale) || scale <= 0) return;
+        ApplyTransform(c, scale, c0x, c0y, c1x, c1y);
+        Shell?.Repaint();
+    }
+
+    public static void ApplyTransform(DiagramController c, double scale, double c0x, double c0y, double c1x, double c1y)
+    {
+        double z0 = c.Zoom, px = c.PanX, py = c.PanY;
+        c.SetZoom(z0 * scale);                // clamps to the desktop zoom range
+        var s = c.Zoom / z0;
+        // SetZoom anchors at the view centre; re-anchor so the point under the fingers stays under them.
+        c.PanBy(c1x + s * (px - c0x) - c.PanX, c1y + s * (py - c0y) - c.PanY);
+    }
+
+    private Element? HitAt(double sx, double sy)
+    {
+        if (Ws.Active is not { } c) return null;
+        var p = c.ToModel(sx, sy);
+        return c.HitNode(p)?.Element ?? c.HitEdge(p)?.Relationship;
+    }
+
+    public override void Dispose()
+    {
+        base.Dispose();
+        if (_module != null) _ = DisposeModule(_module);
+        _self?.Dispose();
+    }
+
+    private static async Task DisposeModule(IJSObjectReference module)
+    {
+        try { await module.InvokeVoidAsync("uninstall"); await module.DisposeAsync(); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException) { }
+    }
+}

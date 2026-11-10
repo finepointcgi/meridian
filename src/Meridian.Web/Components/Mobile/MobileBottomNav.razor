@@ -1,0 +1,31 @@
+@inherits MobileComponent
+
+@* Phone bottom navigation: one full-screen view per tab. *@
+<nav class="m-bottomnav" aria-label="Views">
+    @foreach (var (view, label, icon) in Tabs)
+    {
+        var v = view;
+        var on = Ui.ActiveView == v;
+        <button class="m-tab @(on ? "on" : "")" aria-current="@(on ? "page" : null)" data-view="@v" @onclick="() => Ui.Show(v)">
+            <span class="m-tab-icon">
+                <MudIcon Icon="@icon" />
+                @if (v == MobileUiState.View.Comments && Ws.Selected != null)
+                {
+                    <span class="m-tab-dot" aria-hidden="true"></span>
+                }
+            </span>
+            <span class="m-tab-label">@label</span>
+        </button>
+    }
+</nav>
+
+@code {
+    public static readonly (MobileUiState.View View, string Label, string Icon)[] Tabs =
+    [
+        (MobileUiState.View.Model, "Model", Icons.Material.Outlined.AccountTree),
+        (MobileUiState.View.Diagram, "Diagram", Icons.Material.Outlined.Schema),
+        (MobileUiState.View.Requirements, "Requirements", Icons.Material.Outlined.Assignment),
+        (MobileUiState.View.Reviews, "Reviews", Icons.Material.Outlined.Checklist),
+        (MobileUiState.View.Comments, "Comments", Icons.Material.Outlined.ChatBubbleOutline),
+    ];
+}

@@ -1,0 +1,13 @@
+@inherits MobileComponent
+
+@* Title-bar buttons that open the model explorer and the inspector as drawers over the canvas (tablet widths only; see mobile.css). *@
+<span class="t-drawer-btns">
+    <button class="t-drawer-btn @(Ui.LeftDrawer ? "on" : "")" aria-label="Model explorer" aria-pressed="@(Ui.LeftDrawer ? "true" : "false")" title="Model explorer"
+            @onclick="() => Ui.ToggleDrawer(left: true)">
+        <MudIcon Icon="@Icons.Material.Outlined.AccountTree" />
+    </button>
+    <button class="t-drawer-btn @(Ui.RightDrawer ? "on" : "")" aria-label="Properties and requirements" aria-pressed="@(Ui.RightDrawer ? "true" : "false")" title="Properties and requirements"
+            @onclick="() => Ui.ToggleDrawer(left: false)">
+        <MudIcon Icon="@Icons.Material.Outlined.Tune" />
+    </button>
+</span>

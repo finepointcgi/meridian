@@ -1,0 +1,124 @@
+@inherits MobileComponent
+
+@* Bottom sheet for the selected element: name, docs, key fields, traceability and comments. *@
+@if (Ui.SheetElement is { } e && Ws.Model.Contains(e))
+{
+    var diagram = MobileActions.DiagramFor(e);
+    var trace = Trace(e).ToList();
+    <div class="m-scrim" @onclick="Ui.CloseSheet"></div>
+    <section class="m-sheet @(Ui.SheetExpanded ? "expanded" : "")" role="dialog" aria-modal="true" aria-label="@($"{e.DisplayName} properties")">
+        <button class="m-sheet-handle" aria-label="@(Ui.SheetExpanded ? "Collapse" : "Expand")" @onclick="Ui.ToggleSheetExpanded"><span></span></button>
+        <div class="m-sheet-head">
+            @KindIcon.For(e)
+            <div class="m-head-text">
+                <span class="m-head-title">@Title(e)</span>
+                <span class="m-head-sub">@Kind(e)@(e.Owner is { } o ? $" · in {o.DisplayName}" : "")</span>
+            </div>
+            <button class="m-icon-btn" aria-label="Close" @onclick="Ui.CloseSheet"><MudIcon Icon="@Icons.Material.Filled.Close" /></button>
+        </div>
+        <div class="m-actions">
+            <button class="m-action" @onclick="() => MobileActions.Comment(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.AddComment" /><span>Comment</span></button>
+            <button class="m-action" disabled="@(diagram == null)" @onclick="() => MobileActions.OpenDiagram(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.Schema" /><span>Open diagram</span></button>
+            <button class="m-action" @onclick="() => MobileActions.ShowInTree(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span>Show in tree</span></button>
+        </div>
+        <div class="m-sheet-body">
+            @if (e.Kind == ElementKind.Requirement && e.Get(FieldKeys.Text) is { Length: > 0 } text)
+            {
+                <div class="m-sec-title">Text</div>
+                <p class="m-doc">@text</p>
+            }
+            <div class="m-sec-title">Documentation</div>
+            @if (e.Get(FieldKeys.Documentation) is { Length: > 0 } doc)
+            {
+                <p class="m-doc">@doc</p>
+            }
+            else
+            {
+                <p class="m-doc muted">No documentation.</p>
+            }
+            @{ var fields = KeyFields(e).ToList(); }
+            @if (fields.Count > 0)
+            {
+                <div class="m-sec-title">Properties</div>
+                <dl class="m-fields">
+                    @foreach (var (label, value) in fields)
+                    {
+                        <dt>@label</dt>
+                        <dd>@value</dd>
+                    }
+                </dl>
+            }
+            <div class="m-sec-title">Traceability @(trace.Count > 0 ? $"({trace.Count})" : "")</div>
+            @if (trace.Count == 0)
+            {
+                <p class="m-doc muted">No relationships.</p>
+            }
+            else
+            {
+                <ul class="m-trace-list">
+                    @foreach (var t in trace.Take(40))
+                    {
+                        var other = t.Other;
+                        <li>
+                            <button class="m-trace-row" @onclick="() => Follow(other)">
+                                <MudIcon Icon="@(t.Outgoing ? Icons.Material.Filled.ArrowForward : Icons.Material.Filled.ArrowBack)" Class="m-dir" />
+                                <span class="m-trace-kind">@t.Label</span>
+                                <span class="m-trace-name">@Title(other)</span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (Ws.Session != null)
+            {
+                <div class="m-comments"><CommentsSection ElementId="@e.Id" /></div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    public sealed record TraceRow(bool Outgoing, string Label, Element Other);
+
+    private static readonly HashSet<string> Hidden =
+        [FieldKeys.Name, FieldKeys.Documentation, FieldKeys.Text, FieldKeys.RequirementId, FieldKeys.Stereotypes];
+
+    private static string Title(Element e) =>
+        e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } id ? $"{id} {e.Name}" : e.DisplayName;
+
+    private static string Kind(Element e) => e is Diagram d ? Metamodel.DisplayName(d.DiagramType) : Metamodel.DisplayName(e.Kind);
+
+    /// <summary>The element's non-empty fields worth showing on a phone (ids resolved to names), plus stereotypes.</summary>
+    public IEnumerable<(string Label, string Value)> KeyFields(Element e)
+    {
+        if (e.Stereotypes.Count > 0) yield return ("Stereotypes", string.Join(", ", e.Stereotypes));
+        var n = 0;
+        foreach (var (key, raw) in e.Fields.OrderBy(f => f.Key, StringComparer.Ordinal))
+        {
+            if (Hidden.Contains(key) || string.IsNullOrWhiteSpace(raw)) continue;
+            var value = Ws.Model.Find(raw) is { } target ? target.DisplayName : raw;
+            if (value.Length > 160) value = value[..157] + "…";
+            yield return (MobileActions.FieldLabel(key), value);
+            if (++n == 12) yield break;
+        }
+    }
+
+    /// <summary>Relationships to and from the element (and for a relationship, its two ends).</summary>
+    public IEnumerable<TraceRow> Trace(Element e)
+    {
+        if (e is Relationship rel)
+        {
+            yield return new(false, "Source", rel.Source);
+            yield return new(true, "Target", rel.Target);
+            yield break;
+        }
+        foreach (var r in Ws.Model.Outgoing(e)) yield return new(true, Metamodel.DisplayName(r.Kind), r.Target);
+        foreach (var r in Ws.Model.Incoming(e)) yield return new(false, Metamodel.DisplayName(r.Kind), r.Source);
+    }
+
+    private void Follow(Element other)
+    {
+        Ws.Select(other);
+        Ui.OpenSheet(other, Ui.SheetExpanded);
+    }
+}
