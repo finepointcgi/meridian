@@ -29,11 +29,14 @@ public sealed class CodeSyncState : IDisposable
 
     public IReadOnlyList<CodeSyncReview> Reviews { get; private set; } = [];
 
-    /// <summary>Changes waiting for review across every code-sync branch of the project.</summary>
-    public int PendingCount => Reviews.Sum(r => r.Changes.Count);
+    /// <summary>Changes waiting for review across every code-sync review branch of the project (previews not counted).</summary>
+    public int PendingCount => Reviews.Where(r => !r.IsPreview).Sum(r => r.Changes.Count);
 
-    /// <summary>Runs waiting for review.</summary>
-    public int OpenRuns => Reviews.Sum(r => r.Runs.Count);
+    /// <summary>Runs waiting for review (previews not counted).</summary>
+    public int OpenRuns => Reviews.Where(r => !r.IsPreview).Sum(r => r.Runs.Count);
+
+    /// <summary>Open pull request previews, by pull request number.</summary>
+    public IReadOnlyList<CodeSyncReview> Previews => Reviews.Where(r => r.IsPreview).OrderBy(r => r.PullRequest).ToList();
 
     /// <summary>The review of the branch being edited, if it is a code-sync branch with open runs.</summary>
     public CodeSyncReview? OnThisBranch => Reviews.FirstOrDefault(r => r.Branch.BranchId is { } b && b == _ws.BranchId);
@@ -92,7 +95,9 @@ public sealed class CodeSyncState : IDisposable
             _ws.SetHighlightCodeChanges(true);
         }
         if (Reviews.Count == 0) { if (_ws.CodeChanges is not null) _ws.SetCodeChanges(null); return; }
-        IReadOnlyList<CodeSyncReview> source = here is not null ? [here] : Reviews;
+        // On main, what a review would bring; a pull request preview only shows on its own branch.
+        IReadOnlyList<CodeSyncReview> source = here is not null ? [here] : Reviews.Where(r => !r.IsPreview).ToList();
+        if (source.Count == 0) { if (_ws.CodeChanges is not null) _ws.SetCodeChanges(null); return; }
         var kinds = new Dictionary<string, ChangeHighlight>(StringComparer.Ordinal);
         foreach (var c in source.SelectMany(r => r.Changes)) kinds[c.ElementId] = Highlight(c.Kind);
         _ws.SetCodeChanges(new CodeChangeOverlay(kinds, here?.Main));

@@ -486,6 +486,243 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         Assert.Equal(CodeSyncRunStatus.Accepted, Assert.Single(await _db.ListCodeSyncRunsAsync(_project)).Status);
     }
 
+    // ================================================================ robustness
+
+    [Fact]
+    public async Task An_Edit_Made_On_The_Branch_During_A_Sync_Survives()
+    {
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request());
+        var branchId = Assert.Single(await _db.ListBranchesAsync(_project)).Id;
+        var ben = await Open(_ben, ProjectRole.Editor, branchId);   // Ben is working on the review branch
+
+        _applier.Script.Enqueue(m =>
+        {
+            // While the sync maps the code onto its copy of the branch, Ben documents the engine in his tab.
+            ben.Model.Set(Named(ben.Model, "Engine")!, FieldKeys.Documentation, "Checked by Ben");
+            return AddBlocks("SolarArray")(m);
+        });
+        var outcome = await Runner().RunAsync(Request("Add solar array"));
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+
+        Assert.Equal("Checked by Ben", Named(ben.Model, "Engine")!.Documentation);   // his edit is still there…
+        Assert.NotNull(Named(ben.Model, "SolarArray"));                               // …next to the sync's
+        var stored = ProjectFile.Deserialize((await _db.LoadBranchAsync(branchId))!.HeadJson);
+        Assert.Equal("Checked by Ben", Named(stored, "Engine")!.Documentation);
+        Assert.NotNull(Named(stored, "SolarArray"));
+        var committed = (await _db.ListBranchVersionsAsync(_project, branchId)).Count;
+        Assert.Equal(2, committed);
+        ben.Dispose();
+    }
+
+    [Fact]
+    public async Task An_Edit_Stored_During_A_Sync_With_No_One_On_The_Branch_Survives()
+    {
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request());
+        var branchId = Assert.Single(await _db.ListBranchesAsync(_project)).Id;
+
+        _applier.Script.Enqueue(m =>
+        {
+            // Someone's last edits reach the store (their tab closed) while the sync runs.
+            var head = ProjectFile.Deserialize(_db.LoadBranchAsync(branchId).GetAwaiter().GetResult()!.HeadJson);
+            head.Set(Named(head, "Engine")!, FieldKeys.Documentation, "Saved meanwhile");
+            _db.SaveBranchAsync(branchId, ProjectFile.Serialize(head), _ben.Id).GetAwaiter().GetResult();
+            return AddBlocks("SolarArray")(m);
+        });
+        await Runner().RunAsync(Request("Add solar array"));
+        var stored = await BranchAsync(branchId);
+        Assert.Equal("Saved meanwhile", Named(stored, "Engine")!.Documentation);
+        Assert.NotNull(Named(stored, "SolarArray"));
+    }
+
+    [Fact]
+    public async Task A_Failed_Sync_Deletes_The_Branch_It_Created_But_Not_An_Existing_One()
+    {
+        _applier.Script.Enqueue(m => { AddBlocks("Battery")(m); throw new InvalidOperationException("Mapper exploded"); });
+        var failed = await Runner().RunAsync(Request());
+        Assert.Equal(CodeSyncStatus.Failed, failed.Status);
+        Assert.Empty(await _db.ListBranchesAsync(_project));
+        Assert.Null(Assert.Single(await _db.ListCodeSyncRunsAsync(_project)).BranchId);
+
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request());
+        _applier.Script.Enqueue(_ => throw new InvalidOperationException("Mapper exploded again"));
+        await Runner().RunAsync(Request());
+        Assert.Single(await _db.ListBranchesAsync(_project));   // the review branch with Battery stays
+    }
+
+    [Fact]
+    public void Auto_Diagrams_Follow_The_Connection_Unless_The_Model_Root_Says_Otherwise()
+    {
+        var m = SampleModels.Vehicle();
+        var off = new CodeSync.Hosts.CodeRepoConfig { AutoDiagrams = false };
+        Assert.True(CodeSyncRunner.AutoDiagrams(m.Root, null));
+        Assert.False(CodeSyncRunner.AutoDiagrams(m.Root, off));
+        m.Set(m.Root, CodeSyncRunner.AutoDiagramsField, "true");
+        Assert.True(CodeSyncRunner.AutoDiagrams(m.Root, off));
+        m.Set(m.Root, CodeSyncRunner.AutoDiagramsField, "false");
+        Assert.False(CodeSyncRunner.AutoDiagrams(m.Root, new CodeSync.Hosts.CodeRepoConfig()));
+    }
+
+    [Fact]
+    public async Task The_Connection_Turns_Diagrams_For_New_Packages_Off()
+    {
+        var conn = new IntegrationConnection(Guid.NewGuid(), _project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
+            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", AutoDiagrams = false }.ToJson(), null, DateTime.UtcNow);
+        await _db.SaveIntegrationAsync(conn);
+        _applier.Script.Enqueue(m =>
+        {
+            var pkg = m.Create(m.Root, ElementKind.Package, "Power");
+            var a = m.Create(pkg, ElementKind.Block, "PowerA");
+            return new CodeSyncChanges([pkg.Id, a.Id], [], [], []);
+        });
+        var outcome = await Runner().RunAsync(Request() with { ConnectionId = conn.Id });
+        Assert.DoesNotContain("new diagram", outcome.Summary);
+        Assert.Equal("sat", _applier.LastOptions!.RootPackage);   // the connection's model package (the repository name)
+    }
+
+    // ================================================================ pull request previews
+
+    [Fact]
+    public void Preview_Branch_Names_Carry_The_Pull_Request_Number()
+    {
+        Assert.Equal("code-sync/acme/sat/pr-7", CodeSyncRunner.PreviewBranchNameFor("acme/sat", 7));
+        Assert.Equal(7, CodeSyncRunner.PreviewNumber("code-sync/acme/sat/pr-7"));
+        Assert.Null(CodeSyncRunner.PreviewNumber("code-sync/acme/sat"));
+        Assert.Null(CodeSyncRunner.PreviewNumber("feature/pr-7"));
+        var longName = CodeSyncRunner.PreviewBranchNameFor(new string('a', 40) + "/" + new string('b', 40), 123456);
+        Assert.True(longName.Length <= 60);
+        Assert.Equal(123456, CodeSyncRunner.PreviewNumber(longName));
+        Branching.NormalizeBranchName(longName);
+        // A repository named like a preview does not become one.
+        Assert.False(CodeSyncRunner.IsPreviewBranch(CodeSyncRunner.BranchNameFor("acme/pr-5")));
+    }
+
+    [Fact]
+    public async Task A_Pull_Request_Preview_Is_Listed_But_Never_Accepted_And_Closing_Deletes_It()
+    {
+        _applier.Script.Enqueue(AddBlocks("Thruster"));
+        var preview = await Runner().RunPreviewAsync(Request("Add thruster"), 7);
+        Assert.Equal(CodeSyncStatus.AwaitingReview, preview.Status);
+        var branch = Assert.Single(await _db.ListBranchesAsync(_project));
+        Assert.Equal("code-sync/acme/sat/pr-7", branch.Name);
+        Assert.Contains($"branch={branch.Id}", preview.ReviewUrl);
+
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request());   // and a push to main, on the review branch
+        var reviews = await _review.LoadAsync(_project);
+        Assert.Equal(2, reviews.Count);
+        var pr = Assert.Single(reviews, r => r.IsPreview);
+        Assert.Equal(7, pr.PullRequest);
+        Assert.Equal("Thruster", Assert.Single(pr.Changes).Name);
+        var changes = await Runner().PreviewChangesAsync(_project, "acme/sat", 7);
+        Assert.Equal((CodeSyncChangeKind.Added, "Thruster", "Block"), (Assert.Single(changes).Kind, changes[0].Name, changes[0].ElementKind));
+
+        // Accepting everything takes the review branch, not the preview.
+        var accepted = await _review.AcceptAsync(_project, null, null, _ann);
+        Assert.Equal(1, accepted.Count);
+        Assert.NotNull(Named(await MainAsync(), "Battery"));
+        Assert.Null(Named(await MainAsync(), "Thruster"));
+        Assert.Equal(0, (await _review.RejectAsync(_project, null, null, _ann)).Count);
+        Assert.True(Assert.Single(await _review.LoadAsync(_project)).IsPreview);
+
+        // Merged: the preview goes; the push to main brings the code to the review branch.
+        var message = await Runner().ClosePreviewAsync(_project, "acme/sat", 7, merged: true);
+        Assert.Contains("deleted", message);
+        Assert.DoesNotContain(await _db.ListBranchesAsync(_project), b => b.Name == "code-sync/acme/sat/pr-7");
+        Assert.Empty(await _review.LoadAsync(_project));
+        Assert.DoesNotContain(await _db.ListCodeSyncRunsAsync(_project), r => r.IsOpen);
+        Assert.Contains("No preview", await Runner().ClosePreviewAsync(_project, "acme/sat", 7, merged: false));
+    }
+
+    [Fact]
+    public async Task Closing_A_Preview_Someone_Has_Open_Keeps_Its_Branch()
+    {
+        _applier.Script.Enqueue(AddBlocks("Thruster"));
+        await Runner().RunPreviewAsync(Request(), 8);
+        var branchId = Assert.Single(await _db.ListBranchesAsync(_project)).Id;
+        var ws = await Open(_ben, ProjectRole.Editor, branchId);
+        var message = await Runner().ClosePreviewAsync(_project, "acme/sat", 8, merged: false);
+        Assert.Contains("kept", message);
+        Assert.Equal(CodeSyncRunStatus.Rejected, Assert.Single(await _db.ListCodeSyncRunsAsync(_project)).Status);
+        Assert.Empty(await _review.LoadAsync(_project));
+        ws.Dispose();
+    }
+
+    [Fact]
+    public async Task Badge_And_What_Changed_Show_A_Preview_As_PR_n_Without_Selection()
+    {
+        _applier.Script.Enqueue(AddBlocks("Thruster"));
+        await Runner().RunPreviewAsync(Request("Add thruster"), 7);
+        var (ws, state) = await UiAsync(_ann, ProjectRole.Owner, null);
+        Assert.Equal(0, state.PendingCount);
+        Assert.Single(state.Previews);
+        Assert.Null(ws.CodeChanges);   // main is not highlighted for a preview
+
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var badge = RenderComponent<CodeChangesBadge>();
+        Assert.Contains("PR #7", badge.Find("[data-testid=code-changes-badge]").TextContent);
+        Assert.DoesNotContain("Code changes (", badge.Markup);
+
+        var cut = RenderComponent<CodeChangesTab>();
+        Assert.Contains("PR #7", cut.Find("h3.chg-preview").TextContent);
+        Assert.Contains("for looking only", cut.Markup);
+        Assert.True(cut.Find(".chg-row input[type=checkbox]").HasAttribute("disabled"));
+        cut.Find(".chg-select-all").Change(true);
+        Assert.Contains("0 selected", cut.Markup);
+
+        // A push to main shows next to it.
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request());
+        badge.WaitForAssertion(() => Assert.Contains("Code changes (1)", badge.Markup));
+        Assert.Contains("PR #7", badge.Markup);
+        ws.Dispose();
+    }
+
+    [Fact]
+    public async Task Repository_Settings_Offer_Bitbucket_The_Model_Settings_And_List_Previews()
+    {
+        var ws = await Open(_ann, ProjectRole.Owner);
+        var model = ws.Model;
+        model.Set(model.Root, CodeSyncRunner.AutoDiagramsField, "false");   // the project's override
+        var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
+        var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
+        var hosts = new CodeSync.Hosts.CodeSyncHostService(_db, integrations, factory, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new CodeSync.Hosts.CodeSyncQueue(), new CodeSync.Hosts.CodeSyncRateLimiter(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<CodeSync.Hosts.CodeSyncHostService>.Instance);
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Host = CodeSync.Hosts.GitHostKind.Bitbucket, Owner = "acme", Repo = "sat" }, "token");
+        // The server keeps pull request state; a save from the form never sets it, so put it there as a sync would.
+        var row = (await _db.FindIntegrationAsync(saved.Connection.Id))!;
+        var cfg = CodeSync.Hosts.CodeRepoConfig.Parse(row.ConfigJson);
+        cfg.PullRequests = [new() { Number = 7, Title = "Add thruster", Status = "awaiting-review", Summary = "1 added", ReviewUrl = "/x" }];
+        await _db.SaveIntegrationAsync(row with { ConfigJson = cfg.ToJson() });
+
+        Services.AddSingleton(ws);
+        Services.AddSingleton(hosts);
+        Services.AddSingleton(new MeridianHostInfo(false, Path.GetTempPath(), null));
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<CodeRepositoriesPanel>(p => p.Add(x => x.CanManage, true));
+        cut.WaitForAssertion(() => Assert.Contains("Bitbucket Cloud", cut.Markup));
+        Assert.Contains("PR #7", cut.Find(".code-repo-pr[data-pr='7']").TextContent);
+        Assert.Contains("Add thruster", cut.Markup);
+
+        // Webhook setup for Bitbucket Cloud: the URL carries the secret.
+        cut.Find("button.code-repo-webhook").Click();
+        cut.WaitForAssertion(() => Assert.Contains("Bitbucket Cloud", cut.Find(".code-repo-setup").TextContent));
+        Assert.Contains("?token=", cut.Find(".code-repo-setup").TextContent);
+
+        // The settings form: model package, diagrams switch (with the model's override) and the pull request switches.
+        cut.Find("button.code-repo-edit").Click();
+        cut.WaitForAssertion(() => Assert.Contains("Create diagrams for new packages and classes", cut.Markup));
+        Assert.Contains("codeSync.autoDiagrams = false", cut.Markup);
+        Assert.Contains("Workspace", cut.Markup);
+        Assert.Contains("Repository slug", cut.Markup);
+        Assert.Contains("Preview pull requests", cut.Markup);
+        Assert.Contains("Comment the model changes on each pull request", cut.Markup);
+        ws.Dispose();
+    }
+
     // ================================================================ UI
 
     private async Task<(Workspace Ws, CodeSyncState State)> UiAsync(UserAccount user, ProjectRole role, Guid? branch)
@@ -554,6 +791,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         var (_, _) = await UiAsync(_vic, ProjectRole.Viewer, null);
         var empty = RenderComponent<CodeChangesTab>();
         Assert.Contains("No code changes to review", empty.Markup);
+        Assert.Empty(empty.FindAll(".chg-connect"));   // viewers can't connect repositories
 
         _applier.Script.Enqueue(AddBlocks("Battery"));
         await Runner().RunAsync(Request());
@@ -561,6 +799,14 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         empty.Find(".chg-row input[type=checkbox]").Change(true);
         Assert.True(empty.Find(".chg-accept").HasAttribute("disabled"));
         Assert.Contains("View only", empty.Markup);
+    }
+
+    [Fact]
+    public async Task What_Changed_Without_Changes_Offers_To_Connect_A_Repository()
+    {
+        await UiAsync(_ann, ProjectRole.Owner, null);
+        var empty = RenderComponent<CodeChangesTab>();
+        Assert.Contains("Connect a repository", empty.Find("button.chg-connect").TextContent);
     }
 
     [Fact]

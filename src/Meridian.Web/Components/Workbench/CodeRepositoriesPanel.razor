@@ -1,4 +1,5 @@
 @using Meridian.Data
+@using Meridian.Web.CodeSync
 @using Meridian.Web.CodeSync.Hosts
 @implements IDisposable
 @inject CodeSyncHostService CodeSync
@@ -18,7 +19,7 @@
         <div class="integration-row" style="align-items:flex-start">
             <MudIcon Icon="@Icons.Material.Outlined.Code" Style="font-size:18px; color:var(--accent-2); margin-top:2px" />
             <div style="flex:1; min-width:0">
-                <div style="font-weight:600">@conn.Name <span class="integration-type">@(cfg.Host == GitHostKind.GitHub ? "GitHub" : "GitLab")</span></div>
+                <div style="font-weight:600">@conn.Name <span class="integration-type">@cfg.HostLabel</span></div>
                 <div class="integration-sub">@cfg.Display · @cfg.Branch · @(cfg.Paths.Count == 0 ? "all folders" : string.Join(", ", cfg.Paths)) · @(cfg.AutoSync ? "syncs on push" : "manual sync")</div>
                 <div class="integration-sub">
                     @if (last is null)
@@ -39,15 +40,38 @@
                         }
                     }
                 </div>
+                @foreach (var pr in cfg.PullRequests.OrderBy(p => p.Number))
+                {
+                    <div class="integration-sub code-repo-pr" data-pr="@pr.Number">
+                        <span class="chg-pr">PR #@pr.Number</span>
+                        @if (pr.Url is { Length: > 0 } prUrl && Uri.TryCreate(prUrl, UriKind.Absolute, out var pu) && pu.Scheme is "https" or "http")
+                        {
+                            <a href="@prUrl" target="_blank" rel="noopener noreferrer">@(pr.Title ?? "pull request")</a>
+                        }
+                        else
+                        {
+                            <span>@pr.Title</span>
+                        }
+                        <span style="@($"color:{StatusColor(pr.Status)}")"> · @StatusLabel(pr.Status)</span>
+                        @if (pr.Summary is { Length: > 0 } && pr.Status is not ("queued" or "running"))
+                        {
+                            <span> · @pr.Summary</span>
+                        }
+                        @if (pr.ReviewUrl is { Length: > 0 } prReview)
+                        {
+                            <span> · <a href="@prReview">Preview</a></span>
+                        }
+                    </div>
+                }
             </div>
             @if (CanManage)
             {
                 <MudTooltip Text="Fetch the branch head and sync it now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => SyncNow(conn)" /></MudTooltip>
                 @if (!HostInfo.LocalMode)
                 {
-                    <MudTooltip Text="Webhook setup"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Webhook" OnClick="() => ShowSetup(conn, null)" /></MudTooltip>
+                    <MudTooltip Text="Webhook setup"><MudIconButton Size="Size.Small" Class="code-repo-webhook" Icon="@Icons.Material.Outlined.Webhook" OnClick="() => ShowSetup(conn, null)" /></MudTooltip>
                 }
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
+                <MudIconButton Size="Size.Small" Class="code-repo-edit" aria-label="Edit repository" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
                 <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
             }
         </div>
@@ -60,8 +84,13 @@
                 }
                 else
                 {
-                    var url = CodeSyncHostService.WebhookUrl(BaseUrl, conn.Id);
+                    var cloud = cfg.IsBitbucketCloud;
+                    var url = cloud && _setup.Secret is { } urlSecret ? CodeSyncHostService.WebhookUrlWithToken(BaseUrl, conn.Id, urlSecret) : CodeSyncHostService.WebhookUrl(BaseUrl, conn.Id);
                     <div class="d-flex align-center gap-1"><b>Payload URL</b>&nbsp;<code style="overflow-wrap:anywhere">@url</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(url)" /></div>
+                    @if (cloud && _setup.Secret is null)
+                    {
+                        <div style="opacity:.75">Bitbucket Cloud: the URL ends with <code>?token=</code> and the secret. Create a new secret to see the whole URL again.</div>
+                    }
                     @if (_setup.Secret is { } secret)
                     {
                         <div class="d-flex align-center gap-1"><b>Secret</b>&nbsp;<code style="overflow-wrap:anywhere">@secret</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(secret)" /></div>
@@ -74,11 +103,19 @@
                     }
                     @if (cfg.Host == GitHostKind.GitHub)
                     {
-                        <div class="mt-1">In GitHub: <i>Settings → Webhooks → Add webhook</i>. Paste the URL, set content type to <code>application/json</code>, paste the secret, and choose “Just the push event”.</div>
+                        <div class="mt-1">In GitHub: <i>Settings → Webhooks → Add webhook</i>. Paste the URL, set content type to <code>application/json</code>, paste the secret, and choose “Let me select individual events”: <b>Pushes</b> and <b>Pull requests</b>.</div>
+                    }
+                    else if (cfg.Host == GitHostKind.GitLab)
+                    {
+                        <div class="mt-1">In GitLab: <i>Settings → Webhooks → Add new webhook</i>. Paste the URL, paste the secret as the secret token, and tick “Push events” for <code>@cfg.Branch</code> and “Merge request events”.</div>
+                    }
+                    else if (cloud)
+                    {
+                        <div class="mt-1">In Bitbucket Cloud: <i>Repository settings → Webhooks → Add webhook</i>. Paste the whole URL (it carries the secret, so treat it like a password). Triggers: <b>Repository: Push</b> and <b>Pull request: Created, Updated, Merged, Declined</b>.</div>
                     }
                     else
                     {
-                        <div class="mt-1">In GitLab: <i>Settings → Webhooks → Add new webhook</i>. Paste the URL, paste the secret as the secret token, and tick “Push events” for <code>@cfg.Branch</code>.</div>
+                        <div class="mt-1">In Bitbucket Data Center: <i>Repository settings → Webhooks → Create webhook</i>. Paste the URL and the secret (deliveries are signed with <code>X-Hub-Signature</code>). Events: <b>Repository: Push</b> and <b>Pull request: Opened, Source branch updated, Merged, Declined, Deleted</b>.</div>
                     }
                 }
                 <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => _setup = null">Close</MudButton>
@@ -87,7 +124,7 @@
     }
     @if (_repos.Count == 0)
     {
-        <MudText Typo="Typo.body2" Style="opacity:.7">No code repository connected. Connect GitHub or GitLab to keep a model package in step with your C# code.</MudText>
+        <MudText Typo="Typo.body2" Style="opacity:.7">No code repository connected. Connect GitHub, GitLab or Bitbucket to keep a model package in step with your C# code.</MudText>
     }
     <div class="d-flex gap-2 mt-3 align-center">
         @if (CanManage)
@@ -105,15 +142,23 @@ else
         <MudSelect T="GitHostKind" Label="Host" Value="f.Host" ValueChanged="SetHost" Variant="Variant.Outlined" Margin="Margin.Dense">
             <MudSelectItem Value="GitHostKind.GitHub">GitHub</MudSelectItem>
             <MudSelectItem Value="GitHostKind.GitLab">GitLab</MudSelectItem>
+            <MudSelectItem Value="GitHostKind.Bitbucket">Bitbucket</MudSelectItem>
         </MudSelect>
-        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@(f.Display.Trim('/').Length > 0 ? f.Display : (f.Host == GitHostKind.GitHub ? "owner/repository" : "group/project"))" Variant="Variant.Outlined" Margin="Margin.Dense" />
-        <MudTextField T="string" Label="Server URL" @bind-Value="f.BaseUrl" Variant="Variant.Outlined" Margin="Margin.Dense"
-                      HelperText="@(f.Host == GitHostKind.GitHub ? "https://api.github.com, or https://your-server/api/v3 for GitHub Enterprise" : "https://gitlab.com, or your GitLab server")" />
+        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@(f.Display.Trim('/').Length > 0 ? f.Display : (f.Host == GitHostKind.GitLab ? "group/project" : f.Host == GitHostKind.Bitbucket ? "workspace/repository" : "owner/repository"))" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Server URL" @bind-Value="f.BaseUrl" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@ServerHelp(f.Host)" />
         @if (f.Host == GitHostKind.GitHub)
         {
             <div class="d-flex gap-2">
                 <MudTextField T="string" Label="Owner" @bind-Value="f.Owner" Variant="Variant.Outlined" Margin="Margin.Dense" />
                 <MudTextField T="string" Label="Repository" @bind-Value="f.Repo" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </div>
+        }
+        else if (f.Host == GitHostKind.Bitbucket)
+        {
+            var bbCloud = CodeRepoConfig.IsBitbucketCloudUrl(f.BaseUrl);
+            <div class="d-flex gap-2">
+                <MudTextField T="string" Label="@(bbCloud ? "Workspace" : "Project key")" @bind-Value="f.Owner" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudTextField T="string" Label="Repository slug" @bind-Value="f.Repo" Variant="Variant.Outlined" Margin="Margin.Dense" />
             </div>
         }
         else
@@ -122,10 +167,22 @@ else
         }
         <MudTextField T="string" Label="Branch" @bind-Value="f.Branch" Variant="Variant.Outlined" Margin="Margin.Dense" />
         <MudTextField T="string" Label="Folders to include" @bind-Value="_paths" Placeholder="src/Domain, src/Shared" HelperText="Comma separated. Empty includes the whole repository." Variant="Variant.Outlined" Margin="Margin.Dense" />
-        <MudTextField T="string" Label="Model package" @bind-Value="f.RootPackage" Placeholder="@(f.RepoName is { Length: > 0 } n ? n : "Repository name")" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <div class="code-repo-model-settings">
+            <MudText Typo="Typo.subtitle2">Model</MudText>
+            <MudTextField T="string" Label="Model package" @bind-Value="f.RootPackage" Placeholder="@(f.RepoName is { Length: > 0 } n ? n : "Repository name")"
+                          HelperText="@(RootPackageOverride is { } rp ? $"This project's model sets {CodeSyncRunner.RootPackageField} = “{rp}”, which wins over this setting." : "The package that receives the code. Defaults to the repository name.")"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudSwitch T="bool" @bind-Value="f.AutoDiagrams" Label="Create diagrams for new packages and classes" Color="Color.Primary" Class="code-repo-auto-diagrams" />
+            @if (AutoDiagramsOverride is { } ad)
+            {
+                <div class="integration-sub">This project's model sets <code>@CodeSyncRunner.AutoDiagramsField = @ad</code>, which wins over this switch. Clear the field to use the switch.</div>
+            }
+        </div>
         <MudSwitch T="bool" @bind-Value="f.AutoSync" Label="Sync on every push to the branch" Color="Color.Primary" />
         <MudSwitch T="bool" @bind-Value="f.PostStatus" Label="Post a commit status (meridian/model)" Color="Color.Primary" />
-        <MudTextField T="string" Label="@(f.Host == GitHostKind.GitHub ? "Access token (Contents: read, Commit statuses: write)" : "Access token (read_repository, api for statuses)")"
+        <MudSwitch T="bool" @bind-Value="f.PreviewPullRequests" Label="Preview pull requests into the branch (code-sync/…/pr-n)" Color="Color.Primary" />
+        <MudSwitch T="bool" @bind-Value="f.CommentOnPullRequests" Disabled="!f.PreviewPullRequests" Label="Comment the model changes on each pull request (one comment, updated)" Color="Color.Primary" />
+        <MudTextField T="string" Label="@TokenLabel(f)"
                       @bind-Value="_token" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
                       Placeholder="@(_tokenSet ? "••• set (leave empty to keep)" : "")" HelperText="Stored encrypted; never shown again after saving." autocomplete="new-password" />
         @if (_message != null)
@@ -159,6 +216,25 @@ else
     private Setup? _setup;
 
     private Guid ProjectId => Ws.Session!.ProjectId;
+
+    /// <summary>The model root's code-sync fields override the connection's settings when set.</summary>
+    private string? RootPackageOverride => Ws.Session is null ? null : Ws.Model.Root.Get(CodeSyncRunner.RootPackageField) is { Length: > 0 } v ? v : null;
+    private string? AutoDiagramsOverride => Ws.Session is null ? null : Ws.Model.Root.Get(CodeSyncRunner.AutoDiagramsField) is "true" or "false" ? Ws.Model.Root.Get(CodeSyncRunner.AutoDiagramsField) : null;
+
+    private static string ServerHelp(GitHostKind host) => host switch
+    {
+        GitHostKind.GitLab => "https://gitlab.com, or your GitLab server",
+        GitHostKind.Bitbucket => "https://api.bitbucket.org/2.0 for Bitbucket Cloud, or your Bitbucket Data Center address",
+        _ => "https://api.github.com, or https://your-server/api/v3 for GitHub Enterprise",
+    };
+
+    private static string TokenLabel(CodeRepoConfig f) => f.Host switch
+    {
+        GitHostKind.GitLab => "Access token (read_repository, api for statuses and comments)",
+        GitHostKind.Bitbucket when CodeRepoConfig.IsBitbucketCloudUrl(f.BaseUrl) => "Access token (Repositories: read, Pull requests: write) or username:app-password",
+        GitHostKind.Bitbucket => "HTTP access token (Repository: write for build statuses and comments)",
+        _ => "Access token (Contents: read, Commit statuses: write, Pull requests: write)",
+    };
     private string BaseUrl => CodeSync.PublicBaseUrl ?? Nav.BaseUri.TrimEnd('/');
 
     protected override async Task OnInitializedAsync()
