@@ -30,7 +30,7 @@ public sealed class SsoProvisioner(IMeridianStore db, IAuditLog audit, AdminSett
                 await audit.RecordAsync(AuditActions.SsoDenied, null, target: email ?? subject, details: new { provider = provider.Name, issuer, reason = "auto-provisioning is off" }, ip: ip, actorName: email ?? subject);
                 return new(null, "Your account has not been set up in Meridian yet. Ask an administrator for access.");
             }
-            var username = Claim(external, m.Username) ?? email ?? Claim(external, "preferred_username") ?? subject;
+            var username = Claim(external, m.Username) ?? Claim(external, m.UsernameFallback) ?? email ?? Claim(external, "preferred_username") ?? subject;
             var display = Claim(external, m.DisplayName) ?? Claim(external, "name")
                 ?? string.Join(' ', new[] { Claim(external, "given_name"), Claim(external, "family_name") }.Where(s => !string.IsNullOrWhiteSpace(s)));
             user = await db.CreateExternalUserAsync(username, display, login);

@@ -20,7 +20,7 @@ public static class LocalFileImport
     public const long MaxBytes = 64 * 1024 * 1024;
 
     /// <summary>Files the desktop app can open as a project (the same formats as "Open a file as a new project").</summary>
-    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md"];
+    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md", ".sql", ".ddl", ".dacpac"];
 
     public static bool IsSupported(string path) =>
         Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
@@ -108,6 +108,17 @@ public static class LocalFileImport
                     File.ReadAllText(path), Path.GetFileNameWithoutExtension(path), Meridian.Serialization.Mermaid.MermaidImporter.IsMarkdownFile(path));
                 if (!mm.Diagrams.Any()) throw new FormatException("the file contains no Mermaid diagram Meridian can import.");
                 return (mm, report);
+            }
+            case ".sql" or ".ddl" or ".dacpac":
+            {
+                // A database schema: a new project holding the database, its schemas and a diagram per schema.
+                using var stream = File.OpenRead(path);
+                var catalog = Meridian.Serialization.Database.DatabaseFiles.Read(path, stream);
+                var model = new ModelRepository(Path.GetFileNameWithoutExtension(path));
+                var r = Meridian.Core.DataModeling.DbImport.Import(model, model.Root, catalog, new Meridian.Core.DataModeling.DbImportOptions { Source = Path.GetFileName(path) });
+                if (r.Tables == 0) throw new FormatException("the file contains no table definitions.");
+                model.History.Clear();
+                return (model, new ImportReport(model.Count, model.Relationships.Count(), r.Warnings));
             }
             default:
                 throw new ArgumentException("Unsupported file type.");

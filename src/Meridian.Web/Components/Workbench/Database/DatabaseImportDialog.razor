@@ -1,0 +1,186 @@
+@* Import ▸ Database schema (DDL / .dacpac)… — upload or paste a DDL script, a SQL Server .dacpac or a Mermaid erDiagram,
+   pick the dialect (detected by default), see what it contains, then import it as a new database or review the changes
+   against the database already in the model (matched by its name). The workbench does the import (one undo step). *@
+@using Meridian.Core.DataModeling
+@using Meridian.Serialization.Database
+@inject Workspace Ws
+
+<MudDialog Class="db-import-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.Storage" />
+            <MudText Typo="Typo.h6">@(RefreshOf is { } r ? $"Refresh {r.Name} from a script" : "Import database schema")</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex flex-column gap-3">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2)">
+                DDL scripts from PostgreSQL, SQL Server (T-SQL with GO batches), MySQL / MariaDB, SQLite or Oracle; a SQL Server
+                <code>.dacpac</code>; or a Mermaid <code>erDiagram</code>. Statements Meridian does not model are skipped and listed as warnings.
+            </MudText>
+            <div class="d-flex gap-2 align-center flex-wrap">
+                <label class="db-file-button">
+                    <InputFile OnChange="OnFile" accept=".sql,.ddl,.txt,.dacpac,.mmd,.mermaid,.md" data-testid="db-import-file" />
+                    <span class="mud-button-root mud-button mud-button-outlined mud-button-outlined-default mud-button-outlined-size-medium">Choose file…</span>
+                </label>
+                <span style="color:var(--text-3); font-size:13px">@(_fileName ?? "or paste a script below")</span>
+                <span style="flex:1"></span>
+                <MudSelect T="string" Label="Dialect" Value="_dialect" ValueChanged="SetDialect" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:220px" data-testid="db-import-dialect">
+                    <MudSelectItem Value="@("")">Detect automatically</MudSelectItem>
+                    @foreach (var d in DbFields.Dialects) { <MudSelectItem Value="@d">@DbReservedWords.DialectName(d)</MudSelectItem> }
+                </MudSelect>
+            </div>
+            @if (!_binary)
+            {
+                <textarea class="db-script" spellcheck="false" rows="10" aria-label="DDL script" data-testid="db-import-text"
+                          placeholder="CREATE TABLE customer (id serial PRIMARY KEY, email varchar(320) NOT NULL UNIQUE);"
+                          style="width:100%; min-height:180px; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12.5px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)"
+                          value="@_text" @oninput="OnInput"></textarea>
+            }
+            @if (_error != null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+            @if (_catalog is { } c && (c.ObjectCount > 0 || c.Schemas.Count > 0))
+            {
+                <div class="db-preview" data-testid="db-import-preview" style="border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px">
+                    <div style="font-weight:600; margin-bottom:4px">
+                        @DbReservedWords.DialectName(c.Dialect.Length > 0 ? c.Dialect : "postgresql") · @N(c.Schemas.Count, "schema") ·
+                        @N(c.AllTables.Count(t => !t.IsView), "table") · @N(c.AllTables.Count(t => t.IsView), "view") ·
+                        @N(c.AllTables.Sum(t => t.ForeignKeys.Count), "foreign key") · @N(c.AllTables.Sum(t => t.Indexes.Count), "index", "indexes")
+                        @if (c.Schemas.Sum(s => s.Sequences.Count + s.Types.Count + s.Routines.Count) is > 0 and var other) { <span> · @N(other, "other object")</span> }
+                    </div>
+                    @foreach (var s in c.Schemas.Where(s => s.Tables.Count > 0))
+                    {
+                        <div class="db-preview-schema"><b>@s.Name</b>: <span style="color:var(--text-2)">@string.Join(", ", s.Tables.Take(24).Select(t => t.Name))@(s.Tables.Count > 24 ? $" … +{s.Tables.Count - 24}" : "")</span></div>
+                    }
+                </div>
+                @if (c.Warnings.Count > 0)
+                {
+                    <details class="db-warnings" style="font-size:12px; color:var(--text-2)">
+                        <summary>@c.Warnings.Count warning@(c.Warnings.Count == 1 ? "" : "s") (also listed in Output after the import)</summary>
+                        <ul style="margin:4px 0 0 18px; padding:0">
+                            @foreach (var w in c.Warnings.Take(40)) { <li>@w</li> }
+                            @if (c.Warnings.Count > 40) { <li>… @(c.Warnings.Count - 40) more</li> }
+                        </ul>
+                    </details>
+                }
+                @if (RefreshOf == null)
+                {
+                    <div class="d-flex gap-3 align-center flex-wrap">
+                        <MudTextField T="string" Label="Database name" @bind-Value="_name" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:320px" data-testid="db-import-name" />
+                        @if (Existing is { } ex)
+                        {
+                            <MudRadioGroup T="bool" @bind-Value="_refresh">
+                                <MudRadio T="bool" Value="true" Color="Color.Primary">Review changes against “@ex.Name”</MudRadio>
+                                <MudRadio T="bool" Value="false" Color="Color.Primary">Import as a new database</MudRadio>
+                            </MudRadioGroup>
+                        }
+                    </div>
+                }
+            }
+            else if (_text.Trim().Length > 0 && _error == null)
+            {
+                <div style="padding:6px; color:var(--text-3); font-size:13px">No tables found yet.</div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_catalog is not { ObjectCount: > 0 })" OnClick="Import" data-testid="db-import-ok">
+            @(RefreshOf != null || _refresh && Existing != null ? "Review changes…" : "Import")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>Where a new database goes.</summary>
+    [Parameter] public Element? Target { get; set; }
+    /// <summary>Refreshing this database (the dialog then always answers with a review).</summary>
+    [Parameter] public Element? RefreshOf { get; set; }
+
+    /// <summary>What to do: <see cref="Refresh"/> set means review the changes against that database.</summary>
+    public sealed record Answer(DbCatalog Catalog, string Source, string? Name, Element? Refresh);
+
+    private const long MaxBytes = 64L * 1024 * 1024;
+
+    private static string N(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
+    private string _text = "";
+    private string _dialect = "";
+    private string? _fileName;
+    private byte[]? _bytes;
+    private bool _binary;
+    private DbCatalog? _catalog;
+    private string? _error;
+    private string? _name;
+    private bool _refresh = true;
+
+    /// <summary>A database in the model with the same name as the one being imported.</summary>
+    private Element? Existing => RefreshOf ?? (_catalog is { } c ? DbModel.Databases(Ws.Model).FirstOrDefault(d => DbCatalog.Eq(d.Get(DbFields.QualifiedName), c.Name) || DbCatalog.Eq(d.Name, _name ?? c.Name)) : null);
+
+    protected override void OnInitialized()
+    {
+        if (RefreshOf is { } r) _dialect = r.Get(DbFields.Dialect);
+    }
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        try
+        {
+            await using var s = e.File.OpenReadStream(MaxBytes);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            _fileName = e.File.Name;
+            _bytes = ms.ToArray();
+            _binary = e.File.Name.EndsWith(".dacpac", StringComparison.OrdinalIgnoreCase);
+            if (!_binary) _text = System.Text.Encoding.UTF8.GetString(_bytes).TrimStart('﻿');
+            Parse();
+        }
+        catch (IOException ex) { _error = $"Could not read {e.File.Name}: {ex.Message}"; }
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? "";
+        _binary = false;
+        _bytes = null;
+        if (_fileName != null && !_fileName.EndsWith(".mmd", StringComparison.OrdinalIgnoreCase)) _fileName = null;
+        Parse();
+    }
+
+    private void SetDialect(string d)
+    {
+        _dialect = d;
+        Parse();
+    }
+
+    private void Parse()
+    {
+        _error = null;
+        try
+        {
+            var name = _fileName ?? "pasted.sql";
+            using var stream = _binary && _bytes != null ? new MemoryStream(_bytes) : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_text));
+            var catalogName = RefreshOf?.Get(DbFields.QualifiedName) is { Length: > 0 } q ? q : Path.GetFileNameWithoutExtension(name);
+            _catalog = DatabaseFiles.Read(name, stream, _dialect.Length > 0 ? _dialect : null);
+            if (RefreshOf != null || _catalog.Name is "pasted" or "database") _catalog.Name = catalogName;
+            if (_catalog.Dialect.Length == 0) _catalog.Dialect = _dialect.Length > 0 ? _dialect : "postgresql";
+            _name ??= _catalog.Name == "pasted" ? "Database" : _catalog.Name;
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or System.Xml.XmlException or IOException)
+        {
+            _catalog = null;
+            _error = ex.Message;
+        }
+    }
+
+    private void Import()
+    {
+        if (_catalog is not { } c) return;
+        var source = _fileName != null ? $"{(_binary ? "dacpac" : "ddl")}:{_fileName}" : "pasted script";
+        var refresh = RefreshOf ?? (_refresh ? Existing : null);
+        MudDialog.Close(DialogResult.Ok(new Answer(c, source, _name, refresh)));
+    }
+}

@@ -89,6 +89,10 @@ public static class ConnectorRules
 
         // Classifiers.
         if (target is ElementKind.Interface && Metamodel.IsClassifier(source)) Add(ElementKind.Realization);
+        // Data models: a foreign key between tables; a table realizes the logical entity it implements; data items are allocated to tables.
+        if (source == ElementKind.Table && target == ElementKind.Table) Add(ElementKind.ForeignKey);
+        if (source == ElementKind.Table && target is ElementKind.Class or ElementKind.Block) { Add(ElementKind.Realization); Add(ElementKind.Trace); }
+        if (source is ElementKind.Class or ElementKind.Block && target == ElementKind.Table) { Add(ElementKind.Realization, reverse: true); Add(ElementKind.Allocate); Add(ElementKind.Trace); }
         if (Metamodel.IsStructuralClassifier(source) && Metamodel.IsStructuralClassifier(target))
         {
             if (diagram == DiagramType.BlockDefinition && source is not ElementKind.Actor && target is not ElementKind.Actor) Add(ElementKind.Composition);
@@ -121,6 +125,6 @@ public static class ConnectorRules
 
     /// <summary>Elements whose notation has its own connectors only (no generic dependency/trace lines).</summary>
     private static bool IsSpecialized(ElementKind k) => k is ElementKind.BpmnNode or ElementKind.BpmnPool or ElementKind.BpmnLane or ElementKind.ArchiElement
-        or ElementKind.Table or ElementKind.Feature or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
+        or ElementKind.Feature or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
         or ElementKind.InitialNode or ElementKind.ActivityFinalNode or ElementKind.DecisionNode or ElementKind.ForkNode or ElementKind.InitialState or ElementKind.FinalState;
 }

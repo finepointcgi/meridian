@@ -1,0 +1,138 @@
+@* Subject areas: create, rename, recolour and delete them; see and change their tables; filter the active database
+   diagram; diagram an area; DDL for an area. Areas are packages, so package permissions on them apply to their tables. *@
+@using Meridian.Core.DataModeling
+@implements IDisposable
+@inject Workspace Ws
+
+<MudDialog Class="db-groups-dialog">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Workspaces" /><MudText Typo="Typo.h6">Subject areas</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="d-flex gap-3" style="min-height:320px">
+            <div style="width:42%; display:flex; flex-direction:column; gap:4px" data-testid="db-groups-list">
+                @foreach (var g in DbModel.Groups(Ws.Model))
+                {
+                    var group = g;
+                    <div class="db-group-row @(ReferenceEquals(group, _current) ? "on" : "")" @onclick="() => _current = group" data-group="@group.Name"
+                         style="display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; @(ReferenceEquals(group, _current) ? "background:var(--accent-soft, rgba(79,140,255,.12))" : "")">
+                        <span style="width:12px; height:12px; border-radius:3px; background:@DbModel.ColorOf(group)"></span>
+                        <span style="flex:1">@group.Name</span>
+                        <span style="color:var(--text-3); font-size:12px">@DbModel.Members(Ws.Model, group).Count</span>
+                    </div>
+                }
+                @if (DbModel.Groups(Ws.Model).Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color:var(--text-3)">No subject areas yet. They group tables across schemas (a table can be in several) for diagrams, permissions, documentation and DDL.</MudText>
+                }
+                @if (!Ws.ReadOnly)
+                {
+                    <div class="d-flex gap-2 align-center mt-2">
+                        <MudTextField T="string" @bind-Value="_new" Label="New subject area" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" data-testid="db-groups-new" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Add" Disabled="@string.IsNullOrWhiteSpace(_new)" OnClick="Create" data-testid="db-groups-create" />
+                    </div>
+                }
+            </div>
+            <div style="flex:1; min-width:0; border-left:1px solid var(--border); padding-left:12px">
+                @if (_current is { } cur && Ws.Model.Contains(cur))
+                {
+                    var members = DbModel.Members(Ws.Model, cur);
+                    var editable = !Ws.ReadOnly && Ws.CanEdit(cur);
+                    <MudTextField @key="cur.Id" T="string" Label="Name" Value="cur.Name" ValueChanged="v => Rename(cur, v)" ReadOnly="!editable" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    <div class="d-flex gap-1 mt-2 mb-2 flex-wrap" data-testid="db-group-colors">
+                        @foreach (var color in DbFields.GroupColors)
+                        {
+                            var c = color;
+                            <button title="@c" disabled="@(!editable)" @onclick="() => Ws.Model.Set(cur, FieldKeys.Color, c)"
+                                    style="width:22px; height:22px; border-radius:5px; border:2px solid @(DbModel.ColorOf(cur) == c ? "var(--text)" : "transparent"); background:@c; cursor:pointer"></button>
+                        }
+                    </div>
+                    <MudText Typo="Typo.subtitle2">@members.Count table@(members.Count == 1 ? "" : "s")</MudText>
+                    <div style="max-height:180px; overflow:auto" data-testid="db-group-members">
+                        @foreach (var t in members)
+                        {
+                            var table = t;
+                            <div class="d-flex align-center gap-1" style="font-size:13px">
+                                <MudIcon Icon="@Icons.Material.Outlined.TableChart" Style="font-size:15px; color:var(--text-3)" />
+                                <span style="flex:1">@(DbModel.SchemaOf(table) is { } s ? s.Name + "." : "")@table.Name</span>
+                                @if (editable) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => DbModel.RemoveFromGroup(Ws.Model, [table], cur)" title="Remove from the area" /> }
+                            </div>
+                        }
+                    </div>
+                    @if (editable)
+                    {
+                        <MudAutocomplete T="Element" Placeholder="+ add a table…" Variant="Variant.Outlined" Margin="Margin.Dense" ResetValueOnEmptyText="true"
+                                         SearchFunc="(q, ct) => Candidates(cur, q)" ToStringFunc="@(e => e == null ? "" : (DbModel.SchemaOf(e) is { } s ? s.Name + "." : "") + e.Name)"
+                                         ValueChanged="e => { if (e != null) DbModel.AddToGroup(Ws.Model, [e], cur); }" MaxItems="40" ShowProgressIndicator="false" />
+                        @if (SelectedTables.Count > 0)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => DbModel.AddToGroup(Ws.Model, SelectedTables, cur)">Add the @SelectedTables.Count selected table@(SelectedTables.Count == 1 ? "" : "s")</MudButton>
+                        }
+                    }
+                    <div class="d-flex gap-2 mt-3 flex-wrap">
+                        @if (Ws.Active is { Diagram.DiagramType: DiagramType.Database } active)
+                        {
+                            var filtered = active.Diagram.Get(DbFields.GroupFilter) == cur.Id;
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => DbModel.FilterDiagram(Ws.Model, active.Diagram, filtered ? null : cur)" data-testid="db-group-filter">
+                                @(filtered ? "Show all tables on the diagram" : "Show only these on the diagram")
+                            </MudButton>
+                        }
+                        @if (editable && members.Count > 0)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => { Ws.Open(DbDiagrams.BuildForGroup(Ws.Model, cur)); MudDialog.Close(); }">Diagram this area</MudButton>
+                        }
+                        @if (editable)
+                        {
+                            <MudButton Size="Size.Small" Color="Color.Error" OnClick="() => Delete(cur)">Delete area</MudButton>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Style="color:var(--text-3)">Pick a subject area.</MudText>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Element? Home { get; set; }
+    private Element? _current;
+    private string? _new;
+
+    private IReadOnlyList<Element> SelectedTables =>
+        Ws.Active?.SelectedNodes.Select(n => n.Element).Where(e => e.Kind == ElementKind.Table).ToList() ?? (IReadOnlyList<Element>)[];
+
+    protected override void OnInitialized()
+    {
+        _current = DbModel.Groups(Ws.Model).FirstOrDefault();
+        Ws.Changed += Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private void Create()
+    {
+        if (string.IsNullOrWhiteSpace(_new)) return;
+        _current = DbModel.CreateGroup(Ws.Model, Home ?? Ws.Model.Root, _new.Trim());
+        _new = null;
+    }
+
+    private void Rename(Element g, string? name)
+    {
+        if (!string.IsNullOrWhiteSpace(name)) Ws.Model.Rename(g, name.Trim());
+    }
+
+    private void Delete(Element g)
+    {
+        DbModel.DeleteGroup(Ws.Model, g);
+        _current = DbModel.Groups(Ws.Model).FirstOrDefault();
+    }
+
+    private Task<IEnumerable<Element>> Candidates(Element group, string? q) =>
+        Task.FromResult(DbModel.Tables(Ws.Model).Where(t => !DbModel.InGroup(t, group) && (string.IsNullOrWhiteSpace(q) || t.Name.Contains(q.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Take(40));
+
+    public void Dispose() => Ws.Changed -= Refresh;
+}

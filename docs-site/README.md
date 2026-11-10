@@ -13,7 +13,8 @@ dotnet docfx serve _site                    # http://localhost:8080
 
 The build needs no network access once the tool and NuGet packages are restored. It must stay free of warnings: the
 GitHub workflow `.github/workflows/docs.yml` builds with `--warningsAsErrors` and deploys to GitHub Pages only when it
-is started by hand.
+is started by hand. On GitLab, the `docs` job of `.gitlab-ci.yml` does the same build, and the `pages` job publishes it to
+GitLab Pages when started by hand (or in a manual pipeline with `PUBLISH_PAGES=true`).
 
 | Folder | Content |
 | --- | --- |

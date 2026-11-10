@@ -218,6 +218,7 @@ public static partial class SvgRenderer
             foreach (var n in d.Nodes.Where(n => n.Element.Kind is not (ElementKind.CombinedFragment or ElementKind.Lifeline))) RenderNode(sb, model, d, n, bounds(n), t);
             return;
         }
+        if (d.DiagramType == DiagramType.Database) RenderGroupFrames(sb, model, d, bounds, t);   // subject areas behind everything
         // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then paths, then contents by depth.
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
@@ -538,7 +539,7 @@ public static partial class SvgRenderer
 
     private static void RenderNodeCore(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
     {
-        var c = Notation.Content(m, n.Element, d.DiagramType);
+        var c = Notation.Content(m, n, d.DiagramType);
         var shape = Notation.ShapeOf(n.Element);
         // Per-shape overrides from the format bar: line and text colour apply to every notation.
         if (n.Element.Kind != ElementKind.Shape)
@@ -776,6 +777,7 @@ public static partial class SvgRenderer
                     WrappedCentered(sb, b.Center.X, b.Center.Y + 4, b.Width - 22, c.Name, t.Text);
                     break;
                 }
+                if (n.Element.Kind == ElementKind.Table) { RenderTable(sb, m, d, n, b, c, fill, header, t); break; }
                 RenderCompartments(sb, b, c, fill, n.Element.Kind, t, header);
                 break;
         }

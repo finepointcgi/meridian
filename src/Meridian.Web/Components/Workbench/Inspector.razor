@@ -125,6 +125,7 @@
             </MudButton>
         }
 
+        <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
         <div class="section-title">Specification <span class="grow"></span></div>
         foreach (var key in Fields(e))
         {
@@ -348,7 +349,8 @@
     }
 
     private static IEnumerable<string> Fields(Element e) =>
-        e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation] : Metamodel.EditableFields(e.Kind);
+        e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation]
+        : Metamodel.EditableFields(e.Kind).Where(k => !k.StartsWith("db.", StringComparison.Ordinal));   // data-model fields: DatabaseInspectorSection
 
     private void Set(Element e, string key, string? value)
     {
@@ -498,7 +500,8 @@
         FieldKeys.Name => "Name", FieldKeys.Documentation => "Documentation", FieldKeys.Multiplicity => "Multiplicity", FieldKeys.SourceMultiplicity => "Source multiplicity",
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
-        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message", _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? key,
+        FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message",
+        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? Meridian.Core.DataModeling.DbFields.Label(key) ?? key,
     };
 
     private static string? Help(string key) => key switch
@@ -508,6 +511,6 @@
         FieldKeys.Stereotypes => "Comma separated",
         Meridian.Core.Analysis.ViewFields.Query => "e.g. kind:Block in:Structure where mass > 50 and not has:satisfy",
         Meridian.Core.Analysis.ViewFields.Message => "Placeholders: {name}, {owner}, {mass} …",
-        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key),
+        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key) ?? Meridian.Core.DataModeling.DbFields.Help(key),
     };
 }

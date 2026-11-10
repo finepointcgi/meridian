@@ -1,5 +1,6 @@
 @using Meridian.Data
 @using Meridian.Web.Integrations
+@using Meridian.Web.Components.Workbench.Database
 @inject IntegrationService Integrations
 @inject WebhookDispatcher Webhooks
 @inject Workspace Ws
@@ -36,7 +37,7 @@
                     }
                     @if (_trackers.Count == 0)
                     {
-                        <MudText Typo="Typo.body2" Style="opacity:.7">No issue tracker connected. Add Jira, Azure DevOps or GitHub to link and create issues from model elements.</MudText>
+                        <MudText Typo="Typo.body2" Style="opacity:.7">No issue tracker connected. Add Jira, Azure DevOps, GitHub or GitLab to link and create issues from model elements.</MudText>
                     }
                     <div class="d-flex gap-2 mt-3 align-center">
                         @if (_canManage)
@@ -66,7 +67,17 @@
                         {
                             <MudTextField T="string" Label="Atlassian account email" @bind-Value="f.User" Variant="Variant.Outlined" Margin="Margin.Dense" />
                         }
-                        @if (f.Type != TrackerTypes.GitHub)
+                        @if (f.Type == TrackerTypes.GitLab)
+                        {
+                            <MudTextField T="string" Label="Labels for new issues (comma-separated, optional)" @bind-Value="f.Labels" Placeholder="meridian, requirement" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudCheckBox T="bool" Value="f.BearerAuth == true" ValueChanged="v => f.BearerAuth = v ? true : null" Label="OAuth access token (send as Bearer instead of PRIVATE-TOKEN)" Dense="true" />
+                            <div class="integration-sub gitlab-setup">
+                                gitlab.com or self-managed: the base URL is the instance address. Create a project access token (Settings ▸ Access tokens,
+                                role Reporter or higher, scope <code>api</code>) or a personal access token with <code>api</code>.
+                                The project is its full path (<code>group/subgroup/project</code>) or its numeric id from the project overview.
+                            </div>
+                        }
+                        else if (f.Type != TrackerTypes.GitHub)
                         {
                             <MudTextField T="string" Label="Issue / work item type for new issues" @bind-Value="f.IssueType" Placeholder="Task" Variant="Variant.Outlined" Margin="Margin.Dense" />
                         }
@@ -186,6 +197,11 @@
             <MudTabPanel Text="Code repositories">
                 <CodeRepositoriesPanel CanManage="_canManage" />
             </MudTabPanel>
+
+            @* ------------------------------------------------------------ live databases (schema import and refresh) *@
+            <MudTabPanel Text="Databases">
+                <DatabasesPanel OnImport="() => MudDialog.Close()" />
+            </MudTabPanel>
         </MudTabs>
     </DialogContent>
     <DialogActions><MudButton OnClick="() => MudDialog.Close()">Done</MudButton></DialogActions>
@@ -197,6 +213,9 @@
 
     /// <summary>Index of the Code repositories tab, for <see cref="InitialTab"/>.</summary>
     public const int CodeRepositoriesTab = 2;
+
+    /// <summary>Index of the Databases tab ("Connect to a database…").</summary>
+    public const int DatabasesTab = 4;
 
     /// <summary>Opens Integrations on the Code repositories tab ("Connect a repository" in What changed, ⌘K).</summary>
     public static Task ShowCodeRepositoriesAsync(IDialogService dialogs) =>
@@ -246,6 +265,7 @@
         TrackerTypes.JiraCloud => "API token",
         TrackerTypes.JiraServer => "Personal access token",
         TrackerTypes.AzureDevOps => "Personal access token (Work Items read & write)",
+        TrackerTypes.GitLab => "Access token (scope: api)",
         _ => "Token (fine-grained: Issues read & write)",
     };
 

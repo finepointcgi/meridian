@@ -1723,6 +1723,11 @@ public sealed partial class DiagramController
             if (Notation.IsBorderShape(from.Element) && Diagram.ParentOf(from) is { } fp) Model.Set(r, FieldKeys.SourcePart, fp.Element.Id);
             if (Notation.IsBorderShape(to.Element) && Diagram.ParentOf(to) is { } tp) Model.Set(r, FieldKeys.TargetPart, tp.Element.Id);
             edge = Model.AddEdge(Diagram, r);
+            // Foreign keys: from the column the drag started on to the one it ended on; the referencing column is created when needed.
+            if (kind == ElementKind.ForeignKey && from.Element.Kind == ElementKind.Table && to.Element.Kind == ElementKind.Table && r is Relationship fk)
+                Meridian.Core.DataModeling.DbModel.CompleteForeignKey(Model, fk,
+                    Meridian.Core.DataModeling.DbNotation.ColumnAt(Model, from, BoundsOf(from), _pressModel),
+                    Meridian.Core.DataModeling.DbNotation.ColumnAt(Model, to, BoundsOf(to), CurrentModel));
             // A message's vertical position is its place in time: use where the user started dragging.
             if (edge != null && kind == ElementKind.Message)
                 Model.SetWaypoints(Diagram, edge, [new Pt(0, Snap(Math.Max(_pressModel.Y, from.Bounds.Y + Notation.LifelineHeader + 20)))]);
@@ -1787,7 +1792,7 @@ public sealed partial class DiagramController
         if (shape is NodeShape.StickFigure or NodeShape.SmallSquare or NodeShape.Diamond or NodeShape.Bar)
             return (tl.X - (w - b.Width * Zoom) / 2, tl.Y + b.Height * Zoom + 4, w, 32);
         if (n.Element.Kind == ElementKind.Comment) return (tl.X, tl.Y, w, Math.Max(60, b.Height * Zoom));
-        var y = shape == NodeShape.Rectangle && Notation.Content(Model, n.Element, Diagram.DiagramType).Keyword != null ? 18 : 2;
+        var y = shape == NodeShape.Rectangle && Notation.Content(Model, n, Diagram.DiagramType).Keyword != null ? 18 : 2;
         return (tl.X, tl.Y + y * Zoom, w, 32);
     }
 }

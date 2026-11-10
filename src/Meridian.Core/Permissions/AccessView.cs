@@ -86,14 +86,34 @@ public sealed class AccessView
     /// <summary>The explicit (capped) rule on exactly this element, if any.</summary>
     public PackageAccess? ExplicitAt(string elementId) => _explicit.TryGetValue(elementId, out var l) ? l : null;
 
-    /// <summary>The effective level of an element: the nearest explicit rule on it or above it, else <see cref="Default"/>.</summary>
+    /// <summary>
+    /// The effective level of an element: the nearest explicit rule on it or above it, else <see cref="Default"/>.
+    /// A table in subject areas (data modelling groups, which are packages) also takes the rules on those areas, as if they
+    /// sat between the table and its schema; with several, the most restrictive wins. Subject areas never hide a table
+    /// (a "none" rule on one makes its tables read-only); hiding follows containment only.
+    /// </summary>
     public PackageAccess Level(Element e)
     {
         if (IsOwner) return PackageAccess.Manage;
         if (_explicit.Count == 0) return Default;
         for (var a = e; a != null; a = a.Owner)
+        {
             if (_explicit.TryGetValue(a.Id, out var l)) return l;
+            if (a.Kind == ElementKind.Table && GroupLevel(a) is { } g) return g;
+        }
         return Default;
+    }
+
+    private PackageAccess? GroupLevel(Element table)
+    {
+        PackageAccess? level = null;
+        foreach (var id in DataModeling.DbModel.GroupIds(table))
+            if (_explicit.TryGetValue(id, out var l))
+            {
+                var eff = l == PackageAccess.None ? PackageAccess.Read : l;
+                level = level is { } cur && cur < eff ? cur : eff;
+            }
+        return level;
     }
 
     /// <summary>The level a new child of <paramref name="owner"/> with id <paramref name="childId"/> would have.</summary>

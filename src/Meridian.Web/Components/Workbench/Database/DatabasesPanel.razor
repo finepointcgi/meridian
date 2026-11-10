@@ -1,0 +1,177 @@
+@* Integrations ▸ Databases: live connections for schema import and refresh (PostgreSQL, MySQL / MariaDB, SQLite in
+   the desktop app). The connection string is stored encrypted and never shown again. On a team server only server
+   administrators can add connections, and hosts on private networks need Meridian:Integrations:AllowPrivateNetworks.
+   Meridian reads catalog views in read-only transactions and never runs DDL: use a read-only database account. *@
+@using Meridian.Core.DataModeling
+@using Meridian.Data
+@using Meridian.Data.Databases
+@using Meridian.Web.Integrations.Databases
+@inject DatabaseConnectionService Connections
+@inject Workspace Ws
+@inject ISnackbar Snackbar
+@inject IServiceProvider Services
+
+<div data-testid="db-connections">
+    @if (_form is null)
+    {
+        @foreach (var c in _list)
+        {
+            var conn = c;
+            var cfg = DatabaseConnectionConfig.Parse(conn.ConfigJson);
+            var linked = cfg.DatabaseElementId is { } id ? Ws.Model.Find(id) : null;
+            <div class="integration-row" data-connection="@conn.Name">
+                <MudIcon Icon="@Icons.Material.Outlined.Storage" Style="font-size:18px; color:var(--accent-2)" />
+                <div style="flex:1; min-width:0">
+                    <div style="font-weight:600">@conn.Name <span class="integration-type">@LiveProviders.Display(cfg.Provider)</span></div>
+                    <div class="integration-sub">@cfg.Display · @(cfg.Schemas.Count == 0 ? "all schemas" : string.Join(", ", cfg.Schemas)) · connection string @(conn.ProtectedSecret != null ? "••• set" : "not set")@(linked != null ? $" · fills “{linked.Name}”" : "")</div>
+                </div>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(_busy || Ws.ReadOnly)" OnClick="() => Import(conn)">@(linked != null ? "Refresh…" : "Import")</MudButton>
+                @if (_canManage)
+                {
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                }
+            </div>
+        }
+        @if (_list.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Style="opacity:.7">
+                No database connected. Connect PostgreSQL or MySQL / MariaDB@(Connections.LocalMode ? " (or open a SQLite file)" : "") to import its schema
+                and refresh the model later. SQL Server and Oracle: import a DDL script or a .dacpac (Project ▸ Import ▸ Database schema).
+            </MudText>
+        }
+        <MudText Typo="Typo.caption" Style="display:block; opacity:.7; margin-top:8px">
+            Meridian only reads the catalog, in read-only transactions, and never runs DDL against a database. Use a read-only account
+            (PostgreSQL: a role with USAGE on the schemas and SELECT on the catalog; MySQL: SELECT and SHOW VIEW).
+        </MudText>
+        @if (_canManage)
+        {
+            <MudButton Class="mt-3" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="New" data-testid="db-connection-add">Add connection</MudButton>
+        }
+        else if (!Connections.LocalMode)
+        {
+            <MudText Typo="Typo.caption" Style="display:block; opacity:.7; margin-top:8px">Only server administrators can add database connections on a team server.</MudText>
+        }
+    }
+    else
+    {
+        var f = _form;
+        <div class="d-flex flex-column gap-2">
+            <MudSelect T="string" Label="Database" @bind-Value="f.Provider" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var p in LiveProviders.All.Where(p => p != LiveProviders.Sqlite || Connections.LocalMode)) { <MudSelectItem Value="p">@LiveProviders.Display(p)</MudSelectItem> }
+            </MudSelect>
+            <MudTextField T="string" Label="Name" @bind-Value="_name" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudTextField T="string" Label="Connection string" @bind-Value="_secret" InputType="InputType.Password" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Placeholder="@(_secretSet ? "••• set (leave empty to keep)" : Hint(f.Provider))" HelperText="Stored encrypted; never shown again after saving. Prefer a read-only account." autocomplete="new-password" data-testid="db-connection-string" />
+            <MudTextField T="string" Label="Schemas (comma separated, empty = all)" @bind-Value="_schemas" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudNumericField T="int" Label="Timeout (seconds)" @bind-Value="f.TimeoutSeconds" Min="5" Max="600" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            @if (_message != null)
+            {
+                <MudAlert Severity="@(_ok ? Severity.Success : Severity.Error)" Dense="true">@_message</MudAlert>
+            }
+            <div class="d-flex gap-2">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.NetworkCheck" Disabled="_busy" OnClick="Test">Test connection</MudButton>
+                <span style="flex:1"></span>
+                <MudButton OnClick="() => { _form = null; _message = null; }">Cancel</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Save" data-testid="db-connection-save">Save</MudButton>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback OnImport { get; set; }
+
+    private IReadOnlyList<IntegrationConnection> _list = [];
+    private DatabaseConnectionConfig? _form;
+    private Guid? _editId;
+    private string? _name, _secret, _schemas, _message;
+    private bool _secretSet, _ok, _busy, _canManage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canManage = Connections.CanManage(Ws.IsServerAdmin);
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.Session is { } s) _list = await Connections.ListAsync(s.ProjectId);
+    }
+
+    private static string Hint(string provider) => provider switch
+    {
+        LiveProviders.MySql => "Server=db.example.com;Database=shop;User ID=reader;Password=…",
+        LiveProviders.Sqlite => "Data Source=/path/to/file.db",
+        _ => "Host=db.example.com;Database=shop;Username=reader;Password=…;SSL Mode=Require",
+    };
+
+    private void New()
+    {
+        _form = new DatabaseConnectionConfig();
+        _editId = null;
+        _name = _secret = _schemas = _message = null;
+        _secretSet = false;
+    }
+
+    private void Edit(IntegrationConnection c)
+    {
+        _form = DatabaseConnectionConfig.Parse(c.ConfigJson);
+        _editId = c.Id;
+        _name = c.Name;
+        _schemas = string.Join(", ", _form.Schemas);
+        _secret = _message = null;
+        _secretSet = c.ProtectedSecret != null;
+    }
+
+    private void ApplySchemas() => _form!.Schemas = (_schemas ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private async Task Test()
+    {
+        if (Ws.Session is not { } s || _form is null) return;
+        ApplySchemas();
+        _busy = true;
+        await Connections.RefreshAdminAsync(Ws, Services);
+        try { _message = await Connections.TestAsync(s.ProjectId, _editId, _form, _secret, Ws.IsServerAdmin, CancellationToken.None); _ok = true; }
+        catch (DatabaseImportException ex) { _message = ex.Message; _ok = false; }
+        finally { _busy = false; }
+    }
+
+    private async Task Save()
+    {
+        if (Ws.Session is not { } s || _form is null) return;
+        ApplySchemas();
+        await Connections.RefreshAdminAsync(Ws, Services);
+        try
+        {
+            await Connections.SaveAsync(s.ProjectId, _editId, _name ?? "", _form, _secret, Ws.IsServerAdmin);
+            _secret = null;
+            _form = null;
+            Snackbar.Add("Database connection saved", Severity.Success);
+            await Reload();
+        }
+        catch (DatabaseImportException ex) { _message = ex.Message; _ok = false; }
+    }
+
+    private async Task Delete(IntegrationConnection c)
+    {
+        if (Ws.Session is not { } s) return;
+        await Connections.RefreshAdminAsync(Ws, Services);
+        try { await Connections.DeleteAsync(s.ProjectId, c.Id, Ws.IsServerAdmin); }
+        catch (DatabaseImportException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        await Reload();
+    }
+
+    private async Task Import(IntegrationConnection c)
+    {
+        if (Ws.DatabaseImport is not { } import) { Snackbar.Add("Open a project first", Severity.Info); return; }
+        _busy = true;
+        try
+        {
+            await OnImport.InvokeAsync();   // closes Integrations so the review can show
+            await import(c);
+            await Reload();
+        }
+        finally { _busy = false; }
+    }
+}

@@ -1,0 +1,465 @@
+# GitLab CI/CD for Meridian: the GitLab twin of .github/workflows (ci.yml, container.yml, docs.yml, release.yml).
+# Keep the two in step when you change either. Runners, CI/CD variables and the release flow: docs/RELEASING.md,
+# section "Releasing with GitLab".
+#
+#   merge requests and the default branch   test, e2e, postgres-store, package-smoke, docs (when docs change)
+#   a v* tag                                test, e2e, postgres-store, then package:linux, package:windows, package:macos
+#                                           (optional, see below), release:upload, release:publish, release:macos,
+#                                           container (GitLab Container Registry)
+#   Build ▸ Pipelines ▸ Run pipeline        packages built with VERSION (default 0.0.0-dev) as job artifacts; no release.
+#                                           Set PUBLISH_PAGES=true to publish the docs site to GitLab Pages,
+#                                           PUSH_IMAGE=true to also push a container image tagged with the commit SHA.
+#
+# macOS needs GitLab's hosted macOS runners (saas-macos-medium-m1), which require a Premium or Ultimate plan on
+# GitLab.com. Without them package:macos is a manual job that may fail; set the CI/CD variable MACOS_RUNNER_ENABLED=true
+# to run it automatically on tags. Its files are added to the release by release:macos once it has run.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # A branch with an open merge request runs as a merge request pipeline only (no duplicate branch pipeline).
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+stages:
+  - test
+  - package
+  - release
+  - publish
+
+variables:
+  DOTNET_SDK_IMAGE: mcr.microsoft.com/dotnet/sdk:10.0
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  NUGET_PACKAGES: $CI_PROJECT_DIR/.nuget/packages
+  # Version for manually started pipelines (tags use the tag without its leading v).
+  VERSION: 0.0.0-dev
+  # Generic package registry that holds the release files; the release's asset links point here.
+  PACKAGE_REGISTRY_URL: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/meridian
+  MACOS_RUNNER_ENABLED: "false"
+  PUBLISH_PAGES: "false"
+  PUSH_IMAGE: "false"
+
+# ------------------------------------------------------------------------------------------------ shared
+
+.dotnet:
+  image: $DOTNET_SDK_IMAGE
+  cache:
+    # Package versions live in the individual .csproj files; one shared NuGet cache per branch is enough.
+    key: nuget-$CI_COMMIT_REF_SLUG
+    fallback_keys: [nuget-$CI_DEFAULT_BRANCH]
+    paths: [.nuget/packages]
+    policy: pull-push
+
+# Merge requests, the default branch and v* tags (ci.yml runs on pull requests and main; release.yml tests on tags).
+.on-mr-main-tag:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# v* tags and manually started pipelines (release.yml: push of a v* tag, or workflow_dispatch).
+.on-tag-or-web:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# v* tags only: anything that publishes.
+.on-tag:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# ------------------------------------------------------------------------------------------------ test (ci.yml)
+
+test:
+  extends: [.dotnet, .on-mr-main-tag]
+  stage: test
+  script:
+    - dotnet build Meridian.slnx -c Release
+    # Browser tests run in the e2e job (they skip themselves when Playwright's Chromium is missing anyway).
+    - dotnet test Meridian.slnx -c Release --no-build --filter "FullyQualifiedName!~Meridian.E2E"
+
+# End-to-end browser tests: the real app in-process (SQLite) driven by Playwright's headless Chromium. The .NET 10 SDK
+# image plus install-browsers.sh --with-deps (the Playwright .NET image ships an older SDK), as ci.yml does.
+e2e:
+  extends: [.dotnet, .on-mr-main-tag]
+  stage: test
+  variables:
+    MERIDIAN_E2E: require            # a missing browser fails this job instead of skipping
+    CONFIGURATION: Release
+    MERIDIAN_E2E_SCREENSHOTS: $CI_PROJECT_DIR/e2e-screenshots
+    PLAYWRIGHT_BROWSERS_PATH: $CI_PROJECT_DIR/.cache/ms-playwright
+  script:
+    - tests/Meridian.E2E/install-browsers.sh --with-deps
+    - dotnet test tests/Meridian.E2E -c Release --no-build --logger "console;verbosity=normal"
+  artifacts:
+    when: on_failure
+    name: e2e-screenshots
+    paths: [e2e-screenshots/]
+    expire_in: 7 days
+
+# The IMeridianStore contract against a real PostgreSQL. GitLab runs it as a service container (shared runners have no
+# Docker for Testcontainers); MERIDIAN_POSTGRES_CONNECTION points the fixture at it. MERIDIAN_REQUIRE_POSTGRES turns
+# "server unavailable → skip" into a failure, so this job cannot pass vacuously.
+postgres-store:
+  extends: [.dotnet, .on-mr-main-tag]
+  stage: test
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+      command: ["postgres", "-c", "max_connections=500"]
+  variables:
+    POSTGRES_USER: meridian
+    POSTGRES_PASSWORD: meridian-ci
+    POSTGRES_DB: meridian
+    MERIDIAN_REQUIRE_POSTGRES: "1"
+    MERIDIAN_POSTGRES_CONNECTION: Host=postgres;Port=5432;Username=meridian;Password=meridian-ci;Database=meridian
+  script:
+    - dotnet build tests/Meridian.Tests/Meridian.Tests.csproj -c Release
+    - >
+      dotnet test tests/Meridian.Tests/Meridian.Tests.csproj -c Release --no-build
+      --filter "FullyQualifiedName~Meridian.Tests.StoreContract"
+      --logger "console;verbosity=normal"
+
+# Catches packaging regressions early: the Linux tar.gz and .deb (no signing, no AppImage tool needed).
+package-smoke:
+  extends: .dotnet
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip file > /dev/null
+  script:
+    - bash -n build/package.sh build/macos/import-cert.sh
+    - sh -n build/linux/install.sh build/linux/AppRun
+    - SKIP_SERVER=1 build/package.sh 0.0.0-ci linux-x64
+    - dpkg-deb --info artifacts/Meridian-0.0.0-ci-linux-x64.deb
+    - dpkg-deb --contents artifacts/Meridian-0.0.0-ci-linux-x64.deb | grep -E 'usr/share/mime/packages/meridian.xml|opt/meridian/Meridian$'
+    - grep -q 'Meridian-0.0.0-ci-linux-x64.tar.gz' artifacts/SHA256SUMS.txt
+
+# ------------------------------------------------------------------------------------------------ docs (docs.yml)
+
+# Builds the DocFX user guide on every change to it or to the scripting API (warnings fail the build).
+docs:
+  extends: .dotnet
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [docs-site/**/*, src/Meridian.Scripting/**/*, .gitlab-ci.yml]
+    - if: $CI_PIPELINE_SOURCE == "web"
+  script:
+    - cd docs-site
+    - dotnet tool restore
+    - dotnet docfx metadata docfx.json
+    - dotnet docfx build docfx.json --warningsAsErrors
+  artifacts:
+    paths: [docs-site/_site/]
+    expire_in: 1 day
+
+# GitLab Pages: like docs.yml, the site is published only when asked for: a manual pipeline with PUBLISH_PAGES=true,
+# or by starting this manual job on the default branch.
+pages:
+  stage: publish
+  image: alpine:3.20
+  needs: [docs]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web" && $PUBLISH_PAGES == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [docs-site/**/*, src/Meridian.Scripting/**/*, .gitlab-ci.yml]
+      when: manual
+      allow_failure: true
+  script:
+    - rm -rf public && mv docs-site/_site public
+  artifacts:
+    paths: [public]
+
+# ------------------------------------------------------------------------------------------------ packages (release.yml)
+
+# Every package job writes its files to artifacts/ with NO_CHECKSUMS=1; release:upload writes one SHA256SUMS.txt over all.
+package:linux:
+  extends: [.dotnet, .on-tag-or-web]
+  stage: package
+  variables:
+    NO_CHECKSUMS: "1"
+    SKIP_SERVER: "0"
+  before_script:
+    # zip for the server zip, file for package.sh; dpkg-deb is part of the image. appimagetool as in release.yml.
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip file curl ca-certificates > /dev/null
+    - mkdir -p "$CI_PROJECT_DIR/.tools"
+    - curl -fsSL -o "$CI_PROJECT_DIR/.tools/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+    - chmod +x "$CI_PROJECT_DIR/.tools/appimagetool"
+    - export APPIMAGETOOL="$CI_PROJECT_DIR/.tools/appimagetool"
+  script:
+    - V="${CI_COMMIT_TAG:-$VERSION}"; V="${V#v}"
+    - build/package.sh "$V" linux-x64
+    - for f in "Meridian-$V-linux-x64.AppImage" "Meridian-$V-linux-x64.deb" "Meridian-$V-linux-x64.tar.gz" "Meridian-Server-$V.zip"; do test -s "artifacts/$f" || { echo "missing artifacts/$f"; exit 1; }; done
+    - ls -l artifacts
+  artifacts:
+    name: dist-linux
+    paths: [artifacts/Meridian-*]
+    expire_in: 7 days
+
+# GitLab's hosted Windows runner (PowerShell). Inno Setup from Chocolatey, the .NET 10 SDK from dotnet-install, signtool
+# from the Windows SDK; package.sh runs in Git for Windows' bash like on GitHub's windows-latest.
+package:windows:
+  stage: package
+  extends: .on-tag-or-web
+  tags: [saas-windows-medium-amd64]
+  variables:
+    NO_CHECKSUMS: "1"
+    SKIP_SERVER: "1"
+  before_script:
+    - $ErrorActionPreference = "Stop"
+    - choco install innosetup --no-progress -y | Out-Null
+    - $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+    - if (-not (Test-Path $iscc)) { throw "Inno Setup was not installed" }
+    - $env:ISCC = $iscc
+    - $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+    - if ($signtool) { $env:SIGNTOOL = $signtool.FullName }
+    - Invoke-WebRequest -UseBasicParsing https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1
+    - ./dotnet-install.ps1 -Channel 10.0 -InstallDir "$env:CI_PROJECT_DIR\.dotnet"
+    - $env:PATH = "$env:CI_PROJECT_DIR\.dotnet;$env:PATH"
+    - $env:DOTNET_ROOT = "$env:CI_PROJECT_DIR\.dotnet"
+  script:
+    - $v = if ($env:CI_COMMIT_TAG) { $env:CI_COMMIT_TAG } else { $env:VERSION }
+    - $v = $v.TrimStart('v')
+    - '& "$env:ProgramFiles\Git\bin\bash.exe" -c "build/package.sh $v win-x64"'
+    - if ($LASTEXITCODE -ne 0) { throw "package.sh failed ($LASTEXITCODE)" }
+    - foreach ($f in @("Meridian-$v-windows-x64-setup.exe", "Meridian-$v-windows-x64.zip")) { if (-not (Test-Path "artifacts/$f")) { throw "missing artifacts/$f" } }
+    - Get-ChildItem artifacts
+  artifacts:
+    name: dist-windows
+    paths: [artifacts/Meridian-*]
+    expire_in: 7 days
+
+# GitLab's hosted macOS runner (Apple silicon; Premium/Ultimate on GitLab.com). Optional: manual unless
+# MACOS_RUNNER_ENABLED=true. Developer ID signing and notarization use the APPLE_* CI/CD variables when present.
+package:macos:
+  stage: package
+  tags: [saas-macos-medium-m1]
+  image: macos-15-xcode-16
+  rules:
+    - if: ($CI_COMMIT_TAG =~ /^v/ || $CI_PIPELINE_SOURCE == "web") && $MACOS_RUNNER_ENABLED == "true"
+    - if: $CI_COMMIT_TAG =~ /^v/ || $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+  variables:
+    NO_CHECKSUMS: "1"
+    SKIP_SERVER: "1"
+  before_script:
+    - curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+    - bash dotnet-install.sh --channel 10.0 --install-dir "$CI_PROJECT_DIR/.dotnet"
+    - export PATH="$CI_PROJECT_DIR/.dotnet:$PATH" DOTNET_ROOT="$CI_PROJECT_DIR/.dotnet"
+    # Prints "export MACOS_SIGN_IDENTITY=… MACOS_KEYCHAIN=…" when APPLE_CERT_P12_BASE64 is set; a note otherwise.
+    - eval "$(build/macos/import-cert.sh | grep '^export ' || true)"
+  script:
+    - V="${CI_COMMIT_TAG:-$VERSION}"; V="${V#v}"
+    - build/package.sh "$V" osx-arm64 osx-x64
+    - for f in "Meridian-$V-macos-arm64.dmg" "Meridian-$V-macos-arm64.zip" "Meridian-$V-macos-x64.dmg" "Meridian-$V-macos-x64.zip"; do test -s "artifacts/$f" || { echo "missing artifacts/$f"; exit 1; }; done
+    - ls -l artifacts
+  after_script:
+    - build/macos/import-cert.sh --cleanup
+  artifacts:
+    name: dist-macos
+    paths: [artifacts/Meridian-*]
+    expire_in: 7 days
+
+# ------------------------------------------------------------------------------------------------ release (release.yml)
+
+# Uploads the Windows and Linux files and SHA256SUMS.txt to the generic package registry
+# (meridian/<version>/<file>) and passes the version to release:publish.
+release:upload:
+  extends: .on-tag
+  stage: release
+  image: alpine:3.20
+  needs:
+    - job: package:linux
+      artifacts: true
+    - job: package:windows
+      artifacts: true
+  script:
+    - apk add --no-cache curl coreutils > /dev/null
+    - V="${CI_COMMIT_TAG#v}"
+    - cd artifacts
+    - rm -f SHA256SUMS.txt
+    - sha256sum Meridian-* > SHA256SUMS.txt
+    - cat SHA256SUMS.txt
+    - |
+      for f in Meridian-* SHA256SUMS.txt; do
+        echo "uploading $f"
+        curl --fail-with-body --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" "$PACKAGE_REGISTRY_URL/$V/$f"
+        echo
+      done
+    - echo "RELEASE_VERSION=$V" > "$CI_PROJECT_DIR/release.env"
+  artifacts:
+    reports:
+      dotenv: release.env
+    paths: [artifacts/SHA256SUMS.txt]
+    expire_in: 30 days
+
+# Creates the GitLab release with links to the registry files (the desktop updater reads these links, picks its package
+# and verifies it against SHA256SUMS.txt). GitLab has no pre-release flag: the updater skips versions with a '-' itself.
+release:publish:
+  extends: .on-tag
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: release:upload
+      artifacts: true
+  script:
+    - echo "Publishing Meridian $RELEASE_VERSION"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: Meridian $CI_COMMIT_TAG
+    description: >-
+      Meridian $CI_COMMIT_TAG. Desktop apps for Windows and Linux and the server zip are attached; macOS files are added
+      by release:macos when the macOS job runs. Verify downloads with SHA256SUMS.txt. The server image is
+      $CI_REGISTRY_IMAGE:$RELEASE_VERSION.
+    assets:
+      links:
+        - name: Meridian-$RELEASE_VERSION-windows-x64-setup.exe
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-$RELEASE_VERSION-windows-x64-setup.exe
+          link_type: package
+        - name: Meridian-$RELEASE_VERSION-windows-x64.zip
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-$RELEASE_VERSION-windows-x64.zip
+          link_type: package
+        - name: Meridian-$RELEASE_VERSION-linux-x64.AppImage
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-$RELEASE_VERSION-linux-x64.AppImage
+          link_type: package
+        - name: Meridian-$RELEASE_VERSION-linux-x64.deb
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-$RELEASE_VERSION-linux-x64.deb
+          link_type: package
+        - name: Meridian-$RELEASE_VERSION-linux-x64.tar.gz
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-$RELEASE_VERSION-linux-x64.tar.gz
+          link_type: package
+        - name: Meridian-Server-$RELEASE_VERSION.zip
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/Meridian-Server-$RELEASE_VERSION.zip
+          link_type: package
+        - name: SHA256SUMS.txt
+          url: $PACKAGE_REGISTRY_URL/$RELEASE_VERSION/SHA256SUMS.txt
+          link_type: other
+
+# After package:macos has run (automatically or by hand): uploads the macOS files, re-uploads SHA256SUMS.txt with their
+# checksums added (the registry serves the newest file of a name, so the existing release link stays valid), and links
+# them to the release. Uses RELEASE_API_TOKEN (project access token, api scope, Developer role) when set, because the
+# release-links API may refuse CI_JOB_TOKEN on older GitLab versions.
+release:macos:
+  extends: .on-tag
+  stage: publish
+  image: alpine:3.20
+  needs:
+    - job: package:macos
+      artifacts: true
+    - job: release:upload
+      artifacts: true
+    - job: release:publish
+      artifacts: false
+  script:
+    - apk add --no-cache curl coreutils jq > /dev/null
+    - V="${CI_COMMIT_TAG#v}"
+    - |
+      if [ -n "${RELEASE_API_TOKEN:-}" ]; then AUTH="PRIVATE-TOKEN: $RELEASE_API_TOKEN"; else AUTH="JOB-TOKEN: $CI_JOB_TOKEN"; fi
+    - cd artifacts
+    - ls Meridian-*-macos-* > /dev/null
+    - sha256sum Meridian-*-macos-* >> SHA256SUMS.txt
+    - cat SHA256SUMS.txt
+    - |
+      for f in Meridian-*-macos-* SHA256SUMS.txt; do
+        echo "uploading $f"
+        curl --fail-with-body --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" "$PACKAGE_REGISTRY_URL/$V/$f"
+        echo
+      done
+    - |
+      for f in Meridian-*-macos-*; do
+        body="$(jq -n --arg name "$f" --arg url "$PACKAGE_REGISTRY_URL/$V/$f" '{name: $name, url: $url, link_type: "package"}')"
+        curl --fail-with-body --silent --show-error --header "$AUTH" --header "Content-Type: application/json" \
+          --data "$body" "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$CI_COMMIT_TAG/assets/links"
+        echo
+      done
+
+# ------------------------------------------------------------------------------------------------ container (container.yml)
+
+# On a v* tag: the server image for linux/amd64 and linux/arm64, pushed to the GitLab Container Registry with an SBOM
+# and SLSA provenance, then signed with cosign keyless (GitLab OIDC → Sigstore; no keys to manage). Tags: X.Y.Z, X.Y,
+# X (not for 0.x), the commit SHA, and latest for releases without a '-'. A manual pipeline builds without pushing,
+# or pushes only the SHA tag with PUSH_IMAGE=true. Set COSIGN_SIGN=false to skip signing (e.g. self-managed GitLab
+# without a Sigstore-trusted OIDC issuer).
+container:
+  stage: publish
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web"
+  needs: []
+  timeout: 1h
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+    COSIGN_SIGN: "true"
+    COSIGN_YES: "true"
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  before_script:
+    - apk add --no-cache git > /dev/null
+    - docker run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5 --install arm64
+    - docker buildx create --use --name meridian --driver docker-container
+  script:
+    - |
+      set -eu
+      : > image.env
+      PUSH=false
+      TAGS="-t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+      VERSION_LABEL="$CI_COMMIT_SHORT_SHA"
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        PUSH=true
+        V="${CI_COMMIT_TAG#v}"
+        VERSION_LABEL="$V"
+        CORE="${V%%-*}"; MAJOR="${CORE%%.*}"; MINOR="$(echo "$CORE" | cut -d. -f2)"
+        TAGS="$TAGS -t $CI_REGISTRY_IMAGE:$V"
+        case "$V" in
+          *-*) ;;   # pre-release: only the exact version
+          *)
+            TAGS="$TAGS -t $CI_REGISTRY_IMAGE:$MAJOR.$MINOR -t $CI_REGISTRY_IMAGE:latest"
+            [ "$MAJOR" != "0" ] && TAGS="$TAGS -t $CI_REGISTRY_IMAGE:$MAJOR"
+            ;;
+        esac
+      elif [ "$PUSH_IMAGE" = "true" ]; then
+        PUSH=true
+      fi
+      if [ "$PUSH" = "true" ]; then
+        echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+        OUTPUT="--push --sbom=true --provenance=mode=max --metadata-file metadata.json"
+      else
+        OUTPUT="--output type=cacheonly"
+      fi
+      docker buildx build . --platform linux/amd64,linux/arm64 $TAGS $OUTPUT \
+        --build-arg "VERSION=$VERSION_LABEL" --build-arg "REVISION=$CI_COMMIT_SHA" \
+        --build-arg "CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --label org.opencontainers.image.title=Meridian \
+        --label "org.opencontainers.image.source=$CI_PROJECT_URL" \
+        --label "org.opencontainers.image.documentation=$CI_PROJECT_URL/-/blob/$CI_DEFAULT_BRANCH/docs/DEPLOYMENT.md"
+      if [ "$PUSH" = "true" ]; then
+        DIGEST="$(sed -n 's/.*"containerimage.digest": *"\([^"]*\)".*/\1/p' metadata.json | head -n 1)"
+        echo "Published $CI_REGISTRY_IMAGE@$DIGEST with$TAGS" | sed 's/ -t / /g'
+        echo "IMAGE_DIGEST=$DIGEST" > image.env
+        if [ "$COSIGN_SIGN" = "true" ]; then
+          apk add --no-cache cosign > /dev/null
+          # Sign the manifest-list digest once per tag name (signatures are stored by digest).
+          for t in $(echo "$TAGS" | sed 's/-t //g'); do cosign sign "${t}@${DIGEST}"; done
+        fi
+      fi
+  artifacts:
+    reports:
+      dotenv: image.env
+    expire_in: 30 days

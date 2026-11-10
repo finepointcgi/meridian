@@ -18,14 +18,20 @@ public sealed record IssueLink
     public string? Status { get; init; }
     public string? Assignee { get; init; }
     public bool Closed { get; init; }
+    /// <summary>The issue's labels, for trackers that report them (GitLab).</summary>
+    public string[]? Labels { get; init; }
     public DateTime? Synced { get; init; }
 
     public static IssueLink From(Guid connection, IssueInfo i) => new()
     {
-        Connection = connection.ToString(), Key = i.Key, Url = i.Url, Title = i.Title, Status = i.Status, Assignee = i.Assignee, Closed = i.Closed, Synced = DateTime.UtcNow,
+        Connection = connection.ToString(), Key = i.Key, Url = i.Url, Title = i.Title, Status = i.Status, Assignee = i.Assignee, Closed = i.Closed,
+        Labels = i.Labels is { Length: > 0 } l ? l : null, Synced = DateTime.UtcNow,
     };
 
-    public IssueLink Refreshed(IssueInfo i) => this with { Url = i.Url, Title = i.Title, Status = i.Status, Assignee = i.Assignee, Closed = i.Closed, Synced = DateTime.UtcNow };
+    public IssueLink Refreshed(IssueInfo i) => this with
+    {
+        Url = i.Url, Title = i.Title, Status = i.Status, Assignee = i.Assignee, Closed = i.Closed, Labels = i.Labels is { Length: > 0 } l ? l : null, Synced = DateTime.UtcNow,
+    };
 }
 
 public static class IssueLinks

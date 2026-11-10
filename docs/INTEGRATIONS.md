@@ -1,8 +1,8 @@
 # Integrations
 
 Meridian connects to issue trackers, notifies other systems through webhooks, follows code repositories, syncs
-requirements with IBM DOORS Next and Siemens Polarion, and exposes requirements and model elements to ALM tools
-through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
+requirements with IBM DOORS Next and Siemens Polarion, reads live database schemas, and exposes requirements and model
+elements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrations/`, the UI in
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
@@ -16,9 +16,25 @@ Open the project menu → **Integrations (issue trackers, webhooks, code)…** �
 | Jira Server / Data Center (REST v2) | `https://jira.example.com` | project key | personal access token (Bearer) |
 | Azure DevOps (work items) | `https://dev.azure.com/your-org` | project name | PAT with *Work Items: read & write* (Basic, empty user) |
 | GitHub Issues | `https://api.github.com` or `https://ghe.example.com/api/v3` | `owner/repo` | fine-grained token with *Issues: read & write* (Bearer) |
+| GitLab Issues (REST v4) | `https://gitlab.com` or `https://gitlab.example.com` (the `/api/v4` suffix is optional) | `group/subgroup/project` or numeric project id | project, group or personal access token with `api` (`PRIVATE-TOKEN`), or an OAuth access token (Bearer, tick the option) |
 
 Optionally set the issue / work item type for new issues (default `Task`). **Test connection** checks the
 credentials and that the project/repository is reachable. Base URLs must be `https://`.
+
+**GitLab Issues** (gitlab.com and self-managed, `GitLabTracker` in `IssueTrackers.cs`):
+
+- Setup: in the project, *Settings ▸ Access tokens ▸ Add new token* with role Reporter (Developer to close issues
+  from GitLab itself) and scope `api`, or a personal access token with `api`. The project is its full path as in the
+  browser address (`acme/vehicles/car`) or the numeric *Project ID* from the project overview.
+- Keys are `#<iid>`. **Link issue** accepts `#12`, `12`, the browser address (`…/-/issues/12`, `…/-/work_items/12`,
+  the older `…/issues/12`) or the API address, on the configured GitLab host only.
+- Search uses `GET /projects/:id/issues?search=…&in=title,description&scope=all`, newest first, up to 50 results
+  over pages of 20. Paging follows GitLab's `x-next-page` header, or a `Link: rel="next"` address on the same scheme,
+  host and port (a next link to another host is ignored, so the token never leaves the GitLab instance).
+- Created issues get the description, the deep link back to Meridian and the configured **labels**
+  (comma-separated); set the issue type to `issue`, `incident`, `test_case` or `task` if you need one.
+- Status is GitLab's `opened` / `closed`; the assignee is every assignee's username; labels are shown under the linked
+  issue and refreshed by **Sync status**. Bulk *Create issues for requirements* works as for the other trackers.
 
 ### Secrets
 
@@ -34,8 +50,8 @@ Tracker base URLs and webhook URLs are chosen by project owners, so on a team se
 connection (redirects included) against the address it actually connects to. Link-local addresses (169.254.0.0/16,
 fe80::/10 — where cloud metadata services live), known metadata addresses, unspecified and multicast addresses are
 always refused. Loopback and private networks (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are refused unless
-an administrator sets `Meridian:Integrations:AllowPrivateNetworks=true` — needed for an on-premises Jira or GitHub
-Enterprise. The desktop app's local mode does not restrict addresses.
+an administrator sets `Meridian:Integrations:AllowPrivateNetworks=true` — needed for an on-premises Jira, GitHub
+Enterprise or a self-managed GitLab. The desktop app's local mode does not restrict addresses.
 
 ### Linked issues on elements
 
@@ -418,8 +434,43 @@ The token needs read access to the submodule repositories as well: GitHub fine-g
 (*Contents: read*), GitLab project tokens only see their own project (use a group or personal token, or a connection per
 submodule), Bitbucket repository access tokens likewise.
 
+## 7. Databases (live schema import)
+
+Integrations ▸ **Databases** (also project menu ▸ **Connect to a database…**) keeps connections to databases whose
+schema is imported into the model and refreshed later with a review. Code: `src/Meridian.Web/Integrations/Databases`
+(`DatabaseConnectionService`), `src/Meridian.Data/Databases/LiveSchemaReader.cs`, UI
+`Components/Workbench/Database/DatabasesPanel.razor`. The modelling side is described in [DATABASE.md](DATABASE.md).
+
+| Engine | Driver | Reads |
+|---|---|---|
+| PostgreSQL | Npgsql | `pg_catalog`: schemas, tables, views, materialized views, columns, keys, indexes, triggers, sequences, enum / domain types, routines, comments |
+| MySQL / MariaDB | MySqlConnector 2.6 (MIT) | `information_schema` |
+| SQLite (desktop / local mode only) | Microsoft.Data.Sqlite | the DDL in `sqlite_master` |
+| SQL Server, Oracle | — | not supported live: import DDL scripts, or a SQL Server `.dacpac` |
+
+Microsoft.Data.SqlClient is MIT licensed but brings Azure.Identity, MSAL and native SNI libraries (tens of MB), so
+SQL Server is supported through DDL and `.dacpac` only.
+
+A connection is a `project_integrations` row of kind `database`: the config JSON holds the provider, a display host,
+the schemas to read, a timeout (5–600 s) and the database element it fills; the **connection string is the secret**,
+encrypted like the other integration secrets, never returned to the browser, never logged (driver errors have
+passwords masked).
+
+* **Read-only.** Meridian only runs catalog queries inside a read-only transaction (SQLite opens the file read-only)
+  and never executes DDL. Still, connect with a **read-only account**: PostgreSQL — a role with `CONNECT` and `USAGE`
+  on the schemas; MySQL — `SELECT` and `SHOW VIEW`.
+* **Who.** On a team server only **server administrators** can add, change, test or delete connections; project
+  members can import and refresh through saved ones. In the desktop app's local mode anyone can.
+* **Where.** The host is resolved once and checked like webhook URLs (*Which addresses the server will call*):
+  link-local and metadata addresses are always refused; loopback and private networks need
+  `Meridian:Integrations:AllowPrivateNetworks=true`. The connection then goes to the checked address (with
+  `SSL Mode=VerifyFull` the host name is kept for certificate validation). SQLite files and Unix sockets are refused
+  on a team server (they are paths on the server); multi-host connection strings are refused.
+* **Time.** Connect and command timeouts follow the connection's timeout, and the whole read is cancelled when it
+  runs out.
+
 ## Storage
 
 New tables (created by `MigrateAsync`, in the integrations migration block of each store):
-`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`/`requirements-tool`, name, config JSON, encrypted secret),
+`project_integrations` (id, project, kind `issue-tracker`/`webhook`/`code-repo`/`requirements-tool`/`database`, name, config JSON, encrypted secret),
 `webhook_deliveries` (delivery log) and `api_tokens`.

@@ -92,6 +92,7 @@ public partial class Workbench
         list.AddRange(CodeSyncPaletteCommands());
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
+        list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
@@ -398,6 +399,7 @@ public partial class Workbench
         m.AddRange(PermissionEntries(e));   // package permissions (Workbench.Permissions.cs)
         m.Add(MenuEntry.Sep());
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
+        m.AddRange(DatabaseTreeEntries(e));      // Workbench.Database.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
@@ -426,6 +428,7 @@ public partial class Workbench
                 m.Add(MenuEntry.Do("Show nested parts", () => c.ShowNestedParts(n)));
             }
             if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
+            m.AddRange(DatabaseCanvasEntries(c, n));   // Workbench.Database.cs
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));
@@ -820,16 +823,14 @@ public partial class Workbench
                         Snackbar.Add($"ArchiMate: {els} elements, {rels} relationships, {views} views", Severity.Success);
                         break;
                     }
-                    case ".sql" or ".ddl":
+                    case ".sql" or ".ddl" or ".dacpac":
                     {
-                        Diagram d;
-                        using (Ws.Model.History.Transaction("Import DDL"))
-                        {
-                            d = Ws.Model.CreateDiagram(target, DiagramType.Database, Path.GetFileNameWithoutExtension(file.Name) + " schema");
-                            var (tables, fks) = SqlDdl.Import(Ws.Model, target, await ReadText(file), d);
-                            Snackbar.Add($"SQL: {tables} tables, {fks} foreign keys", Severity.Success);
-                        }
-                        Ws.Open(d);
+                        // A database with its schemas, a diagram per schema (Workbench.Database.cs); one undo step.
+                        await using var s = file.OpenReadStream(MaxUpload);
+                        using var ms = new MemoryStream();
+                        await s.CopyToAsync(ms);
+                        ms.Position = 0;
+                        ImportCatalog(Meridian.Serialization.Database.DatabaseFiles.Read(file.Name, ms), target, $"{(ext == ".dacpac" ? "dacpac" : "ddl")}:{file.Name}");
                         break;
                     }
                     case ".mdzip" or ".mdxml":

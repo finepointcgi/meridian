@@ -1,0 +1,96 @@
+@* Generate DDL…: CREATE scripts for a database, schema, subject area or the selected tables, in any of five dialects,
+   tables in dependency order with foreign keys last. Meridian only writes the script; it never runs it. *@
+@using Meridian.Core.DataModeling
+@using Meridian.Serialization.Database
+@inject Workspace Ws
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<MudDialog Class="db-ddl-dialog">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Code" /><MudText Typo="Typo.h6">Generate DDL</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="d-flex gap-2 align-center flex-wrap">
+            <MudSelect T="string" Label="For" Value="_scopeKey" ValueChanged="SetScope" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:280px" data-testid="ddl-scope">
+                @foreach (var (key, label, _) in Scopes()) { <MudSelectItem Value="@key">@label</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" Label="Dialect" Value="_dialect" ValueChanged="SetDialect" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:200px" data-testid="ddl-dialect">
+                @foreach (var d in DbFields.Dialects) { <MudSelectItem Value="@d">@DbReservedWords.DialectName(d)</MudSelectItem> }
+            </MudSelect>
+            <MudCheckBox T="bool" Value="_quoteAll" ValueChanged="v => { _quoteAll = v; Build(); }" Label="Quote all names" Dense="true" />
+            <MudCheckBox T="bool" Value="_comments" ValueChanged="v => { _comments = v; Build(); }" Label="Comments" Dense="true" />
+            <MudCheckBox T="bool" Value="_indexes" ValueChanged="v => { _indexes = v; Build(); }" Label="Indexes" Dense="true" />
+        </div>
+        <textarea readonly class="db-ddl-preview" spellcheck="false" data-testid="ddl-preview"
+                  style="width:100%; height:52vh; margin-top:8px; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--panel-solid); color:var(--text)">@_sql</textarea>
+        <MudText Typo="Typo.caption" Style="color:var(--text-3)">@_summary — review the script before running it. Meridian never executes DDL against a database.</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Copy" StartIcon="@Icons.Material.Outlined.ContentCopy">Copy</MudButton>
+        <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Download" OnClick="Download" data-testid="ddl-download">Download .sql</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>Preselected scope (database, schema, subject area, table, package).</summary>
+    [Parameter] public Element? Scope { get; set; }
+    /// <summary>Tables selected on the diagram (offered as a scope).</summary>
+    [Parameter] public IReadOnlyList<Element> Selection { get; set; } = [];
+
+    private string _scopeKey = "model";
+    private string _dialect = "postgresql";
+    private bool _quoteAll, _comments = true, _indexes = true;
+    private string _sql = "";
+    private string _summary = "";
+
+    private IEnumerable<(string Key, string Label, Func<(Element Scope, IReadOnlyList<Element>? Tables)> Get)> Scopes()
+    {
+        if (Selection.Count > 0) yield return ("selection", $"Selected tables ({Selection.Count})", () => (Ws.Model.Root, Selection));
+        foreach (var db in DbModel.Databases(Ws.Model))
+        {
+            var d = db;
+            yield return (d.Id, $"Database {d.Name}", () => (d, null));
+            foreach (var s in d.OwnedElements.Where(DbModel.IsSchema)) { var sc = s; yield return (sc.Id, $"  Schema {d.Name}.{sc.Name}", () => (sc, null)); }
+        }
+        foreach (var g in DbModel.Groups(Ws.Model)) { var gr = g; yield return (gr.Id, $"Subject area {gr.Name}", () => (gr, null)); }
+        if (Scope is { Kind: ElementKind.Table } t) yield return (t.Id, $"Table {t.Name}", () => (t, [t]));
+        if (Scope != null && Scope.Kind is ElementKind.Package or ElementKind.Model && DbModel.RoleOf(Scope).Length == 0) { var p = Scope; yield return (p.Id, $"Package {p.Name}", () => (p, null)); }
+        yield return ("model", "Every table in the model", () => (Ws.Model.Root, null));
+    }
+
+    protected override void OnInitialized()
+    {
+        _scopeKey = Selection.Count > 1 ? "selection" : Scope != null && Scopes().Any(s => s.Key == Scope.Id) ? Scope.Id : Scopes().First().Key;
+        _dialect = Scope != null && DbModel.DatabaseOf(Scope) is { } db && db.Get(DbFields.Dialect) is { Length: > 0 } dd ? dd
+                 : DbModel.Databases(Ws.Model).FirstOrDefault()?.Get(DbFields.Dialect) is { Length: > 0 } d1 ? d1 : "postgresql";
+        Build();
+    }
+
+    private void SetScope(string key) { _scopeKey = key; Build(); }
+    private void SetDialect(string d) { _dialect = d; Build(); }
+
+    private void Build()
+    {
+        var entry = Scopes().FirstOrDefault(s => s.Key == _scopeKey);
+        if (entry.Get == null) { _sql = ""; return; }
+        var (scope, tables) = entry.Get();
+        var catalog = DbExtract.FromModel(Ws.Model, scope, tables).Catalog;
+        _sql = DdlWriter.Generate(catalog, _dialect, new DdlOptions { QuoteAll = _quoteAll, Comments = _comments, Indexes = _indexes, Title = $"Generated by Meridian from '{scope.Name}'" });
+        var count = catalog.AllTables.Count();
+        _summary = $"{count} table{(count == 1 ? "" : "s")} and views, {catalog.AllTables.Sum(t => t.ForeignKeys.Count)} foreign keys";
+    }
+
+    private async Task Download()
+    {
+        var name = $"{(Scopes().FirstOrDefault(s => s.Key == _scopeKey).Get?.Invoke().Scope.Name ?? "model")}-{_dialect}.sql".Replace(' ', '_');
+        await JS.InvokeVoidAsync("meridian.download", name, "text/plain", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_sql)));
+        Ws.Log($"Downloaded {name}");
+    }
+
+    private async Task Copy()
+    {
+        var error = await JS.InvokeAsync<string?>("meridian.copyText", _sql);
+        Snackbar.Add(error ?? "DDL copied", error == null ? Severity.Success : Severity.Warning);
+    }
+}

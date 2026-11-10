@@ -43,6 +43,7 @@
                 @(link.Assignee is { Length: > 0 } a ? a : "Unassigned")
                 · @(conn?.Name ?? "connection removed")
                 @if (link.Synced is { } at) { <span> · @Ago(at)</span> }
+                @if (link.Labels is { Length: > 0 } labels) { <span class="issue-labels"> · @string.Join(", ", labels)</span> }
             </div>
         </div>
     }
@@ -52,7 +53,7 @@
     }
     @if (_trackers.Count == 0)
     {
-        <div style="color:var(--text-3); font-size:12px; margin-bottom:6px">Connect Jira, Azure DevOps or GitHub in the project menu › Integrations… to link issues.</div>
+        <div style="color:var(--text-3); font-size:12px; margin-bottom:6px">Connect Jira, Azure DevOps, GitHub or GitLab in the project menu › Integrations… to link issues.</div>
     }
     else if (!Ws.ReadOnly)
     {

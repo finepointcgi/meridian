@@ -34,7 +34,7 @@ internal sealed class DesktopSettings
     /// <summary>The newer release found by the last check, shown again on later launches until installed.</summary>
     public UpdateInfo? AvailableUpdate { get; set; }
 
-    /// <summary>Where updates come from: GitHub releases (default), GitHub with a token, or a custom manifest address.</summary>
+    /// <summary>Where updates come from: GitHub releases (default), GitHub with a token, a custom manifest address, or GitLab releases.</summary>
     public UpdateSourceKind UpdateSource { get; set; } = UpdateSourceKind.GitHub;
 
     /// <summary>The manifest address for <see cref="UpdateSourceKind.Manifest"/> (https://, or http://localhost for testing).</summary>
@@ -43,11 +43,22 @@ internal sealed class DesktopSettings
     /// <summary>The GitHub token for <see cref="UpdateSourceKind.GitHubToken"/>, encrypted with Data Protection (<see cref="UpdateTokenProtector"/>).</summary>
     public string? ProtectedGitHubToken { get; set; }
 
+    /// <summary>The GitLab instance for <see cref="UpdateSourceKind.GitLab"/> (https://gitlab.com when empty).</summary>
+    public string? UpdateGitLabUrl { get; set; }
+
+    /// <summary>The GitLab project (group/project path or numeric id) for <see cref="UpdateSourceKind.GitLab"/>.</summary>
+    public string? UpdateGitLabProject { get; set; }
+
+    /// <summary>The optional GitLab token (read_api) for a private project, encrypted like the GitHub token; sent only to that GitLab host.</summary>
+    public string? ProtectedGitLabToken { get; set; }
+
     /// <summary>The update source to check, with the token decrypted.</summary>
     public UpdateSource ResolveUpdateSource(UpdateTokenProtector? tokens) => UpdateSource switch
     {
         UpdateSourceKind.GitHubToken => new UpdateSource(UpdateSourceKind.GitHubToken, Token: tokens?.Unprotect(ProtectedGitHubToken)),
         UpdateSourceKind.Manifest => new UpdateSource(UpdateSourceKind.Manifest, ManifestUrl: UpdateManifestUrl),
+        UpdateSourceKind.GitLab => new UpdateSource(UpdateSourceKind.GitLab, Token: tokens?.Unprotect(ProtectedGitLabToken),
+            GitLabUrl: UpdateGitLabUrl, GitLabProject: UpdateGitLabProject),
         _ => Meridian.Desktop.UpdateSource.Default,
     };
 
