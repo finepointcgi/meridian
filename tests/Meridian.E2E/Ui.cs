@@ -13,7 +13,7 @@ public static class Ui
     public static ILocator Canvas(this IPage p) => p.Locator(".diagram-host .canvas");
     public static ILocator Nodes(this IPage p) => p.Locator(".diagram-host svg.main g[data-node]");
     public static ILocator Node(this IPage p, string label) => p.Nodes().Filter(new() { Has = p.Locator("text", new() { HasTextString = label }) });
-    public static ILocator Tree(this IPage p) => p.Locator("main.workbench > section.card").First;
+    public static ILocator Tree(this IPage p) => p.Locator("main.workbench > section.card").First.Locator(".card-body");
     public static ILocator DockBody(this IPage p) => p.Locator(".dock-body");
     public static ILocator Inspector(this IPage p) => p.Locator("aside.stack > section.card").First;
     public static ILocator MudDialog(this IPage p) => p.Locator(".mud-dialog").Last;
