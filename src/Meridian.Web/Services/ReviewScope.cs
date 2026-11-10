@@ -42,7 +42,11 @@ public static class ReviewScope
     /// <summary>The changes between two models restricted to the review's scope (everything, for a version-range review).</summary>
     public static IReadOnlyList<ElementDiff> Diff(ModelRepository before, ModelRepository after, ReviewInfo review)
     {
-        var all = ModelDiff.Compare(before, after);
+        // Suspect-link fingerprints are bookkeeping written alongside requirement edits, not changes to review.
+        var all = ModelDiff.Compare(before, after)
+            .Select(d => d with { Fields = d.Fields.Where(f => f.Key is not (ReqFields.SourceFingerprint or ReqFields.TargetFingerprint)).ToList() })
+            .Where(d => d.Kind != DiffKind.Changed || d.Fields.Count > 0)
+            .ToList();
         if (review.ScopeKind == ReviewScopeKind.Versions) return all;
         var ids = Ids(before, review);
         ids.UnionWith(Ids(after, review));
