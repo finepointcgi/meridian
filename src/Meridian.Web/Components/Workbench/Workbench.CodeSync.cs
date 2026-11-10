@@ -36,5 +36,6 @@ public partial class Workbench
         if (branch is { } b && b != Ws.BranchId && await Db.GetBranchAsync(b) is { } info && info.ProjectId == s.ProjectId)
             await SwitchBranch(new BranchRef(info.Id, info.Name));
         if (panel == Integrations.DeepLink.CodeChangesPanel) OpenCodeChanges();
+        else if (panel == Meridian.Web.CodeSync.Conformance.ArchitectureCheckService.Panel) OpenArchitecture();
     }
 }

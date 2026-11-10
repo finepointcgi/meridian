@@ -22,6 +22,12 @@ public sealed class CodeSyncReview
     /// <summary>Main's current model (the ghosts of removed elements are drawn from its diagrams).</summary>
     public required ModelRepository Main { get; init; }
 
+    /// <summary>The pull / merge request this review previews ("PR #n"); null for the review branch of the followed branch.</summary>
+    public int? PullRequest => CodeSyncRunner.PreviewNumber(Branch.Name);
+
+    /// <summary>A pull request preview: shown for looking, never accepted or rejected (the sync after the merge is).</summary>
+    public bool IsPreview => PullRequest is not null;
+
     /// <summary>Element id → how it differs, for diagram highlights.</summary>
     public IReadOnlyDictionary<string, CodeSyncChangeKind> Kinds => _kinds ??= Changes.ToDictionary(c => c.ElementId, c => c.Kind, StringComparer.Ordinal);
     private IReadOnlyDictionary<string, CodeSyncChangeKind>? _kinds;
@@ -47,6 +53,7 @@ public sealed record CodeSyncDecision(int Count, int? VersionNumber, string Mess
 /// with the normal three-way merge (conflicts surface in the merge dialog); accepting only some changes first puts the
 /// others back to the merge base, so main keeps its version of them and they stay on the branch for later. Rejecting
 /// puts the chosen elements on the branch back to main's version. Only editors and owners decide; viewers can't.
+/// Pull request previews (code-sync/repo/pr-n) are listed but never accepted or rejected.
 /// </summary>
 public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hub, CodeSyncEvents events, ILogger<CodeSyncReviewService> log)
 {
@@ -95,7 +102,7 @@ public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hu
     }
 
     /// <summary>Pending entries of the runs, as net changes of the branch against its merge base.</summary>
-    private static List<CodeSyncPendingChange> Pending(ModelRepository baseModel, ModelRepository head, ModelRepository main, IReadOnlyList<CodeSyncRunRecord> runs)
+    internal static List<CodeSyncPendingChange> Pending(ModelRepository baseModel, ModelRepository head, ModelRepository main, IReadOnlyList<CodeSyncRunRecord> runs)
     {
         var entries = runs.SelectMany(r => r.Changes.Where(c => c.State == CodeSyncChangeState.Pending).Select(c => (Run: r.Id, Change: c)))
                           .GroupBy(x => x.Change.ElementId, StringComparer.Ordinal).ToList();
@@ -138,6 +145,7 @@ public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hu
             int? version = null;
             foreach (var review in await LoadAsync(projectId))
             {
+                if (review.IsPreview) continue;   // previews are decided by the sync after the merge
                 var scope = Scope(review, runIds, elementIds);
                 if (scope.Count == 0) { await MarkAsync(review.Runs, Stale(review, runIds, elementIds), CodeSyncChangeState.Accepted); continue; }
                 var acceptance = await PrepareAsync(review, scope, runIds, elementIds);
@@ -185,6 +193,7 @@ public sealed class CodeSyncReviewService(IMeridianStore db, CollaborationHub hu
             int? version = null;
             foreach (var review in await LoadAsync(projectId))
             {
+                if (review.IsPreview) continue;
                 var scope = Scope(review, runIds, elementIds);
                 if (scope.Count == 0) { await MarkAsync(review.Runs, Stale(review, runIds, elementIds), CodeSyncChangeState.Rejected); continue; }
                 var branchId = review.Branch.BranchId!.Value;

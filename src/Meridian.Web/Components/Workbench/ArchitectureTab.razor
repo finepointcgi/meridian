@@ -1,0 +1,180 @@
+@inherits WorkspaceComponent
+@using Meridian.Core.CodeSync.Conformance
+@using Meridian.Web.CodeSync.Conformance
+@inject ArchitectureState State
+@inject ISnackbar Snackbar
+
+@* "Architecture": the code of each connected repository checked against the model (docs/ARCHITECTURE-CHECKS.md). *@
+<div class="arch-tab">
+    <div class="arch-toolbar">
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="arch-check" StartIcon="@Icons.Material.Outlined.Rule"
+                   Disabled="@State.Busy" OnClick="Check">@(State.Busy ? "Checking…" : "Check architecture")</MudButton>
+        @if (State.Checked)
+        {
+            <span class="dim arch-total">@Total()</span>
+        }
+        <MudSpacer />
+        <MudButton Size="Size.Small" Variant="Variant.Text" Class="arch-toggle" StartIcon="@Icons.Material.Outlined.Highlight" OnClick="() => State.SetShowOnDiagrams(!State.ShowOnDiagrams)">
+            @(State.ShowOnDiagrams ? "Hide on diagrams" : "Show on diagrams")
+        </MudButton>
+    </div>
+
+    @if (State.Error is { } error)
+    {
+        <div class="dim mt-2" style="color:var(--danger)">@error</div>
+    }
+
+    @if (State.Repos.Count == 0)
+    {
+        <div class="arch-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Rule" />
+            <h3 style="justify-content:center">No connected repositories</h3>
+            <div>Connect a code repository (Integrations › Code repositories). After each sync, its code is checked against the architecture in this model.</div>
+        </div>
+    }
+    else
+    {
+        @foreach (var repo in State.Repos)
+        {
+            var r = repo;
+            <h3><MudIcon Icon="@Icons.Material.Outlined.Source" Style="font-size:15px" /> @r.Name</h3>
+            <div class="arch-repo" data-connection="@r.ConnectionId">
+                @if (r.Record is { Commit.Length: > 0 } rec)
+                {
+                    <span>Last synced code:</span>
+                    @if (Safe(rec.CommitUrl) is { } url)
+                    {
+                        <a class="sha" href="@url" target="_blank" rel="noopener noreferrer">@Short(rec.Commit)</a>
+                    }
+                    else
+                    {
+                        <span class="sha">@Short(rec.Commit)</span>
+                    }
+                    @if (rec.Summary is { Length: > 0 } summary)
+                    {
+                        <span class="dim arch-status">· main: @summary</span>
+                    }
+                }
+                else
+                {
+                    <span class="dim">Not synced yet.</span>
+                }
+                <MudSpacer />
+                <label class="d-flex align-center gap-1" style="font-size:12px; cursor:pointer" title="Off: the meridian/architecture status is a success that lists the violations">
+                    <input type="checkbox" class="arch-fail-prs" checked="@(r.Record?.FailPullRequests == true)" disabled="@Ws.ReadOnly"
+                           @onchange="e => SetFail(r, e.Value is true)" /> Fail pull requests on architecture violations
+                </label>
+            </div>
+
+            @if (r.Result is { } result)
+            {
+                @if (result.Violations.Count == 0)
+                {
+                    <div class="dim mt-2 arch-clean">The code conforms to the architecture@(result.Suppressed.Count > 0 ? $" ({result.Suppressed.Count} suppressed)" : "").</div>
+                }
+                @foreach (var group in result.Violations.GroupBy(v => v.Rule).OrderBy(g => g.Key))
+                {
+                    <h3 class="arch-rule" data-rule="@ArchitectureConformance.RuleId(group.Key)">@ArchitectureConformance.RuleTitle(group.Key) <span class="dim" style="text-transform:none">(@group.Count())</span></h3>
+                    @foreach (var violation in group)
+                    {
+                        var v = violation;
+                        var sev = v.Severity == ViolationSeverity.Error ? "error" : "warning";
+                        <div class="arch-row @sev" data-rule="@v.RuleId">
+                            <MudIcon Class="sev" Icon="@(v.Severity == ViolationSeverity.Error ? Icons.Material.Outlined.ErrorOutline : Icons.Material.Outlined.WarningAmber)" Style="font-size:17px" />
+                            <span class="msg">@v.Message</span>
+                            <span class="acts">
+                                @if (v.File is not null)
+                                {
+                                    @if (r.Record is { } rr && ArchitectureCheckService.FileUrl(rr.CommitUrl, rr.Commit, v.File, v.Line) is { } fileUrl)
+                                    {
+                                        <a class="loc" href="@fileUrl" target="_blank" rel="noopener noreferrer">@v.Location</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="loc">@v.Location</span>
+                                    }
+                                }
+                                @if (v.ElementId is not null)
+                                {
+                                    <button class="arch-link arch-show" @onclick="() => ShowOnDiagram(v)">Show on diagram</button>
+                                }
+                            </span>
+                            <span class="hint">@v.FixHint</span>
+                        </div>
+                    }
+                }
+            }
+            else if (r.Record?.PackedCode is { Length: > 0 } && !State.Checked)
+            {
+                <div class="dim mt-2">Press <b>Check architecture</b> to check the last synced code against this model.</div>
+            }
+        }
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        State.Changed += OnState;
+        if (!State.Checked && !State.Busy) _ = State.CheckAsync(post: false);
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    public override void Dispose()
+    {
+        State.Changed -= OnState;
+        base.Dispose();
+    }
+
+    private async Task Check()
+    {
+        await State.CheckAsync();
+        Ws.SetStatus($"Architecture check: {Total()}");
+    }
+
+    private string Total()
+    {
+        var all = State.Violations.ToList();
+        int errors = all.Count(v => v.Severity == ViolationSeverity.Error), warnings = all.Count - errors;
+        if (all.Count == 0) return "No architecture violations";
+        var parts = new List<string>();
+        if (errors > 0) parts.Add($"{errors} violation{(errors == 1 ? "" : "s")}");
+        if (warnings > 0) parts.Add($"{warnings} warning{(warnings == 1 ? "" : "s")}");
+        return string.Join(", ", parts);
+    }
+
+    private async Task SetFail(ArchitectureRepo r, bool on)
+    {
+        await State.SetFailPullRequestsAsync(r.ConnectionId, on);
+        Snackbar.Add(on ? $"Pull requests of {r.Name} now fail on architecture violations." : $"Architecture violations in {r.Name} no longer fail pull requests.", Severity.Info);
+    }
+
+    /// <summary>Opens a diagram that shows the element (both ends when one does) and selects it.</summary>
+    private void ShowOnDiagram(ArchitectureViolation v)
+    {
+        if (Ws.Model.Find(v.ElementId) is not { } e)
+        {
+            Snackbar.Add($"{v.ElementName} is not in this model.", Severity.Info);
+            return;
+        }
+        var diagrams = Ws.Model.Diagrams.Where(d => Shows(d, v.ElementId!)).ToList();
+        var d = diagrams.FirstOrDefault(x => v.TargetElementId is { } t && Shows(x, t)) ?? diagrams.FirstOrDefault();
+        if (d is null)
+        {
+            Ws.Select(e);
+            Snackbar.Add($"{e.Name} isn't shown on any diagram.", Severity.Info);
+            return;
+        }
+        if (!State.ShowOnDiagrams) State.SetShowOnDiagrams(true);
+        Ws.Open(d);
+        Ws.Select(e);
+    }
+
+    private static bool Shows(Diagram d, string id) =>
+        d.Nodes.Any(n => n.Element.Id == id || (n.Element.Kind == ElementKind.Property && n.Element.TypeRef == id));
+
+    private static string? Safe(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "https" or "http" ? url : null;
+    private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;
+}

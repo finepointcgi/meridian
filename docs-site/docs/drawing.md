@@ -103,11 +103,21 @@ Right-click the canvas or a shape for context actions. Depending on what is sele
 internal block and parametric diagrams), *Add input pin* / *Add output pin* (actions), *Allocate actions to swimlanes* (activity diagrams), *Straighten path*, *Arrange*, *Add link…*,
 *Copy diagram as image* and *Export as PNG… / SVG*.
 
+## Selecting many
+
+Shift-click or ⌘-click to add shapes and connectors to the selection, drag a box on empty canvas, or press ⌘A. The
+Inspector then edits them all at once, and **Link to…** links them all to one element. Lines you draw pick their
+relationship type for you. See [Multi-select and bulk editing](multi-select.md).
+
 ## Automatic layout
 
 **Arrange** (ribbon *Diagram* group, or the canvas menu) lays the diagram out in layers that follow the relationship
 direction: general above specific, wholes above parts, requirements above the elements that satisfy or verify them.
 It is one undo step, so you can always go back.
+
+**Auto-diagram** (ribbon *Diagram* group) goes further and draws new diagrams for what is already in the model: a
+package overview, structure, internal structure, requirement and behaviour views. See
+[AI assistant](ai-assistant.md#auto-diagram-without-ai); it needs no AI.
 
 ## Diagram templates
 

@@ -141,15 +141,8 @@ activity from use case", "Create sequence from activity", …).
 | Sequence or activity | a state machine for a chosen block, built from the events it receives and its replies, with guarded transitions (through a choice when branches start with the same event) for alternatives (approximate) | classifier behaviour |
 | Blocks / requirements | «satisfy» and test case «verify» proposals, each reviewed one by one | «satisfy», «verify» |
 
-A dialog lists what will be created, with checkboxes and warnings, and **Create** applies it as one undo step. When a
-source changes, its derived diagrams show a **Source changed** badge. **Update from source…** previews the differences
-with green (added), amber (changed) and dashed (removed) highlights. It never touches what you added yourself and never
-moves the shapes you placed. The inspector's **Derivation chain** shows where the selection sits in the chain and offers
-**Create next…**. When the AI assistant is on, **Fill in with AI** can write a use case's steps or name the messages.
-You review its output in the same dialog before anything is created.
-
-The full reference, covering every mapping, the stored `derive.*` fields and how updates are matched, is
-`docs/DERIVATION.md` in the source repository.
+A dialog lists what will be created, and **Create** applies it as one undo step. Derived diagrams can later be updated
+from their source without losing your own edits. See [Creating diagrams from diagrams](derivation.md).
 
 ## Whiteboards
 

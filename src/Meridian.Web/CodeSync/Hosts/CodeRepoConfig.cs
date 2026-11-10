@@ -12,7 +12,7 @@ public static class CodeRepoKinds
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<GitHostKind>))]
-public enum GitHostKind { GitHub, GitLab }
+public enum GitHostKind { GitHub, GitLab, Bitbucket }
 
 /// <summary>What happened in the most recent sync of a connection (kept in the connection's config).</summary>
 public sealed class CodeRepoLastSync
@@ -25,6 +25,24 @@ public sealed class CodeRepoLastSync
     public string? ReviewUrl { get; set; }
 }
 
+/// <summary>An open pull / merge request with a preview branch (kept in the connection's config).</summary>
+public sealed class CodeRepoPullRequest
+{
+    public int Number { get; set; }
+    public string? Title { get; set; }
+    public string? Url { get; set; }
+    /// <summary>The head commit last synced (or queued).</summary>
+    public string Head { get; set; } = "";
+    /// <summary>As <see cref="CodeRepoLastSync.Status"/>.</summary>
+    public string Status { get; set; } = "";
+    public string Summary { get; set; } = "";
+    /// <summary>The preview branch in Meridian.</summary>
+    public string? ReviewUrl { get; set; }
+    /// <summary>Id of Meridian's comment on the pull request, updated in place on later syncs.</summary>
+    public string? CommentId { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// Non-secret settings of a code repository connection, stored as the integration's config JSON. The access token is
 /// the connection's protected secret; the webhook secret is encrypted with the same protector and kept here.
@@ -33,13 +51,18 @@ public sealed partial class CodeRepoConfig
 {
     public const string GitHubApi = "https://api.github.com";
     public const string GitLabCom = "https://gitlab.com";
+    public const string BitbucketCloudApi = "https://api.bitbucket.org/2.0";
+
+    /// <summary>Most open pull requests remembered per connection (the oldest are forgotten).</summary>
+    public const int MaxPullRequests = 100;
 
     public GitHostKind Host { get; set; } = GitHostKind.GitHub;
-    /// <summary>GitHub API root (https://api.github.com or https://ghe.example.com/api/v3), or the GitLab server (https://gitlab.com).</summary>
+    /// <summary>GitHub API root (https://api.github.com or https://ghe.example.com/api/v3), the GitLab server
+    /// (https://gitlab.com), or Bitbucket: https://api.bitbucket.org/2.0 (Cloud) or the Data Center / Server address.</summary>
     public string BaseUrl { get; set; } = GitHubApi;
-    /// <summary>GitHub owner (user or organisation).</summary>
+    /// <summary>GitHub owner (user or organisation); Bitbucket Cloud workspace or Data Center project key.</summary>
     public string Owner { get; set; } = "";
-    /// <summary>GitHub repository name.</summary>
+    /// <summary>GitHub repository name; Bitbucket repository slug.</summary>
     public string Repo { get; set; } = "";
     /// <summary>GitLab project path ("group/sub/project") or numeric id.</summary>
     public string Project { get; set; } = "";
@@ -53,6 +76,14 @@ public sealed partial class CodeRepoConfig
     public bool AutoSync { get; set; } = true;
     /// <summary>Post a "meridian/model" commit status back to the host.</summary>
     public bool PostStatus { get; set; } = true;
+    /// <summary>Sync pull / merge requests into the branch into preview branches (<c>code-sync/&lt;repo&gt;/pr-&lt;n&gt;</c>).</summary>
+    public bool PreviewPullRequests { get; set; } = true;
+    /// <summary>Keep one Meridian comment on each previewed pull request with the model changes (updated in place).</summary>
+    public bool CommentOnPullRequests { get; set; } = true;
+    /// <summary>Create diagrams for new packages and blocks. The model root's <c>codeSync.autoDiagrams</c> field overrides it when set.</summary>
+    public bool AutoDiagrams { get; set; } = true;
+    /// <summary>Open pull requests with a preview branch, by number.</summary>
+    public List<CodeRepoPullRequest> PullRequests { get; set; } = [];
     /// <summary>Webhook secret, encrypted with the integrations protector. Never shown again after creation.</summary>
     public string? ProtectedWebhookSecret { get; set; }
     public CodeRepoLastSync? LastSync { get; set; }
@@ -64,15 +95,36 @@ public sealed partial class CodeRepoConfig
 
     public CodeRepoConfig Clone() => Parse(ToJson());
 
-    public static string DefaultBaseUrl(GitHostKind host) => host == GitHostKind.GitLab ? GitLabCom : GitHubApi;
+    public static string DefaultBaseUrl(GitHostKind host) => host switch
+    {
+        GitHostKind.GitLab => GitLabCom,
+        GitHostKind.Bitbucket => BitbucketCloudApi,
+        _ => GitHubApi,
+    };
 
-    /// <summary>"owner/repo" or the GitLab project path.</summary>
+    /// <summary>The host's display name ("Bitbucket Cloud", "Bitbucket Data Center").</summary>
     [JsonIgnore]
-    public string Display => Host == GitHostKind.GitHub ? $"{Owner.Trim()}/{Repo.Trim()}" : Project.Trim();
+    public string HostLabel => Host switch
+    {
+        GitHostKind.GitLab => "GitLab",
+        GitHostKind.Bitbucket => IsBitbucketCloud ? "Bitbucket Cloud" : "Bitbucket Data Center",
+        _ => "GitHub",
+    };
 
-    /// <summary>The repository name: the last part of the GitHub repo or the GitLab path.</summary>
+    /// <summary>A Bitbucket connection to bitbucket.org (Cloud) rather than a Data Center / Server instance.</summary>
     [JsonIgnore]
-    public string RepoName => Host == GitHostKind.GitHub ? Repo.Trim() : Project.Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+    public bool IsBitbucketCloud => Host == GitHostKind.Bitbucket && IsBitbucketCloudUrl(BaseUrl);
+
+    public static bool IsBitbucketCloudUrl(string? url) =>
+        Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var u) && (u.Host.Equals("api.bitbucket.org", StringComparison.OrdinalIgnoreCase) || u.Host.Equals("bitbucket.org", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>"owner/repo", the GitLab project path, or "workspace/repo" / "PROJECT/repo" for Bitbucket.</summary>
+    [JsonIgnore]
+    public string Display => Host == GitHostKind.GitLab ? Project.Trim() : $"{Owner.Trim()}/{Repo.Trim()}";
+
+    /// <summary>The repository name: the last part of the GitHub / Bitbucket repo or the GitLab path.</summary>
+    [JsonIgnore]
+    public string RepoName => Host == GitHostKind.GitLab ? Project.Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "" : Repo.Trim();
 
     [JsonIgnore]
     public string EffectiveRootPackage => RootPackage is { Length: > 0 } r && r.Trim().Length > 0 ? r.Trim() : RepoName is { Length: > 0 } n ? n : "Code";
@@ -81,7 +133,10 @@ public sealed partial class CodeRepoConfig
     public void Normalize()
     {
         BaseUrl = (BaseUrl ?? "").Trim().TrimEnd('/');
-        if (BaseUrl.Length == 0) BaseUrl = DefaultBaseUrl(Host);
+        // Empty, or another host's default (the host was switched): this host's default.
+        if (BaseUrl.Length == 0 || Enum.GetValues<GitHostKind>().Any(h => h != Host && string.Equals(BaseUrl, DefaultBaseUrl(h), StringComparison.OrdinalIgnoreCase)))
+            BaseUrl = DefaultBaseUrl(Host);
+        if (Host == GitHostKind.Bitbucket && IsBitbucketCloudUrl(BaseUrl)) BaseUrl = BitbucketCloudApi;   // bitbucket.org → its API root
         Owner = (Owner ?? "").Trim();
         Repo = (Repo ?? "").Trim();
         if (Repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) Repo = Repo[..^4];
@@ -114,7 +169,12 @@ public sealed partial class CodeRepoConfig
         if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback)))
             return "The server URL must be an absolute https:// URL.";
         if (!string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment)) return "The server URL must not have a query or fragment.";
-        if (Host == GitHostKind.GitHub)
+        if (Host == GitHostKind.Bitbucket)
+        {
+            if (!NamePart().IsMatch(Owner?.Trim() ?? "")) return IsBitbucketCloud ? "Enter the Bitbucket workspace." : "Enter the Bitbucket project key.";
+            if (!NamePart().IsMatch(Repo?.Trim() ?? "") || (Repo ?? "").Trim() is "." or "..") return "Enter the repository slug.";
+        }
+        else if (Host == GitHostKind.GitHub)
         {
             if (!NamePart().IsMatch(Owner?.Trim() ?? "")) return "Enter the repository owner (user or organisation).";
             if (!NamePart().IsMatch(Repo?.Trim() ?? "") || (Repo ?? "").Trim() is "." or "..") return "Enter the repository name.";
