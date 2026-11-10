@@ -471,11 +471,7 @@ public sealed class ModelRepository
 
         // Detach order: external relationships first, then the element. Record positions for undo.
         var detached = new List<(Element el, Element owner, int index)>();
-        var views = Diagrams.Where(d => !gone.Contains(d)).Select(d => (
-            diagram: d,
-            edges: d.EdgeList.Select((x, i) => (x, i)).Where(t => gone.Contains(t.x.Relationship) || gone.Contains(t.x.Source.Element) || gone.Contains(t.x.Target.Element)
-                || d.NodeList.Any(p => gone.Contains(p.Element) && (d.DescendantsOf(p).Contains(t.x.Source) || d.DescendantsOf(p).Contains(t.x.Target)))).ToList(),
-            nodes: d.NodeList.Select((x, i) => (x, i)).Where(t => gone.Contains(t.x.Element) || d.NodeList.Any(p => gone.Contains(p.Element) && d.DescendantsOf(p).Contains(t.x))).ToList()))
+        var views = Diagrams.Where(d => !gone.Contains(d)).Select(d => ViewsOf(d, gone))
             .Where(v => v.edges.Count > 0 || v.nodes.Count > 0).ToList();
 
         History.Execute(new DelegateCommand($"Delete {e.DisplayName}",
@@ -504,6 +500,26 @@ public sealed class ModelRepository
                     foreach (var (x, i) in v.edges) EdgeInsertRaw(v.diagram, i, x);
                 }
             }));
+    }
+
+    /// <summary>
+    /// The shapes and paths of <paramref name="d"/> that go with <paramref name="gone"/>: shapes of gone elements and every shape
+    /// nested in them, and paths of gone relationships or touching any of those shapes (with their positions, for undo).
+    /// Linear in the diagram's size: deleting one element of a model with a thousand diagrams must not cost seconds.
+    /// </summary>
+    private static (Diagram diagram, List<(DiagramEdge x, int i)> edges, List<(DiagramNode x, int i)> nodes) ViewsOf(Diagram d, HashSet<Element> gone)
+    {
+        var removedRoots = d.NodeList.Where(p => gone.Contains(p.Element)).ToList();
+        HashSet<DiagramNode>? inside = null;
+        if (removedRoots.Count > 0)
+        {
+            inside = new HashSet<DiagramNode>(ReferenceEqualityComparer.Instance);
+            foreach (var p in removedRoots) inside.UnionWith(d.DescendantsOf(p));
+        }
+        var edges = d.EdgeList.Select((x, i) => (x, i)).Where(t => gone.Contains(t.x.Relationship) || gone.Contains(t.x.Source.Element) || gone.Contains(t.x.Target.Element)
+            || (inside != null && (inside.Contains(t.x.Source) || inside.Contains(t.x.Target)))).ToList();
+        var nodes = removedRoots.Count == 0 ? [] : d.NodeList.Select((x, i) => (x, i)).Where(t => gone.Contains(t.x.Element) || inside!.Contains(t.x)).ToList();
+        return (d, edges, nodes);
     }
 
     /// <summary>

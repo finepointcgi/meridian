@@ -254,8 +254,12 @@ public sealed partial class ProjectSession
     {
         if (_texts.Count == 0) return;
         _textRefresh ??= new Timer(_ => RefreshSharedTexts(), null, Timeout.Infinite, Timeout.Infinite);
-        _textRefresh.Change(250, Timeout.Infinite);
+        // A whole-model text of a huge project takes long to export (under the session lock), so refreshes back off to a few
+        // times their own cost instead of stalling every editor's operations four times a second.
+        _textRefresh.Change(Math.Max(250, (int)(_lastTextRefreshCost.TotalMilliseconds * 4)), Timeout.Infinite);
     }
+
+    private TimeSpan _lastTextRefreshCost;
 
     /// <summary>
     /// Brings every shared text in step with the model: a text without unapplied edits simply becomes the new canonical text;
@@ -265,6 +269,15 @@ public sealed partial class ProjectSession
     public void RefreshSharedTexts()
     {
         lock (_gate)
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { RefreshSharedTextsLocked(); }
+            finally { _lastTextRefreshCost = System.Diagnostics.Stopwatch.GetElapsedTime(started); }
+        }
+    }
+
+    private void RefreshSharedTextsLocked()
+    {
         {
             foreach (var t in _texts.Values.ToList())
             {

@@ -109,14 +109,14 @@ public sealed partial class ProjectSession
         // Only known participants with an editing role may change the model (viewers are read-only server-side too).
         if (!_participants.TryGetValue(participantId, out var me) || !me.Presence.CanEdit)
         {
-            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(ProjectFile.Serialize(_master), "This project is view-only for you — your change was not applied."); }
+            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(SnapshotLocked(), "This project is view-only for you — your change was not applied."); }
             return false;
         }
         if (_locks.Count == 0 || Blocks(userId, op) is not { } l) return true;
         _rejecting.Add(participantId);
         var what = _master.Find(l.ElementId)?.DisplayName ?? "That element";
         if (_participants.TryGetValue(participantId, out var p))
-            p.Client.Replaced(ProjectFile.Serialize(_master), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
+            p.Client.Replaced(SnapshotLocked(), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
         return false;
     }
 

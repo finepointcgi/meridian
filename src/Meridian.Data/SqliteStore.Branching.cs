@@ -126,7 +126,7 @@ public sealed partial class SqliteStore
                 """;
             cmd.Parameters.AddWithValue("$1", S(projectId));
             cmd.Parameters.AddWithValue("$2", message);
-            cmd.Parameters.AddWithValue("$3", modelJson);
+            cmd.Parameters.AddWithValue("$3", VersionBlob.Encode(modelJson));
             cmd.Parameters.AddWithValue("$4", author is { } a ? S(a) : DBNull.Value);
             cmd.Parameters.AddWithValue("$5", Now());
             await using var r = await cmd.ExecuteReaderAsync();

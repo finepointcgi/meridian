@@ -122,7 +122,7 @@ public sealed partial class ProjectSession : IDisposable
 
     public string Snapshot()
     {
-        lock (_gate) return ProjectFile.Serialize(_master);
+        lock (_gate) return SnapshotLocked();
     }
 
     internal void Join(Presence me, ISessionClient client)
@@ -162,6 +162,7 @@ public sealed partial class ProjectSession : IDisposable
         lock (_gate)
         {
             if (!AllowEdit(participantId, userId, op)) return;   // element locks (ProjectSession.Locks.cs)
+            _snapshotSequence = -1;
             _master.ApplyRemote(op);
             ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
             Events?.OperationApplied(ProjectId, Name, userId, op, _master);
@@ -266,7 +267,7 @@ public sealed partial class ProjectSession : IDisposable
             lock (_gate)
             {
                 if (!_dirty) return;
-                json = ProjectFile.Serialize(_master);
+                json = SnapshotLocked();
                 editor = _lastEditor;
                 _dirty = false;
             }

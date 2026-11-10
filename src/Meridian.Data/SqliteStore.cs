@@ -246,7 +246,7 @@ public sealed partial class SqliteStore : IMeridianStore
             insert into project_versions(project_id, number, message, model, author, created_at)
             values ($1, coalesce((select max(number) from project_versions where project_id = $1), 0) + 1, $2, $3, $4, $5)
             returning number
-            """, S(projectId), message, modelJson, author is { } a ? S(a) : null, Now()) ?? 0L);
+            """, S(projectId), message, VersionBlob.Encode(modelJson), author is { } a ? S(a) : null, Now()) ?? 0L);
 
     public async Task<IReadOnlyList<VersionInfo>> ListVersionsAsync(Guid projectId)
     {
@@ -261,7 +261,7 @@ public sealed partial class SqliteStore : IMeridianStore
     }
 
     public async Task<string?> LoadVersionAsync(Guid projectId, long versionId) =>
-        await ScalarAsync("select model from project_versions where id = $1 and project_id = $2", versionId, S(projectId)) as string;
+        VersionBlob.Decode(await ScalarAsync("select model from project_versions where id = $1 and project_id = $2", versionId, S(projectId)));
 
     // =============================================================== comments
 

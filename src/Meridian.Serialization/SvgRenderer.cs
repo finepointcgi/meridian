@@ -128,14 +128,18 @@ public static partial class SvgRenderer
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
     public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false)
     {
-        Func<DiagramNode, Bounds> bounds = n => Notation.EffectiveBounds(model, n, d.DiagramType);
+        // Effective bounds measure each shape's compartments; routing asks for every obstacle once per path, so compute each once.
+        var memo = new Dictionary<DiagramNode, Bounds>(ReferenceEqualityComparer.Instance);
+        Func<DiagramNode, Bounds> bounds = n => memo.TryGetValue(n, out var b) ? b : memo[n] = Notation.EffectiveBounds(model, n, d.DiagramType);
         var view = DiagramExtras.VisibleView(d);   // hidden layers are not exported
         var nodes = view.Nodes;
         double minX = 0, minY = 0, maxX = 400, maxY = 300;
+        Dictionary<DiagramEdge, IReadOnlyList<Pt>>? routes = null;
         if (nodes.Count > 0)
         {
             // Routed connectors may detour around shapes: keep their whole path inside the picture.
-            var pts = EdgeRouter.RouteAll(view, bounds).Values.SelectMany(p => p).ToList();
+            routes = EdgeRouter.RouteAll(view, bounds);
+            var pts = routes.Values.SelectMany(p => p).ToList();
             minX = Math.Min(nodes.Min(n => n.Bounds.X), pts.Count > 0 ? pts.Min(p => p.X) : double.MaxValue) - margin - (d.DiagramType == DiagramType.InternalBlock ? 40 : 0);
             minY = Math.Min(nodes.Min(n => n.Bounds.Y), pts.Count > 0 ? pts.Min(p => p.Y) : double.MaxValue) - margin - 30 - (d.DiagramType == DiagramType.InternalBlock ? 50 : 0);
             maxX = Math.Max(nodes.Max(n => n.Bounds.Right), pts.Count > 0 ? pts.Max(p => p.X) : double.MinValue) + margin + 60;
@@ -150,7 +154,7 @@ public static partial class SvgRenderer
         if (d.DiagramType != DiagramType.Whiteboard)
             sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
         RenderHeader(sb, d, minX + 4, minY + 4, t);
-        RenderBody(sb, model, d, bounds, null, t);
+        RenderBody(sb, model, d, bounds, null, t, null, routes);   // the routes just computed (same view, same bounds)
         sb.Append("</svg>");
         return sb.ToString();
     }
@@ -171,7 +175,12 @@ public static partial class SvgRenderer
 
     /// <summary>Edges then nodes, in model coordinates.</summary>
     public static void RenderBody(StringBuilder sb, ModelRepository model, Diagram d, Func<DiagramNode, Bounds> bounds,
-                                  Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null)
+                                  Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null) =>
+        RenderBody(sb, model, d, bounds, waypoints, theme, viewport, null);
+
+    private static void RenderBody(StringBuilder sb, ModelRepository model, Diagram d, Func<DiagramNode, Bounds> bounds,
+                                   Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints, SvgTheme? theme, Bounds? viewport,
+                                   Dictionary<DiagramEdge, IReadOnlyList<Pt>>? precomputedRoutes)
     {
         var t = theme ?? SvgTheme.Light;
         d = DiagramExtras.VisibleView(d);   // layers: hidden ones are skipped, the rest drawn bottom layer first
@@ -180,7 +189,7 @@ public static partial class SvgRenderer
         var memo = new Dictionary<DiagramNode, Bounds>(d.Nodes.Count, ReferenceEqualityComparer.Instance);
         bounds = n => memo.TryGetValue(n, out var mb) ? mb : memo[n] = raw(n);
         // Routes are computed on the whole (visible) diagram, before culling, so they don't depend on the viewport.
-        var routes = EdgeRouter.RouteAll(d, bounds, waypoints);
+        var routes = precomputedRoutes ?? EdgeRouter.RouteAll(d, bounds, waypoints);
         var jumps = EdgeRouter.LineJumps(d) ? new List<(Pt A, Pt B)>() : null;
         if (viewport is { } vp && d.Nodes.Count > 150)
         {

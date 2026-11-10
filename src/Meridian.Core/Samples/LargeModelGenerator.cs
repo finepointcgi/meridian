@@ -18,7 +18,27 @@ public sealed record LargeModelOptions
     public int StateMachines { get; init; } = 250;
     public int Diagrams { get; init; } = 300;
 
+    // Cameo-scale extras (off by default, so the default model stays exactly as it was).
+    /// <summary>Use cases (with actors, include links and numbered step descriptions) under "Use Cases"; not scaled.</summary>
+    public int UseCases { get; init; }
+    /// <summary>Depth of a binary "Product Breakdown" package tree (0 = none); each leaf package holds a few blocks.</summary>
+    public int BreakdownDepth { get; init; }
+    /// <summary>Big diagrams with 50–500 shapes each (sizes spread evenly over that range); not scaled.</summary>
+    public int LargeDiagrams { get; init; }
+
     internal int N(int count) => Math.Max(1, (int)Math.Round(count * Scale));
+
+    /// <summary>
+    /// A Cameo-scale project of roughly <paramref name="elements"/> elements (e.g. 200,000 or 500,000): the default mix scaled
+    /// up, plus use cases, a deep package breakdown and diagrams of 50–500 shapes.
+    /// </summary>
+    public static LargeModelOptions Cameo(int elements) => new()
+    {
+        Scale = Math.Max(0.05, (elements - 4_500) / 60_350.0),
+        UseCases = Math.Clamp(elements / 500, 20, 2_000),
+        BreakdownDepth = 9,
+        LargeDiagrams = 24,
+    };
 }
 
 /// <summary>
@@ -303,6 +323,18 @@ public static class LargeModelGenerator
             made++;
         }
 
+        if (o.UseCases > 0) AddUseCases(g, root, o.UseCases);
+        if (o.BreakdownDepth > 0) AddBreakdown(g, g.Add(root, ElementKind.Package, "Product Breakdown"), o.BreakdownDepth, interfaces);
+        for (var i = 0; i < o.LargeDiagrams; i++)
+        {
+            var shapes = o.LargeDiagrams == 1 ? 500 : 50 + i * 450 / (o.LargeDiagrams - 1);
+            var big = g.Add(views, ElementKind.Package, $"Big view {i + 1}");
+            if (i % 2 == 1)
+                g.Diagram(big, DiagramType.BlockDefinition, $"System BDD ({shapes} shapes)", g.Neighbourhood(blocks[i * 31 % blocks.Count], shapes, ElementKind.Block, blocks));
+            else
+                g.Diagram(big, DiagramType.Requirement, $"Requirements overview ({shapes} shapes)", g.Neighbourhood(requirements[i * 37 % reqCount], shapes, ElementKind.Requirement, requirements));
+        }
+
         var model = new ModelRepository(root);
 
         // A handful of requirements changed after their links were reviewed: their trace links are suspect.
@@ -317,6 +349,46 @@ public static class LargeModelGenerator
             r.SetRaw(FieldKeys.Text, r.Get(FieldKeys.Text) + " (revised)");
         }
         return model;
+    }
+
+    /// <summary>Actors and use cases with numbered steps, include links and actor associations, plus a use case diagram per package.</summary>
+    private static void AddUseCases(Builder g, Element root, int count)
+    {
+        var pkg = g.Add(root, ElementKind.Package, "Use Cases");
+        var actors = Enumerable.Range(0, 6).Select(i => g.Add(pkg, ElementKind.Actor, Words.Actors[i])).ToList();
+        var groups = Enumerable.Range(0, Math.Max(1, count / 50)).Select(i => g.Add(pkg, ElementKind.Package, $"Missions {i + 1}")).ToList();
+        var cases = new List<Element>();
+        for (var i = 0; i < count; i++)
+        {
+            var actor = actors[g.Rng.Next(actors.Count)];
+            var uc = g.Add(groups[i * groups.Count / count], ElementKind.UseCase, $"{Words.Pick(g.Rng, Words.Verbs)} {Words.Pick(g.Rng, Words.Signals)} {i + 1}");
+            uc.SetRaw(FieldKeys.Documentation, $"1. {actor.Name} requests {Words.Pick(g.Rng, Words.Signals).ToLowerInvariant()}\n" +
+                                               $"2. System validates the request\n3. If the request is valid, system {Words.Pick(g.Rng, Words.Verbs)}s it\n" +
+                                               $"4. System reports the result\nAlternate: timeout - system logs the failure");
+            g.Connect(root, ElementKind.Association, actor, uc);
+            if (cases.Count > 0 && g.Rng.Next(4) == 0) g.Connect(root, ElementKind.Include, uc, cases[g.Rng.Next(cases.Count)]);
+            cases.Add(uc);
+        }
+        foreach (var grp in groups)
+            g.Diagram(grp, DiagramType.UseCase, $"{grp.Name} UCD", grp.Children.Where(c => c.Kind == ElementKind.UseCase).Take(20).Concat(actors).ToList());
+    }
+
+    /// <summary>A binary package tree <paramref name="depth"/> levels deep; each leaf package holds three blocks with ports.</summary>
+    private static void AddBreakdown(Builder g, Element pkg, int depth, List<Element> interfaces)
+    {
+        if (depth <= 1)
+        {
+            for (var b = 0; b < 3; b++)
+            {
+                var blk = g.Add(pkg, ElementKind.Block, $"{pkg.Name} item {b + 1}");
+                var vp = g.Add(blk, ElementKind.Property, "mass");
+                vp.SetRaw(FieldKeys.Type, "Real");
+                var port = g.Add(blk, ElementKind.Port, "io");
+                port.SetRaw(FieldKeys.Type, interfaces[g.Rng.Next(interfaces.Count)].Id);
+            }
+            return;
+        }
+        for (var k = 0; k < 2; k++) AddBreakdown(g, g.Add(pkg, ElementKind.Package, $"{pkg.Name.Split(' ')[0]} {depth}{(char)('a' + k)}"), depth - 1, interfaces);
     }
 
     private sealed class Builder(int seed)
@@ -348,6 +420,22 @@ public static class LargeModelGenerator
         }
 
         public IReadOnlyList<Relationship> IncidentOf(Element e) => _incident.TryGetValue(e, out var l) ? l : [];
+
+        /// <summary>Up to <paramref name="count"/> elements of one kind connected to <paramref name="seed"/> (breadth first over
+        /// relationships, so a diagram of them has plenty of paths), topped up from <paramref name="pool"/>.</summary>
+        public List<Element> Neighbourhood(Element seed, int count, ElementKind kind, List<Element> pool)
+        {
+            var seen = new HashSet<Element>(ReferenceEqualityComparer.Instance) { seed };
+            var result = new List<Element> { seed };
+            var queue = new Queue<Element>([seed]);
+            while (queue.Count > 0 && result.Count < count)
+                foreach (var r in IncidentOf(queue.Dequeue()))
+                    foreach (var other in new[] { r.Source, r.Target })
+                        if (other.Kind == kind && result.Count < count && seen.Add(other)) { result.Add(other); queue.Enqueue(other); }
+            for (var k = 0; result.Count < count && k < pool.Count; k++)
+                if (seen.Add(pool[k])) result.Add(pool[k]);
+            return result;
+        }
 
         /// <summary>Same ownership rules as <see cref="ModelRepository.Connect"/>.</summary>
         public Relationship Connect(Element root, ElementKind kind, Element source, Element target)
@@ -409,5 +497,6 @@ public static class LargeModelGenerator
         public static readonly string[] ValueNames = ["mass", "power", "length", "mtbf", "voltage", "temperature"];
         public static readonly string[] Teams = ["alpha", "bravo", "charlie", "delta"];
         public static readonly string[] States = ["Off", "Standby", "Operating", "Fault", "Maintenance"];
+        public static readonly string[] Actors = ["Operator", "Maintainer", "Ground Station", "Pilot", "Supervisor", "Auditor"];
     }
 }
