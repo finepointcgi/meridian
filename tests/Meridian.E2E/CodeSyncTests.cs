@@ -16,6 +16,9 @@ public static class CodeSyncE2E
 {
     public static readonly ConcurrentQueue<Func<ModelRepository, CodeSyncChanges>> Script = new();
 
+    /// <summary>What the reader returns for a push whose first file has this path (default: no types).</summary>
+    public static readonly ConcurrentDictionary<string, CodeModel> Code = new(StringComparer.Ordinal);
+
     public static void Register(IServiceCollection services)
     {
         services.AddSingleton<ICodeReader, Reader>();
@@ -26,7 +29,8 @@ public static class CodeSyncE2E
     {
         public string Language => "C#";
         public bool Handles(string path) => path.EndsWith(".cs", StringComparison.Ordinal);
-        public CodeModel Read(IReadOnlyList<CodeFile> files, CancellationToken ct = default) => new("C#", [], []);
+        public CodeModel Read(IReadOnlyList<CodeFile> files, CancellationToken ct = default) =>
+            files.Count > 0 && Code.TryGetValue(files[0].Path, out var code) ? code : new("C#", [], []);
     }
 
     private sealed class Applier : ICodeModelApplier
