@@ -421,6 +421,7 @@ public partial class Workbench
                 m.Add(MenuEntry.Do("Show ports on border", () => c.ShowPortsOf(n)));
                 m.Add(MenuEntry.Do("Show nested parts", () => c.ShowNestedParts(n)));
             }
+            if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));

@@ -176,6 +176,7 @@ public static partial class DiagramDerivation
             var b = s.Shape!.Bounds ?? Fallback(diagram, e);
             var parent = s.Shape.ParentKey is { } pk && nodes.TryGetValue(pk, out var pn) ? pn : null;
             nodes[s.Key] = m.AddNode(diagram, e, b, showRelationships: false, parent);
+            Separate(m, diagram, nodes[s.Key], s, created);
         }
         DrawEdges(m, diagram, plan.Items.Where(x => x.IsRelationship && created.ContainsKey(x.Key) && x.Change != DerivedChange.Remove), created, null);
         EdgeRouter.Invalidate(diagram);
@@ -195,6 +196,14 @@ public static partial class DiagramDerivation
             if (nextMessageY != null) nextMessageY += ActivityToSequence.MessageGap;
             m.SetWaypoints(d, edge, [new Pt(0, y)]);
         }
+    }
+
+    /// <summary>Stores where each later operand of a planned fragment starts (the separators of its shape).</summary>
+    private static void Separate(ModelRepository m, Diagram d, DiagramNode node, DerivedItem item, Dictionary<string, Element> created)
+    {
+        foreach (var (key, offset) in item.Separators ?? [])
+            if (created.TryGetValue(key, out var operand))
+                m.SetNodeStyle(d, node, InteractionOperands.StyleKey(operand), InteractionOperands.Format(offset));
     }
 
     private static Bounds Fallback(Diagram d, Element e)
@@ -240,6 +249,7 @@ public static partial class DiagramDerivation
                 autoX += w + 40;
             }
             var node = m.AddNode(d, e, b, showRelationships: false, parent);
+            Separate(m, d, node, s, created);
             added.Add(node);
         }
         if (added.Count > 0)

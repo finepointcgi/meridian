@@ -76,6 +76,67 @@ public static partial class UseCaseSteps
         return steps;
     }
 
+    /// <summary>
+    /// Gives unnumbered steps ("#n") the keys of the steps an earlier derivation made from them, matched by text similarity in
+    /// order (a longest common subsequence where two steps match when <see cref="Similarity"/> ≥ <paramref name="threshold"/>),
+    /// so inserting, deleting or rewording one step changes only that step. Steps that match nothing get new keys after the
+    /// highest earlier one. Numbered steps keep their numbers.
+    /// </summary>
+    /// <param name="previous">The earlier unnumbered steps: key ("#3") and text, in any order.</param>
+    public static IReadOnlyList<UseCaseStep> MatchUnnumbered(IReadOnlyList<UseCaseStep> steps, IReadOnlyList<(string Id, string Text)> previous, double threshold = 0.5)
+    {
+        static int Num(string id) => int.TryParse(id.AsSpan(1), out var n) ? n : 0;
+        var old = previous.Where(p => p.Id.StartsWith('#')).OrderBy(p => Num(p.Id)).ToList();
+        var fresh = steps.Select((s, i) => (s, i)).Where(t => t.s.Id.StartsWith('#')).ToList();
+        if (old.Count == 0 || fresh.Count == 0) return steps;
+
+        // Order-preserving alignment that maximises the total similarity of the matched pairs.
+        var n = fresh.Count; var k = old.Count;
+        var sim = new double[n, k];
+        for (var i = 0; i < n; i++)
+            for (var j = 0; j < k; j++)
+                sim[i, j] = Similarity(fresh[i].s.Text, old[j].Text);
+        var best = new double[n + 1, k + 1];
+        for (var i = n - 1; i >= 0; i--)
+            for (var j = k - 1; j >= 0; j--)
+            {
+                var v = Math.Max(best[i + 1, j], best[i, j + 1]);
+                if (sim[i, j] >= threshold) v = Math.Max(v, sim[i, j] + best[i + 1, j + 1]);
+                best[i, j] = v;
+            }
+        var ids = new string?[n];
+        for (int i = 0, j = 0; i < n && j < k;)
+        {
+            if (sim[i, j] >= threshold && Math.Abs(best[i, j] - (sim[i, j] + best[i + 1, j + 1])) < 1e-9) { ids[i] = old[j].Id; i++; j++; }
+            else if (best[i + 1, j] >= best[i, j + 1]) i++;
+            else j++;
+        }
+        var next = old.Max(p => Num(p.Id));
+        var result = steps.ToList();
+        for (var i = 0; i < n; i++) result[fresh[i].i] = fresh[i].s with { Id = ids[i] ?? $"#{++next}" };
+        return result;
+    }
+
+    /// <summary>Normalised Levenshtein similarity of two step texts (case and punctuation ignored): 1 = same, 0 = nothing alike.</summary>
+    public static double Similarity(string a, string b)
+    {
+        static string Norm(string s) => string.Join(' ', new string(s.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
+                                                  .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        var x = Norm(a); var y = Norm(b);
+        if (x.Length == 0 && y.Length == 0) return 1;
+        var prev = new int[y.Length + 1];
+        var cur = new int[y.Length + 1];
+        for (var j = 0; j <= y.Length; j++) prev[j] = j;
+        for (var i = 1; i <= x.Length; i++)
+        {
+            cur[0] = i;
+            for (var j = 1; j <= y.Length; j++)
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1));
+            (prev, cur) = (cur, prev);
+        }
+        return 1 - (double)prev[y.Length] / Math.Max(x.Length, y.Length);
+    }
+
     private static bool LooksLikeAlternate(string t)
     {
         var first = t.Split([' ', ':', '-', ','], 2)[0].ToLowerInvariant();

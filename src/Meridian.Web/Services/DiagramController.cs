@@ -16,7 +16,7 @@ public sealed partial class DiagramController
     public const double Grid = 10;
     public const double HandleSize = 8;
 
-    public enum Gesture { None, Move, Resize, Connect, Marquee, Pan, Waypoint, QuickConnect, EdgeDrag }
+    public enum Gesture { None, Move, Resize, Connect, Marquee, Pan, Waypoint, QuickConnect, EdgeDrag, Separator }
 
     /// <summary>An alignment guide shown while dragging (a line where edges or centres line up).</summary>
     public readonly record struct Guide(bool Vertical, double Pos, double From, double To);
@@ -756,6 +756,9 @@ public sealed partial class DiagramController
             return false;
         }
 
+        // The dashed separator between two operands of a combined fragment: drag it up or down.
+        if (BeginSeparatorDrag(_pressModel)) return false;
+
         var additive = mods.HasFlag(Mods.Shift) || mods.HasFlag(Mods.Ctrl) || mods.HasFlag(Mods.Meta);
         var node = HitNode(_pressModel);
         if (node != null)
@@ -873,6 +876,8 @@ public sealed partial class DiagramController
             case Gesture.Waypoint when WaypointPreview is List<Pt> wps:
                 wps[_waypointIndex] = new Pt(Snap(CurrentModel.X), Snap(CurrentModel.Y));
                 return true;
+            case Gesture.Separator:
+                return DragSeparator();
             case Gesture.Connect:
             case Gesture.Marquee:
                 return true;
@@ -914,6 +919,9 @@ public sealed partial class DiagramController
                 }
                 case Gesture.Waypoint when SelectedEdge != null && WaypointPreview != null:
                     Model.SetWaypoints(Diagram, SelectedEdge, WaypointPreview);
+                    break;
+                case Gesture.Separator:
+                    EndSeparatorDrag();
                     break;
                 case Gesture.Connect when ConnectFrom != null && Tool is { } kind:
                 {
@@ -1623,7 +1631,7 @@ public sealed partial class DiagramController
                     Model.Set(e, FieldKeys.Name, Subtypes.Display(subtype));
                 var (w, h) = size ?? Notation.DefaultSizeOf(kind, subtype);
                 var bounds = new Bounds(Snap(p.X - w / 2), Snap(p.Y - h / 3), w, h);
-                if (Notation.IsBorderShape(kind) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
+                if (Notation.IsBorderShape(e) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
                 node = Model.AddNode(Diagram, e, bounds, parent: container);
                 PutOnActiveLayer(node);
                 if (container != null) GrowContainers([node]);

@@ -50,6 +50,10 @@ internal static class UseCaseToActivity
                 : $"No steps were found in the description of “{uc.Name}”, so the activity is a skeleton.");
         }
         if (o.Steps is { Count: > 0 }) b.Plan.AiNote = o.AiNote ?? "Steps written by AI";
+        // Unnumbered steps keep the keys of the steps they were derived as before, matched by text rather than by position.
+        steps = UseCaseSteps.MatchUnnumbered(steps, DiagramDerivation.Existing(m, DerivationKind.ActivityFromUseCase, uc)
+            .Where(e => e.Kind == ElementKind.Action && e.Get(DeriveFields.Key).StartsWith("step:#", StringComparison.Ordinal))
+            .Select(e => (e.Get(DeriveFields.Key)["step:".Length..], e.Name)).ToList());
 
         var activity = b.Element("activity", ElementKind.Activity, uc, uc.Name, null,
             (FieldKeys.Documentation, $"Derived from the use case {uc.DisplayName}."));

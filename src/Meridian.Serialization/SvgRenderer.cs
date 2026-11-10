@@ -350,6 +350,9 @@ public static partial class SvgRenderer
         }
         if (e.Relationship.Kind is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation && pts.Count >= 2 && !string.IsNullOrEmpty(e.Relationship.Multiplicity))
             sb.Append($"<text x=\"{F(pts[^1].X + 6)}\" y=\"{F(pts[^1].Y - 6)}\" font-size=\"11\" fill=\"{t.Muted}\">{E(e.Relationship.Multiplicity)}</text>");
+        // The source end's multiplicity, next to where the path leaves its source.
+        if (e.Relationship.Kind is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation && pts.Count >= 2 && e.Relationship.Get(FieldKeys.SourceMultiplicity) is { Length: > 0 } sm)
+            sb.Append($"<text class=\"source-mult\" x=\"{F(pts[0].X + 6)}\" y=\"{F(pts[0].Y - 6)}\" font-size=\"11\" fill=\"{t.Muted}\">{E(sm)}</text>");
     }
 
     /// <summary>SVG path for a polyline with small semicircular hops at the given crossings.</summary>
@@ -536,6 +539,9 @@ public static partial class SvgRenderer
             case NodeShape.FilledCircle:
                 sb.Append($"<circle cx=\"{F(b.Center.X)}\" cy=\"{F(b.Center.Y)}\" r=\"{F(Math.Min(b.Width, b.Height) / 2)}\" fill=\"{ink}\"/>");
                 break;
+            case NodeShape.Pseudostate:
+                RenderPseudostate(sb, n.Element, b, t);
+                break;
             case NodeShape.BullsEye:
                 sb.Append($"<circle cx=\"{F(b.Center.X)}\" cy=\"{F(b.Center.Y)}\" r=\"{F(Math.Min(b.Width, b.Height) / 2)}\" fill=\"{t.Background}\" stroke=\"{ink}\"/>");
                 sb.Append($"<circle cx=\"{F(b.Center.X)}\" cy=\"{F(b.Center.Y)}\" r=\"{F(Math.Max(2, Math.Min(b.Width, b.Height) / 2 - 5))}\" fill=\"{ink}\"/>");
@@ -657,8 +663,18 @@ public static partial class SvgRenderer
                 sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"3\" fill=\"{t.Accent(ElementKind.Interaction)}\" fill-opacity=\"0.05\" stroke=\"{t.Accent(ElementKind.Interaction)}\" stroke-width=\"1.3\"/>");
                 sb.Append($"<path d=\"M{F(b.X)},{F(b.Y)} H{F(b.X + tagW)} V{F(b.Y + 12)} L{F(b.X + tagW - 8)},{F(b.Y + 20)} H{F(b.X)} Z\" fill=\"{t.Header(ElementKind.Interaction)}\" stroke=\"{t.Accent(ElementKind.Interaction)}\" stroke-width=\"1.3\"/>");
                 Text(sb, b.X + 7, b.Y + 14, op, true, "start", size: 11.5, color: t.Text);
-                if (n.Element.Get(FieldKeys.Guard) is { Length: > 0 } guard)
-                    Text(sb, b.X + tagW + 6, b.Y + 14, $"[{guard}]", false, "start", italic: true, size: 11.5, color: t.Muted);
+                // Operands: a dashed separator above every operand but the first, each with its guard below the line.
+                var bands = InteractionOperands.Layout(n, b);
+                foreach (var band in bands)
+                {
+                    var guard = band.Operand?.Get(FieldKeys.Guard) ?? n.Element.Get(FieldKeys.Guard);
+                    if (band.Index > 0)
+                        sb.Append($"<line class=\"operand-sep\" data-operand=\"{E(band.Operand!.Id)}\" x1=\"{F(b.X)}\" y1=\"{F(band.Top)}\" x2=\"{F(b.Right)}\" y2=\"{F(band.Top)}\" stroke=\"{t.Accent(ElementKind.Interaction)}\" stroke-width=\"1.2\" stroke-dasharray=\"7,4\"/>");
+                    if (guard.Length == 0) continue;
+                    var gx = band.Index == 0 ? b.X + tagW + 6 : b.X + 10;
+                    var gy = band.Index == 0 ? b.Y + 14 : band.Top + 15;
+                    Text(sb, gx, gy, Trunc($"[{guard}]", b.Right - gx - 4), false, "start", italic: true, size: 11.5, color: t.Muted);
+                }
                 break;
             }
             case NodeShape.Timeline:
@@ -726,6 +742,38 @@ public static partial class SvgRenderer
                 break;
         }
         sb.Append("</g>");
+    }
+
+    /// <summary>History (H / H*), entry point (circle), exit point (circle with a cross) and terminate (cross) pseudostates, named beside them.</summary>
+    private static void RenderPseudostate(StringBuilder sb, Element e, Bounds b, SvgTheme t)
+    {
+        var kind = Pseudostates.KindOf(e);
+        var cx = b.Center.X; var cy = b.Center.Y;
+        var r = Math.Min(b.Width, b.Height) / 2;
+        var ink = t.Ink;
+        switch (kind)
+        {
+            case Pseudostates.Terminate:
+            {
+                var k = r * 0.8;
+                sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" fill=\"transparent\"/>");
+                sb.Append($"<path d=\"M{F(cx - k)},{F(cy - k)} L{F(cx + k)},{F(cy + k)} M{F(cx + k)},{F(cy - k)} L{F(cx - k)},{F(cy + k)}\" stroke=\"{ink}\" stroke-width=\"2\" fill=\"none\"/>");
+                break;
+            }
+            case Pseudostates.ShallowHistory or Pseudostates.DeepHistory:
+                sb.Append($"<circle cx=\"{F(cx)}\" cy=\"{F(cy)}\" r=\"{F(r)}\" fill=\"{t.Background}\" stroke=\"{ink}\"/>");
+                sb.Append($"<text x=\"{F(cx)}\" y=\"{F(cy + r * 0.38)}\" text-anchor=\"middle\" font-size=\"{F(r * 1.05)}\" font-weight=\"700\" fill=\"{ink}\">{(kind == Pseudostates.DeepHistory ? "H*" : "H")}</text>");
+                break;
+            default:   // entry / exit point
+                sb.Append($"<circle cx=\"{F(cx)}\" cy=\"{F(cy)}\" r=\"{F(r)}\" fill=\"{t.Background}\" stroke=\"{ink}\" stroke-width=\"1.3\"/>");
+                if (kind == Pseudostates.ExitPoint)
+                {
+                    var k = r * 0.68;
+                    sb.Append($"<path d=\"M{F(cx - k)},{F(cy - k)} L{F(cx + k)},{F(cy + k)} M{F(cx + k)},{F(cy - k)} L{F(cx - k)},{F(cy + k)}\" stroke=\"{ink}\" stroke-width=\"1.3\" fill=\"none\"/>");
+                }
+                break;
+        }
+        if (e.Name.Length > 0) Text(sb, b.Right + 4, b.Y - 3, e.Name, false, "start", size: 11.5, color: t.Text);
     }
 
     /// <summary>Timing lifeline: name and state labels on the left, the state timeline as a step line over the diagram's time range.</summary>
