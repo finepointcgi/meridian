@@ -265,11 +265,7 @@ public sealed class CodeSyncHostService(
     public static ICodeSyncRunner ResolveRunner(IServiceProvider sp) =>
         sp.GetServices<ICodeSyncRunner>().LastOrDefault(r => r is not NullCodeSyncRunner) ?? NullCodeSyncRunner.Instance;
 
-    public static Func<string, bool> DefaultInclude(string language) => language switch
-    {
-        "csharp" => p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
-        _ => _ => false,
-    };
+    public static Func<string, bool> DefaultInclude(string language) => Meridian.Serialization.CodeSync.CodeReaders.Include(language);
 
     public static CommitState StateOf(CodeSyncStatus status) => status switch
     {

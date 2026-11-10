@@ -3,7 +3,7 @@ namespace Meridian.Core.CodeSync;
 // Shared contracts for "code sync": a push to a GitHub / GitLab repository updates a review branch of the model,
 // the diagrams that show changed elements are refreshed, and the differences are highlighted for review.
 //
-//   Git host (Meridian.Web/CodeSync/Hosts)  ->  ICodeReader (C# via Roslyn)  ->  CodeModelMapper (model elements)
+//   Git host (Meridian.Web/CodeSync/Hosts)  ->  ICodeReader (C#, TypeScript, Java, Python)  ->  CodeModelMapper (model elements)
 //        webhook + fetch + commit status         CodeFile[] -> CodeModel          applies to a branch's ModelRepository
 //
 // Owned pieces: hosts/webhooks (Meridian.Web/CodeSync/Hosts), reader + mapper (Meridian.Serialization/CodeSync and
@@ -20,7 +20,33 @@ public enum CodeMemberKind { Field, Property, Method, EnumValue }
 /// <summary>A member of a type. <see cref="TypeSymbol"/> is the fully qualified symbol of its type when that type is
 /// declared in the scanned code (so it can become a part / reference), otherwise null; <see cref="TypeName"/> is the
 /// display type ("int", "List&lt;Battery&gt;").</summary>
-public sealed record CodeMember(string Name, CodeMemberKind Kind, string TypeName, string? TypeSymbol, bool IsCollection, string Visibility);
+/// <remarks>For a method, <see cref="TypeName"/> / <see cref="TypeSymbol"/> describe the return type ("void" or "" for none)
+/// and <see cref="Parameters"/> lists its parameters in order. Each overload is its own member.</remarks>
+public sealed record CodeMember(string Name, CodeMemberKind Kind, string TypeName, string? TypeSymbol, bool IsCollection, string Visibility)
+{
+    /// <summary>Method parameters in declaration order; empty for other members.</summary>
+    public IReadOnlyList<CodeParameter> Parameters { get; init; } = [];
+    /// <summary>Declared abstract (an abstract method, or one without a body in an abstract class).</summary>
+    public bool IsAbstract { get; init; }
+    /// <summary>A static (class-level) member.</summary>
+    public bool IsStatic { get; init; }
+    /// <summary>The value may be absent (C# <c>T?</c> is also recognised from <see cref="TypeName"/>; TypeScript <c>x?: T</c>,
+    /// <c>T | null</c>, Python <c>Optional[T]</c>, Java <c>Optional&lt;T&gt;</c>).</summary>
+    public bool IsOptional { get; init; }
+    /// <summary>Documentation comment text (summary / first paragraph), whitespace collapsed; null when there is none.</summary>
+    public string? Doc { get; init; }
+    /// <summary>1-based line of the member's name; 0 when unknown (the type's line is used).</summary>
+    public int Line { get; init; }
+}
+
+public enum CodeParameterDirection { In, Out, InOut, Return }
+
+/// <summary>A method parameter. <see cref="TypeName"/> is the type as written ("" when the code gives none, as in untyped
+/// Python); <see cref="TypeSymbol"/> is the scanned type it holds (directly, optional or as a collection element), else
+/// null.</summary>
+public sealed record CodeParameter(
+    string Name, string TypeName, string? TypeSymbol = null, bool IsCollection = false,
+    CodeParameterDirection Direction = CodeParameterDirection.In);
 
 /// <summary>A declared type. <see cref="Symbol"/> is the stable identity across syncs (fully qualified, e.g.
 /// "Sat.Power.Battery"; generic arity as "`1"). <see cref="Dependencies"/> lists symbols of other scanned types it
@@ -29,7 +55,13 @@ public sealed record CodeType(
     string Symbol, string Name, string Namespace, CodeTypeKind Kind,
     string File, int Line, string? Doc,
     IReadOnlyList<string> BaseTypes, IReadOnlyList<string> Interfaces,
-    IReadOnlyList<CodeMember> Members, IReadOnlyList<string> Dependencies);
+    IReadOnlyList<CodeMember> Members, IReadOnlyList<string> Dependencies)
+{
+    /// <summary>An abstract class (interfaces are not marked).</summary>
+    public bool IsAbstract { get; init; }
+    /// <summary>A static class (C#) or a static nested class (Java).</summary>
+    public bool IsStatic { get; init; }
+}
 
 /// <summary>Language-neutral result of reading a set of files.</summary>
 public sealed record CodeModel(string Language, IReadOnlyList<CodeType> Types, IReadOnlyList<string> Warnings);

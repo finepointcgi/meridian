@@ -15,7 +15,13 @@ public static class CodeSyncSetup
         // A plain Add, so it wins over the fallback runner the git-host integration registers with TryAdd (in either order).
         services.AddSingleton<ICodeSyncRunner>(sp => sp.GetRequiredService<CodeSyncRunner>());
         services.AddSingleton<CodeSyncReviewService>();
+        // "auto" first: the runner takes the first reader that handles the pushed files, and the host has already narrowed
+        // them to the connection's language. The single-language readers are found by their Language name.
+        services.AddSingleton<ICodeReader, Meridian.Serialization.CodeSync.MultiLanguageCodeReader>();
         services.AddSingleton<ICodeReader, Meridian.Serialization.CodeSync.CSharpCodeReader>();
+        services.AddSingleton<ICodeReader, Meridian.Serialization.CodeSync.TypeScriptCodeReader>();
+        services.AddSingleton<ICodeReader, Meridian.Serialization.CodeSync.JavaCodeReader>();
+        services.AddSingleton<ICodeReader, Meridian.Serialization.CodeSync.PythonCodeReader>();
         services.AddHostedService<CodeSyncStatusBridge>();   // reviewed runs turn the commit status green
         services.AddScoped<CodeSyncState>();   // per browser tab: badge, "What changed" tab, diagram highlights
         return services;

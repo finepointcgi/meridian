@@ -48,7 +48,8 @@ public sealed partial class CodeRepoConfig
     public List<string> Paths { get; set; } = [];
     /// <summary>Package that receives the code; empty means the repository name.</summary>
     public string? RootPackage { get; set; }
-    public string Language { get; set; } = "csharp";
+    /// <summary>"auto" (every supported language, picked by file extension), "csharp", "typescript", "java" or "python".</summary>
+    public string Language { get; set; } = "auto";
     /// <summary>Sync on every push to <see cref="Branch"/> (webhook); otherwise only with "Sync now".</summary>
     public bool AutoSync { get; set; } = true;
     /// <summary>Post a "meridian/model" commit status back to the host.</summary>
@@ -91,7 +92,7 @@ public sealed partial class CodeRepoConfig
         if (Branch.Length == 0) Branch = "main";
         Paths = (Paths ?? []).Select(NormalizePath).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         RootPackage = RootPackage?.Trim() is { Length: > 0 } r ? r : null;
-        Language = string.IsNullOrWhiteSpace(Language) ? "csharp" : Language.Trim();
+        Language = string.IsNullOrWhiteSpace(Language) ? "auto" : Language.Trim().ToLowerInvariant();
     }
 
     public static string NormalizePath(string p)
@@ -132,7 +133,7 @@ public sealed partial class CodeRepoConfig
             var n = NormalizePath(p);
             if (n.Split('/').Any(s => s is ".." or ".") || n.Contains(':')) return $"“{p}” is not a valid folder.";
         }
-        if (Language != "csharp") return "Only C# is supported.";
+        if (!Meridian.Serialization.CodeSync.CodeReaders.Languages.Contains(Language)) return "The language must be auto, csharp, typescript, java or python.";
         return null;
     }
 }
