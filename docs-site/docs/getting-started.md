@@ -80,21 +80,23 @@ The first account registered on a server becomes a server administrator (so does
 
 ## The workbench at a glance
 
-> [!NOTE]
-> **TODO (screenshot):** the workbench with the title bar, ribbon, model explorer, a diagram, the dock and the
-> inspector labelled.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/workbench-dark.png">
+  <img src="../images/workbench-light.png" alt="The workbench: title bar, ribbon, model explorer, a block definition diagram, the inspector and the requirements panel">
+</picture>
 
 | Area | What it does |
 | --- | --- |
 | **Title bar** | The project menu (projects, import, commit, history, branches, baselines, exports), the branch picker, the command palette (**⌘K** / **Ctrl+K**), people editing with you, notifications, undo/redo, dark mode and **Commit**. |
-| **Ribbon** | Groups for *Create*, *Diagram*, *Requirements*, *Traceability*, *Review*, *Model views*, *Simulate*, *Generate* and *Extend*. |
+| **Ribbon** | Groups for *Create*, *Diagram*, *Requirements*, *Traceability*, *Review*, *Model views*, *Simulate*, *Generate*, *Extend*, *AI* and, when a code repository is connected, *Code*. |
 | **Model explorer** (left) | The containment tree. Search it, drag items onto a diagram to show them or onto another item to move them, right-click for *New*, *Rename*, *Delete* and more. Star items as favorites. |
 | **Diagram area** (centre) | Open diagrams as tabs, with breadcrumbs, back/forward, zoom and *Fit*. **+** on the tab strip creates a diagram, also *From template…*. |
 | **Dock** (bottom) | Validation, Requirements table, Traceability matrix, Impact analysis, Simulation, Parametrics, Traceability table, Reviews, Script, Tables, Variants & trades, SysML v2 text and Output. |
 | **Inspector** (right) | Properties, specification, stereotypes and tagged values, traceability, appearance on the current diagram, comments and linked issues for the selection. The requirements side panel sits below it. |
 | **Status bar** | Model health (errors and warnings; click to validate), status messages, element counts and save state. |
 
-**Take the guided tour** (project menu, or the command palette) walks through these areas.
+The guided tour walks through these areas the first time you open Meridian. Pick any of its chapters later from the
+project menu ▸ **Help ▸ Tour…** (or ⌘K "Tour"); see [Settings and theming](settings.md#the-guided-tour).
 
 ## Your first project
 
@@ -105,5 +107,8 @@ The first account registered on a server becomes a server administrator (so does
 4. Edit. Every change is saved as you go; the status bar shows the save state.
 5. **Commit** (**⌘S** / **Ctrl+S**) records a named version in the project history. See
    [Branches, merge and baselines](version-control.md).
+
+A project with no diagrams offers one-click ways to start in the middle of the screen: **Import Mermaid**,
+**Open a Cameo file**, **Start from a sample** and, once there is something to draw, **Auto-diagram**.
 
 From here, follow [Model a drone in 20 minutes](../tutorials/drone-in-20-minutes.md) for a guided first model.

@@ -27,13 +27,15 @@ public static class CodeSyncHostsSetup
 
     public static WebApplication MapMeridianCodeSyncHosts(this WebApplication app)
     {
-        // Called by GitHub / GitLab: authenticated by the per-connection webhook secret, not by a user session.
+        // Called by GitHub / GitLab / Bitbucket: authenticated by the per-connection webhook secret, not by a user session.
         app.MapPost("/api/code-sync/{connectionId:guid}/webhook", async (HttpContext http, Guid connectionId, CodeSyncHostService service) =>
         {
             if (http.Request.ContentLength > CodeSyncHostService.MaxWebhookBytes) return Results.Text("Payload too large.", statusCode: 413);
             var body = await ReadBodyAsync(http.Request.Body, CodeSyncHostService.MaxWebhookBytes, http.RequestAborted);
             if (body is null) return Results.Text("Payload too large.", statusCode: 413);
-            var result = await service.HandleWebhookAsync(connectionId, http.Request.Headers, body, http.RequestAborted);
+            // Bitbucket Cloud does not sign deliveries by default: its webhook URL carries the secret as ?token=….
+            var token = http.Request.Query.TryGetValue(CodeWebhooks.UrlTokenParameter, out var t) && t.Count > 0 ? t[0] : null;
+            var result = await service.HandleWebhookAsync(connectionId, http.Request.Headers, body, token, http.RequestAborted);
             return Results.Text(result.Message, statusCode: result.StatusCode);
         }).AllowAnonymous().DisableAntiforgery();
         return app;

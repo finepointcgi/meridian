@@ -1,6 +1,6 @@
 # Code sync
 
-A push to a connected GitHub or GitLab repository updates a **review branch** of the model from the code. Diagrams that
+A push to a connected GitHub, GitLab or Bitbucket repository updates a **review branch** of the model from the code. Diagrams that
 show changed elements are refreshed, the differences are highlighted, and an owner or editor accepts all or some of the
 changes into `main`.
 
@@ -28,7 +28,10 @@ undo step**:
 | field / property typed by a scanned interface | Property (reference) typed by the interface block + Association | |
 | field / property typed by a scanned enum | Property (value) typed by the enumeration | |
 | any other field / property | Property (value) with the C# type as text (`double`, `List<int>`) | |
-| method | Operation, signature `() : ReturnType` | overloads are merged into one operation; parameters are not listed |
+| method | Operation, signature `(a : int, out b : string) : ReturnType` | one operation per overload; `in` is implied, `out` / `inout` (C# `ref`) are written; an untyped parameter is just its name; no signature for a parameterless method returning nothing |
+| abstract class / abstract method | `isAbstract = true` on the block / operation | interface operations are not flagged |
+| static field, property or method | `isStatic = true` on the property / operation | the metamodel has no static flag, so the UML attribute name is used |
+| doc comment on a member | documentation of the property / operation | only written when the code has one |
 | base class / base interface | Generalization | |
 | implemented interface | Realization | |
 | scanned type used in a body, parameter, local, `new`, static call or return type | Dependency | only with `IncludeUsageDependencies`; none when a part, reference, generalization or realization already links the pair |
@@ -38,7 +41,8 @@ Members that are not `public` are skipped unless `IncludeNonPublic` is set. A sk
 
 Every element and relationship that code sync creates carries `code.symbol`, `code.file`, `code.line`, `code.repo` and
 `code.commit`. Symbols are fully qualified with the generic arity (`Sat.Power.Battery`, `Sat.Box`1`). Members use
-`Type.Member` and operations use `Type.Method()`. Relationships use `gen:A->B`, `real:A->B`, `comp:A->B`, `ref:A->B` and
+`Type.Member` and operations use `Type.Method(int,List<string>)`: the parameter types as written, whitespace removed, `?`
+for an untyped parameter. Relationships use `gen:A->B`, `real:A->B`, `comp:A->B`, `ref:A->B` and
 `dep:A->B`.
 
 On every later sync:
@@ -59,6 +63,87 @@ On every later sync:
 - Running the same code twice changes nothing: the second `Apply` returns an empty `CodeSyncChanges` and adds no undo
   step.
 
+### Operations from earlier versions
+
+Earlier versions of code sync made one `Type.Method()` operation per method name. On the next sync, Meridian keeps that element and
+re-keys it to the first overload (in declaration order); the other overloads are added. More generally, when exactly one
+operation of a method name no longer matches the code and at least one overload of that name is new, the existing operation
+is updated in place instead of being deleted and created again. A changed parameter type therefore keeps the operation's
+id, diagrams, stereotypes and hand-made content.
+
+### Choosing the language
+
+A connection's `Language` is `auto` (the default for new connections), `csharp`, `typescript`, `java` or `python`. `auto`
+gives each file to the reader for its extension and merges the results; the host then fetches only the files that reader
+handles. Existing connections keep the language they were created with.
+
+The TypeScript, Java and Python readers are hand-written, tolerant parsers: they run no Node.js, JVM or Python process and
+never fail on code they do not understand. A part they cannot parse is skipped with a warning
+(`path: N parts could not be parsed (first at line L …)`), and the rest of the file is read. They apply the same limits as
+the C# reader (50,000 types, 2 million characters per file, 200 million in total). Output is deterministic: types are sorted
+by symbol and members are in declaration order. Usage dependencies come from names in signatures, initializers and bodies
+that resolve to a scanned type. Type parameters are never resolved as types. Collections (`List<T>`, `T[]`, `list[T]`,
+`Map<K, V>` …) map to multiplicity `*`, and optional values (`T | null`, `x?: T`, `Optional[T]`, `Optional<T>`) map to
+`0..1`.
+
+#### TypeScript
+
+| Code | Model |
+|---|---|
+| file `src/power/battery.ts` | package `src` › `power` (folders become packages; the file itself does not) |
+| `namespace A.B { … }` / `module A { … }` | packages `A` › `B` below the folder packages |
+| `class` (`abstract class`) | Block (`isAbstract`) |
+| `interface`, `type X = { … }`, `type X = A & { … }` | InterfaceBlock (the named parts of an intersection are generalizations) |
+| `enum`, `const enum` | Enumeration |
+| property, `get` / `set` accessor, constructor parameter property (`constructor(private x: T)`) | Property; `#x` and `private` are private |
+| method, overload signatures | Operation per overload signature (the implementation behind overloads is not listed again) |
+| `extends` / `implements` | Generalization / Realization |
+
+Symbols are `folder.path.Name` (`src.power.Battery`). Names resolve through the file's declarations (including enclosing
+namespaces), relative imports (named, default, `* as ns`, `import X = require(…)`), re-exports (`export * from`,
+`export { A as B } from`, `index.ts` barrels), `@/` → `src/`, and the declarations of script files (files without imports
+or exports are global). Package imports (`@acme/logging`) are not resolved. Decorators are ignored, `node_modules/` is
+skipped, and union type aliases (`type Mode = "a" | "b"`) are not types. A property without a type annotation takes its type
+from `= new X(…)`.
+
+#### Java
+
+| Code | Model |
+|---|---|
+| `package com.acme.rover;` | packages `com` › `acme` › `rover` (the package, not the folder) |
+| `class`, `record`, `enum`, `interface`, `@interface` | Block, Block, Enumeration, InterfaceBlock, InterfaceBlock |
+| nested (static) class | Block owned by the outer block (`IsStatic` in the code model) |
+| field (each declarator of `int a, b;`), record component | Property; package-private is `package` visibility |
+| method, constructor | Operation per overload; constructors are not listed; `default` / `static` interface methods are kept |
+| `extends` / `implements` | Generalization / Realization (an interface's `extends` is a generalization) |
+| enum constants | EnumerationLiterals |
+
+Symbols are `package.Outer.Inner`; generics show in the name (`Source<T>`), not in the symbol. Names resolve like javac:
+nested types of the enclosing types (and of their scanned base types), single-type imports (also of nested types), the same
+package, on-demand imports (`.*`), then fully qualified names. `target/`, `build/generated…`, `module-info.java` and
+`package-info.java` are skipped. Javadoc gives the text before the first block tag, without HTML tags.
+
+#### Python
+
+| Code | Model |
+|---|---|
+| module `src/lander/power/battery.py` | packages `lander` › `power` › `battery`: folders from the topmost folder with `__init__.py`; without any `__init__.py` the whole folder path is used |
+| `class X:` | Block |
+| class based on `Protocol` or `ABC`, or with `metaclass=ABCMeta` | InterfaceBlock; subclasses realize it |
+| class based on `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag` | Enumeration; `NAME = value` are its literals |
+| annotated class attribute, dataclass field | Property (`ClassVar[…]` is static) |
+| unannotated class attribute | static Property, type inferred from the value |
+| `self.x = …` / `self.x: T = …` in `__init__` | Property; the type is the annotation, the hint of the parameter assigned, a class call `Battery(…)`, or a literal's type |
+| `def` | Operation (without `self` / `cls`); `@staticmethod` and `@classmethod` are static; `@abstractmethod` is abstract; `@overload` signatures are the overloads |
+| `@property` | Property typed by its return hint |
+| `_x` / `__x` | protected / private |
+
+Dunder methods (`__init__`, `__repr__` …) are not operations. The docstring's first paragraph is the documentation.
+Names resolve through enclosing classes, the module, imports (absolute, relative, `as` aliases, `from x import *`),
+re-exports in `__init__.py` and imports inside functions. String annotations (`"Battery"`) and `Optional`, `Union`,
+`X | None` are understood. Virtual environments, `site-packages` and `__pycache__` are skipped. A class that only inherits
+from a scanned enum is not recognised as an enum.
+
 ## Reviewing code changes
 
 ### Where the changes go
@@ -76,12 +161,48 @@ Each push that is applied:
   the IBD of its block, a new child to a package or block drawn as a container — placed in free space below what is already
   there. Shapes people positioned never move (a container may grow to hold a new child);
 - creates diagrams for new namespaces and blocks with the auto-diagrammer (a structure diagram per new package, an IBD per new
-  block with parts). A project turns this off by setting the model root's `codeSync.autoDiagrams` field to `false`;
+  block with parts). Each repository connection has a **Create diagrams for new packages and classes** switch (on by
+  default, under *Model* in its settings). The model root's `codeSync.autoDiagrams` field (`true` or `false`) overrides the
+  switch when it is set, and the settings say so;
 - commits the result on the branch as `Code sync: <short sha> <first line of the commit message>` (authored by the system);
 - records a **sync run**: commit, link, author, message, status, summary, counts and the list of changed elements.
 
 Anyone with the branch open sees the update at once. A push that only carries the changed files (not a full snapshot)
 never deletes elements.
+
+**Edits made while a sync runs are kept.** The sync maps the code onto a copy of the branch and records every change it
+makes as replication operations (the same `ModelOp`s collaborators exchange). When someone has the branch open, those
+operations are applied to the live session. Whatever people changed on the branch in the meantime stays, and they see the
+sync's changes arrive like a collaborator's. With nobody on the branch, the result is written to the store; if the stored
+head changed while the sync ran, the operations are replayed onto the new head instead of replacing it.
+
+**A failed sync leaves nothing behind.** When a sync fails (or is cancelled) after it created a new review or preview
+branch, that branch is deleted again and the failed run is recorded without a branch. An existing branch is never deleted.
+
+## Pull request previews
+
+When a pull request (GitHub, Bitbucket) or merge request (GitLab) **into the followed branch** is opened, reopened or gets
+new commits, Meridian syncs its head into a **preview branch** `code-sync/<repository>/pr-<n>`, created from `main`. The
+name is shortened to fit the 60-character branch limit, keeping the `/pr-<n>` suffix. Pull requests into other branches
+are ignored, and the connection's **Preview pull requests** switch turns previews off.
+
+- The PR head gets the `meridian/model` commit status: `pending` while Meridian works, then `success` with the summary
+  ("Model preview: 3 added, 1 changed") and a link to the preview, or `failure`. A preview never leaves a pending status,
+  because nobody accepts it.
+- With **Comment on pull requests** (on by default), Meridian keeps **one** comment on the pull request: the counts, the
+  first 10 changes (kind, name, element kind, owner) and a link to the preview. Later pushes edit that comment in place.
+  If someone deleted it, a new one is posted. The comment id is kept in the connection's settings.
+- In Meridian the title-bar badge shows open previews as **PR #n**, next to *Code changes (N)* when the followed branch has
+  changes to review. *What changed* lists each preview under a **PR #n** heading. A preview is for looking only: its
+  changes cannot be selected, accepted or rejected, and on `main` the diagram highlights leave previews out. Open the
+  preview branch to see its highlights.
+
+When the pull request is **merged**, Meridian deletes the preview branch and closes its runs. It does not carry the
+preview's changes over: the merge is a push to the followed branch, and that push's full-snapshot sync brings the same
+changes, worked out against the current `main`, to the review branch. That is simpler than moving the preview, and it is
+always right, because the preview may be out of date with `main` or with what was finally merged. When the pull request
+is **closed without merging**, the preview branch is deleted and its runs are marked rejected. If someone has the preview
+branch open at that moment, the branch is kept (its runs are still closed) and can be deleted from the branch menu.
 
 ### The review
 
@@ -129,8 +250,17 @@ status colours, so they read in light and dark mode.
 - `ICodeSyncRunner.RunAsync(CodeSyncRequest)` (the git-host integration calls it after fetching files) returns a
   `CodeSyncOutcome`: `AwaitingReview` with the review link, `NoChanges`, or `Failed` with the reason. Runs of one project are
   serialized; review decisions take the same lock.
+- `IPullRequestPreviews` (implemented by `CodeSyncRunner`): `RunPreviewAsync(request, n)` syncs into the preview branch,
+  `ClosePreviewAsync(project, repo, n, merged)` deletes it, and `PreviewChangesAsync(project, repo, n)` lists its net
+  changes for the pull request comment. `CodeSyncRunner.PreviewBranchNameFor` and `PreviewNumber` map between numbers and
+  branch names; `CodeSyncReview.IsPreview` and `PullRequest` tell the UI.
 - `CodeSyncReviewService.Accepted` is raised once per run when its last pending change is decided and at least one was
   accepted, with `(outcome, connectionId, commitSha)` — use it to update the commit status. `Rejected` is raised when all of a
   run's changes were rejected.
 - Runs are stored in the `code_sync_runs` table (SQLite and PostgreSQL), one row per push, with the change list as JSON.
-- The model root's `codeSync.rootPackage` field names the package code is mapped into (default `Code`).
+- The model root's `codeSync.rootPackage` field names the package code is mapped into. It overrides the connection's
+  *Model package*, which defaults to the repository name. `codeSync.autoDiagrams` likewise overrides the connection's
+  *Create diagrams for new packages and classes* switch.
+- `CodeSyncEvents.RunCompleted` is raised with `(request, outcome)` after each run that did not fail (pull request
+  previews included). The architecture check subscribes to it and posts its own `meridian/architecture` status
+  ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)).
