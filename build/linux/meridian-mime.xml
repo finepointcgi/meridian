@@ -12,4 +12,14 @@
     <sub-class-of type="text/plain"/>
     <glob pattern="*.sysml"/>
   </mime-type>
+  <mime-type type="application/x-magicdraw-mdzip">
+    <comment>MagicDraw / Cameo project</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.mdzip"/>
+  </mime-type>
+  <mime-type type="application/x-magicdraw-mdxml">
+    <comment>MagicDraw / Cameo XMI project</comment>
+    <sub-class-of type="application/xml"/>
+    <glob pattern="*.mdxml"/>
+  </mime-type>
 </mime-info>

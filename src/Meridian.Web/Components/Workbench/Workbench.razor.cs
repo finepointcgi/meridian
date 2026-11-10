@@ -74,7 +74,7 @@ public partial class Workbench
             CA("Export diagram as PNG…", Icons.Material.Outlined.Image, ExportImage),
             CA("Copy diagram as image", Icons.Material.Outlined.ContentCopy, CopyDiagramImage),
             CA("Take the guided tour", Icons.Material.Outlined.Tour, StartTour),
-            CA("Import into this project (BPMN, ArchiMate, SQL, C#)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
+            CA("Import into this project (BPMN, ArchiMate, SQL, C#, MagicDraw re-import)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
             CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
             C("Reviews", Icons.Material.Outlined.Checklist, () => OpenDock(ReviewsDock)),
@@ -734,6 +734,7 @@ public partial class Workbench
                 Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);
                 return;
             }
+            if (IsMagicDrawFile(file.Name)) { await OpenMagicDrawProject(file); return; }
             var text = await ReadText(file);
             if (ext is ".xmi" or ".xml" or ".uml")
                 (model, report) = XmiExchange.Import(System.Xml.Linq.XDocument.Parse(text));
@@ -803,6 +804,9 @@ public partial class Workbench
                         Ws.Open(d);
                         break;
                     }
+                    case ".mdzip" or ".mdxml":
+                        await ReimportMagicDraw(file);   // updates elements by MagicDraw id
+                        break;
                     case ".cs":
                         csharp.Add((file.Name, await ReadText(file)));
                         break;

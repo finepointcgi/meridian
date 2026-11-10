@@ -26,8 +26,8 @@
             <ChildContent>
                 <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects… <Key>⌘O</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.NoteAdd" OnClick="NewModel">New project…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))">Import file as project (.meridian, .xmi, .sysml, EA .qea)…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly">Import into this project (BPMN, ArchiMate, SQL, C#)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))">Import file as project (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly">Import into this project (BPMN, ArchiMate, SQL, C#, MagicDraw re-import)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Badge" OnClick="AddUafProfile" Disabled="Ws.ReadOnly">Add UAF profile</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.Commit" OnClick="Save" Disabled="Ws.ReadOnly">Commit version… <Key>⌘S</Key></MudMenuItem>
@@ -370,9 +370,9 @@
     <OnboardingTour @ref="_tour" />
 
     <div style="display:none">
-        <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax" OnChange="OnOpenFile" />
+        <InputFile id="file-open" accept=".meridian,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml" OnChange="OnOpenFile" />
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
-        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip" multiple OnChange="OnImportInto" />
+        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.cs,.zip,.mdzip,.mdxml" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
         <InputFile id="file-req-sheet" accept=".xlsx,.csv" OnChange="OnRequirementsSheetFile" />
     </div>
