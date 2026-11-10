@@ -106,7 +106,7 @@ else
             <MudSelectItem Value="GitHostKind.GitHub">GitHub</MudSelectItem>
             <MudSelectItem Value="GitHostKind.GitLab">GitLab</MudSelectItem>
         </MudSelect>
-        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@f.Display" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        <MudTextField T="string" Label="Name" @bind-Value="_name" Placeholder="@(f.Display.Trim('/').Length > 0 ? f.Display : (f.Host == GitHostKind.GitHub ? "owner/repository" : "group/project"))" Variant="Variant.Outlined" Margin="Margin.Dense" />
         <MudTextField T="string" Label="Server URL" @bind-Value="f.BaseUrl" Variant="Variant.Outlined" Margin="Margin.Dense"
                       HelperText="@(f.Host == GitHostKind.GitHub ? "https://api.github.com, or https://your-server/api/v3 for GitHub Enterprise" : "https://gitlab.com, or your GitLab server")" />
         @if (f.Host == GitHostKind.GitHub)
