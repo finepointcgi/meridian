@@ -48,6 +48,7 @@ public static class MeridianServer
         builder.Services.AddSingleton<ImageCache>();
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddScoped<ReviewService>();
+        builder.Services.AddScoped<MobileUiState>();   // phone / tablet shell state (Components/Mobile)
         builder.Services.AddMeridianScripting(builder.Configuration, host);   // script console + plugins (docs/SCRIPTING.md, docs/PLUGINS.md)
         builder.Services.AddHttpContextAccessor();
         Integrations.IntegrationsSetup.AddMeridianIntegrations(builder.Services);   // issue trackers, webhooks, API tokens, OSLC

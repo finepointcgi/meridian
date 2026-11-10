@@ -1,0 +1,49 @@
+@inherits MobileComponent
+@inject MeridianHostInfo Host
+
+@* Phone top bar: project + branch, search, notifications and the account menu. *@
+<header class="m-topbar" role="banner">
+    <button class="m-project" @onclick="OpenProjects" aria-label="Switch project">
+        <span class="logo"><MudIcon Icon="@Icons.Material.Filled.Hub" /></span>
+        <span class="m-project-text">
+            <span class="name">@(Ws.Session?.Name ?? "No project")</span>
+            @if (Ws.ReadOnly) { <span class="ro-badge">View only</span> }
+        </span>
+        <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Class="chev" />
+    </button>
+    @if (Ws.Session != null)
+    {
+        <span class="m-branch"><BranchPicker /></span>
+    }
+    <span class="grow"></span>
+    <button class="m-icon-btn" aria-label="Search" @onclick="Search"><MudIcon Icon="@Icons.Material.Outlined.Search" /></button>
+    @if (!Host.LocalMode)
+    {
+        <span class="m-bell"><NotificationBell /></span>
+    }
+    @if (Ws.User is { } me)
+    {
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="m-avatar-menu">
+            <ActivatorContent>
+                <button class="m-icon-btn" aria-label="Account"><span class="avatar me" style="background:@me.Color">@MembersDialog.Initials(me)</span></button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudText Typo="Typo.body2" Class="px-4 pt-2" Style="font-weight:600">@me.DisplayName</MudText>
+                <MudText Typo="Typo.caption" Class="px-4 pb-2" Style="opacity:.6">@(Shell?.SavedStatus)</MudText>
+                <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects…</MudMenuItem>
+                <MudMenuItem Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="() => Shell?.ToggleDarkMode()">@(Ws.DarkMode ? "Light mode" : "Dark mode")</MudMenuItem>
+                @if (!Host.LocalMode)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="() => Shell?.SignOutOfMeridian()">Sign out</MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+    }
+</header>
+
+@code {
+    private Task OpenProjects() => Shell?.ShowProjects() ?? Task.CompletedTask;
+
+    private void Search() => Shell?.ShowPalette();
+}

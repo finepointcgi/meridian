@@ -1,0 +1,18 @@
+@inherits MobileComponent
+
+@* Long-press menu on the canvas: Comment / Open diagram / Show in tree, as a thumb-reachable action sheet. *@
+@if (Ui.MenuElement is { } e && Ws.Model.Contains(e))
+{
+    var diagram = MobileActions.DiagramFor(e);
+    <div class="m-scrim" @onclick="Ui.CloseMenu"></div>
+    <div class="m-action-sheet" role="menu" aria-label="@($"Actions for {e.DisplayName}")">
+        <div class="m-action-title">@KindIcon.For(e) <span>@e.DisplayName</span></div>
+        <button class="m-menu-item" role="menuitem" @onclick="() => MobileActions.Comment(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.AddComment" />Comment</button>
+        <button class="m-menu-item" role="menuitem" disabled="@(diagram == null)" @onclick="() => MobileActions.OpenDiagram(Ws, Ui, e)">
+            <MudIcon Icon="@Icons.Material.Outlined.Schema" />@(diagram != null && !ReferenceEquals(diagram, Ws.Active?.Diagram) ? $"Open diagram “{diagram.Name}”" : "Open diagram")
+        </button>
+        <button class="m-menu-item" role="menuitem" @onclick="() => MobileActions.ShowInTree(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" />Show in tree</button>
+        <button class="m-menu-item" role="menuitem" @onclick="() => Ui.OpenSheet(e)"><MudIcon Icon="@Icons.Material.Outlined.Info" />Properties</button>
+        <button class="m-menu-item cancel" @onclick="Ui.CloseMenu">Cancel</button>
+    </div>
+}

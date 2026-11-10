@@ -1,0 +1,83 @@
+@using Meridian.Data
+@inherits MobileComponent
+@inject IMeridianStore Db
+
+@* Phone comments view: the thread on the selected element (post, @mention, reply), or every discussed element. *@
+<div class="m-list-view">
+    @if (Ws.Selected is { } e)
+    {
+        <div class="m-list-head">
+            <button class="m-icon-btn" aria-label="All discussions" @onclick="() => Ws.Select(null)"><MudIcon Icon="@Icons.Material.Filled.ArrowBack" /></button>
+            @KindIcon.For(e)
+            <div class="m-head-text">
+                <span class="m-head-title">@e.DisplayName</span>
+                <span class="m-head-sub">@Metamodel.DisplayName(e.Kind)</span>
+            </div>
+            <button class="m-icon-btn" aria-label="Details" @onclick="() => Ui.OpenSheet(e)"><MudIcon Icon="@Icons.Material.Outlined.Info" /></button>
+        </div>
+        @if (Ws.Session != null)
+        {
+            <div class="m-thread"><CommentsSection ElementId="@e.Id" /></div>
+        }
+        else
+        {
+            <div class="m-empty">Open a project to comment.</div>
+        }
+    }
+    else
+    {
+        <div class="m-list-head"><span class="m-head-title">Discussions</span></div>
+        @if (_threads.Count == 0)
+        {
+            <div class="m-empty">
+                <MudIcon Icon="@Icons.Material.Outlined.ChatBubbleOutline" Style="font-size:36px; opacity:.45" />
+                <div>No comments yet. Select an element in the model or on a diagram to start a discussion.</div>
+                <button class="m-btn" @onclick="() => Ui.Show(MobileUiState.View.Model)">Browse the model</button>
+            </div>
+        }
+        <ul class="m-list" role="list">
+            @foreach (var t in _threads)
+            {
+                var thread = t;
+                <li class="m-row">
+                    <button class="m-row-main" @onclick="() => Ws.Select(thread.Element)">
+                        @KindIcon.For(thread.Element)
+                        <span class="m-row-text">
+                            <span class="m-row-title">@thread.Element.DisplayName</span>
+                            <span class="m-row-sub">@thread.Last.Author.DisplayName: @Excerpt(thread.Last.Body)</span>
+                        </span>
+                        @if (thread.Open > 0) { <span class="m-count">@thread.Open</span> }
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    public sealed record Thread(Element Element, int Open, CommentInfo Last);
+
+    private List<Thread> _threads = [];
+    private int _loaded = -1;
+    private Guid? _project;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    protected override void OnWorkspaceChanged() => _ = InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    private async Task Load()
+    {
+        if (Ws.Session is null) { _threads = []; return; }
+        if (_loaded == Ws.CommentsVersion && _project == Ws.Session.ProjectId) return;
+        _loaded = Ws.CommentsVersion;
+        _project = Ws.Session.ProjectId;
+        var all = await Db.ListCommentsAsync(Ws.Session.ProjectId);
+        _threads = all.GroupBy(c => c.ElementId)
+            .Select(g => (Element: Ws.Model.Find(g.Key), Comments: g.ToList()))
+            .Where(x => x.Element != null)
+            .Select(x => new Thread(x.Element!, x.Comments.Count(c => !c.Resolved), x.Comments.MaxBy(c => c.CreatedAt)!))
+            .OrderByDescending(t => t.Last.CreatedAt).ToList();
+    }
+
+    private static string Excerpt(string text) => text.Length > 90 ? text[..87] + "…" : text;
+}

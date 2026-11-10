@@ -1,0 +1,111 @@
+@using Meridian.Core.Analysis
+@inherits MobileComponent
+
+@* Phone requirements view: coverage at a glance and one card per requirement (text, satisfied / verified by, derived). *@
+@{ var cov = Traceability.Coverage(Ws.Model); var cards = Cards().ToList(); }
+<div class="m-list-view">
+    <div class="m-list-head">
+        <span class="m-head-title">Requirements</span>
+    </div>
+    <div class="m-coverage">
+        <div class="m-cov">
+            <div class="m-cov-label"><span>Satisfied</span><span>@cov.Satisfied/@cov.Total</span></div>
+            <div class="m-bar"><span style="width:@Pct(cov.SatisfiedRatio)"></span></div>
+        </div>
+        <div class="m-cov">
+            <div class="m-cov-label"><span>Verified</span><span>@cov.Verified/@cov.Total</span></div>
+            <div class="m-bar verify"><span style="width:@Pct(cov.VerifiedRatio)"></span></div>
+        </div>
+    </div>
+    <div class="m-search">
+        <MudIcon Icon="@Icons.Material.Outlined.Search" />
+        <input type="search" placeholder="Search requirements" value="@_query" aria-label="Search requirements"
+               @oninput="e => _query = e.Value?.ToString()" />
+    </div>
+    <div class="m-chips" role="tablist">
+        @foreach (var (key, label) in Filters)
+        {
+            var k = key;
+            <button class="m-chip @(_filter == k ? "on" : "")" role="tab" aria-selected="@(_filter == k ? "true" : "false")" @onclick="() => _filter = k">@label</button>
+        }
+    </div>
+    <div class="m-cards">
+        @foreach (var c in cards)
+        {
+            var req = c.Requirement;
+            <article class="m-card @(ReferenceEquals(Ws.Selected, req) ? "sel" : "")" data-id="@req.Id">
+                <button class="m-card-main" @onclick="() => Open(req)">
+                    <div class="m-card-head">
+                        @if (req.Get(FieldKeys.RequirementId) is { Length: > 0 } id) { <span class="req-id">@id</span> }
+                        <span class="m-card-title">@req.Name</span>
+                    </div>
+                    @if (req.Get(FieldKeys.Text) is { Length: > 0 } text) { <p class="m-card-text">@text</p> }
+                    <div class="m-trace">
+                        @if (c.Leaf)
+                        {
+                            <span class="m-pill @(c.SatisfiedBy.Count > 0 ? "ok" : "bad")">
+                                <MudIcon Icon="@(c.SatisfiedBy.Count > 0 ? Icons.Material.Filled.CheckCircle : Icons.Material.Outlined.Cancel)" />
+                                @(c.SatisfiedBy.Count > 0 ? $"Satisfied by {Names(c.SatisfiedBy)}" : "Not satisfied")
+                            </span>
+                            <span class="m-pill @(c.VerifiedBy.Count > 0 ? "ok" : "warn")">
+                                <MudIcon Icon="@(c.VerifiedBy.Count > 0 ? Icons.Material.Filled.Verified : Icons.Material.Outlined.HelpOutline)" />
+                                @(c.VerifiedBy.Count > 0 ? $"Verified by {Names(c.VerifiedBy)}" : "Not verified")
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="m-pill">@c.Children sub-requirements</span>
+                        }
+                        @if (c.Derived > 0) { <span class="m-pill">@c.Derived derived</span> }
+                        @if (req.Get(ReviewScope.StatusKey) is { Length: > 0 } st) { <span class="m-pill">@st</span> }
+                    </div>
+                </button>
+            </article>
+        }
+        @if (cards.Count == 0)
+        {
+            <div class="m-empty">@(Ws.Model.OfKind(ElementKind.Requirement).Any() ? "No requirements match." : "This model has no requirements yet.")</div>
+        }
+    </div>
+</div>
+
+@code {
+    public sealed record Card(Element Requirement, bool Leaf, int Children, IReadOnlyList<Element> SatisfiedBy, IReadOnlyList<Element> VerifiedBy, int Derived);
+
+    private static readonly (string Key, string Label)[] Filters =
+        [("all", "All"), ("unsatisfied", "Not satisfied"), ("unverified", "Not verified")];
+
+    private string _filter = "all";
+    private string? _query;
+
+    /// <summary>Requirement cards in id order, filtered by the chip and the search text.</summary>
+    public IEnumerable<Card> Cards()
+    {
+        foreach (var req in Ws.Model.OfKind(ElementKind.Requirement)
+                     .OrderBy(r => r.Get(FieldKeys.RequirementId), StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Name))
+        {
+            if (_query is { Length: > 0 } q && !req.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                && !req.Get(FieldKeys.RequirementId).Contains(q, StringComparison.OrdinalIgnoreCase)
+                && !req.Get(FieldKeys.Text).Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+            var children = req.OwnedElements.Count(c => c.Kind == ElementKind.Requirement);
+            var sat = Ws.Model.Incoming(req, ElementKind.Satisfy).Select(r => r.Source).ToList();
+            var ver = Ws.Model.Incoming(req, ElementKind.Verify).Select(r => r.Source).ToList();
+            var derived = Ws.Model.Incoming(req, ElementKind.DeriveReqt).Count() + Ws.Model.Outgoing(req, ElementKind.DeriveReqt).Count();
+            var card = new Card(req, children == 0, children, sat, ver, derived);
+            if (_filter == "unsatisfied" && (!card.Leaf || sat.Count > 0)) continue;
+            if (_filter == "unverified" && (!card.Leaf || ver.Count > 0)) continue;
+            yield return card;
+        }
+    }
+
+    private static string Names(IReadOnlyList<Element> elements) =>
+        elements.Count <= 2 ? string.Join(", ", elements.Select(e => e.DisplayName)) : $"{elements[0].DisplayName} +{elements.Count - 1}";
+
+    private static string Pct(double ratio) => (ratio * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private void Open(Element req)
+    {
+        Ws.Select(req);
+        Ui.OpenSheet(req);
+    }
+}
