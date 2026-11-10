@@ -96,11 +96,17 @@ The FMI 2.0 logger is variadic: Meridian logs its message text without substitut
 | `Meridian:Fmi:StorePath`             | `<DataPath>/fmus`             | Where uploaded `.fmu` files are kept                       |
 | `Meridian:Fmi:HostPath`              | next to Meridian              | `Meridian.FmuHost` executable or `.dll`, also `MERIDIAN_FMUHOST` |
 | `Meridian:Fmi:CallTimeoutSeconds`    | `60`                          | Longest single call into an FMU before its host is killed  |
+| `Meridian:Fmi:AllowProjectOwners`    | `false`                       | On servers, also let project owners (not only administrators) run FMUs |
 
 As environment variables, use `Meridian__Fmi__Enabled=true` and so on.
 
-- **Owners only.** Only project owners can run FMUs or attach `.fmu` files. The check runs on the server. Anyone can
-  open the tab and see the plan, and anyone can run a system made only of ordinary blocks, which runs no native code.
+- **Administrators only on servers.** On a team server only server administrators can run FMUs or attach `.fmu`
+  files; set `Meridian:Fmi:AllowProjectOwners=true` to also allow the owner of the open project (any user can create
+  and own a project, so this gives every account native code execution). In the desktop app the project owner can.
+  The check runs on the server and re-reads the administrator state before each run. Anyone can open the tab and see
+  the plan, and anyone can run a system made only of ordinary blocks, which runs no native code.
+- **Plain model identifiers.** The FMU's `modelIdentifier` must be a C identifier (as the standard requires), so it
+  cannot point the host at a library outside the FMU's `binaries/` folder. Lines the host prints are capped at 4 MB.
 - **One process per FMU.** Meridian unpacks each FMU into its own temporary folder, rejecting paths that escape the
   folder and archives over 2 GB unpacked. It then starts `Meridian.FmuHost` with that folder as its working directory.
   The host talks to Meridian over stdin/stdout, one JSON request or response per line. Response lines carry a marker, so

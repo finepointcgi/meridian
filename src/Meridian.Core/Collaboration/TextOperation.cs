@@ -28,9 +28,10 @@ public sealed class TextOperation : IEquatable<TextOperation>
     {
         if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
         if (n == 0) return this;
-        BaseLength += n;
-        TargetLength += n;
-        if (_ops.Count > 0 && _ops[^1] is int last && last > 0) _ops[^1] = last + n;
+        // Checked: components come from browsers, and a wrapped length would pass the base-length check.
+        BaseLength = checked(BaseLength + n);
+        TargetLength = checked(TargetLength + n);
+        if (_ops.Count > 0 && _ops[^1] is int last && last > 0) _ops[^1] = checked(last + n);
         else _ops.Add(n);
         return this;
     }
@@ -38,7 +39,7 @@ public sealed class TextOperation : IEquatable<TextOperation>
     public TextOperation Insert(string s)
     {
         if (string.IsNullOrEmpty(s)) return this;
-        TargetLength += s.Length;
+        TargetLength = checked(TargetLength + s.Length);
         if (_ops.Count > 0 && _ops[^1] is string prev) _ops[^1] = prev + s;
         else if (_ops.Count > 0 && _ops[^1] is int d && d < 0)
         {   // canonical order: insert before delete
@@ -52,9 +53,9 @@ public sealed class TextOperation : IEquatable<TextOperation>
     public TextOperation Delete(int n)
     {
         if (n == 0) return this;
-        if (n > 0) n = -n;
-        BaseLength -= n;
-        if (_ops.Count > 0 && _ops[^1] is int last && last < 0) _ops[^1] = last + n;
+        if (n > 0) n = checked(-n);
+        BaseLength = checked(BaseLength - n);
+        if (_ops.Count > 0 && _ops[^1] is int last && last < 0) _ops[^1] = checked(last + n);
         else _ops.Add(n);
         return this;
     }
@@ -271,14 +272,14 @@ public sealed class TextOperation : IEquatable<TextOperation>
             {
                 case string s: op.Insert(s); break;
                 case int n when n > 0: op.Retain(n); break;
-                case int n when n < 0: op.Delete(n); break;
+                case int n when n < 0: op.Delete(checked(-n)); break;
                 case long n when n > 0: op.Retain(checked((int)n)); break;
-                case long n when n < 0: op.Delete(checked((int)n)); break;
-                case double n when n > 0: op.Retain(checked((int)n)); break;
-                case double n when n < 0: op.Delete(checked((int)n)); break;
+                case long n when n < 0: op.Delete(checked((int)-n)); break;
+                case double n when n > 0 && n == Math.Floor(n): op.Retain(checked((int)n)); break;
+                case double n when n < 0 && n == Math.Floor(n): op.Delete(checked((int)-n)); break;
                 case JsonElement { ValueKind: JsonValueKind.String } js: op.Insert(js.GetString()!); break;
                 case JsonElement { ValueKind: JsonValueKind.Number } jn when jn.GetInt32() > 0: op.Retain(jn.GetInt32()); break;
-                case JsonElement { ValueKind: JsonValueKind.Number } jn when jn.GetInt32() < 0: op.Delete(jn.GetInt32()); break;
+                case JsonElement { ValueKind: JsonValueKind.Number } jn when jn.GetInt32() < 0: op.Delete(checked(-jn.GetInt32())); break;
                 default: throw new FormatException("Invalid text operation component");
             }
         }
@@ -296,38 +297,70 @@ public sealed class TextOperation : IEquatable<TextOperation>
     public override string ToString() => "[" + string.Join(", ", _ops.Select(o => o is string s ? JsonSerializer.Serialize(s) : o.ToString())) + "]";
 }
 
-/// <summary>The server side of a shared text: one authoritative text and the history of applied operations. Clients send an
-/// operation with the revision it was based on; it is transformed against everything applied since and appended.</summary>
+/// <summary>The server side of a shared text: one authoritative text and the recent history of applied operations. Clients send an
+/// operation with the revision it was based on; it is transformed against everything applied since and appended. Operations come
+/// from browsers, so the text size and the kept history are bounded: a client whose base revision has been trimmed away is
+/// refused (and resynchronises from the current text).</summary>
 public sealed class SharedTextDocument(string text)
 {
+    /// <summary>Longest text a client operation may produce (server-made operations, i.e. the model's own text, are exempt).</summary>
+    public const int MaxLength = 8_000_000;
+    /// <summary>Most operations kept for transforming late client operations.</summary>
+    public const int MaxHistory = 1000;
+    /// <summary>Most inserted characters kept in the history.</summary>
+    public const long MaxHistoryChars = 16_000_000;
+
     private readonly List<TextOperation> _history = new();
+    private int _base;
+    private long _historyChars;
 
     public string Text { get; private set; } = text;
-    public int Revision => _history.Count;
+    public int Revision => _base + _history.Count;
+    /// <summary>Operations currently kept (diagnostics, tests).</summary>
+    public int HistoryCount => _history.Count;
 
     /// <summary>Applies a client operation made against <paramref name="revision"/>; returns it transformed to the current revision.</summary>
-    public TextOperation Receive(int revision, TextOperation op)
+    public TextOperation Receive(int revision, TextOperation op) => Receive(revision, op, fromClient: true);
+
+    /// <summary>Applies an operation; <paramref name="fromClient"/> enforces <see cref="MaxLength"/>.</summary>
+    public TextOperation Receive(int revision, TextOperation op, bool fromClient)
     {
-        if (revision < 0 || revision > Revision) throw new InvalidOperationException($"Unknown revision {revision} (server is at {Revision})");
-        for (var k = revision; k < _history.Count; k++) op = TextOperation.Transform(op, _history[k]).APrime;
+        if (revision < _base || revision > Revision) throw new InvalidOperationException($"Unknown revision {revision} (server is at {Revision})");
+        for (var k = revision - _base; k < _history.Count; k++) op = TextOperation.Transform(op, _history[k]).APrime;
+        if (fromClient && op.TargetLength > MaxLength && op.TargetLength > Text.Length)
+            throw new InvalidOperationException($"The text would be longer than {MaxLength:N0} characters");
         Text = op.Apply(Text);
         _history.Add(op);
+        _historyChars += InsertedChars(op);
+        Trim();
         return op;
+    }
+
+    private static long InsertedChars(TextOperation op) => op.Ops.OfType<string>().Sum(s => (long)s.Length);
+
+    private void Trim()
+    {
+        var drop = 0;
+        while (_history.Count - drop > 1 && (_history.Count - drop > MaxHistory || _historyChars > MaxHistoryChars))
+            _historyChars -= InsertedChars(_history[drop++]);
+        if (drop == 0) return;
+        _history.RemoveRange(0, drop);
+        _base += drop;
     }
 
     /// <summary>Everything applied after <paramref name="revision"/>, as one operation.</summary>
     public TextOperation Since(int revision)
     {
-        if (revision < 0 || revision > Revision) throw new InvalidOperationException($"Unknown revision {revision}");
-        var op = new TextOperation().Retain(revision == Revision ? Text.Length : _history[revision].BaseLength);
-        for (var k = revision; k < _history.Count; k++) op = op.Compose(_history[k]);
+        if (revision < _base || revision > Revision) throw new InvalidOperationException($"Unknown revision {revision}");
+        var op = new TextOperation().Retain(revision == Revision ? Text.Length : _history[revision - _base].BaseLength);
+        for (var k = revision - _base; k < _history.Count; k++) op = op.Compose(_history[k]);
         return op;
     }
 
     /// <summary>Transforms a caret position from <paramref name="revision"/> to the current revision.</summary>
     public int TransformIndex(int revision, int index)
     {
-        for (var k = Math.Max(0, revision); k < _history.Count; k++) index = _history[k].TransformIndex(index);
+        for (var k = Math.Max(0, revision - _base); k < _history.Count; k++) index = _history[k].TransformIndex(index);
         return Math.Clamp(index, 0, Text.Length);
     }
 }

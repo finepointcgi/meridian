@@ -14,6 +14,11 @@ public sealed class ResolveOptions
     /// <summary>Render diagram SVG (false leaves a placeholder figure, for fast previews).</summary>
     public bool RenderDiagrams { get; init; } = true;
     public DateTime? Date { get; init; }
+    /// <summary>Upper bound on loop iterations in the whole document, nested loops included (a template is model data,
+    /// so a few nested loops over every element must not tie up the server).</summary>
+    public int MaxIterations { get; init; } = 1_000_000;
+    /// <summary>Upper bound on the number of paragraphs, headings, tables and figures produced.</summary>
+    public int MaxNodes { get; init; } = 500_000;
 }
 
 /// <summary>
@@ -46,6 +51,7 @@ public sealed class DocResolver
 
     private readonly int[] _counters = new int[10];
     private int _chapter, _figSeq, _tabSeq, _anchor;
+    private long _iterations;
     private bool _landscape, _wantLandscape;
     private readonly Dictionary<string, (string Svg, double W, double H)> _svgCache = new();
     private Dictionary<Element, int>? _reqOrder;
@@ -98,6 +104,8 @@ public sealed class DocResolver
 
     private void Emit(DocNode n)
     {
+        if (_doc.Nodes.Count >= _o.MaxNodes)
+            throw new InvalidOperationException($"The document is too large: more than {_o.MaxNodes:N0} paragraphs, tables and figures. Narrow the template's loops or queries.");
         if (n is not (TitlePageNode or ListingNode or RevisionHistoryNode or PageBreakNode) && _wantLandscape != _landscape)
         {
             _landscape = _wantLandscape;
@@ -242,6 +250,8 @@ public sealed class DocResolver
         for (var i = 0; i < list.Count; i++)
         {
             _ct.ThrowIfCancellationRequested();
+            if (++_iterations > _o.MaxIterations)
+                throw new InvalidOperationException($"The document is too large: its loops run more than {_o.MaxIterations:N0} times in all. Narrow the template's loops (nested loops multiply).");
             if (top && i % 25 == 0) _progress?.Report(new ReportProgress($"Resolving {i + 1} of {list.Count}", double.NaN));
             var inner = sc.With(list[i], f.Variable, i + 1, list.Count);
             if (!string.IsNullOrWhiteSpace(f.Heading))

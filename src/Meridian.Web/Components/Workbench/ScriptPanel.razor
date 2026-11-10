@@ -44,7 +44,7 @@
             <span style="flex:1"></span>
             <span class="script-warn" title="Scripts are compiled C# running inside the Meridian @(Console.Settings.LocalMode ? "app" : "server") process. A policy blocks file, process, network and reflection APIs by default, but this is not a sandbox: only run scripts you trust.">
                 <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:15px" />
-                @(Console.Settings.LocalMode ? "Runs C# on this computer — not a sandbox" : "Runs C# on the server process (owners only) — not a sandbox")
+                @(Console.Settings.LocalMode ? "Runs C# on this computer — not a sandbox" : "Runs C# on the server process (administrators only) — not a sandbox")
             </span>
         </div>
         <div class="script-main">
