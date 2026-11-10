@@ -4,6 +4,7 @@ using Anthropic;
 using Anthropic.Helpers;
 using Anthropic.Models.Beta;
 using Anthropic.Models.Beta.Messages;
+using Meridian.Assistant.Providers;
 using Meridian.Assistant.Tools;
 using Meridian.Core.Analysis;
 using Meridian.Core.Language;
@@ -31,10 +32,34 @@ public sealed record NarrativeResult(bool Ok, string? Error, IReadOnlyList<Narra
 /// silently. Same conventions as <see cref="AssistantEngine"/>: configured model, adaptive thinking, strict tool with
 /// <c>tool_choice: auto</c>, refusal handling, optional server-side fallbacks. Prompts are never logged.
 /// </summary>
-public sealed class NarrativeWriter(AnthropicClient client, AssistantOptions? options = null)
+public sealed class NarrativeWriter
 {
     public const string ToolName = "submit_narrative";
-    private readonly AssistantOptions _options = options ?? new AssistantOptions();
+    private readonly AssistantOptions _options;
+    private readonly AnthropicClient? _client;
+    private readonly IChatProvider? _provider;
+
+    /// <summary>Claude through the Anthropic SDK (the original request, unchanged).</summary>
+    public NarrativeWriter(AnthropicClient client, AssistantOptions? options = null)
+    {
+        _client = client;
+        _options = options ?? new AssistantOptions();
+    }
+
+    /// <summary>Any provider: Claude is still called through the SDK request above; other providers through <see cref="IChatProvider"/>.</summary>
+    public NarrativeWriter(IChatProvider provider, AssistantOptions? options = null)
+    {
+        _options = options ?? (provider as AnthropicChatProvider)?.Options ?? new AssistantOptions();
+        if (provider is AnthropicChatProvider anthropic) _client = anthropic.Client;
+        else _provider = provider;
+    }
+
+    private static readonly ChatTool NeutralTool = new(ToolName,
+        "Submit the drafted narrative: one entry per document section, with the exact section title, an overview paragraph and a rationale paragraph.",
+        Object(Req("sections", Array(Object(
+            Req("title", String("The section title, exactly as given.")),
+            Req("overview", String("Overview paragraph for the section.")),
+            Req("rationale", String("Rationale paragraph for the section."))), "One entry per section."))));
 
     private const string System = """
         You write the narrative paragraphs of an engineering document (for example a System Design Description) that Meridian, an MBSE
@@ -73,6 +98,7 @@ public sealed class NarrativeWriter(AnthropicClient client, AssistantOptions? op
             {Digest(m)}
             </model>
             """;
+        if (_client is not { } client) return await DraftWithProviderAsync(_provider!, prompt, sectionTitles, ct);
         var p = new MessageCreateParams
         {
             Model = _options.Model,
@@ -112,6 +138,51 @@ public sealed class NarrativeWriter(AnthropicClient client, AssistantOptions? op
         JsonElement input;
         try { input = JsonSerializer.SerializeToElement(use.Input); }
         catch (Exception e) when (e is JsonException or NotSupportedException) { return new NarrativeResult(false, "The narrative was not valid JSON.", []); }
+        return Match(input, sectionTitles, "Claude");
+    }
+
+    /// <summary>A local model or Claude Code: the same prompt and tool through the provider-neutral interface.</summary>
+    private static async Task<NarrativeResult> DraftWithProviderAsync(IChatProvider provider, string prompt, IReadOnlyList<string> sectionTitles, CancellationToken ct)
+    {
+        var who = provider.Info.AssistantName;
+        JsonElement? submitted = null;
+        ChatResponse response;
+        try
+        {
+            var request = new ChatRequest(System, [NeutralTool], [new ChatMessage(ChatRole.User, [new TextPart(prompt)])], AssistantEffort.Medium)
+            {
+                ExecuteTool = provider.RunsToolLoop ? call =>
+                {
+                    if (call.Name != ToolName || call.Input is not { ValueKind: JsonValueKind.Object } i) return ToolResult.Error($"Call {ToolName}.");
+                    var errors = ToolSchema.Validate(NeutralTool.Schema, i);
+                    if (errors.Count > 0) return ToolResult.Error("Invalid input: " + string.Join("; ", errors.Take(8)));
+                    submitted = i;
+                    return ToolResult.Ok(new { received = true, note = "Done. Do not call any more tools." });
+                } : null,
+            };
+            response = await provider.CompleteAsync(request, NullChatStream.Instance, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new NarrativeResult(false, "Cancelled.", []);
+        }
+        catch (Exception e) when ((e is ChatProviderException ? e.Message : provider.DescribeError(e)) is { } text)
+        {
+            return new NarrativeResult(false, text, []);
+        }
+        if (response.Stop == ChatStopReason.Refusal) return new NarrativeResult(false, $"{who} declined to draft this narrative.", []);
+        if (response.Stop == ChatStopReason.MaxTokens) return new NarrativeResult(false, "The narrative hit the output limit and was not used. Try a template with fewer sections.", []);
+        if (submitted == null && response.ToolCalls.FirstOrDefault(c => c.Name == ToolName)?.Input is { ValueKind: JsonValueKind.Object } input)
+        {
+            if (ToolSchema.Validate(NeutralTool.Schema, input).Count > 0) return new NarrativeResult(false, $"{who}'s narrative did not have the expected shape. Try again.", []);
+            submitted = input;
+        }
+        if (submitted is not { } result) return new NarrativeResult(false, $"{who} did not return a narrative. Try again.", []);
+        return Match(result, sectionTitles, who);
+    }
+
+    private static NarrativeResult Match(JsonElement input, IReadOnlyList<string> sectionTitles, string who)
+    {
         var drafted = input.Arr("sections").Select(s => (Title: s.Str("title") ?? "", Overview: Clean(s.Str("overview")), Rationale: Clean(s.Str("rationale")))).ToList();
         var sections = new List<NarrativeSection>();
         foreach (var title in sectionTitles)
@@ -121,7 +192,7 @@ public sealed class NarrativeWriter(AnthropicClient client, AssistantOptions? op
                 sections.Add(new NarrativeSection(title, hit.Overview, hit.Rationale));
         }
         return sections.Count == 0
-            ? new NarrativeResult(false, "Claude's narrative did not match the document's sections. Try again.", [])
+            ? new NarrativeResult(false, $"{who}'s narrative did not match the document's sections. Try again.", [])
             : new NarrativeResult(true, null, sections);
     }
 

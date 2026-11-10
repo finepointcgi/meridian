@@ -1,5 +1,5 @@
 using System.Text;
-using Anthropic.Models.Beta.Messages;
+using Meridian.Assistant.Providers;
 using Meridian.Assistant.Changes;
 using Meridian.Assistant.Tools;
 
@@ -66,7 +66,11 @@ public sealed class Conversation
 
     public Guid Id { get; } = Guid.NewGuid();
     public List<ChatItem> Items { get; } = new();
-    public List<BetaMessageParam> History { get; } = new();
+    /// <summary>Provider-neutral history (Claude's own blocks are kept on each message and replayed unchanged).</summary>
+    public List<ChatMessage> History { get; } = new();
+
+    /// <summary>A short progress line while the model works ("Loading the model…"); null when there is none.</summary>
+    public string? Status { get; internal set; }
     public bool Busy { get; internal set; }
 
     /// <summary>Notes for the model about what happened since the last turn (change sets applied or discarded).</summary>

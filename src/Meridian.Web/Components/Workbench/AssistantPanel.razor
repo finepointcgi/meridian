@@ -1,6 +1,7 @@
 @using Meridian.Assistant.Changes
 @using Meridian.Assistant.Engine
 @using Meridian.Assistant.Tools
+@using Meridian.Assistant.Providers
 @inherits WorkspaceComponent
 @inject AssistantService Assistant
 @inject IJSRuntime JS
@@ -17,7 +18,12 @@
                 <div class="ai-off-text">@reason</div>
                 @if ((Assistant.Settings.LocalMode && !Assistant.Settings.DisabledByAdmin) || !Ws.Preferences.AssistantEnabled)
                 {
-                    <button class="ai-btn primary ai-open-settings" @onclick="OpenSettings"><MudIcon Icon="@Icons.Material.Outlined.Settings" />@(Ws.Preferences.AssistantEnabled ? "Add your key in Settings" : "Open Settings")</button>
+                    <button class="ai-btn primary ai-open-settings" @onclick="OpenSettings"><MudIcon Icon="@Icons.Material.Outlined.Settings" />@(!Ws.Preferences.AssistantEnabled ? "Open Settings" : Assistant.Settings.Provider switch
+                        {
+                            AssistantProvider.Local => "Set up the local model in Settings",
+                            AssistantProvider.ClaudeCode => "Open Settings",
+                            _ => "Add your key in Settings",
+                        })</button>
                 }
             </div>
         </div>
@@ -31,6 +37,11 @@
             <button class="ai-btn" disabled="@(Assistant.Busy || !Assistant.Acknowledged)" @onclick="() => OpenForm(QuickAction.DiagramFromDescription)" title="Describe a system and get a proposed BDD, IBD, activity or package diagram"><MudIcon Icon="@Icons.Material.Outlined.Schema" />Diagram from description…</button>
             <button class="ai-btn" disabled="@(Assistant.Busy || !Assistant.Acknowledged)" @onclick="() => Quick(QuickAction.DiagramModel)" title="Claude picks the views that tell the story (overview, structure, internals, behavior, requirements) and proposes them, laid out automatically"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" />Diagram my model</button>
             <span style="flex:1"></span>
+            @{ var info = Assistant.ProviderInfo; }
+            <span class="ai-provider" title="@(info.Endpoint is { } ep && (Assistant.Settings.LocalMode || Ws.IsServerAdmin) ? $"{info.Label} at {ep}" : info.Label)">
+                <MudIcon Icon="@(info.Kind == ChatProviderKind.OpenAiCompatible ? Icons.Material.Outlined.Dns : info.Kind == ChatProviderKind.ClaudeCode ? Icons.Material.Outlined.Terminal : Icons.Material.Outlined.AutoAwesome)" />
+                @info.Label · @info.Model
+            </span>
             @if (Assistant.Busy)
             {
                 <button class="ai-btn danger" @onclick="Assistant.Stop" title="Stop the answer"><MudIcon Icon="@Icons.Material.Outlined.StopCircle" />Stop</button>
@@ -109,9 +120,11 @@
                         break;
                 }
             }
-            @if (Assistant.Busy && Conversation.Items.LastOrDefault() is not AssistantTextItem)
+            @if (Assistant.Busy && (Conversation.Items.LastOrDefault() is not AssistantTextItem || Conversation.Status != null))
             {
-                <div class="ai-thinking"><span class="ai-dot"></span><span class="ai-dot"></span><span class="ai-dot"></span></div>
+                <div class="ai-thinking"><span class="ai-dot"></span><span class="ai-dot"></span><span class="ai-dot"></span>
+                    @if (Conversation.Status is { } status) { <span class="ai-status">@status</span> }
+                </div>
             }
         </div>
 
@@ -120,9 +133,21 @@
             <div class="ai-privacy">
                 <MudIcon Icon="@Icons.Material.Outlined.PrivacyTip" Style="font-size:20px; color:var(--warn)" />
                 <div>
-                    <b>Your model is sent to Anthropic.</b>
-                    To answer, the assistant sends your question, the selection, the active diagram, a project summary and whatever model
-                    content it looks up to Anthropic's API (Claude). Don't use it for content you may not share with that service.
+                    @switch (Assistant.Settings.Provider)
+                    {
+                        case AssistantProvider.Local:
+                            <b>Your model stays on the configured model server.</b>
+                            @(" ")@SettingsDialog.LocalPrivacyText
+                            break;
+                        case AssistantProvider.ClaudeCode:
+                            <b>Your model is sent to Anthropic through Claude Code.</b>
+                            @(" ")@SettingsDialog.ClaudeCodePrivacyText
+                            break;
+                        default:
+                            <b>Your model is sent to Anthropic.</b>
+                            @(" ")@SettingsDialog.PrivacyText
+                            break;
+                    }
                 </div>
                 <button class="ai-btn primary" @onclick="Assistant.Acknowledge">I understand</button>
             </div>
@@ -137,7 +162,7 @@
         </div>
         @if (Conversation.InputTokens + Conversation.OutputTokens > 0)
         {
-            <div class="ai-usage">@($"{Conversation.InputTokens:N0} input ({Conversation.CacheReadTokens:N0} cached) · {Conversation.OutputTokens:N0} output tokens in this chat · {Assistant.Options.Model}")</div>
+            <div class="ai-usage">@($"{Conversation.InputTokens:N0} input ({Conversation.CacheReadTokens:N0} cached) · {Conversation.OutputTokens:N0} output tokens in this chat · {Assistant.ProviderInfo.Model}")</div>
         }
     }
 </div>
@@ -191,7 +216,10 @@
     .ai-tool .mud-icon-root { font-size: 15px; }
     .ai-tool.err { color: var(--warn); }
     .ai-tool-err { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
-    .ai-thinking { display: flex; gap: 4px; padding: 4px 0; }
+    .ai-thinking { display: flex; gap: 4px; padding: 4px 0; align-items: center; }
+    .ai-status { margin-left: 6px; color: var(--text-3); font-size: 12px; }
+    .ai-provider { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: 12px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ai-provider .mud-icon-root { font-size: 15px; }
     .ai-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: ai-pulse 1.2s infinite ease-in-out; }
     .ai-dot:nth-child(2) { animation-delay: .2s; } .ai-dot:nth-child(3) { animation-delay: .4s; }
     @@keyframes ai-pulse { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }

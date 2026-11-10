@@ -197,6 +197,10 @@ compose `.env` file, every setting has a short variable that `docker-compose.pro
 | `Meridian__Scripting__Enabled` | false on servers | Script console ([SCRIPTING.md](SCRIPTING.md)). Scripts run arbitrary .NET code in the server |
 | `Meridian__Scripting__TimeoutSeconds` / `__Unrestricted` | 30 / false | Script limits |
 | `Meridian__Plugins__Path` / `__Enabled` | none / true | Server plugin folder ([PLUGINS.md](PLUGINS.md)) |
+| `Meridian__AI__Enabled` / `__ApiKey` / `__Model` | true / none / `claude-opus-5-5` | AI assistant with Claude ([AI.md](AI.md)). `ANTHROPIC_API_KEY` also works for the key |
+| `Meridian__AI__Provider` | Anthropic | `Anthropic`, or `Local` for a self-hosted OpenAI-compatible model server (Ollama, LM Studio, llama.cpp, vLLM, LocalAI). Only administrators set it; users can't change the provider or the address |
+| `Meridian__AI__Local__BaseUrl` / `__Model` / `__ApiKey` | none | The model server's base URL (such as `http://ollama:11434/v1`), model name and optional key. Requests only ever go to this URL's host; private addresses are allowed |
+| `Meridian__AI__Local__ContextWindow` / `__MaxTokens` / `__Temperature` / `__ToolCalling` / `__TimeoutSeconds` | 32768 / 4096 / 0.2 / Auto / 300 | Local model tuning ([AI.md](AI.md#using-a-local-model)) |
 | `Meridian__Logging__Format` | text | `json` for one JSON object per line |
 | `Meridian__Logging__Requests` | false | Log one line per request: method, path, status and duration. Never query strings, headers, cookies or bodies |
 | `Meridian__Telemetry__OtlpEndpoint` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) | none (off) | Export traces and metrics over OTLP |

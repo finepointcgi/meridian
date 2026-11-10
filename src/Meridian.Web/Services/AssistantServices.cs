@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Meridian.Assistant.Changes;
 using Meridian.Assistant.Engine;
+using Meridian.Assistant.Providers;
 using Meridian.Core.Model;
 using Meridian.Data;
 using Microsoft.AspNetCore.DataProtection;
@@ -16,8 +17,12 @@ namespace Meridian.Web.Services;
 /// <item>Local/desktop mode: the key is entered in the assistant's settings and stored encrypted with ASP.NET Data Protection
 /// in <c>{DataPath}/assistant.json</c> (config / environment keys are used when none is saved).</item>
 /// <item><c>Meridian:AI:Enabled=false</c> turns the assistant off for everyone; <c>Meridian:AI:Model</c> picks the model.</item>
+/// <item><c>Meridian:AI:Provider</c> picks who answers: <c>Anthropic</c> (default), <c>Local</c> (an OpenAI-compatible server:
+/// <c>Meridian:AI:Local:BaseUrl</c>, <c>:Model</c>, <c>:ApiKey</c>…) or, in local/desktop mode only, <c>ClaudeCode</c>. On a
+/// server only the administrator sets these (configuration); users can't point the server at another address. In
+/// local/desktop mode they are per-device settings stored next to the API key.</item>
 /// </list>
-/// The key never leaves the server process: it is not rendered, logged or sent to the browser.
+/// Keys never leave the server process: they are not rendered, logged or sent to the browser.
 /// </summary>
 public sealed class AssistantSettings
 {
@@ -32,6 +37,29 @@ public sealed class AssistantSettings
     {
         public string? ProtectedKey { get; set; }
         public List<Guid> Acknowledged { get; set; } = new();
+
+        /// <summary>Who acknowledged the local-model notice (content stays on the configured server).</summary>
+        public List<Guid> AcknowledgedLocal { get; set; } = new();
+        public AssistantProvider? Provider { get; set; }
+        public LocalStored? Local { get; set; }
+        public ClaudeCodeStored? ClaudeCode { get; set; }
+    }
+
+    private sealed class LocalStored
+    {
+        public string? BaseUrl { get; set; }
+        public string? Model { get; set; }
+        public string? ProtectedApiKey { get; set; }
+        public int? ContextWindow { get; set; }
+        public int? MaxTokens { get; set; }
+        public double? Temperature { get; set; }
+        public ToolCallingMode? ToolCalling { get; set; }
+    }
+
+    private sealed class ClaudeCodeStored
+    {
+        public string? Path { get; set; }
+        public string? Model { get; set; }
     }
 
     public AssistantSettings(IConfiguration config, MeridianHostInfo host, IDataProtectionProvider protection)
@@ -104,28 +132,226 @@ public sealed class AssistantSettings
         }
     }
 
-    /// <summary>Whether this user has seen the notice that model content is sent to Anthropic.</summary>
+    /// <summary>
+    /// Whether this user has seen the data notice for the active provider: that content is sent to Anthropic (Claude, and
+    /// Claude Code, which uses the user's own Anthropic login), or that it stays on the configured local model server.
+    /// </summary>
     public bool HasAcknowledged(Guid? user)
     {
-        lock (_gate) return _stored.Acknowledged.Contains(user ?? Guid.Empty);
+        lock (_gate) return AckList.Contains(user ?? Guid.Empty);
     }
 
     public void Acknowledge(Guid? user)
     {
         lock (_gate)
         {
-            if (_stored.Acknowledged.Contains(user ?? Guid.Empty)) return;
-            _stored.Acknowledged.Add(user ?? Guid.Empty);
+            var list = AckList;
+            if (list.Contains(user ?? Guid.Empty)) return;
+            list.Add(user ?? Guid.Empty);
             Save();
         }
     }
 
+    private List<Guid> AckList => Provider == AssistantProvider.Local ? _stored.AcknowledgedLocal : _stored.Acknowledged;
+
     /// <summary>Why the assistant can't be used, with how to enable it; null when it can.</summary>
     public string? UnavailableReason =>
         DisabledByAdmin ? "The AI assistant has been turned off by the administrator (Meridian:AI:Enabled=false)."
-        : HasKey ? null
-        : _host.LocalMode ? "Add your Anthropic API key in the assistant settings to turn the assistant on. Get a key at console.anthropic.com."
-        : "The AI assistant is off: no Anthropic API key is configured. An administrator can enable it by setting Meridian:AI:ApiKey (or the ANTHROPIC_API_KEY environment variable) on the server.";
+        : Provider switch
+        {
+            AssistantProvider.Local => LocalOptions() != null ? null
+                : _host.LocalMode ? "Set the local model server's URL and pick a model in Settings ▸ AI assistant to turn the assistant on."
+                : "The AI assistant is set to use a local model, but it is not fully configured. An administrator can set Meridian:AI:Local:BaseUrl and Meridian:AI:Local:Model on the server.",
+            AssistantProvider.ClaudeCode => !_host.LocalMode ? "Claude Code can only be used by the desktop app or a local Meridian; a server uses an API key or a local model server."
+                : ClaudeCodePath() == null ? ClaudeCodeProvider.NotInstalled : null,
+            _ => HasKey ? null
+                : _host.LocalMode ? "Add your Anthropic API key in the assistant settings to turn the assistant on. Get a key at console.anthropic.com."
+                : "The AI assistant is off: no Anthropic API key is configured. An administrator can enable it by setting Meridian:AI:ApiKey (or the ANTHROPIC_API_KEY environment variable) on the server.",
+        };
+
+    // ================================================================ provider (Claude, local model, Claude Code)
+
+    /// <summary>Who answers: per device in local/desktop mode, set by the administrator (configuration) on servers.</summary>
+    public AssistantProvider Provider
+    {
+        get
+        {
+            if (_host.LocalMode) lock (_gate) if (_stored.Provider is { } p && Enum.IsDefined(p)) return p;
+            return ParseProvider(_config["Meridian:AI:Provider"]);
+        }
+    }
+
+    public static AssistantProvider ParseProvider(string? value) => value?.Trim().ToLowerInvariant().Replace("-", "").Replace("_", "") switch
+    {
+        "local" or "openai" or "openaicompatible" or "ollama" or "lmstudio" => AssistantProvider.Local,
+        "claudecode" => AssistantProvider.ClaudeCode,
+        _ => AssistantProvider.Anthropic,
+    };
+
+    /// <summary>Whether this installation lets the user change the provider and its server (local/desktop mode only).</summary>
+    public bool CanConfigureProvider => _host.LocalMode;
+
+    private void RequireLocalMode()
+    {
+        if (!_host.LocalMode) throw new InvalidOperationException("On a server the assistant's provider is configured by the administrator (Meridian:AI:Provider and Meridian:AI:Local:*).");
+    }
+
+    public void SetProvider(AssistantProvider provider)
+    {
+        RequireLocalMode();
+        lock (_gate)
+        {
+            _stored.Provider = provider;
+            Save();
+        }
+    }
+
+    /// <summary>The local model server's settings as entered (stored values over configuration), for the settings dialog.</summary>
+    public sealed record LocalSettings(string BaseUrl, string Model, bool HasApiKey, int ContextWindow, int MaxTokens, double? Temperature, ToolCallingMode ToolCalling);
+
+    public LocalSettings Local
+    {
+        get
+        {
+            LocalStored s;
+            lock (_gate) s = _host.LocalMode ? _stored.Local ?? new LocalStored() : new LocalStored();
+            var c = _config.GetSection("Meridian:AI:Local");
+            var d = new LocalModelOptions { BaseUrl = new Uri(LocalModelOptions.OllamaUrl), Model = "" };
+            return new LocalSettings(
+                s.BaseUrl ?? c["BaseUrl"] ?? "",
+                s.Model ?? c["Model"] ?? "",
+                LocalApiKey() != null,
+                s.ContextWindow ?? (int.TryParse(c["ContextWindow"], out var cw) && cw >= 2048 ? cw : d.ContextWindow),
+                s.MaxTokens ?? (int.TryParse(c["MaxTokens"], out var mt) && mt >= 256 ? mt : d.MaxTokens),
+                s.Temperature ?? (double.TryParse(c["Temperature"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : d.Temperature),
+                s.ToolCalling ?? (Enum.TryParse<ToolCallingMode>(c["ToolCalling"], true, out var tc) && Enum.IsDefined(tc) ? tc : ToolCallingMode.Auto));
+        }
+    }
+
+    private string? LocalApiKey()
+    {
+        if (_host.LocalMode)
+            lock (_gate)
+                if (_stored.Local?.ProtectedApiKey is { Length: > 0 } p)
+                {
+                    try { return _protector.Unprotect(p); }
+                    catch (CryptographicException) { }
+                }
+        return _config["Meridian:AI:Local:ApiKey"] is { Length: > 0 } k ? k : null;
+    }
+
+    /// <summary>
+    /// Options for <see cref="OpenAiCompatibleProvider"/>, or null when the base URL or model is missing or invalid.
+    /// The URL is only ever the configured one (administrator on servers, the user on their own computer).
+    /// </summary>
+    public LocalModelOptions? LocalOptions()
+    {
+        var s = Local;
+        if (LocalModelOptions.NormalizeBaseUrl(s.BaseUrl) is not { } url || string.IsNullOrWhiteSpace(s.Model)) return null;
+        var firstToken = int.TryParse(_config["Meridian:AI:Local:TimeoutSeconds"], out var secs) && secs >= 10 ? TimeSpan.FromSeconds(secs) : TimeSpan.FromMinutes(5);
+        return new LocalModelOptions
+        {
+            BaseUrl = url,
+            Model = s.Model.Trim(),
+            ApiKey = LocalApiKey(),
+            ContextWindow = s.ContextWindow,
+            MaxTokens = s.MaxTokens,
+            Temperature = s.Temperature,
+            ToolCalling = s.ToolCalling,
+            FirstTokenTimeout = firstToken,
+            RevealEndpoint = _host.LocalMode,
+        };
+    }
+
+    /// <summary>Options to probe a server before saving it (desktop only: "Test connection" on an unsaved URL).</summary>
+    public LocalModelOptions? DraftLocalOptions(string baseUrl, string model)
+    {
+        RequireLocalMode();
+        return LocalModelOptions.NormalizeBaseUrl(baseUrl) is { } url
+            ? (LocalOptions() ?? new LocalModelOptions { BaseUrl = url, Model = "" }) with { BaseUrl = url, Model = model.Trim(), RevealEndpoint = true, ApiKey = LocalApiKey() }
+            : null;
+    }
+
+    /// <summary>Saves the local model settings (local/desktop mode only). Throws <see cref="ArgumentException"/> for an unusable URL.</summary>
+    public void SaveLocal(string baseUrl, string model, int contextWindow, int maxTokens, double? temperature, ToolCallingMode toolCalling)
+    {
+        RequireLocalMode();
+        var url = LocalModelOptions.NormalizeBaseUrl(baseUrl) ?? throw new ArgumentException("Enter an http:// or https:// address, such as http://localhost:11434/v1.");
+        if (model.Length > 200 || model.Any(char.IsControl)) throw new ArgumentException("That model name is not valid.");
+        lock (_gate)
+        {
+            var s = _stored.Local ??= new LocalStored();
+            s.BaseUrl = url.AbsoluteUri.TrimEnd('/');
+            s.Model = model.Trim();
+            s.ContextWindow = Math.Clamp(contextWindow, 2048, 2_000_000);
+            s.MaxTokens = Math.Clamp(maxTokens, 256, 200_000);
+            s.Temperature = temperature is { } t ? Math.Clamp(t, 0, 2) : null;
+            s.ToolCalling = Enum.IsDefined(toolCalling) ? toolCalling : ToolCallingMode.Auto;
+            Save();
+        }
+    }
+
+    public void SaveLocalApiKey(string? key)
+    {
+        RequireLocalMode();
+        key = key?.Trim();
+        if (key is { Length: > 0 } && (key.Length > 4096 || key.Any(char.IsWhiteSpace))) throw new ArgumentException("That does not look like an API key.");
+        lock (_gate)
+        {
+            var s = _stored.Local ??= new LocalStored();
+            s.ProtectedApiKey = key is { Length: > 0 } ? _protector.Protect(key) : null;
+            Save();
+        }
+    }
+
+    /// <summary>Claude Code: the path override and model (local/desktop mode).</summary>
+    public (string? Path, string? Model) ClaudeCode
+    {
+        get
+        {
+            ClaudeCodeStored? s;
+            lock (_gate) s = _stored.ClaudeCode;
+            return (s?.Path ?? (_config["Meridian:AI:ClaudeCode:Path"] is { Length: > 0 } p ? p : null),
+                    s?.Model ?? (_config["Meridian:AI:ClaudeCode:Model"] is { Length: > 0 } m ? m : null));
+        }
+    }
+
+    public void SaveClaudeCode(string? path, string? model)
+    {
+        RequireLocalMode();
+        path = string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        model = string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+        if (path != null && !File.Exists(path)) throw new ArgumentException("No file at that path.");
+        if (model is { Length: > 100 } || (model?.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)) ?? false)) throw new ArgumentException("That model name is not valid.");
+        lock (_gate)
+        {
+            _stored.ClaudeCode = new ClaudeCodeStored { Path = path, Model = model };
+            Save();
+        }
+    }
+
+    /// <summary>The Claude Code executable found (override, PATH or the usual install folders), without running it.</summary>
+    public string? ClaudeCodePath() => _host.LocalMode ? ClaudeCodeLocator.Candidates(ClaudeCode.Path).FirstOrDefault(File.Exists) : null;
+
+    private ClaudeCodeInstall? _detected;
+    private DateTime _detectedAt;
+
+    /// <summary>Runs <c>claude --version</c> (cached for a minute); null when Claude Code isn't installed or this is a server.</summary>
+    public async Task<ClaudeCodeInstall?> DetectClaudeCodeAsync(bool refresh = false)
+    {
+        if (!_host.LocalMode) return null;
+        if (!refresh && DateTime.UtcNow - _detectedAt < TimeSpan.FromMinutes(1)) return _detected;
+        var found = await ClaudeCodeLocator.DetectAsync(ClaudeCode.Path);
+        _detected = found;
+        _detectedAt = DateTime.UtcNow;
+        return found;
+    }
+
+    /// <summary>The last detection result (no process is started).</summary>
+    public ClaudeCodeInstall? DetectedClaudeCode => _detected;
+
+    public ClaudeCodeOptions? ClaudeCodeOptions() =>
+        ClaudeCodePath() is { } path ? new ClaudeCodeOptions { ExecutablePath = path, Model = ClaudeCode.Model, MaxTurns = 24 } : null;
 
     private Stored Load()
     {
@@ -149,6 +375,9 @@ public sealed class AssistantSettings
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 }
+
+/// <summary>Who answers the assistant's questions.</summary>
+public enum AssistantProvider { Anthropic, Local, ClaudeCode }
 
 /// <summary>Conversations, in memory, per user per project (and branch). They are lost when the server restarts.</summary>
 public sealed class AssistantConversations
@@ -179,8 +408,11 @@ public enum QuickAction { GenerateRequirements, SuggestTraceLinks, ReviewModel, 
 /// The assistant for one circuit: builds the workbench context, runs turns through <see cref="AssistantEngine"/> and
 /// applies reviewed change sets to the workspace model (one undoable, replicated step). Viewers can ask but not apply.
 /// </summary>
-public sealed class AssistantService(Workspace ws, AssistantSettings settings, AssistantConversations conversations, IAssistantClientFactory clients)
+public sealed class AssistantService(Workspace ws, AssistantSettings settings, AssistantConversations conversations, IAssistantClientFactory clients,
+                                     ILocalModelHttpFactory? localHttp = null)
 {
+    private readonly ILocalModelHttpFactory _localHttp = localHttp ?? new LocalModelHttpFactory();
+
     private CancellationTokenSource? _cts;
 
     public AssistantSettings Settings => settings;
@@ -232,11 +464,31 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
     /// <summary>Most API messages a conversation may hold; every turn resends the whole history.</summary>
     public const int MaxHistoryMessages = 400;
 
+    /// <summary>The configured provider, or null when it is not usable. Claude keeps the exact SDK path; nothing here takes a URL from the browser.</summary>
+    public IChatProvider? CreateProvider() => settings.Provider switch
+    {
+        AssistantProvider.Local => settings.LocalOptions() is { } o ? new OpenAiCompatibleProvider(_localHttp.Create(o.BaseUrl), o) : null,
+        AssistantProvider.ClaudeCode => settings.ClaudeCodeOptions() is { } c ? new ClaudeCodeProvider(c) : null,
+        _ => settings.ApiKey() is { } key ? new AnthropicChatProvider(clients.Create(key), Options) : null,
+    };
+
+    /// <summary>What the panel header shows: provider and model.</summary>
+    public ChatProviderInfo ProviderInfo => settings.Provider switch
+    {
+        AssistantProvider.Local => new ChatProviderInfo(ChatProviderKind.OpenAiCompatible, settings.Local.Model, settings.LocalOptions()?.BaseUrl.GetLeftPart(UriPartial.Authority)),
+        AssistantProvider.ClaudeCode => new ChatProviderInfo(ChatProviderKind.ClaudeCode, settings.ClaudeCode.Model ?? "Claude Code default"),
+        _ => new ChatProviderInfo(ChatProviderKind.Anthropic, Options.Model),
+    };
+
+    /// <summary>A provider for the settings dialog's discovery and "Test connection" (the configured server only).</summary>
+    public OpenAiCompatibleProvider? LocalProvider(LocalModelOptions? draft = null) =>
+        (draft ?? settings.LocalOptions()) is { } o ? new OpenAiCompatibleProvider(_localHttp.Create(o.BaseUrl), o) : null;
+
     private async Task RunAsync(TurnRequest request)
     {
         if (UnavailableReason != null || Busy || !Acknowledged) return;
-        var key = settings.ApiKey();
-        if (key == null) return;
+        var provider = CreateProvider();
+        if (provider == null) return;
         var conversation = Conversation;
         var tooLong = request.Prompt.Length > MaxPromptChars ? $"That request is too long ({request.Prompt.Length:N0} characters; at most {MaxPromptChars:N0}). Shorten it or split it up."
             : conversation.History.Count >= MaxHistoryMessages ? "This conversation is too long to continue. Start a new chat."
@@ -249,16 +501,21 @@ public sealed class AssistantService(Workspace ws, AssistantSettings settings, A
         }
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
-        var engine = new AssistantEngine(clients.Create(key), Options);
+        var engine = new AssistantEngine(provider, Options);
         await engine.RunTurnAsync(conversation, ws.Model, request, () => Changed?.Invoke(), _cts.Token);
     }
 
     /// <summary>
     /// A narrative writer for generated documents (the report dialog's "AI narrative"), or null when the assistant is off or
-    /// this user has not accepted the notice that model content is sent to Anthropic.
+    /// this user has not accepted the data notice of the active provider.
     /// </summary>
-    public NarrativeWriter? NarrativeWriter() =>
-        UnavailableReason == null && Acknowledged && settings.ApiKey() is { } key ? new NarrativeWriter(clients.Create(key), settings.Options) : null;
+    public NarrativeWriter? NarrativeWriter()
+    {
+        if (UnavailableReason != null || !Acknowledged) return null;
+        if (settings.Provider == AssistantProvider.Anthropic)
+            return settings.ApiKey() is { } key ? new NarrativeWriter(clients.Create(key), settings.Options) : null;
+        return CreateProvider() is { } provider ? new NarrativeWriter(provider, settings.Options) : null;
+    }
 
     public ApplyResult Apply(ChangeSet set)
     {
@@ -292,6 +549,7 @@ public static class AssistantServiceExtensions
         services.AddSingleton<AssistantSettings>();
         services.AddSingleton<AssistantConversations>();
         services.AddSingleton<IAssistantClientFactory>(new AssistantClientFactory());
+        services.AddSingleton<ILocalModelHttpFactory>(new LocalModelHttpFactory());   // only ever the configured base URL's host
         services.AddScoped<AssistantService>();
         return services;
     }
