@@ -37,11 +37,10 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
         await Expect(svg.Locator("g.vfy-mark.fail")).ToHaveCountAsync(1);
         await Expect(p.Locator("[data-testid=verify-chip]")).ToContainTextAsync("✓ 2");
 
-        // Changing the fuel tank makes the range result stale.
-        await p.Tree().GetByText("capacity", new() { Exact = true }).First.ClickAsync();
-        var value = p.Inspector().GetByLabel("Default value", new() { Exact = true });
-        await value.FillAsync("70");
-        await value.PressAsync("Tab");
+        // Editing the range criterion makes its result stale.
+        var crit = range.Locator("input.vfy-crit");
+        await crit.FillAsync("capacity * 12 km/L >= 600 km");
+        await crit.PressAsync("Tab");
         await Expect(range.Locator(".verdict.stale")).ToHaveCountAsync(1);
         await Expect(svg.Locator("g.vfy-mark.stale")).ToHaveCountAsync(1);
     }
@@ -72,7 +71,7 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
 
         // Hide instead of grey, then back to the whole model.
         await chip.GetByRole(AriaRole.Button, new() { Name = "Hide", Exact = true }).ClickAsync();
-        await Expect(p.Node("Electric")).ToBeHiddenAsync();
+        await Expect(p.Node("Electric")).ToHaveCSSAsync("display", "none");
         await chip.GetByRole(AriaRole.Button, new() { Name = "Off", Exact = true }).ClickAsync();
         await Expect(p.Node("Electric")).ToBeVisibleAsync();
         await Expect(chip).ToHaveCountAsync(0);
