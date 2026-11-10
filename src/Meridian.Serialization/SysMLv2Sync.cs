@@ -31,6 +31,10 @@ public sealed class SysmlSyncResult
 /// replicated operations, as one undo step. Elements are matched by their <c>/* @id */</c> comment when present, else by
 /// name within their owner (a lone renamed element of the same kind is recognised as a rename). Model content the
 /// textual notation can't express (diagrams, operations, associations, pins …) is never touched.
+/// <para>Text with no Meridian equivalent (imports, aliases, views, calc results, requirement constraints …) is kept
+/// verbatim on the nearest mapped owner in <see cref="SysMLv2Text.UnmappedField"/> and written back by the exporter, so
+/// round trips don't lose content. Header details Meridian doesn't model (subsetting, redefinition, prefixes, keywords …)
+/// are kept in <c>sysml:*</c> fields the same way.</para>
 /// </summary>
 public static class SysMLv2Sync
 {
@@ -72,6 +76,10 @@ public static class SysMLv2Sync
         owner.Descendants().FirstOrDefault(c => c is not Relationship and not Diagram && SysmlNameIndex.ExportName(c) == name
                                                && c.Kind is not (ElementKind.InitialNode or ElementKind.InitialState or ElementKind.ActivityFinalNode or ElementKind.FinalState));
 
+    /// <summary><c>#tag</c> words with a meaning of their own (not stereotype applications).</summary>
+    internal static readonly HashSet<string> SpecialTags = new(StringComparer.Ordinal)
+        { "actor", "derivation", "refinement", "trace", "extend", "derive", "refine", "reply", "async" };
+
     // ====================================================================================================
 
     private sealed class Mapper(ModelRepository m, Element scope, SysmlDocument doc, SysmlSyncResult result)
@@ -80,9 +88,13 @@ public static class SysMLv2Sync
         private readonly Dictionary<Element, SysmlDecl> _byElement = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<SysmlComment, Element> _comments = new(ReferenceEqualityComparer.Instance);
         private readonly HashSet<SysmlDecl> _created = new(ReferenceEqualityComparer.Instance);
+        /// <summary>Members represented in the model other than through <see cref="Map"/> (relationships, fields …).</summary>
+        private readonly HashSet<SysmlMember> _mapped = new(ReferenceEqualityComparer.Instance);
         private SysmlDecl? _top;
         private List<SysmlMember> _topBody = new();
         private SysmlNameIndex _names = null!;
+        private HashSet<string>? _docNames;
+        private static SysMLv2Library Lib => SysMLv2Library.Standard;
 
         // -------------------------------------------------------------- classification
 
@@ -114,18 +126,19 @@ public static class SysMLv2Sync
         /// <summary>The family a declaration maps to inside an owner of the given kind, or null if Meridian has no equivalent.</summary>
         private static string? DeclFamily(SysmlDecl d, ElementKind owner)
         {
+            if (d.OpaqueHeader || d.Types.Count > 1 || d.EffectiveName == null) return null;
             var kw = d.Keyword;
             if (d.IsDef)
                 return kw switch
                 {
                     "part" => d.Tags.Contains("actor") ? "actor" : "block",
-                    "item" or "connection" or "allocation" => "block",
+                    "item" or "connection" or "allocation" or "flow" => "block",
                     "port" or "interface" => "portdef",
                     "attribute" => "valuetype",
                     "enum" => "enum",
-                    "constraint" => "constraint",
+                    "constraint" or "calc" => "constraint",
                     "requirement" or "concern" => "requirement",
-                    "verification" => "testcase",
+                    "verification" or "analysis" or "case" => "testcase",
                     "use case" => "usecase",
                     "action" => "activity",
                     "state" => "statemachine",
@@ -138,15 +151,15 @@ public static class SysMLv2Sync
                 "decide" or "merge" => owner == ElementKind.Activity ? "decision" : null,
                 "fork" or "join" => owner == ElementKind.Activity ? "fork" : null,
                 "action" or "perform action" when owner == ElementKind.Activity => "action",
+                "accept" or "send" or "assign" or "if" or "while" or "loop" or "for" or "terminate" when owner == ElementKind.Activity => "action",
                 "state" or "exhibit state" when owner is ElementKind.StateMachine or ElementKind.State => "state",
                 "enum" when owner == ElementKind.Enumeration => "literal",
                 "requirement" or "concern" when owner is ElementKind.Package or ElementKind.Model or ElementKind.Requirement => "requirement",
                 "verification" when owner is ElementKind.Package or ElementKind.Model => "testcase",
-                "part" or "item" or "ref" when owner == ElementKind.Interaction => "lifeline",
+                "part" or "item" or "ref" when owner == ElementKind.Interaction && !d.ImplicitKeyword => "lifeline",
                 "part" or "item" when owner is ElementKind.Package or ElementKind.Model => "block",
                 "part" or "item" or "attribute" or "port" or "ref" or "constraint" or "occurrence"
                     when Metamodel.CanOwn(owner, ElementKind.Property) || Metamodel.CanOwn(owner, ElementKind.Port) => "feature",
-                "connection" or "interface" when d.Connect != null => null,
                 _ => null,
             };
         }
@@ -185,12 +198,14 @@ public static class SysMLv2Sync
 
         private static string Name(SysmlDecl d) => d.EffectiveName ?? "";
 
+        private static bool IsPlain(SysmlComment c) => c.Name == null && c.About.Count == 0;
+
         // -------------------------------------------------------------- matching
 
         public void Match()
         {
             var decls = doc.Members.OfType<SysmlDecl>().ToList();
-            var otherTop = doc.Members.Any(x => x is SysmlRelation or SysmlSuccession);
+            var otherTop = doc.Members.Any(x => x is SysmlRelation or SysmlSuccession or SysmlImport or SysmlUnsupported or SysmlMetadata);
             if (decls.Count == 1 && decls[0].Keyword == "package" && !otherTop)
             {
                 _top = decls[0];
@@ -224,10 +239,15 @@ public static class SysMLv2Sync
         {
             foreach (var x in body)
             {
-                if (x is SysmlDecl { Keyword: "objective" } o) { foreach (var y in Flat(o.Body)) yield return y; }
+                if (IsVerifyObjective(x)) { foreach (var y in ((SysmlDecl)x).Body) yield return y; }
                 else yield return x;
             }
         }
+
+        /// <summary><c>objective { verify r; }</c>: the form the exporter writes for a test case's verify relationships.</summary>
+        private static bool IsVerifyObjective(SysmlMember x) =>
+            x is SysmlDecl { Keyword: "objective", Name: null, Types.Count: 0, Modifiers.Count: 0 } o
+            && o.Body.All(b => b is SysmlRelation { Keyword: "verify", Complex: false } or SysmlComment);
 
         private void MatchBody(IEnumerable<SysmlMember> body, Element? owner)
         {
@@ -252,7 +272,7 @@ public static class SysMLv2Sync
                     if (g.Count() == 1 && olds.Count == 1 && g.First().d.Id == null) { Bind(g.First().d, olds[0]); free.Remove(olds[0]); }
                 }
                 // Comments: by body, then a lone pair is an edit.
-                var comments = members.OfType<SysmlComment>().ToList();
+                var comments = members.OfType<SysmlComment>().Where(IsPlain).ToList();
                 if (owner.Kind != ElementKind.Requirement)
                 {
                     var freeC = ManagedComments(owner).ToList();
@@ -278,7 +298,8 @@ public static class SysMLv2Sync
             _names = new SysmlNameIndex(m);
             Typing();
             Relationships();
-            Report(_topBody, scope);
+            CheckImports(doc.Members);
+            StoreUnmapped();
         }
 
         private void CreateAndUpdate(IEnumerable<SysmlMember> body, Element owner)
@@ -287,7 +308,7 @@ public static class SysMLv2Sync
             Element? previous = null;
             foreach (var x in members)
             {
-                if (x is SysmlComment c && owner.Kind != ElementKind.Requirement && Metamodel.CanOwn(owner.Kind, ElementKind.Comment))
+                if (x is SysmlComment c && IsPlain(c) && owner.Kind != ElementKind.Requirement && Metamodel.CanOwn(owner.Kind, ElementKind.Comment))
                 {
                     if (_comments.TryGetValue(c, out var ce)) { Set(ce, FieldKeys.Body, c.Body); }
                     else
@@ -312,14 +333,15 @@ public static class SysMLv2Sync
                         target = m.DefaultOwnerFor(owner, kind);
                         if (!Metamodel.CanOwn(target.Kind, kind))
                         {
-                            Diag(SysmlSeverity.Warning, $"A {Metamodel.DisplayName(owner.Kind)} cannot contain a {Metamodel.DisplayName(kind)}; '{Name(d)}' was skipped", d.NameSpan);
+                            Diag(SysmlSeverity.Info, $"A {Metamodel.DisplayName(owner.Kind)} cannot contain a {Metamodel.DisplayName(kind)}; '{Name(d)}' is kept as text", d.NameSpan);
                             continue;
                         }
                         Diag(SysmlSeverity.Info, $"'{Name(d)}' was placed in {target.DisplayName}: a {Metamodel.DisplayName(owner.Kind)} cannot contain a {Metamodel.DisplayName(kind)}", d.NameSpan);
                     }
                     var index = previous != null && ReferenceEquals(previous.Owner, target) ? target.OwnedElements.ToList().IndexOf(previous) + 1 : -1;
-                    var name = fam is "decision" or "fork" ? d.Name : Name(d);
+                    var name = fam is "decision" or "fork" || d.Name == null && d.SyntheticName != null && fam == "action" ? d.Name : Name(d);
                     e = m.Create(target, kind, string.IsNullOrEmpty(name) ? null : name, index);
+                    if (fam == "action" && d.Name == null && d.SyntheticName != null && e.Name.Length > 0) m.Set(e, FieldKeys.Name, null);
                     Bind(d, e);
                     _created.Add(d);
                     created = true;
@@ -344,6 +366,10 @@ public static class SysMLv2Sync
             {
                 if (d.Name != null && d.Name != SysmlNameIndex.ExportName(e)) Rename(e, d.Name);
             }
+            else if (e.Kind == ElementKind.Action && SysMLv2Parser.ActionBodyKeywords.Contains(d.Keyword) && d.Name == null)
+            {
+                if (e.Name.Length > 0) Rename(e, "");
+            }
             else if (e.Kind != ElementKind.Model || d.Name != null)
             {
                 var name = Name(d);
@@ -356,11 +382,12 @@ public static class SysMLv2Sync
             if (e.Kind == ElementKind.Requirement)
             {
                 Set(e, FieldKeys.Text, docText);
-                var notes = d.Body.OfType<SysmlComment>().Select(c => c.Body).ToList();
+                var notes = d.Body.OfType<SysmlComment>().Where(IsPlain).Select(c => c.Body).ToList();
                 Set(e, FieldKeys.Documentation, notes.Count == 0 ? null : string.Join("\n\n", notes));
                 if (d.ShortName != null) Set(e, FieldKeys.RequirementId, d.ShortName);
                 else if (!created) Set(e, FieldKeys.RequirementId, null);
-                var subject = d.Decls.FirstOrDefault(x => x.Keyword == "subject");
+                var subject = d.Decls.FirstOrDefault(x => x.Keyword == "subject" && IsSimpleSubject(x));
+                if (subject != null) _mapped.Add(subject);
                 Set(e, SysMLv2Text.SubjectField, subject == null ? null
                     : SysMLv2Text.N(subject.Name ?? "subject") + (subject.Types.Count > 0 ? " : " + string.Join(", ", subject.Types.Select(t => t.Text)) : ""));
             }
@@ -370,14 +397,66 @@ public static class SysMLv2Sync
                 Set(e, FieldKeys.IsAbstract, d.IsAbstract ? "true" : null);
             if (e.Kind is ElementKind.Property or ElementKind.Port)
                 Set(e, FieldKeys.Multiplicity, string.IsNullOrEmpty(d.Multiplicity) ? "1" : d.Multiplicity);
+            else Set(e, SysMLv2Text.MultiplicityField, d.Multiplicity);
             if (e.Kind == ElementKind.Property) Set(e, FieldKeys.DefaultValue, d.Value);
-            if (e.Kind == ElementKind.Port) Set(e, FieldKeys.Direction, d.Direction);
+            else Set(e, SysMLv2Text.ValueField, d.Value);
+            Set(e, SysMLv2Text.ValueOpField, d.Value != null && d.ValueOp != "=" ? d.ValueOp : null);
+            if (e.Kind is ElementKind.Port or ElementKind.Property) Set(e, FieldKeys.Direction, d.Direction);
             if (e.Kind == ElementKind.ConstraintBlock)
             {
-                var exprs = d.Body.OfType<SysmlExpression>().Select(x => x.Text).ToList();
-                Set(e, FieldKeys.Body, exprs.Count == 0 ? null : string.Join("\n", exprs));
+                var exprs = d.Body.OfType<SysmlExpression>().ToList();
+                foreach (var x in exprs) _mapped.Add(x);
+                Set(e, FieldKeys.Body, exprs.Count == 0 ? null : string.Join("\n", exprs.Select(x => x.Text)));
             }
+            if (e.Kind is ElementKind.State or ElementKind.StateMachine)
+            {
+                foreach (var (kw, key) in new[] { ("entry", FieldKeys.Entry), ("do", FieldKeys.DoActivity), ("exit", FieldKeys.Exit) })
+                {
+                    var a = d.Decls.FirstOrDefault(x => x.Keyword == kw && x.Raw != null && x.Tags.Count == 0 && x.Modifiers.Count == 0);
+                    if (a != null) _mapped.Add(a);
+                    Set(e, key, a?.Raw);
+                }
+            }
+            if (e.Kind == ElementKind.Action) Set(e, SysMLv2Text.RawField, d.Raw);
+
+            // header details Meridian doesn't model, kept for the exporter
+            var prefix = d.Modifiers.Where(x => x is not ("public" or "private" or "protected") && !(x == "abstract" && Metamodel.IsClassifier(e.Kind))).ToList();
+            Set(e, SysMLv2Text.PrefixField, prefix.Count == 0 ? null : string.Join(" ", prefix));
+            var vis = d.Visibility;
+            if (vis != null) Set(e, FieldKeys.Visibility, vis);
+            else if (e.Get(FieldKeys.Visibility) is "private" or "protected") Set(e, FieldKeys.Visibility, null);
+            if (e.Kind != ElementKind.Requirement) Set(e, SysMLv2Text.ShortNameField, d.ShortName);
+            Set(e, SysMLv2Text.FlagsField, d.Flags.Count == 0 ? null : string.Join(" ", d.Flags));
+            Set(e, SysMLv2Text.RedefinesField, d.Redefines.Count == 0 ? null : string.Join(", ", d.Redefines.Select(RefText)));
+            Set(e, SysMLv2Text.UnnamedField, d.Name == null && d.Redefines.Count > 0 ? "true" : null);
+            Set(e, SysMLv2Text.ReferencesField, d.References.Count == 0 ? null : string.Join(", ", d.References.Select(RefText)));
+            Set(e, SysMLv2Text.ConjugatedField, d.Types.Count > 0 && d.Types[0].Conjugated ? "true" : null);
+
+            // metadata: #Tag prefixes and @Tag { name = value; } annotations → stereotypes and tagged values
+            var stereotypes = d.Tags.Where(t => !SpecialTags.Contains(t)).ToList();
+            var annotations = new List<string>();
+            var claimed = SysMLv2Text.AnnotationKeys(e).ToHashSet(StringComparer.Ordinal);
+            foreach (var md in d.Body.OfType<SysmlMetadata>().Where(x => !x.Complex))
+            {
+                _mapped.Add(md);
+                var n = md.Type.Text;
+                if (!stereotypes.Contains(n)) stereotypes.Add(n);
+                annotations.Add(n + ":" + string.Join(",", md.Values.Select(v => v.Name)));
+                foreach (var (k, v) in md.Values)
+                {
+                    claimed.Remove(k);
+                    Set(e, FieldKeys.TagPrefix + k, v);
+                }
+            }
+            foreach (var k in claimed) Set(e, FieldKeys.TagPrefix + k, null);   // removed from an annotation
+            Set(e, FieldKeys.Stereotypes, stereotypes.Count == 0 ? null : string.Join(",", stereotypes));
+            Set(e, SysMLv2Text.MetadataField, annotations.Count == 0 ? null : string.Join(";", annotations));
         }
+
+        private static bool IsSimpleSubject(SysmlDecl s) => !s.HasBody && s.Value == null && s.Modifiers.Count == 0 && s.Specializes.Count == 0
+                                                             && s.Redefines.Count == 0 && s.Multiplicity == null && s.Tags.Count == 0;
+
+        private static string RefText(SysmlRef r) => (r.Conjugated ? "~" : "") + string.Join(r.IsChain ? "." : "::", r.Segments.Select(SysMLv2Text.N));
 
         private void DeleteUnmatched(Element owner)
         {
@@ -405,12 +484,25 @@ public static class SysMLv2Sync
 
         // -------------------------------------------------------------- typing & specialization
 
+        /// <summary>True when a reference names something: the model, a declaration in this text, or the standard library.</summary>
+        private bool Known(SysmlRef r, Element context)
+        {
+            if (r.IsKeyword) return true;
+            if (L(r, context, null) != null) return true;
+            _docNames ??= doc.AllDecls().SelectMany(d => new[] { d.Name, d.ShortName, d.EffectiveName })
+                             .Concat(Aliases(doc.Members)).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            if (_docNames.Contains(r.IsChain ? r.Segments[0] : r.Segments[^1])) return true;
+            if (Metamodel.PrimitiveTypes.Contains(r.Simple) && (r.Segments.Count == 1 || r.Segments[0] == "ScalarValues")) return true;
+            return Lib.Contains(r.IsChain ? [r.Segments[0]] : r.Segments);
+        }
+
         private void Typing()
         {
             foreach (var (d, e) in Map.ToList())
             {
                 if (!m.Contains(e)) continue;
                 var context = e.Owner ?? m.Root;
+                string? typeText = null;
                 if (Metamodel.IsTypedFeature(e.Kind))
                 {
                     string? value = null;
@@ -419,7 +511,11 @@ public static class SysMLv2Sync
                         var hit = L(t, context, x => Metamodel.IsClassifier(x.Kind));
                         if (hit != null) value = hit.Id;
                         else if (Metamodel.PrimitiveTypes.Contains(t.Simple) && (t.Segments.Count == 1 || t.Segments[0] == "ScalarValues")) value = t.Simple;
-                        else value = t.Text;
+                        else
+                        {
+                            value = t.Text;
+                            if (!Known(t, context)) Diag(SysmlSeverity.Warning, $"Unknown type '{t.Text}'", t.Span);
+                        }
                     }
                     if (e.TypeRef != (value ?? ""))
                     {
@@ -427,22 +523,41 @@ public static class SysMLv2Sync
                         Change(SysmlChangeKind.Update, $"Retype {e.DisplayName} to {(value != null && m.Find(value) is { } te ? te.DisplayName : value ?? "(none)")}");
                     }
                 }
-                if (e.Kind == ElementKind.Action)
+                else if (e.Kind == ElementKind.Action)
                 {
                     var b = d.Types.FirstOrDefault() is { } t ? L(t, context, x => x.Kind == ElementKind.Activity) : null;
-                    if (d.Types.Count > 0 && b == null) Diag(SysmlSeverity.Warning, $"Unknown action definition '{d.Types[0].Text}'", d.Types[0].Span);
+                    if (d.Types.Count > 0 && b == null)
+                    {
+                        typeText = RefText(d.Types[0]);
+                        if (!Known(d.Types[0], context)) Diag(SysmlSeverity.Warning, $"Unknown action definition '{d.Types[0].Text}'", d.Types[0].Span);
+                    }
                     Set(e, FieldKeys.Behavior, b?.Id);
                 }
+                var subsets = new List<SysmlRef>();
+                var extraSupers = new List<SysmlRef>();
                 if (Metamodel.IsClassifier(e.Kind) && e.Kind != ElementKind.Model)
                 {
                     var wanted = new List<Element>();
-                    var refs = d.Specializes.Concat(!d.IsDef && e.Kind is ElementKind.Block ? d.Types : []).ToList();
+                    var blockUsage = !d.IsDef && e.Kind is ElementKind.Block;
+                    var refs = d.IsDef ? d.Specializes.ToList() : blockUsage ? d.Types.ToList() : [];
+                    if (!d.IsDef) subsets.AddRange(d.Specializes);
                     foreach (var r in refs)
                     {
                         var g = L(r, context, x => x.Kind == e.Kind && !ReferenceEquals(x, e))
                                 ?? L(r, context, x => Metamodel.IsClassifier(x.Kind) && !ReferenceEquals(x, e));
-                        if (g == null) { Diag(SysmlSeverity.Warning, $"Unknown supertype '{r.Text}' of '{e.Name}'", r.Span); continue; }
+                        if (g == null || Metamodel.CheckEnds(ElementKind.Generalization, e.Kind, g.Kind) != null)
+                        {
+                            if (!Known(r, context)) Diag(SysmlSeverity.Warning, $"Unknown supertype '{r.Text}' of '{e.Name}'", r.Span);
+                            if (blockUsage) typeText = typeText == null ? RefText(r) : typeText + ", " + RefText(r);
+                            else extraSupers.Add(r);
+                            continue;
+                        }
                         wanted.Add(g);
+                    }
+                    if (!blockUsage && d.Types.Count > 0)
+                    {
+                        typeText = string.Join(", ", d.Types.Select(RefText));
+                        foreach (var t in d.Types.Where(t => !Known(t, context))) Diag(SysmlSeverity.Warning, $"Unknown type '{t.Text}'", t.Span);
                     }
                     var existing = m.Outgoing(e, ElementKind.Generalization).ToList();
                     foreach (var r in existing.Where(r => !wanted.Contains(r.Target)).ToList())
@@ -454,6 +569,38 @@ public static class SysMLv2Sync
                         TryConnect(ElementKind.Generalization, e, g, null, d.Specializes.FirstOrDefault()?.Span ?? d.NameSpan,
                                    $"{e.DisplayName} specializes {g.DisplayName}");
                 }
+                else if (!Metamodel.IsTypedFeature(e.Kind) && e.Kind != ElementKind.Action && d.Types.Count > 0)
+                    typeText = string.Join(", ", d.Types.Select(RefText));
+                else if (e.Kind != ElementKind.Model) subsets.AddRange(d.Specializes);
+                if (e.Kind is ElementKind.Package or ElementKind.Model) extraSupers.AddRange(d.Specializes);
+
+                Set(e, SysMLv2Text.TypeField, typeText);
+                Set(e, SysMLv2Text.SubsetsField, subsets.Count == 0 ? null : string.Join(", ", subsets.Select(RefText)));
+                Set(e, SysMLv2Text.SpecializesField, extraSupers.Count == 0 ? null : string.Join(", ", extraSupers.Select(RefText)));
+
+                // the keyword as written, when the exporter would choose another one
+                var written = d.KeywordText.Length == 0 ? SysMLv2Text.NoKeyword : d.KeywordText + (d.IsDef ? " def" : "");
+                if (d.Tags.Contains("actor") && e.Kind == ElementKind.Actor) written = d.KeywordText + (d.IsDef ? " def" : "");
+                Set(e, SysMLv2Text.KeywordField, written == SysMLv2Text.DefaultKeyword(m, e) ? null : written);
+            }
+        }
+
+        private static IEnumerable<string?> Aliases(IEnumerable<SysmlMember> body)
+        {
+            foreach (var x in body)
+            {
+                if (x is SysmlUnsupported { Keyword: "alias" } a) yield return a.Name;
+                if (x is SysmlDecl d) foreach (var n in Aliases(d.Body)) yield return n;
+            }
+        }
+
+        private void CheckImports(IEnumerable<SysmlMember> body)
+        {
+            foreach (var x in body)
+            {
+                if (x is SysmlImport { Namespace: { } ns } && !Known(ns, scope))
+                    Diag(SysmlSeverity.Warning, $"Unknown namespace '{ns.Text}' in import", ns.Span);
+                if (x is SysmlDecl d) CheckImports(d.Body);
             }
         }
 
@@ -469,6 +616,9 @@ public static class SysMLv2Sync
             public string? SourcePart { get; init; }
             public string? TargetPart { get; init; }
             public string? Item { get; init; }
+            public string? Via { get; init; }
+            public string? Usage { get; init; }
+            public SysmlMember? Member { get; init; }
         }
 
         private static ElementKind Family(ElementKind k) => k == ElementKind.ObjectFlow ? ElementKind.ControlFlow : k;
@@ -529,11 +679,18 @@ public static class SysMLv2Sync
                 m.Delete(r);
                 Change(SysmlChangeKind.Disconnect, "Remove " + label);
             }
-            foreach (var (f, r) in matched) SetRelFields(r, f);
+            foreach (var (f, r) in matched)
+            {
+                SetRelFields(r, f);
+                if (f.Member != null) _mapped.Add(f.Member);
+            }
             foreach (var f in fresh)
             {
                 if (TryConnect(f.Kind, f.Source, f.Target, f.Owner, f.Span, "Add " + Describe(f.Kind, f.Source, f.Target)) is { } r)
+                {
                     SetRelFields(r, f);
+                    if (f.Member != null) _mapped.Add(f.Member);
+                }
             }
         }
 
@@ -542,7 +699,7 @@ public static class SysMLv2Sync
 
         private static bool Same(Fact f, Relationship r) =>
             (f.Name ?? "") == r.Name && (f.Guard ?? "") == r.Get(FieldKeys.Guard) && (f.SourcePart ?? "") == r.Get(FieldKeys.SourcePart)
-            && (f.TargetPart ?? "") == r.Get(FieldKeys.TargetPart);
+            && (f.TargetPart ?? "") == r.Get(FieldKeys.TargetPart) && (f.Via ?? "") == r.Get(SysMLv2Text.ViaField);
 
         private void SetRelFields(Relationship r, Fact f)
         {
@@ -564,6 +721,11 @@ public static class SysMLv2Sync
                 var item = f.Item == null ? null : _names.Lookup(f.Item.Split("::"), r.Owner ?? scope, x => Metamodel.IsClassifier(x.Kind))?.Id ?? f.Item;
                 if (item == null || m.Find(r.Get(FieldKeys.ItemFlow)) is not { } cur || cur.Id != item) Set(r, FieldKeys.ItemFlow, item);
             }
+            if (f.Kind == ElementKind.Allocate)
+            {
+                Set(r, SysMLv2Text.ViaField, f.Via);
+                Set(r, SysMLv2Text.UsageField, f.Usage);
+            }
         }
 
         private Relationship? TryConnect(ElementKind kind, Element s, Element t, Element? owner, TextSpan span, string description)
@@ -583,17 +745,24 @@ public static class SysMLv2Sync
             }
             catch (InvalidOperationException ex)
             {
-                Diag(SysmlSeverity.Warning, ex.Message, span);
+                Diag(SysmlSeverity.Warning, ex.Message + " (kept as text)", span);
                 return null;
             }
         }
 
+        /// <summary>Resolves a reference; an unknown name is a warning unless the text or the library declares it (then it's kept as text).</summary>
         private Element? Resolve(SysmlRef? r, Element context, string what)
         {
             if (r == null) return null;
             var hit = L(r, context, null);
-            if (hit == null) Diag(SysmlSeverity.Warning, $"Unknown {what} '{r.Text}'", r.Span);
+            if (hit == null) Unresolved(r, context, what);
             return hit;
+        }
+
+        private void Unresolved(SysmlRef r, Element context, string what)
+        {
+            if (Known(r, context)) Diag(SysmlSeverity.Info, $"'{r.Text}' is not a Meridian model element; the statement is kept as text", r.Span);
+            else Diag(SysmlSeverity.Warning, $"Unknown {what} '{r.Text}'", r.Span);
         }
 
         private (Element? End, string? Part) ResolveEnd(SysmlRef r, Element context)
@@ -602,7 +771,7 @@ public static class SysMLv2Sync
             var path = _names.LookupChain(r.Segments, context);
             if (path == null && _renamedFrom.TryGetValue(r.Segments[0], out var renamed))
                 path = _names.LookupChain([SysmlNameIndex.ExportName(renamed), .. r.Segments.Skip(1)], context);
-            if (path == null) { Diag(SysmlSeverity.Warning, $"Unknown connector end '{r.Text}'", r.Span); return (null, null); }
+            if (path == null) { Unresolved(r, context, "connector end"); return (null, null); }
             return (path[^1], path.Count > 1 ? path[^2].Id : null);
         }
 
@@ -628,6 +797,9 @@ public static class SysMLv2Sync
             return L(r, behavior, null);
         }
 
+        private static bool IsStructural(Element e) =>
+            e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Actor or ElementKind.InterfaceBlock or ElementKind.UseCase;
+
         private void CollectFacts(IEnumerable<SysmlMember> body, Element ctx, List<Fact> into)
         {
             foreach (var x in Flat(body))
@@ -635,11 +807,18 @@ public static class SysMLv2Sync
                 switch (x)
                 {
                     case SysmlDecl d:
-                        if (d.Connect is { } conn && d.Keyword is "connection" or "interface")
-                            AddConnector(into, ctx, conn.From, conn.To, d.Name, null, x.Span);
+                        if (d.Connect is { } conn && d.Keyword is "connection" or "interface" && !Map.ContainsKey(d) && IsBareUsage(d, allowTypes: false))
+                            AddConnector(into, ctx, conn.From, conn.To, d.Name, null, x.Span, member: d);
+                        else if (d.Keyword is "perform action" or "exhibit state" && !Map.ContainsKey(d) && IsStructural(ctx) && d.Types.Count == 1 && IsBareUsage(d, allowTypes: true))
+                        {
+                            var perform = d.Keyword == "perform action";
+                            var behavior = L(d.Types[0], ctx, perform ? y => y.Kind == ElementKind.Activity : y => y.Kind == ElementKind.StateMachine);
+                            if (behavior != null)
+                                into.Add(new Fact(ElementKind.Allocate, behavior, ctx, ctx, d.Span) { Via = perform ? "perform" : "exhibit", Usage = d.Name, Member = d });
+                        }
                         if (Map.TryGetValue(d, out var e) && m.Contains(e)) CollectFacts(d.Body, e, into);
                         break;
-                    case SysmlRelation r:
+                    case SysmlRelation { Complex: false } r:
                         AddRelation(into, ctx, r);
                         break;
                     case SysmlSuccession s:
@@ -650,34 +829,47 @@ public static class SysMLv2Sync
                             ElementKind.StateMachine or ElementKind.State => ElementKind.Transition,
                             _ => (ElementKind?)null,
                         };
-                        if (kind == null) { Diag(SysmlSeverity.Warning, $"Successions are only supported inside action and state definitions", s.Span); break; }
-                        if (s.First == null || s.Then == null) break;
+                        if (kind == null || s.First == null || s.Then == null) break;   // kept as text
                         var a = ResolveNode(s.First, ctx, create: true);
                         var b = ResolveNode(s.Then, ctx, create: true);
-                        if (a == null) { Diag(SysmlSeverity.Warning, $"Unknown {(kind == ElementKind.Transition ? "state" : "action")} '{s.First.Text}'", s.First.Span); break; }
-                        if (b == null) { Diag(SysmlSeverity.Warning, $"Unknown {(kind == ElementKind.Transition ? "state" : "action")} '{s.Then.Text}'", s.Then.Span); break; }
-                        into.Add(new Fact(kind.Value, a, b, a.Owner ?? ctx, s.Span) { Name = s.Name, Guard = s.Guard, Effect = s.Effect, Trigger = s.Trigger });
+                        var what = kind == ElementKind.Transition ? "state" : "action";
+                        if (a == null) { Unresolved(s.First, ctx, what); break; }
+                        if (b == null) { Unresolved(s.Then, ctx, what); break; }
+                        into.Add(new Fact(kind.Value, a, b, a.Owner ?? ctx, s.Span) { Name = s.Name, Guard = s.Guard, Effect = s.Effect, Trigger = s.Trigger, Member = s });
                         break;
                     }
                 }
             }
         }
 
-        private void AddConnector(List<Fact> into, Element ctx, SysmlRef from, SysmlRef to, string? name, string? item, TextSpan span, ElementKind kind = ElementKind.Connector)
+        private static bool IsBareUsage(SysmlDecl d, bool allowTypes) =>
+            !d.HasBody && d.Value == null && d.Multiplicity == null && d.Specializes.Count == 0 && d.Redefines.Count == 0 && d.References.Count == 0
+            && d.Modifiers.Count == 0 && d.Tags.Count == 0 && d.Direction == null && d.Flags.Count == 0 && d.ShortName == null && (allowTypes || d.Types.Count == 0);
+
+        private void AddConnector(List<Fact> into, Element ctx, SysmlRef from, SysmlRef to, string? name, string? item, TextSpan span,
+                                  ElementKind kind = ElementKind.Connector, SysmlMember? member = null)
         {
             var (a, ap) = ResolveEnd(from, ctx);
             var (b, bp) = ResolveEnd(to, ctx);
             if (a == null || b == null) return;
-            into.Add(new Fact(kind, a, b, ctx, span) { Name = name, SourcePart = ap, TargetPart = bp, Item = item });
+            into.Add(new Fact(kind, a, b, ctx, span) { Name = name, SourcePart = ap, TargetPart = bp, Item = item, Member = member });
         }
 
         private void AddRelation(List<Fact> into, Element ctx, SysmlRelation r)
         {
             switch (r.Keyword)
             {
-                case "connect": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span); return;
-                case "flow": AddConnector(into, ctx, r.Source!, r.Target!, r.Name, r.Detail, r.Span); return;
-                case "bind": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span, ElementKind.Binding); return;
+                case "connect": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span, member: r); return;
+                case "flow": AddConnector(into, ctx, r.Source!, r.Target!, r.Name, r.Detail, r.Span, member: r); return;
+                case "bind": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span, ElementKind.Binding, member: r); return;
+                case "perform" or "exhibit":
+                {
+                    if (!IsStructural(ctx) || r.Target == null) return;
+                    var behavior = L(r.Target, ctx, y => y.Kind is ElementKind.Activity or ElementKind.StateMachine or ElementKind.Action or ElementKind.State);
+                    if (behavior == null) return;
+                    into.Add(new Fact(ElementKind.Allocate, behavior, ctx, ctx, r.Span) { Via = r.Keyword, Member = r });
+                    return;
+                }
             }
             var kind = r.Keyword switch
             {
@@ -694,38 +886,89 @@ public static class SysMLv2Sync
                 _ => (ElementKind?)null,
             };
             if (kind == null) return;
-            if (kind == ElementKind.Verify && ctx.Kind != ElementKind.TestCase && r.Source == null)
-            {
-                Diag(SysmlSeverity.Info, "'verify' is only mapped inside verification definitions", r.Span);
-                return;
-            }
+            if (kind == ElementKind.Verify && ctx.Kind != ElementKind.TestCase && r.Source == null) return;   // kept as text
+            if (kind == ElementKind.Dependency && r.Name != null) return;                                     // named dependency: kept as text
             var target = Resolve(r.Target, ctx, kind == ElementKind.Satisfy || kind == ElementKind.Verify ? "requirement" : "element");
             var source = r.Source == null ? ctx : Resolve(r.Source, ctx, "element");
             if (source == null || target == null) return;
             var owner = kind is ElementKind.Verify or ElementKind.Include or ElementKind.Extend ? m.DefaultOwnerFor(source.Owner ?? ctx, kind.Value) : ctx;
-            into.Add(new Fact(kind.Value, source, target, owner, r.Span) { Name = r.Keyword == "message" ? r.Name : null, Sort = r.Detail });
+            into.Add(new Fact(kind.Value, source, target, owner, r.Span) { Name = r.Keyword == "message" ? r.Name : null, Sort = r.Detail, Member = r });
         }
 
-        // -------------------------------------------------------------- reporting & navigation
+        // -------------------------------------------------------------- text kept verbatim
 
-        private void Report(IEnumerable<SysmlMember> body, Element? ctx)
+        /// <summary>Stores every member that isn't represented in the model as verbatim text on its nearest mapped owner:
+        /// before the first mapped declaration in <see cref="SysMLv2Text.UnmappedHeadField"/>, after it in <see cref="SysMLv2Text.UnmappedField"/>.</summary>
+        private void StoreUnmapped()
         {
-            foreach (var x in body)
+            var visited = new HashSet<Element>(ReferenceEqualityComparer.Instance);
+            void Visit(IEnumerable<SysmlMember> body, Element owner)
             {
-                switch (x)
+                visited.Add(owner);
+                var head = new List<string>();
+                var tail = new List<string>();
+                Collect(body, owner, head, tail, false);
+                Set(owner, SysMLv2Text.UnmappedHeadField, head.Count == 0 ? null : string.Join("\n", head));
+                Set(owner, SysMLv2Text.UnmappedField, tail.Count == 0 ? null : string.Join("\n", tail));
+            }
+            bool Collect(IEnumerable<SysmlMember> body, Element owner, List<string> head, List<string> tail, bool seen)
+            {
+                var list = body.ToList();
+                var covered = new HashSet<SysmlDecl>(list.OfType<SysmlSuccession>().Where(s => s.Shorthand != null && !IsMapped(s, owner) && !IsMapped(s.Shorthand, owner))
+                                                         .Select(s => s.Shorthand!), ReferenceEqualityComparer.Instance);
+                foreach (var x in list)
                 {
-                    case SysmlUnsupported u:
-                        Diag(SysmlSeverity.Info, $"'{u.Keyword}' is not represented in the Meridian model and is ignored", u.Span);
-                        break;
-                    case SysmlDecl d:
-                        var mapped = Map.ContainsKey(d) || d.Keyword is "objective" or "subject" || d.Connect != null;
-                        if (!mapped && ctx != null && !ReferenceEquals(d, _top))
-                            Diag(SysmlSeverity.Warning, $"'{d.Keyword}{(d.IsDef ? " def" : "")}'{(d.Name != null ? $" {d.Name}" : "")} has no Meridian equivalent inside a {Metamodel.DisplayName(ctx.Kind)} and is ignored", d.NameSpan);
-                        Report(d.Body, Map.GetValueOrDefault(d) ?? (mapped ? ctx : null));
-                        break;
+                    if (IsVerifyObjective(x)) { seen = Collect(((SysmlDecl)x).Body, owner, head, tail, seen); continue; }
+                    if (IsMapped(x, owner))
+                    {
+                        if (x is SysmlDecl d && Map.TryGetValue(d, out var e) && m.Contains(e)) Visit(d.Body, e);
+                        if (x is SysmlDecl or SysmlRelation or SysmlSuccession or SysmlExpression) seen = true;
+                        continue;
+                    }
+                    if (x is SysmlDecl cd && covered.Contains(cd)) continue;
+                    if (x is SysmlSuccession { Shorthand: { } sh } && IsMapped(sh, owner)) continue;   // its target is mapped; the bare "then" is implied
+                    (seen ? tail : head).Add(MemberText(x));
+                    if (x is SysmlDecl or SysmlUnsupported { Keyword: not ("alias" or "rep") } && result.Diagnostics.Count < 500)
+                        Diag(SysmlSeverity.Info, $"{Label(x)} has no Meridian model equivalent here; it is kept as text", x is SysmlDecl dd ? dd.NameSpan : x.Span);
                 }
+                return seen;
+            }
+            Visit(_topBody, scope);
+            foreach (var e in Map.Values.Where(e => !visited.Contains(e) && m.Contains(e)))
+            {
+                Set(e, SysMLv2Text.UnmappedHeadField, null);
+                Set(e, SysMLv2Text.UnmappedField, null);
             }
         }
+
+        private static string Label(SysmlMember x) => x switch
+        {
+            SysmlDecl d => $"'{d.KeywordText}{(d.IsDef ? " def" : "")}{(d.Name != null ? " " + d.Name : "")}'".Replace("' ", "'"),
+            SysmlUnsupported u => $"'{u.Keyword}'",
+            _ => "This statement",
+        };
+
+        private bool IsMapped(SysmlMember x, Element owner) => x switch
+        {
+            SysmlDoc => true,
+            SysmlUnsupported { Keyword: "first" } => owner.Kind is ElementKind.Activity or ElementKind.StateMachine or ElementKind.State,
+            SysmlComment c => IsPlain(c),
+            SysmlMetadata md => _mapped.Contains(md),
+            SysmlDecl d => Map.TryGetValue(d, out var e) && m.Contains(e) || _mapped.Contains(d),
+            SysmlRelation or SysmlSuccession or SysmlExpression => _mapped.Contains(x),
+            _ => false,
+        };
+
+        private string MemberText(SysmlMember x)
+        {
+            var s = doc.Text[x.Span.Start..Math.Min(doc.Text.Length, x.Span.End)];
+            var lineStart = x.Span.Start == 0 ? 0 : doc.Text.LastIndexOf('\n', x.Span.Start - 1) + 1;
+            var indent = 0;
+            while (lineStart + indent < doc.Text.Length && doc.Text[lineStart + indent] is ' ' or '\t') indent++;
+            return SysMLv2Parser.Dedent(s.TrimEnd(), indent);
+        }
+
+        // -------------------------------------------------------------- navigation
 
         public Element? ElementAt(int offset)
         {
@@ -787,7 +1030,7 @@ public static class SysMLv2Sync
             if (!string.IsNullOrEmpty(e.Name)) _renamedFrom.TryAdd(e.Name, e);
             var old = e.DisplayName;
             m.Rename(e, name);
-            Change(SysmlChangeKind.Rename, $"Rename {old} → {name}");
+            Change(SysmlChangeKind.Rename, $"Rename {old} → {(name.Length == 0 ? "(anonymous)" : name)}");
         }
 
         private void Set(Element e, string key, string? value)

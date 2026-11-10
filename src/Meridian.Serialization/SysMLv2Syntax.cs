@@ -58,8 +58,16 @@ public sealed class SysmlDecl : SysmlMember
 {
     /// <summary>The kind keyword, normalized: "package", "part", "port", "attribute", "item", "enum", "constraint", "requirement",
     /// "verification", "action", "state", "use case", "occurrence", "interface", "connection", "allocation", "subject", "flow" …</summary>
-    public string Keyword { get; init; } = "";
-    public bool IsDef { get; init; }
+    public string Keyword { get; internal set; } = "";
+    public bool IsDef { get; internal set; }
+    /// <summary>The keyword phrase exactly as written, without modifiers and 'def' ("part", "analysis case", "perform action");
+    /// empty when the declaration has no keyword (<c>in x : Real;</c>, <c>:>> mass = 1;</c>, an enum literal shorthand).</summary>
+    public string KeywordText { get; internal set; } = "";
+    public bool ImplicitKeyword => KeywordText.Length == 0;
+    /// <summary>Prefix keywords other than the direction, in source order: visibility, abstract, readonly, derived, end, ref,
+    /// variation, variant, individual, constant, standard, library …</summary>
+    public List<string> Modifiers { get; } = new();
+    public string? Visibility => Modifiers.FirstOrDefault(m => m is "public" or "private" or "protected");
     public string? Name { get; internal set; }
     public TextSpan NameSpan { get; internal set; }
     public string? ShortName { get; internal set; }
@@ -69,8 +77,20 @@ public sealed class SysmlDecl : SysmlMember
     public List<SysmlRef> Types { get; } = new();
     public List<SysmlRef> Specializes { get; } = new();
     public List<SysmlRef> Redefines { get; } = new();
+    /// <summary><c>::></c> / <c>references</c> targets.</summary>
+    public List<SysmlRef> References { get; } = new();
     public string? Multiplicity { get; internal set; }
+    /// <summary>Header flags after the name: ordered, nonunique, parallel.</summary>
+    public List<string> Flags { get; } = new();
     public string? Value { get; internal set; }
+    /// <summary>How the value is bound: "=", ":=", "default", "default =", "default :=".</summary>
+    public string? ValueOp { get; internal set; }
+    public TextSpan ValueSpan { get; internal set; }
+    /// <summary>True when the header has clauses the mapper doesn't model (allocate / from / of / about / via …).</summary>
+    public bool OpaqueHeader { get; internal set; }
+    /// <summary>Action-body statements (accept, send, assign, if, while, for, terminate) and state actions (entry, do, exit):
+    /// the statement text after the keyword, without the final ';'.</summary>
+    public string? Raw { get; internal set; }
     public string? Id { get; internal set; }
     /// <summary>The <c>connect a to b</c> clause of connection / interface usages.</summary>
     public (SysmlRef From, SysmlRef To)? Connect { get; internal set; }
@@ -105,6 +125,17 @@ public sealed class SysmlComment : SysmlMember
 public sealed class SysmlImport : SysmlMember
 {
     public string Target { get; init; } = "";
+    /// <summary>The imported namespace (or member) without the wildcard.</summary>
+    public SysmlRef? Namespace { get; init; }
+}
+
+/// <summary>A metadata annotation <c>@Safety { isMandatory = true; }</c> (or <c>@Safety;</c>).</summary>
+public sealed class SysmlMetadata : SysmlMember
+{
+    public SysmlRef Type { get; init; } = default!;
+    public List<(string Name, string Value)> Values { get; } = new();
+    /// <summary>True when the annotation has more than simple <c>name = value;</c> entries (about, nested declarations …).</summary>
+    public bool Complex { get; internal set; }
 }
 
 /// <summary>Binary relationship statements: satisfy, verify, allocate, dependency (and tagged variants), include, message, connect, bind, flow.</summary>
@@ -119,6 +150,8 @@ public sealed class SysmlRelation : SysmlMember
     public SysmlRef? Target { get; init; }
     /// <summary>message sort (synchCall / asynchCall / reply) or the item conveyed by a flow.</summary>
     public string? Detail { get; init; }
+    /// <summary>True when the statement has parts the mapper doesn't model (kept as text).</summary>
+    public bool Complex { get; init; }
 }
 
 /// <summary>A succession or transition: <c>first a then b;</c>, <c>transition t first s1 accept e if g do x then s2;</c>, <c>then b;</c>.</summary>
@@ -131,6 +164,8 @@ public sealed class SysmlSuccession : SysmlMember
     public string? Trigger { get; init; }
     public string? Guard { get; init; }
     public string? Effect { get; init; }
+    /// <summary>For <c>then action x;</c>: the declaration the shorthand introduced (the succession span covers it).</summary>
+    public SysmlDecl? Shorthand { get; init; }
 }
 
 /// <summary>A bare expression (constraint bodies) kept verbatim.</summary>
@@ -143,6 +178,8 @@ public sealed class SysmlExpression : SysmlMember
 public sealed class SysmlUnsupported : SysmlMember
 {
     public string Keyword { get; init; } = "";
+    /// <summary>The name an alias declares.</summary>
+    public string? Name { get; init; }
 }
 
 /// <summary>The result of parsing a .sysml text.</summary>

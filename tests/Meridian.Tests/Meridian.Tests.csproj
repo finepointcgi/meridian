@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="SysMLv2Corpus\*.sysml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Meridian.Core\Meridian.Core.csproj" />
     <ProjectReference Include="..\..\src\Meridian.Serialization\Meridian.Serialization.csproj" />
     <ProjectReference Include="..\..\src\Meridian.Data\Meridian.Data.csproj" />
