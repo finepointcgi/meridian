@@ -2,19 +2,38 @@
 @using Meridian.Web.CodeSync
 @inject CodeSyncState State
 
-@* Title-bar badge: code changes from connected repositories waiting for review. Opens the "What changed" tab. *@
-@if (State.PendingCount > 0)
+@* Title-bar badge: code changes from connected repositories waiting for review, and open pull request previews
+   ("PR #n"). Opens the "What changed" tab. *@
+@if (State.PendingCount > 0 || State.Previews.Count > 0)
 {
+    var previews = State.Previews;
     <MudTooltip Text="@Tip">
         <button class="chg-badge" @onclick="Open" data-testid="code-changes-badge">
             <MudIcon Icon="@Icons.Material.Outlined.Difference" Style="font-size:15px" />
-            Code changes (@State.PendingCount)
+            @(State.PendingCount > 0 ? $"Code changes ({State.PendingCount})" : "Code changes")
+            @foreach (var p in previews.Take(3))
+            {
+                <span class="chg-pr" data-pr="@p.PullRequest">PR #@p.PullRequest</span>
+            }
+            @if (previews.Count > 3)
+            {
+                <span class="chg-pr">+@(previews.Count - 3)</span>
+            }
         </button>
     </MudTooltip>
 }
 
 @code {
-    private string Tip => $"{State.OpenRuns} push{(State.OpenRuns == 1 ? "" : "es")} from code waiting for review — open “What changed”";
+    private string Tip
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (State.OpenRuns > 0) parts.Add($"{State.OpenRuns} push{(State.OpenRuns == 1 ? "" : "es")} from code waiting for review");
+            if (State.Previews.Count > 0) parts.Add($"{State.Previews.Count} pull request preview{(State.Previews.Count == 1 ? "" : "s")}");
+            return string.Join(", ", parts) + " — open “What changed”";
+        }
+    }
 
     protected override void OnInitialized()
     {

@@ -888,6 +888,9 @@
         // Code-sync review: added / changed / removed outlines, and ghosts of removed shapes at main's positions.
         if (Ws.HighlightCodeChanges && Ws.CodeChanges is { } changes)
             SvgRenderer.RenderChangeHighlights(sb, C.Diagram, C.BoundsOf, C.WaypointsFor, changes.Kinds, changes.GhostSource?.Find(C.Diagram.Id) as Diagram);
+        // Architecture check: red dashed edges between blocks whose code violates the architecture.
+        if (Ws.ArchitectureViolations is { } violations)
+            SvgRenderer.RenderViolationEdges(sb, C.Diagram, C.BoundsOf, violations);
         return sb.ToString();
     }
 

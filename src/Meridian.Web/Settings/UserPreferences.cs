@@ -39,6 +39,8 @@ public sealed class UserPreferences
     // ---------------------------------------------------------------- editor
     public bool ConfirmDeleteFromModel { get; set; }
     public bool TourSeen { get; set; }
+    /// <summary>The release whose "What's new" card the user has seen (or skipped by taking the tour), e.g. "0.5".</summary>
+    public string? WhatsNewSeen { get; set; }
 
     // ---------------------------------------------------------------- AI assistant
     public bool AssistantEnabled { get; set; } = true;
@@ -83,6 +85,7 @@ public sealed class UserPreferences
         if (!Enum.IsDefined(ConnectorStyle)) ConnectorStyle = ConnectorDefault.Automatic;
         if (!Enum.IsDefined(DefaultZoom)) DefaultZoom = DefaultZoom.Fit;
         if (!AssistantModels.All.Any(m => m.Id == AssistantModel)) AssistantModel = AssistantModels.Default;
+        if (WhatsNewSeen is { Length: > 16 }) WhatsNewSeen = null;
         Favorites = (Favorites ?? new()).Where(f => !string.IsNullOrEmpty(f) && f.Length <= 64).Distinct().Take(500).ToList();
         return this;
     }

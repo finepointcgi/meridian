@@ -90,3 +90,33 @@
 .tour-skip { border: none; background: none; color: var(--text-3); font: 500 12px Inter, sans-serif; cursor: pointer; padding: 0; }
 .tour-btn { height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text); font: 600 12.5px Inter, sans-serif; cursor: pointer; }
 .tour-btn.primary { border: none; background: var(--accent-grad, #4f8cff); color: #fff; }
+.tour-card { max-height: calc(100dvh - 24px); overflow-y: auto; box-sizing: border-box; }
+.tour-card.tour-wide { width: 380px; }
+.tour-chapters-link { margin-left: 4px; }
+.tour-card .tour-step { display: flex; gap: 10px; align-items: baseline; }
+.tour-kicker { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tour-count { flex: none; color: var(--text-3); letter-spacing: .04em; }
+.tour-chapter-list, .tour-whatsnew-list { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 12px; }
+.tour-chapter { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--text); font: 13px Inter, sans-serif; text-align: left; cursor: pointer; }
+.tour-chapter:hover, .tour-chapter:focus-visible { background: var(--hover); border-color: var(--border); outline: none; }
+.tour-chapter > .mud-icon-root { font-size: 20px; color: var(--accent, #4f8cff); flex: none; }
+.tour-chapter > span:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tour-chapter-blurb { color: var(--text-3); font-size: 12px; line-height: 1.35; }
+.tour-chapter-len { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+.tour-new { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tour-new:last-child { border-bottom: none; }
+.tour-new > div { flex: 1; min-width: 0; }
+.tour-new .tour-btn { height: 26px; padding: 0 10px; flex: none; }
+/* What's new: a card in the corner that leaves the workbench usable. */
+.tour.tour-light { inset: auto; }
+.tour-card.tour-whatsnew { position: fixed; right: 18px; bottom: 44px; }
+
+/* Empty states: one-click ways to start. */
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; pointer-events: auto; }
+.empty-action { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong);
+  background: var(--panel-solid, transparent); color: var(--text); font: 600 12.5px Inter, sans-serif; cursor: pointer; }
+.empty-action .mud-icon-root { font-size: 17px; }
+.empty-action:hover:not(:disabled) { background: var(--hover); }
+.empty-action.primary { border: none; background: var(--accent-grad, #4f8cff); color: #fff; }
+.empty-action:disabled { opacity: .45; cursor: default; }

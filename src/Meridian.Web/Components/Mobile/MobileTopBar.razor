@@ -34,6 +34,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects…</MudMenuItem>
                 <MudMenuItem Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="() => Shell?.ToggleDarkMode()">@(Ws.DarkMode ? "Light mode" : "Dark mode")</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => Shell?.OpenSettings()">Settings…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="() => Shell?.ShowTour() ?? Task.CompletedTask" data-testid="m-tour">Tour…</MudMenuItem>
                 @if (!Host.LocalMode)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="() => Shell?.SignOutOfMeridian()">Sign out</MudMenuItem>
