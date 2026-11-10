@@ -101,7 +101,7 @@ public sealed partial class ProjectSession : IDisposable
         _db = db;
         _log = log;
         _onEmpty = onEmpty;
-        _persistTimer = new Timer(_ => _ = PersistAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        _persistTimer = new Timer(_ => _ = PersistIfDueAsync(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
     }
 
     public Guid ProjectId { get; }
@@ -163,7 +163,7 @@ public sealed partial class ProjectSession : IDisposable
             _master.ApplyRemote(op);
             Events?.OperationApplied(ProjectId, Name, userId, op, _master);
             Sequence++;
-            _dirty = true;
+            MarkDirty();
             _lastEditor = userId;
             foreach (var (id, p) in _participants)
                 if (id != participantId) p.Client.RemoteOp(op);
@@ -188,7 +188,7 @@ public sealed partial class ProjectSession : IDisposable
         {
             _master = ProjectFile.Deserialize(modelJson);
             Sequence++;
-            _dirty = true;
+            MarkDirty();
             _lastEditor = userId;
             foreach (var p in _participants.Values) p.Client.Reset(modelJson);
         }
@@ -209,28 +209,78 @@ public sealed partial class ProjectSession : IDisposable
         foreach (var p in _participants.Values) p.Client.PresenceChanged();
     }
 
-    public async Task PersistAsync()
+    // ---------------------------------------------------------------- persistence (batched)
+    //
+    // Operations are never serialized one by one: they mark the session dirty, and the whole model is written at most once per
+    // burst of edits — after editing pauses for QuietPeriod, or after MaxStaleness of continuous editing — and never more often
+    // than ~10× the time the last save took (so a huge model doesn't spend its time serializing). Explicit flushes (leave,
+    // shutdown, version commits) still persist immediately.
+
+    internal static TimeSpan QuietPeriod = TimeSpan.FromSeconds(2);
+    internal static TimeSpan MaxStaleness = TimeSpan.FromSeconds(10);
+
+    private DateTime _firstDirtyAt, _lastOpAt;
+    private TimeSpan _lastSaveCost;
+    private DateTime _lastSaveAt;
+    private int _persisting;
+
+    private void MarkDirty()
     {
-        string json;
-        Guid? editor;
+        var now = DateTime.UtcNow;
+        if (!_dirty) _firstDirtyAt = now;
+        _lastOpAt = now;
+        _dirty = true;
+    }
+
+    /// <summary>The timer's check: persist when the edit burst has settled (or has gone on too long).</summary>
+    internal Task PersistIfDueAsync()
+    {
         lock (_gate)
         {
-            if (!_dirty) return;
-            json = ProjectFile.Serialize(_master);
-            editor = _lastEditor;
-            _dirty = false;
+            if (!_dirty) return Task.CompletedTask;
+            var now = DateTime.UtcNow;
+            var settled = now - _lastOpAt >= QuietPeriod || now - _firstDirtyAt >= MaxStaleness;
+            var throttled = now - _lastSaveAt < _lastSaveCost * 10;
+            if (!settled || throttled) return Task.CompletedTask;
+        }
+        return PersistAsync();
+    }
+
+    public async Task PersistAsync()
+    {
+        // One save at a time; a tick that overlaps a running save simply waits for the next one.
+        if (Interlocked.Exchange(ref _persisting, 1) == 1)
+        {
+            while (Volatile.Read(ref _persisting) == 1) await Task.Delay(20);
+            if (Interlocked.Exchange(ref _persisting, 1) == 1) return;
         }
         try
         {
-            if (BranchId is { } branch) await _db.SaveBranchAsync(branch, json, editor);
-            else await _db.SaveProjectAsync(ProjectId, json, editor);
-            LastPersisted = DateTime.Now;
+            string json;
+            Guid? editor;
+            var started = DateTime.UtcNow;
+            lock (_gate)
+            {
+                if (!_dirty) return;
+                json = ProjectFile.Serialize(_master);
+                editor = _lastEditor;
+                _dirty = false;
+            }
+            try
+            {
+                if (BranchId is { } branch) await _db.SaveBranchAsync(branch, json, editor);
+                else await _db.SaveProjectAsync(ProjectId, json, editor);
+                LastPersisted = DateTime.Now;
+                _lastSaveAt = DateTime.UtcNow;
+                _lastSaveCost = _lastSaveAt - started;
+            }
+            catch (Exception ex)
+            {
+                lock (_gate) if (!_dirty) { _dirty = true; _firstDirtyAt = DateTime.MinValue; }   // retry on the next tick
+                _log.LogError(ex, "Persisting project {Project} failed", ProjectId);
+            }
         }
-        catch (Exception ex)
-        {
-            lock (_gate) _dirty = true;   // retry on the next tick
-            _log.LogError(ex, "Persisting project {Project} failed", ProjectId);
-        }
+        finally { Volatile.Write(ref _persisting, 0); }
     }
 
     public void Dispose() => _persistTimer.Dispose();

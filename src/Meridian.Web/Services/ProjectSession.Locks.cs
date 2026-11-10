@@ -133,7 +133,7 @@ public sealed partial class ProjectSession
         {
             _master = ProjectFile.Deserialize(modelJson);
             Sequence++;
-            _dirty = true;
+            MarkDirty();
             _lastEditor = userId;
             foreach (var (id, p) in _participants)
             {
