@@ -142,10 +142,17 @@ public sealed class Workspace : IDisposable, ISessionClient
     {
         var activeId = Active?.Diagram.Id;
         var selectedId = Selected?.Id;
+        // The code-change review stays open across a merge (accepting code changes replaces main's model).
+        var review = _views.FirstOrDefault(v => v.Kind == ViewTabKind.CodeChanges) is { } rv ? (Active: ReferenceEquals(ActiveView, rv), View: rv) : default;
         Install(ProjectFile.Deserialize(modelJson));
         Session?.Resynced(ParticipantId);
         if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
         else OpenDefaultDiagrams();
+        if (review.View is { } keep)
+        {
+            _views.Add(keep);
+            if (review.Active) ActiveView = keep;
+        }
         if (Model.Find(selectedId) is { } sel) Select(sel);
         Log(message);
         SetStatus(message);
@@ -422,6 +429,27 @@ public sealed class Workspace : IDisposable, ISessionClient
         Bump();
     }
 
+    // ---------------------------------------------------------------- code-sync review highlights
+
+    /// <summary>Code changes waiting for review (set by <see cref="Meridian.Web.CodeSync.CodeSyncState"/>); null when there are none.</summary>
+    public CodeChangeOverlay? CodeChanges { get; private set; }
+
+    /// <summary>Draw the code-change highlights on diagrams (on by default on a code-sync review branch).</summary>
+    public bool HighlightCodeChanges { get; private set; }
+
+    public void SetCodeChanges(CodeChangeOverlay? overlay)
+    {
+        CodeChanges = overlay;
+        Bump();
+    }
+
+    public void SetHighlightCodeChanges(bool on)
+    {
+        if (HighlightCodeChanges == on) return;
+        HighlightCodeChanges = on;
+        Bump();
+    }
+
     // ---------------------------------------------------------------- new diagrams open as tabs
 
     /// <summary>Most diagrams one action may create and still all open as tabs; beyond this (imports), only the first opens.</summary>
@@ -473,7 +501,7 @@ public sealed class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -489,6 +517,16 @@ public sealed class ViewTab(ViewTabKind kind)
     {
         ViewTabKind.Table => "New custom table",
         ViewTabKind.Query => "New query",
+        ViewTabKind.CodeChanges => "What changed",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
+}
+
+/// <summary>
+/// What the diagrams highlight during a code-sync review: element id → how it changed, and (on the review branch) main's
+/// model, whose diagrams give the last place of removed elements (drawn as ghosts).
+/// </summary>
+public sealed record CodeChangeOverlay(IReadOnlyDictionary<string, Meridian.Serialization.ChangeHighlight> Kinds, ModelRepository? GhostSource)
+{
+    public int Count(Meridian.Serialization.ChangeHighlight k) => Kinds.Values.Count(v => v == k);
 }

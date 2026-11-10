@@ -38,6 +38,7 @@ public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
         await MigrateAdminAsync(conn); // enterprise administration tables: PostgresStore.Admin.cs
         await MigrateBranchingAsync(conn);   // branches, branch commits, baselines (PostgresStore.Branching.cs)
         await MigratePreferencesAsync(conn);   // per-user preferences (PostgresStore.Preferences.cs)
+        await MigrateCodeSyncRunsAsync(conn);   // code-sync review runs (PostgresStore.CodeSync.cs)
         await tx.CommitAsync();
     }
 

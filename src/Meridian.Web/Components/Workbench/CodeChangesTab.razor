@@ -1,0 +1,277 @@
+@inherits WorkspaceComponent
+@using Meridian.Core.Analysis
+@using Meridian.Data
+@using Meridian.Web.CodeSync
+@inject CodeSyncState State
+@inject CodeSyncReviewService Review
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@* "What changed": code changes from connected repositories waiting for review, by push and by element. *@
+<div class="chg-review">
+    <div class="chg-toolbar">
+        <input class="chg-filter" placeholder="Filter by name, path or kind" value="@_filter" @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" aria-label="Filter changes" />
+        <label class="d-flex align-center gap-1" style="font-size:12px; cursor:pointer">
+            <input type="checkbox" class="chg-select-all" checked="@AllSelected" disabled="@(Visible.Count == 0)" @onchange="e => SelectAll(e.Value is true)" /> Select all
+        </label>
+        <span class="dim">@_selected.Count selected</span>
+        <MudSpacer />
+        <MudButton Size="Size.Small" Variant="Variant.Text" Class="chg-highlight" StartIcon="@Icons.Material.Outlined.Highlight" OnClick="ToggleHighlight">
+            @(Ws.HighlightCodeChanges ? "Hide highlights" : "Highlight on diagrams")
+        </MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" Class="chg-reject" Disabled="@(!CanDecide || _selected.Count == 0 || _busy)" OnClick="Reject">Reject selected</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Class="chg-accept" Disabled="@(!CanDecide || _selected.Count == 0 || _busy)" OnClick="Accept">Accept selected</MudButton>
+    </div>
+
+    @if (Ws.ReadOnly && State.PendingCount > 0)
+    {
+        <div class="dim mt-2">View only: owners and editors accept or reject code changes.</div>
+    }
+    @if (State.Error is { } error)
+    {
+        <div class="dim mt-2" style="color:var(--danger)">@error</div>
+    }
+
+    @if (!State.Loaded)
+    {
+        <div class="chg-empty">Loading code changes…</div>
+    }
+    else if (State.Reviews.Count == 0)
+    {
+        <div class="chg-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.Difference" />
+            <h3 style="justify-content:center">No code changes to review</h3>
+            <div>When code is pushed to a connected repository, the model changes it implies land on a <b>code-sync</b> branch and appear here for review.</div>
+        </div>
+    }
+    else
+    {
+        @foreach (var r in State.Reviews)
+        {
+            var review = r;
+            var onBranch = review.Branch.BranchId == Ws.BranchId;
+            <h3>
+                <MudIcon Icon="@Icons.Material.Outlined.CallSplit" Style="font-size:15px" />
+                @review.Branch.Name
+                <span class="dim" style="text-transform:none; letter-spacing:0">· @review.Changes.Count change@(review.Changes.Count == 1 ? "" : "s") from @review.Runs.Count push@(review.Runs.Count == 1 ? "" : "es")</span>
+                @if (!onBranch && Shell is not null)
+                {
+                    <button class="chg-link" style="text-transform:none; letter-spacing:0" @onclick="() => Shell.SwitchBranch(review.Branch)">Open branch</button>
+                }
+            </h3>
+            @foreach (var run in review.Runs)
+            {
+                var rr = run;
+                var ids = review.Changes.Where(c => c.RunIds.Contains(rr.Id)).Select(c => c.ElementId).ToList();
+                <div class="chg-run" data-run="@rr.Id">
+                    <input type="checkbox" checked="@(ids.Count > 0 && ids.All(_selected.Contains))" disabled="@(ids.Count == 0)" @onchange="e => SelectMany(ids, e.Value is true)" title="Select this push's changes" />
+                    @if (rr.CommitUrl is { Length: > 0 } url && Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "https" or "http")
+                    {
+                        <a class="sha" href="@url" target="_blank" rel="noopener noreferrer">@rr.ShortCommit</a>
+                    }
+                    else
+                    {
+                        <span class="sha">@rr.ShortCommit</span>
+                    }
+                    <span class="msg" title="@rr.Message">@FirstLine(rr.Message) <span class="meta">— @(rr.Author ?? "unknown author") · @Ago(rr.CreatedAt)</span></span>
+                    <span class="meta">@rr.Summary</span>
+                </div>
+            }
+
+            @foreach (var kind in new[] { CodeSyncChangeKind.Added, CodeSyncChangeKind.Changed, CodeSyncChangeKind.Removed })
+            {
+                var k = kind;
+                var rows = review.Changes.Where(c => c.Kind == k && Matches(c)).ToList();
+                if (rows.Count == 0) continue;
+                <h3><span class="chg-kind @Css(k)">@KindTitle(k)</span> <span class="dim" style="text-transform:none">(@rows.Count)</span></h3>
+                @foreach (var c in rows)
+                {
+                    var change = c;
+                    var open = _expanded.Contains(change.ElementId);
+                    <div class="chg-row" data-element="@change.ElementId" data-kind="@Css(k)">
+                        <input type="checkbox" checked="@_selected.Contains(change.ElementId)" @onchange="e => Toggle(change.ElementId, e.Value is true)" aria-label="@($"Select {change.Name}")" />
+                        <MudIcon Class="@($"chg-kind {Css(k)}")" Icon="@KindIcon(k)" Style="font-size:17px" />
+                        <MudIcon Icon="@UiKinds.Icon(change.ElementKind)" Style="@($"font-size:15px; color:{UiKinds.Accent(change.ElementKind)}")" />
+                        <span class="name" title="@change.Path">
+                            @if (k == CodeSyncChangeKind.Changed && change.Fields.Count > 0)
+                            {
+                                <span style="cursor:pointer" @onclick="() => ToggleExpanded(change.ElementId)">@(open ? "▾" : "▸") </span>
+                            }
+                            @change.Name<span class="path">@change.Path</span>
+                        </span>
+                        <button class="chg-link chg-show" @onclick="() => ShowOnDiagram(review, change)">Show on diagram</button>
+                        @if (open)
+                        {
+                            <div class="chg-fields">
+                                @foreach (var f in change.Fields.Take(12))
+                                {
+                                    <span class="dim">@f.Key</span><span class="before">@Clip(f.Before)</span><span class="after">@Clip(f.After)</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        }
+    }
+</div>
+
+@code {
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private string _filter = "";
+    private bool _busy;
+
+    private bool CanDecide => !Ws.ReadOnly && Ws.User is not null && Ws.Session is not null;
+
+    private List<CodeSyncPendingChange> Visible => State.Reviews.SelectMany(r => r.Changes).Where(Matches).ToList();
+    private bool AllSelected => Visible is { Count: > 0 } v && v.All(c => _selected.Contains(c.ElementId));
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        State.Changed += OnState;
+        if (!State.Loaded) _ = State.ReloadAsync();
+    }
+
+    private void OnState()
+    {
+        // Forget selections of changes that were decided elsewhere.
+        var pending = State.Reviews.SelectMany(r => r.Changes).Select(c => c.ElementId).ToHashSet(StringComparer.Ordinal);
+        _selected.IntersectWith(pending);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public override void Dispose()
+    {
+        State.Changed -= OnState;
+        base.Dispose();
+    }
+
+    private bool Matches(CodeSyncPendingChange c) =>
+        _filter.Length == 0 || c.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) || c.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        || c.ElementKind.ToString().Contains(_filter, StringComparison.OrdinalIgnoreCase) || c.Kind.ToString().Contains(_filter, StringComparison.OrdinalIgnoreCase);
+
+    private void Toggle(string id, bool on)
+    {
+        if (on) _selected.Add(id); else _selected.Remove(id);
+    }
+
+    private void SelectMany(IEnumerable<string> ids, bool on)
+    {
+        foreach (var id in ids) Toggle(id, on);
+    }
+
+    private void SelectAll(bool on)
+    {
+        if (on) SelectMany(Visible.Select(c => c.ElementId), true);
+        else _selected.Clear();
+    }
+
+    private void ToggleExpanded(string id)
+    {
+        if (!_expanded.Remove(id)) _expanded.Add(id);
+    }
+
+    private void ToggleHighlight() => Ws.SetHighlightCodeChanges(!Ws.HighlightCodeChanges);
+
+    private async Task Accept()
+    {
+        if (Ws.Session is not { } s || Ws.User is not { } me) return;
+        _busy = true;
+        try
+        {
+            var ids = _selected.ToList();
+            var result = await Review.AcceptAsync(s.ProjectId, null, ids, me);
+            while (result.NeedsResolution is { } pending)
+            {
+                var dialog = await Dialogs.ShowAsync<MergeDialog>("Accept code changes", new DialogParameters<MergeDialog> { { x => x.Plan, pending.Plan } },
+                    new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
+                if (await dialog.Result is not { Canceled: false, Data: MergeDialog.Decision decision })
+                {
+                    Snackbar.Add("Nothing more was accepted; the changes are still waiting for review.", Severity.Info);
+                    return;
+                }
+                try { result = await Review.CompleteAcceptAsync(pending, decision.Merged, me); }
+                catch (MergeOutdatedException ex)
+                {
+                    Snackbar.Add(ex.Message, Severity.Info);
+                    result = await Review.AcceptAsync(s.ProjectId, null, ids, me);
+                }
+            }
+            _selected.Clear();
+            Ws.Log(result.Message);
+            Snackbar.Add(result.Message, Severity.Success);
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        finally
+        {
+            _busy = false;
+            await State.ReloadAsync();
+        }
+    }
+
+    private async Task Reject()
+    {
+        if (Ws.Session is not { } s || Ws.User is not { } me) return;
+        if (Ws.Confirm is { } confirm && !await confirm("Reject code changes", $"Put {_selected.Count} element{(_selected.Count == 1 ? "" : "s")} on the review branch back to main's version?"))
+            return;
+        _busy = true;
+        try
+        {
+            var result = await Review.RejectAsync(s.ProjectId, null, _selected.ToList(), me);
+            _selected.Clear();
+            Ws.Log(result.Message);
+            Snackbar.Add(result.Message, Severity.Success);
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+        finally
+        {
+            _busy = false;
+            await State.ReloadAsync();
+        }
+    }
+
+    /// <summary>Opens a diagram that shows the element (or, for a removed one, its ghost) and selects it.</summary>
+    private async Task ShowOnDiagram(CodeSyncReview review, CodeSyncPendingChange c)
+    {
+        if (Ws.Model.Find(c.ElementId) is null && review.Branch.BranchId != Ws.BranchId && c.Kind == CodeSyncChangeKind.Added && Shell is not null)
+            await Shell.SwitchBranch(review.Branch);   // added elements exist only on the review branch
+        var e = Ws.Model.Find(c.ElementId);
+        Diagram? d = null;
+        if (e is not null)
+            d = Ws.Active?.Diagram is { } a && Shows(a, c.ElementId) ? a : Ws.Model.Diagrams.FirstOrDefault(x => Shows(x, c.ElementId)) ?? e as Diagram;
+        else
+            d = review.Main.Diagrams.Where(md => Shows(md, c.ElementId)).Select(md => Ws.Model.Find(md.Id) as Diagram).FirstOrDefault(x => x is not null);
+        if (d is null)
+        {
+            if (e is not null) Ws.Select(e);
+            Snackbar.Add($"{c.Name} isn't shown on any diagram.", Severity.Info);
+            return;
+        }
+        Ws.SetHighlightCodeChanges(true);
+        Ws.Open(d);
+        if (e is not null && e is not Diagram) Ws.Select(e);
+    }
+
+    private static bool Shows(Diagram d, string id) => d.Nodes.Any(n => n.Element.Id == id) || d.Edges.Any(x => x.Relationship.Id == id);
+
+    private static string Css(CodeSyncChangeKind k) => k switch { CodeSyncChangeKind.Added => "added", CodeSyncChangeKind.Changed => "changed", _ => "removed" };
+    private static string KindTitle(CodeSyncChangeKind k) => k switch { CodeSyncChangeKind.Added => "Added", CodeSyncChangeKind.Changed => "Changed", _ => "Removed" };
+    private static string KindIcon(CodeSyncChangeKind k) => k switch
+    {
+        CodeSyncChangeKind.Added => Icons.Material.Outlined.AddBox,
+        CodeSyncChangeKind.Changed => Icons.Material.Outlined.EditNote,
+        _ => Icons.Material.Outlined.IndeterminateCheckBox,
+    };
+
+    private static string FirstLine(string? m) => (m ?? "").Split('\n', 2)[0].Trim() is { Length: > 0 } s ? s : "(no message)";
+    private static string Clip(string? v) => v is null ? "∅" : v.Length > 200 ? v[..200] + "…" : v;
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        return d.TotalMinutes < 1 ? "just now" : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min ago" : d.TotalDays < 1 ? $"{(int)d.TotalHours} h ago"
+            : utc.ToLocalTime().ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+    }
+}

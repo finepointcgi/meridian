@@ -244,6 +244,23 @@ public sealed class CodeSyncHostService(
         return outcome;
     }
 
+    /// <summary>Reports a reviewed sync back to the git host: the commit status turns green with the review summary.</summary>
+    public async Task ReportReviewedAsync(Guid connectionId, string commit, CodeSyncOutcome outcome, CancellationToken ct = default)
+    {
+        if (await db.FindIntegrationAsync(connectionId) is not { Kind: CodeRepoKinds.CodeRepo } c) return;
+        var config = CodeRepoConfig.Parse(c.ConfigJson);
+        var reviewUrl = AbsoluteUrl(outcome.ReviewUrl);
+        if (config.PostStatus)
+        {
+            IGitHost host;
+            try { host = Host(c); }
+            catch (GitHostException ex) { log.LogWarning("Posting the review status for {Connection} failed: {Error}", c.Id, ex.Message); return; }
+            await TryPostStatusAsync(host, c, commit, CommitState.Success, outcome.Summary, reviewUrl, ct);
+        }
+        if (config.LastSync?.Commit == commit)
+            await SetLastSyncAsync(c.Id, commit, StatusText(outcome.Status), outcome.Summary, reviewUrl ?? outcome.ReviewUrl);
+    }
+
     /// <summary>The registered runner; the stand-in only when no real one is registered (whatever the registration order).</summary>
     public static ICodeSyncRunner ResolveRunner(IServiceProvider sp) =>
         sp.GetServices<ICodeSyncRunner>().LastOrDefault(r => r is not NullCodeSyncRunner) ?? NullCodeSyncRunner.Instance;
@@ -258,7 +275,8 @@ public sealed class CodeSyncHostService(
     {
         CodeSyncStatus.Pending => CommitState.Pending,
         CodeSyncStatus.Failed => CommitState.Failure,
-        _ => CommitState.Success,   // no changes, accepted, or changes waiting on the review branch
+        CodeSyncStatus.AwaitingReview => CommitState.Pending,   // turns green when someone accepts or rejects it
+        _ => CommitState.Success,   // no changes, or reviewed
     };
 
     private static string StatusText(CodeSyncStatus s) => s switch

@@ -127,6 +127,10 @@ public sealed class ScriptEngine
         var (script, diagnostics) = Prepare(code);
         if (script is null) return new ScriptRunResult(ScriptOutcome.CompileFailed, null, diagnostics, watch.Elapsed, 0, false);
 
+        // Cancelled while compiling (a cold compile can take longer than a short cancel delay): nothing ran, nothing to undo.
+        if (cancellationToken.IsCancellationRequested)
+            return new ScriptRunResult(ScriptOutcome.Cancelled, null, diagnostics, watch.Elapsed, 0, false);
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var limit = timeout ?? Settings.Timeout;
         cts.CancelAfter(limit);

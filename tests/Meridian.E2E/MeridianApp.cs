@@ -29,7 +29,8 @@ public sealed class MeridianApp : IAsyncDisposable
     /// <summary>Server-side errors (log level Error and above), so tests also fail on exceptions the browser never sees.</summary>
     public ServerErrorLog ServerErrors { get; } = new();
 
-    public static async Task<MeridianApp> StartAsync(bool localMode, IDictionary<string, string?>? extra = null)
+    /// <param name="services">Test-only registrations, applied before the app's own (which use TryAdd for seams such as the code-sync mapper).</param>
+    public static async Task<MeridianApp> StartAsync(bool localMode, IDictionary<string, string?>? extra = null, Action<IServiceCollection>? services = null)
     {
         var data = Path.Combine(Path.GetTempPath(), "meridian-e2e-" + Guid.NewGuid().ToString("N")[..10]);
         Directory.CreateDirectory(data);
@@ -54,6 +55,7 @@ public sealed class MeridianApp : IAsyncDisposable
             b.Configuration.AddInMemoryCollection(settings);
             b.WebHost.UseUrls("http://127.0.0.1:0");
             b.WebHost.UseStaticWebAssets();   // serves wwwroot + MudBlazor's _content from the build output
+            services?.Invoke(b.Services);
         }, new WebApplicationOptions
         {
             ApplicationName = "Meridian.Web",

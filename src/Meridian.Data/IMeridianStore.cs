@@ -165,6 +165,16 @@ public interface IMeridianStore
     Task RevokeUserSessionsAsync(Guid userId);
     /// <summary>When the user last signed out everywhere (sessions issued earlier are invalid), or null.</summary>
     Task<DateTime?> UserSessionsRevokedAtAsync(Guid userId);
+
+    // ---------------------------------------------------------------- code sync: review-branch runs (see CodeSyncRuns.cs)
+    // One row per push applied to a project's code-sync review branch, with the list of element changes as JSON.
+
+    Task AddCodeSyncRunAsync(CodeSyncRunRecord run);
+    Task<CodeSyncRunRecord?> GetCodeSyncRunAsync(Guid runId);
+    /// <summary>A project's runs, newest first.</summary>
+    Task<IReadOnlyList<CodeSyncRunRecord>> ListCodeSyncRunsAsync(Guid projectId, int limit = 50);
+    /// <summary>Records a review decision: the run's status, summary and its change list (a JSON array).</summary>
+    Task UpdateCodeSyncRunAsync(Guid runId, CodeSyncRunStatus status, string summary, string changesJson);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

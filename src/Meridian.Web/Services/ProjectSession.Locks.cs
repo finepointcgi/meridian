@@ -132,8 +132,8 @@ public sealed partial class ProjectSession
         _rejecting.Remove(participantId);
     }
 
-    /// <summary>Replaces the whole model for everyone (a merge result), telling them why.</summary>
-    public void Replace(string modelJson, Guid userId, string message)
+    /// <summary>Replaces the whole model for everyone (a merge result), telling them why. A null user is the system (code sync).</summary>
+    public void Replace(string modelJson, Guid? userId, string message)
     {
         lock (_gate)
         {

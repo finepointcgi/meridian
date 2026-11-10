@@ -427,7 +427,7 @@ public sealed class CodeSyncHostServiceTests : IAsyncLifetime
         var statuses = handler.Requests.Where(r => r.Request.Method == HttpMethod.Post).Select(r => JsonNode.Parse(r.Body!)!).ToList();
         Assert.Equal(2, statuses.Count);
         Assert.Equal(("pending", "meridian/model"), ((string)statuses[0]["state"]!, (string)statuses[0]["context"]!));
-        Assert.Equal("success", (string)statuses[1]["state"]!);
+        Assert.Equal("pending", (string)statuses[1]["state"]!);   // waiting for review; turns green on accept
         Assert.Equal("https://meridian.test/review/run-1", (string)statuses[1]["target_url"]!);
         Assert.StartsWith("2 added", (string)statuses[1]["description"]!);
         Assert.All(handler.Requests, r => Assert.Equal(("Bearer", Token), (r.Request.Headers.Authorization!.Scheme, r.Request.Headers.Authorization.Parameter)));

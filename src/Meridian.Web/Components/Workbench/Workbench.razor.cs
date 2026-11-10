@@ -86,6 +86,7 @@ public partial class Workbench
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
         list.AddRange(AutoDiagramPaletteCommands());
+        list.AddRange(CodeSyncPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -145,6 +146,7 @@ public partial class Workbench
         var pick = projects.FirstOrDefault(p => p.Id == deep?.Project) ?? projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
         if (pick != null) await OpenProject(pick.Id);
         else await OpenProjects();
+        if (deep is not null && Ws.Session?.ProjectId == deep.Value.Project) await OpenDeepLinkView();   // &branch=…&panel=code-changes
         if (deep?.Element is { } deepElement && Ws.Model.Find(deepElement) is { } target) Navigate(target);
         StateHasChanged();
     }
