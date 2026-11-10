@@ -1,0 +1,16 @@
+@using Meridian.Web.Admin
+@inject AdminAccess Access
+@inject AuthenticationStateProvider Auth
+
+@* Avatar-menu entry shown only to server administrators (never in the desktop app's local mode). *@
+@if (_admin)
+{
+    <MudMenuItem Icon="@Icons.Material.Outlined.AdminPanelSettings" Href="/admin">Administration</MudMenuItem>
+}
+
+@code {
+    private bool _admin;
+
+    protected override async Task OnInitializedAsync() =>
+        _admin = await Access.IsAdminAsync((await Auth.GetAuthenticationStateAsync()).User);
+}

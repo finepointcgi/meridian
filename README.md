@@ -81,6 +81,56 @@ in your local `appsettings.Development.json`, which git ignores.
 To run with a single SQLite file instead of PostgreSQL, set `Meridian__Storage=sqlite` and
 `Meridian__DataPath=<folder>`.
 
+### Administration, single sign-on and backups (server mode)
+
+The first account registered on a server (or any username listed in `Meridian:Admins`) is a server
+administrator. Administrators get an **Administration** entry in the avatar menu (`/admin`) with tabs for
+users (create, disable, reset password, unlock, make admin), organizations and teams (a team can be given a
+role on any project; a member's effective role is the higher of their direct and team roles), all projects
+(owner, size, rename, transfer, delete), a filterable audit log with CSV export, and backups. None of this
+appears in the desktop app's local mode.
+
+Single sign-on uses OpenID Connect (authorization code + PKCE). Register Meridian with your identity provider
+using the redirect URI `https://<server>/signin-oidc-<name>`, then configure it, e.g. in `appsettings.json` or
+environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
+
+```json
+"Meridian": {
+  "Admins": [ "alice" ],
+  "Sso": {
+    "DisableLocalPasswords": false,
+    "Providers": [
+      { "Name": "entra", "DisplayName": "Microsoft", "Authority": "https://login.microsoftonline.com/<tenant-id>/v2.0",
+        "ClientId": "<app-id>", "ClientSecret": "<secret>", "Scopes": [ "openid", "profile", "email" ],
+        "ClaimMappings": { "Username": "preferred_username", "DisplayName": "name", "Email": "email",
+                           "AdminClaim": "roles", "AdminValue": "Meridian.Admin" } },
+      { "Name": "okta",     "Authority": "https://<org>.okta.com/oauth2/default",        "ClientId": "…", "ClientSecret": "…" },
+      { "Name": "google",   "DisplayName": "Google", "Authority": "https://accounts.google.com", "ClientId": "…", "ClientSecret": "…" },
+      { "Name": "keycloak", "Authority": "https://sso.example.com/realms/<realm>",      "ClientId": "…", "ClientSecret": "…" }
+    ]
+  },
+  "Security": { "MaxFailedLogins": 5, "LockoutMinutes": 15, "LoginAttemptsPerMinute": 10,
+                "AllowRegistration": true, "TrustForwardedHeaders": false },
+  "Backup": { "Folder": "/var/backups/meridian", "IntervalHours": 24, "Retain": 7, "IncludeUsers": true }
+}
+```
+
+- The sign-in page shows a "Sign in with …" button per provider. A first sign-in creates a Meridian account
+  linked by issuer + subject (never matched to an existing account by name or e-mail); set `AutoProvision: false`
+  on a provider to refuse unknown identities. `DisableLocalPasswords` turns off password sign-in, registration
+  and HTTP Basic API auth.
+- SSO needs HTTPS. Behind a TLS-terminating reverse proxy set `Security:TrustForwardedHeaders` to `true`.
+- Password sign-in is rate limited per client IP, and an account is locked for `LockoutMinutes` after
+  `MaxFailedLogins` wrong passwords in a row (an administrator can unlock it). Disabled accounts are signed out
+  on their next request.
+- The audit log (`audit_log` table, append-only — the database rejects updates and deletes) records sign-ins
+  and failures, SSO provisioning, user, role, team and member changes, project create/rename/delete/transfer,
+  version commits and restores, exports, backups and restores.
+- **Backups**: *Administration → Backups* downloads a zip with every project's latest model, its full version
+  history and members, plus (optionally) the user directory without password hashes. Uploading a backup there
+  restores selected projects with their history; a project whose id still exists comes back as a copy. With
+  `Backup:Folder` set, the server also writes a backup every `IntervalHours` and keeps the newest `Retain` files.
+
 ## Build the desktop apps
 
 ```bash

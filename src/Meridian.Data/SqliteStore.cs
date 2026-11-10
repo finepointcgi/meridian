@@ -7,7 +7,7 @@ namespace Meridian.Data;
 /// Single-file SQLite store used by the desktop app's local mode: same schema and behaviour as
 /// <see cref="PostgresStore"/>, with ids as text, timestamps as ISO-8601 UTC text and models as JSON text.
 /// </summary>
-public sealed class SqliteStore : IMeridianStore
+public sealed partial class SqliteStore : IMeridianStore
 {
     private readonly string _connectionString;
 
@@ -104,6 +104,7 @@ public sealed class SqliteStore : IMeridianStore
             create index if not exists comments_project_element on comments(project_id, element_id);
             create index if not exists members_user on project_members(user_id);
             """);
+        await MigrateAdminAsync(); // enterprise administration tables: SqliteStore.Admin.cs
     }
 
     // =============================================================== users
@@ -126,13 +127,8 @@ public sealed class SqliteStore : IMeridianStore
         return user;
     }
 
-    public async Task<UserAccount?> VerifyUserAsync(string username, string password)
-    {
-        await using var cmd = await CmdAsync("select id, username, display_name, color, password_hash from users where username = $1", username.Trim().ToLowerInvariant());
-        await using var r = await cmd.ExecuteReaderAsync();
-        if (!await r.ReadAsync()) return null;
-        return Accounts.VerifyPassword(password, r.GetString(4)) ? new UserAccount(Id(r, 0), r.GetString(1), r.GetString(2), r.GetString(3)) : null;
-    }
+    public async Task<UserAccount?> VerifyUserAsync(string username, string password) =>
+        (await AuthenticateAsync(username, password, LoginPolicy.MaxFailures, LoginPolicy.Lockout)).User;
 
     public async Task<UserAccount?> FindUserAsync(string username)
     {
@@ -147,7 +143,12 @@ public sealed class SqliteStore : IMeridianStore
     {
         await using var cmd = await CmdAsync("""
             select p.id, p.name, m.role, p.updated_at, p.revision, u.display_name
-            from projects p join project_members m on m.project_id = p.id and m.user_id = $1
+            from projects p join (
+                select project_id, max(role) as role from (
+                    select project_id, role from project_members where user_id = $1
+                    union all
+                    select g.project_id, g.role from team_project_roles g join team_members t on t.team_id = g.team_id where t.user_id = $1)
+                group by project_id) m on m.project_id = p.id
             left join users u on u.id = p.updated_by
             order by p.updated_at desc
             """, S(userId));
@@ -205,7 +206,13 @@ public sealed class SqliteStore : IMeridianStore
     public Task DeleteProjectAsync(Guid projectId) => ExecAsync("delete from projects where id = $1", S(projectId));
 
     public async Task<ProjectRole?> RoleOfAsync(Guid projectId, Guid userId) =>
-        await ScalarAsync("select role from project_members where project_id = $1 and user_id = $2", S(projectId), S(userId)) is long l ? (ProjectRole)l : null;
+        // Effective role: the higher of a direct membership and any team grant.
+        await ScalarAsync("""
+            select max(role) from (
+                select role from project_members where project_id = $1 and user_id = $2
+                union all
+                select g.role from team_project_roles g join team_members t on t.team_id = g.team_id where g.project_id = $1 and t.user_id = $2)
+            """, S(projectId), S(userId)) is long l ? (ProjectRole)l : null;
 
     public async Task<IReadOnlyList<ProjectMember>> MembersAsync(Guid projectId)
     {

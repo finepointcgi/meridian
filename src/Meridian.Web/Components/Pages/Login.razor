@@ -2,6 +2,7 @@
 @layout Meridian.Web.Components.Layout.EmptyLayout
 @attribute [ExcludeFromInteractiveRouting]
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject Meridian.Web.Admin.AdminSettings Settings
 
 <PageTitle>Sign in — Meridian</PageTitle>
 
@@ -21,6 +22,25 @@
             <div class="auth-error">@Error</div>
         }
 
+        @if (!Register && Settings.Sso.Providers.Count > 0)
+        {
+            <div class="auth-sso">
+                @foreach (var p in Settings.Sso.Providers)
+                {
+                    <a class="auth-sso-btn" href="@($"/account/sso/{Uri.EscapeDataString(p.Name)}")">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 6a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 14.2c-2.5-.85-4.62-2.65-5.82-4.98C7.6 15.13 10.2 14.5 12 14.5s4.4.63 5.82 1.72c-1.2 2.33-3.32 4.13-5.82 4.98z"/></svg>
+                        Sign in with @p.Label
+                    </a>
+                }
+            </div>
+            @if (!Settings.Sso.DisableLocalPasswords)
+            {
+                <div class="auth-divider"><span>or with your Meridian password</span></div>
+            }
+        }
+
+        @if (!Settings.Sso.DisableLocalPasswords && (!Register || Settings.Security.AllowRegistration))
+        {
         <form method="post" action="@(Register ? "/account/register" : "/account/login")">
             <label>Username<input name="username" autocomplete="username" required autofocus /></label>
             @if (Register)
@@ -30,7 +50,10 @@
             <label>Password<input name="password" type="password" autocomplete="@(Register ? "new-password" : "current-password")" required minlength="@(Register ? 8 : 1)" /></label>
             <button type="submit">@(Register ? "Create account" : "Sign in")</button>
         </form>
+        }
 
+        @if (!Settings.Sso.DisableLocalPasswords && Settings.Security.AllowRegistration)
+        {
         <div class="auth-switch">
             @if (Register)
             {
@@ -41,6 +64,11 @@
                 <span>New to Meridian? <a href="/login?mode=register">Create an account</a></span>
             }
         </div>
+        }
+        else if (Register)
+        {
+            <div class="auth-switch"><a href="/login">Back to sign in</a></div>
+        }
     </div>
 </div>
 

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Meridian.Core.Samples;
 using Meridian.Data;
 using Meridian.Serialization;
+using Meridian.Web.Admin;
 using Meridian.Web.Components;
 using Meridian.Web.Services;
 using Microsoft.AspNetCore.Authentication;
@@ -65,6 +66,7 @@ public static class MeridianServer
             });
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
+        builder.AddMeridianAdmin(host); // SSO, lockout + rate limiting, audit log, backups (Admin/AdminHosting.cs)
 
         var app = builder.Build();
 
@@ -90,6 +92,7 @@ public static class MeridianServer
             if (!host.LocalMode) app.UseHsts();
         }
         app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+        app.UseMeridianAdmin();
         app.UseAuthentication();
 
         // Desktop local mode: a single user, signed in automatically — but only by the window that holds this launch's token,
@@ -131,40 +134,24 @@ public static class MeridianServer
 
         // ---------------------------------------------------------------- account endpoints (form posts from the static sign-in page)
 
-        static async Task SignIn(HttpContext http, UserAccount user)
-        {
-            var identity = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim("display_name", user.DisplayName),
-                new Claim("color", user.Color),
-            ], CookieAuthenticationDefaults.AuthenticationScheme);
-            await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity),
-                new AuthenticationProperties { IsPersistent = true });
-        }
+        static Task SignIn(HttpContext http, UserAccount user) => MeridianAuth.SignInAsync(http, user);
 
         static string Back(string? mode, string error) => $"/login?mode={mode}&error={Uri.EscapeDataString(error)}";
 
         var account = app.MapGroup("/account");
 
-        account.MapPost("/login", async (HttpContext http, IMeridianStore db) =>
-        {
-            var form = await http.Request.ReadFormAsync();
-            var user = await db.VerifyUserAsync(form["username"].ToString(), form["password"].ToString());
-            if (user is null) return Results.Redirect(Back("signin", "Wrong username or password."));
-            await SignIn(http, user);
-            return Results.Redirect("/");
-        });
+        account.MapPost("/login", AdminHosting.PasswordLoginAsync).RequireRateLimiting(AdminHosting.LoginRateLimit);
 
         account.MapPost("/register", async (HttpContext http, IMeridianStore db) =>
         {
+            if (AdminHosting.RegistrationBlocked(http) is { } blocked) return Results.Redirect(Back("register", blocked));
             var form = await http.Request.ReadFormAsync();
             try
             {
                 var user = await db.CreateUserAsync(form["username"].ToString(), form["display"].ToString(), form["password"].ToString());
                 // Every new account starts with its own copy of the sample model so there is something to explore.
                 await db.CreateProjectAsync("Vehicle System (sample)", ProjectFile.Serialize(SampleModels.Vehicle()), user.Id);
+                await AdminHosting.OnRegisteredAsync(http, db, user);
                 await SignIn(http, user);
                 return Results.Redirect("/");
             }
@@ -172,7 +159,7 @@ public static class MeridianServer
             {
                 return Results.Redirect(Back("register", ex.Message));
             }
-        });
+        }).RequireRateLimiting(AdminHosting.LoginRateLimit);
 
         account.MapMethods("/logout", ["GET", "POST"], async (HttpContext http) =>
         {
@@ -188,7 +175,7 @@ public static class MeridianServer
             if (http.User.Identity?.IsAuthenticated == true && Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
                 return new UserAccount(id, http.User.Identity.Name ?? "", http.User.FindFirstValue("display_name") ?? "", http.User.FindFirstValue("color") ?? "");
             var header = http.Request.Headers.Authorization.ToString();
-            if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!header.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) || AdminHosting.LocalPasswordsDisabled(http)) return null;
             try
             {
                 var raw = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(header[6..].Trim()));
@@ -259,6 +246,8 @@ public static class MeridianServer
             if (error != null) return error;
             return model!.Find(elementId) is { } e ? Results.Content(SysMLv2Json.Element(model, e).ToJsonString(), "application/json") : Results.NotFound();
         });
+
+        await app.MapMeridianAdminAsync();
 
         app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<CollaborationHub>().FlushAllAsync().GetAwaiter().GetResult());
 

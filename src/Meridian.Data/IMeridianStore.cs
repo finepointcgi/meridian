@@ -45,6 +45,53 @@ public interface IMeridianStore
     Task<long> AddCommentAsync(Guid projectId, string elementId, Guid author, string body);
     Task SetCommentResolvedAsync(long commentId, bool resolved);
     Task DeleteCommentAsync(long commentId);
+
+    // ------------------------------------------------------------ enterprise administration (see AdminModels.cs)
+    // Server roles, account state and lockout, SSO links, organizations/teams, all-projects admin, restore, audit log.
+
+    Task<AdminUser?> GetUserAsync(Guid userId);
+    Task<IReadOnlyList<AdminUser>> ListUsersAsync();
+    Task SetUserAdminAsync(Guid userId, bool admin);
+    Task SetUserDisabledAsync(Guid userId, bool disabled);
+    Task SetPasswordAsync(Guid userId, string password);
+    Task UnlockUserAsync(Guid userId);
+    /// <summary>When no administrator exists yet, promotes the oldest account (the first one registered). Returns true if it promoted someone.</summary>
+    Task<bool> EnsureAdminAsync();
+    /// <summary>Password sign-in with account state: disabled accounts are refused, and <paramref name="maxFailures"/> wrong passwords in a row lock the account for <paramref name="lockout"/>.</summary>
+    Task<LoginResult> AuthenticateAsync(string username, string password, int maxFailures, TimeSpan lockout);
+
+    Task<UserAccount?> FindExternalLoginAsync(string issuer, string subject);
+    /// <summary>Creates an account that has no usable password (single sign-on only) and links it to the external identity.</summary>
+    Task<UserAccount> CreateExternalUserAsync(string username, string displayName, ExternalLogin login);
+    Task LinkExternalLoginAsync(Guid userId, ExternalLogin login);
+
+    Task<Guid> CreateOrganizationAsync(string name);
+    Task DeleteOrganizationAsync(Guid organizationId);
+    Task<IReadOnlyList<OrganizationInfo>> ListOrganizationsAsync();
+    Task<IReadOnlyList<UserAccount>> OrganizationMembersAsync(Guid organizationId);
+    Task AddOrganizationMemberAsync(Guid organizationId, Guid userId);
+    Task RemoveOrganizationMemberAsync(Guid organizationId, Guid userId);
+    Task<Guid> CreateTeamAsync(Guid organizationId, string name);
+    Task DeleteTeamAsync(Guid teamId);
+    Task<IReadOnlyList<TeamInfo>> ListTeamsAsync(Guid organizationId);
+    Task<IReadOnlyList<UserAccount>> TeamMembersAsync(Guid teamId);
+    /// <summary>Adds a user to a team (and to the team's organization).</summary>
+    Task AddTeamMemberAsync(Guid teamId, Guid userId);
+    Task RemoveTeamMemberAsync(Guid teamId, Guid userId);
+    Task<IReadOnlyList<TeamGrant>> TeamGrantsAsync(Guid teamId);
+    Task SetTeamGrantAsync(Guid teamId, Guid projectId, ProjectRole role);
+    Task RemoveTeamGrantAsync(Guid teamId, Guid projectId);
+
+    Task<IReadOnlyList<AdminProject>> ListAllProjectsAsync();
+    /// <summary>Makes <paramref name="newOwnerId"/> an owner; previous owners become editors.</summary>
+    Task TransferProjectAsync(Guid projectId, Guid newOwnerId);
+    /// <summary>Recreates a project from a backup with its version history. Keeps the original id unless it is taken.</summary>
+    Task<Guid> RestoreProjectAsync(RestoredProject project);
+    /// <summary>Every version of a project with its full model, oldest first (for backups).</summary>
+    Task<IReadOnlyList<VersionSnapshot>> ListVersionSnapshotsAsync(Guid projectId);
+
+    Task AppendAuditAsync(AuditEntry entry);
+    Task<AuditPage> QueryAuditAsync(AuditQuery query);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

@@ -1,0 +1,291 @@
+@using Meridian.Data
+@using Meridian.Web.Admin
+@inject IMeridianStore Db
+@inject IAuditLog Audit
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<div class="admin-split">
+    @* ------------------------------------------------ organizations *@
+    <div class="admin-panel">
+        <h3><MudIcon Icon="@Icons.Material.Outlined.Domain" Style="font-size:15px" /> Organizations</h3>
+        <div class="d-flex gap-2 mb-2">
+            <MudTextField T="string" @bind-Value="_newOrg" Placeholder="New organization" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" OnKeyDown="@(e => e.Key == "Enter" ? CreateOrg() : Task.CompletedTask)" />
+            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newOrg)" OnClick="CreateOrg" Class="mt-1" />
+        </div>
+        <div class="admin-list">
+            @foreach (var o in _orgs)
+            {
+                var org = o;
+                <div class="row @(org.Id == _org?.Id ? "on" : "")" @onclick="() => SelectOrg(org)">
+                    <MudIcon Icon="@Icons.Material.Outlined.Domain" Style="font-size:17px; color:var(--accent)" />
+                    <span class="t">@org.Name<br /><small>@org.MemberCount members · @org.TeamCount teams</small></span>
+                </div>
+            }
+            @if (_orgs.Count == 0) { <div class="admin-empty">No organizations yet.</div> }
+        </div>
+    </div>
+
+    <div>
+        @if (_org is { } current)
+        {
+            <div class="admin-panel">
+                <div class="d-flex align-center gap-2">
+                    <h3 style="margin:0; flex:1"><MudIcon Icon="@Icons.Material.Outlined.Domain" Style="font-size:15px" /> @current.Name</h3>
+                    <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Outlined.Delete" OnClick="DeleteOrg">Delete organization</MudButton>
+                </div>
+                <div class="d-flex gap-2 align-center mt-2">
+                    <UserPicker Users="_users" @bind-Selected="_orgPick" Placeholder="Add a member…" />
+                    <MudButton Variant="Variant.Outlined" Disabled="_orgPick is null" OnClick="AddOrgMember">Add</MudButton>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    @foreach (var m in _orgMembers)
+                    {
+                        var member = m;
+                        <MudChip T="string" OnClose="() => RemoveOrgMember(member)" Size="Size.Small">
+                            <span class="avatar sm" style="background:@member.Color; margin-right:6px">@MembersDialog.Initials(member)</span>@member.DisplayName
+                        </MudChip>
+                    }
+                    @if (_orgMembers.Count == 0) { <span class="muted">No members yet.</span> }
+                </div>
+            </div>
+
+            <div class="admin-split" style="grid-template-columns:260px minmax(0,1fr); margin-top:12px">
+                <div class="admin-panel">
+                    <h3><MudIcon Icon="@Icons.Material.Outlined.Groups" Style="font-size:15px" /> Teams</h3>
+                    <div class="d-flex gap-2 mb-2">
+                        <MudTextField T="string" @bind-Value="_newTeam" Placeholder="New team" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" OnKeyDown="@(e => e.Key == "Enter" ? CreateTeam() : Task.CompletedTask)" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newTeam)" OnClick="CreateTeam" Class="mt-1" />
+                    </div>
+                    <div class="admin-list">
+                        @foreach (var t in _teams)
+                        {
+                            var team = t;
+                            <div class="row @(team.Id == _team?.Id ? "on" : "")" @onclick="() => SelectTeam(team)">
+                                <MudIcon Icon="@Icons.Material.Outlined.Groups" Style="font-size:17px; color:var(--accent-2)" />
+                                <span class="t">@team.Name<br /><small>@team.MemberCount members · @team.ProjectCount projects</small></span>
+                            </div>
+                        }
+                        @if (_teams.Count == 0) { <div class="admin-empty">No teams yet.</div> }
+                    </div>
+                </div>
+
+                @if (_team is { } t2)
+                {
+                    <div class="admin-panel">
+                        <div class="d-flex align-center gap-2">
+                            <h3 style="margin:0; flex:1"><MudIcon Icon="@Icons.Material.Outlined.Groups" Style="font-size:15px" /> @t2.Name</h3>
+                            <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Outlined.Delete" OnClick="DeleteTeam">Delete team</MudButton>
+                        </div>
+
+                        <div class="admin-note mt-1">Members</div>
+                        <div class="d-flex gap-2 align-center mt-1">
+                            <UserPicker Users="_users" @bind-Selected="_teamPick" Placeholder="Add a team member…" />
+                            <MudButton Variant="Variant.Outlined" Disabled="_teamPick is null" OnClick="AddTeamMember">Add</MudButton>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            @foreach (var m in _teamMembers)
+                            {
+                                var member = m;
+                                <MudChip T="string" OnClose="() => RemoveTeamMember(member)" Size="Size.Small">
+                                    <span class="avatar sm" style="background:@member.Color; margin-right:6px">@MembersDialog.Initials(member)</span>@member.DisplayName
+                                </MudChip>
+                            }
+                            @if (_teamMembers.Count == 0) { <span class="muted">No members yet.</span> }
+                        </div>
+
+                        <div class="admin-note mt-4">Project access — every team member gets at least this role (the higher of this and any direct membership applies)</div>
+                        <div class="d-flex gap-2 align-start mt-1">
+                            <MudSelect T="Guid?" @bind-Value="_grantProject" Placeholder="Project" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:240px">
+                                @foreach (var p in _projects) { <MudSelectItem T="Guid?" Value="p.Id">@p.Name</MudSelectItem> }
+                            </MudSelect>
+                            <MudSelect T="ProjectRole" @bind-Value="_grantRole" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="max-width:130px">
+                                <MudSelectItem Value="ProjectRole.Viewer">Viewer</MudSelectItem>
+                                <MudSelectItem Value="ProjectRole.Editor">Editor</MudSelectItem>
+                                <MudSelectItem Value="ProjectRole.Owner">Owner</MudSelectItem>
+                            </MudSelect>
+                            <MudButton Variant="Variant.Outlined" Disabled="_grantProject is null" OnClick="Grant" Class="mt-1">Grant</MudButton>
+                        </div>
+                        <table class="admin-table mt-2">
+                            <tbody>
+                                @foreach (var g in _grants)
+                                {
+                                    var grant = g;
+                                    <tr>
+                                        <td><MudIcon Icon="@Icons.Material.Outlined.Description" Style="font-size:15px; vertical-align:-3px; color:var(--accent)" /> @grant.ProjectName</td>
+                                        <td style="width:140px">
+                                            <MudSelect T="ProjectRole" Value="grant.Role" ValueChanged="r => SetGrant(grant.ProjectId, grant.ProjectName, r)" Dense="true" Variant="Variant.Text">
+                                                <MudSelectItem Value="ProjectRole.Viewer">Viewer</MudSelectItem>
+                                                <MudSelectItem Value="ProjectRole.Editor">Editor</MudSelectItem>
+                                                <MudSelectItem Value="ProjectRole.Owner">Owner</MudSelectItem>
+                                            </MudSelect>
+                                        </td>
+                                        <td style="width:40px"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Close" OnClick="() => RemoveGrant(grant)" /></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (_grants.Count == 0) { <div class="admin-empty">This team has no project access yet.</div> }
+                    </div>
+                }
+                else
+                {
+                    <div class="admin-panel admin-empty">Select or create a team to manage its members and project access.</div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="admin-panel admin-empty">Select or create an organization. Organizations group people into teams; a team can be granted a role on any project.</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminUser Me { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IReadOnlyList<OrganizationInfo> _orgs = [];
+    private IReadOnlyList<TeamInfo> _teams = [];
+    private IReadOnlyList<UserAccount> _orgMembers = [], _teamMembers = [];
+    private IReadOnlyList<TeamGrant> _grants = [];
+    private IReadOnlyList<UserAccount> _users = [];
+    private IReadOnlyList<AdminProject> _projects = [];
+    private OrganizationInfo? _org;
+    private TeamInfo? _team;
+    private string? _newOrg, _newTeam;
+    private UserAccount? _orgPick, _teamPick;
+    private Guid? _grantProject;
+    private ProjectRole _grantRole = ProjectRole.Editor;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = (await Db.ListUsersAsync()).Where(u => !u.Disabled).Select(u => u.User).ToList();
+        _projects = await Db.ListAllProjectsAsync();
+        await ReloadOrgs();
+    }
+
+    private async Task ReloadOrgs()
+    {
+        _orgs = await Db.ListOrganizationsAsync();
+        _org = _org is null ? null : _orgs.FirstOrDefault(o => o.Id == _org.Id);
+        if (_org != null) await LoadOrg();
+    }
+
+    private async Task SelectOrg(OrganizationInfo o) { _org = o; _team = null; await LoadOrg(); }
+
+    private async Task LoadOrg()
+    {
+        _orgMembers = await Db.OrganizationMembersAsync(_org!.Id);
+        _teams = await Db.ListTeamsAsync(_org.Id);
+        _team = _team is null ? null : _teams.FirstOrDefault(t => t.Id == _team.Id);
+        if (_team != null) await LoadTeam();
+    }
+
+    private async Task SelectTeam(TeamInfo t) { _team = t; await LoadTeam(); }
+
+    private async Task LoadTeam()
+    {
+        _teamMembers = await Db.TeamMembersAsync(_team!.Id);
+        _grants = await Db.TeamGrantsAsync(_team.Id);
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        try { await action(); }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+    }
+
+    private Task CreateOrg() => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(_newOrg)) return;
+        var id = await Db.CreateOrganizationAsync(_newOrg);
+        await Audit.RecordAsync(AuditActions.OrgCreate, Me.User, target: _newOrg.Trim(), details: new { organizationId = id });
+        _newOrg = null;
+        await ReloadOrgs();
+        _org = _orgs.FirstOrDefault(o => o.Id == id);
+        if (_org != null) await LoadOrg();
+        await Changed.InvokeAsync();
+    });
+
+    private async Task DeleteOrg()
+    {
+        var ok = await Dialogs.ShowMessageBox("Delete organization", $"Delete “{_org!.Name}” and its {_org.TeamCount} teams? Project access granted through those teams is removed; direct project memberships are kept.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.DeleteOrganizationAsync(_org.Id);
+        await Audit.RecordAsync(AuditActions.OrgDelete, Me.User, target: _org.Name, details: new { organizationId = _org.Id });
+        _org = null; _team = null;
+        await ReloadOrgs();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task AddOrgMember()
+    {
+        if (_orgPick is not { } u) return;
+        await Db.AddOrganizationMemberAsync(_org!.Id, u.Id);
+        await Audit.RecordAsync(AuditActions.OrgMemberAdd, Me.User, target: u.Username, details: new { organization = _org.Name });
+        _orgPick = null;
+        await ReloadOrgs();
+    }
+
+    private async Task RemoveOrgMember(UserAccount u)
+    {
+        await Db.RemoveOrganizationMemberAsync(_org!.Id, u.Id);
+        await Audit.RecordAsync(AuditActions.OrgMemberRemove, Me.User, target: u.Username, details: new { organization = _org.Name });
+        await ReloadOrgs();
+    }
+
+    private Task CreateTeam() => Run(async () =>
+    {
+        if (string.IsNullOrWhiteSpace(_newTeam)) return;
+        var id = await Db.CreateTeamAsync(_org!.Id, _newTeam);
+        await Audit.RecordAsync(AuditActions.TeamCreate, Me.User, target: _newTeam.Trim(), details: new { organization = _org.Name, teamId = id });
+        _newTeam = null;
+        await ReloadOrgs();
+        _team = _teams.FirstOrDefault(t => t.Id == id);
+        if (_team != null) await LoadTeam();
+    });
+
+    private async Task DeleteTeam()
+    {
+        var ok = await Dialogs.ShowMessageBox("Delete team", $"Delete team “{_team!.Name}”? Its members lose any project access granted through it.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.DeleteTeamAsync(_team.Id);
+        await Audit.RecordAsync(AuditActions.TeamDelete, Me.User, target: _team.Name, details: new { organization = _org!.Name });
+        _team = null;
+        await ReloadOrgs();
+    }
+
+    private async Task AddTeamMember()
+    {
+        if (_teamPick is not { } u) return;
+        await Db.AddTeamMemberAsync(_team!.Id, u.Id);
+        await Audit.RecordAsync(AuditActions.TeamMemberAdd, Me.User, target: u.Username, details: new { team = _team.Name, organization = _org!.Name });
+        _teamPick = null;
+        await ReloadOrgs();
+    }
+
+    private async Task RemoveTeamMember(UserAccount u)
+    {
+        await Db.RemoveTeamMemberAsync(_team!.Id, u.Id);
+        await Audit.RecordAsync(AuditActions.TeamMemberRemove, Me.User, target: u.Username, details: new { team = _team.Name, organization = _org!.Name });
+        await ReloadOrgs();
+    }
+
+    private Task Grant() => _grantProject is { } pid ? SetGrant(pid, _projects.FirstOrDefault(p => p.Id == pid)?.Name, _grantRole) : Task.CompletedTask;
+
+    private async Task SetGrant(Guid projectId, string? projectName, ProjectRole role)
+    {
+        await Db.SetTeamGrantAsync(_team!.Id, projectId, role);
+        await Audit.RecordAsync(AuditActions.TeamGrantSet, Me.User, projectId, projectName, target: _team.Name, details: new { role = role.ToString().ToLowerInvariant() });
+        _grantProject = null;
+        await ReloadOrgs();
+    }
+
+    private async Task RemoveGrant(TeamGrant g)
+    {
+        await Db.RemoveTeamGrantAsync(_team!.Id, g.ProjectId);
+        await Audit.RecordAsync(AuditActions.TeamGrantRemove, Me.User, g.ProjectId, g.ProjectName, target: _team.Name);
+        await ReloadOrgs();
+    }
+}

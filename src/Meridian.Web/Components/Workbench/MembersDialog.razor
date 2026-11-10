@@ -1,6 +1,7 @@
 @using Meridian.Data
 @inject IMeridianStore Db
 @inject Workspace Ws
+@inject Meridian.Web.Admin.IAuditLog Audit
 
 <MudDialog>
     <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Group" /><MudText Typo="Typo.h6">Share “@Ws.Session?.Name”</MudText></div></TitleContent>
@@ -77,6 +78,7 @@
         var user = await Db.FindUserAsync(_username!);
         if (user is null) { _error = $"No user called “{_username}”. They need to create an account first."; return; }
         await Db.SetMemberAsync(ProjectId, user.Id, _role);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.MemberSet, Ws.User, ProjectId, Ws.Session?.Name, target: user.Username, details: new { role = _role.ToString().ToLowerInvariant() });
         _username = null;
         await Reload();
     }
@@ -84,6 +86,7 @@
     private async Task SetRole(ProjectMember m, ProjectRole r)
     {
         await Db.SetMemberAsync(ProjectId, m.User.Id, r);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.MemberSet, Ws.User, ProjectId, Ws.Session?.Name, target: m.User.Username, details: new { role = r.ToString().ToLowerInvariant(), from = m.Role.ToString().ToLowerInvariant() });
         await Reload();
     }
 
@@ -91,6 +94,7 @@
     {
         if (_members.Count(x => x.Role == ProjectRole.Owner) == 1 && m.Role == ProjectRole.Owner) { _error = "A project needs at least one owner."; return; }
         await Db.RemoveMemberAsync(ProjectId, m.User.Id);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.MemberRemove, Ws.User, ProjectId, Ws.Session?.Name, target: m.User.Username);
         await Reload();
     }
 }

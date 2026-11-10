@@ -1,0 +1,129 @@
+@using Meridian.Data
+@using Meridian.Web.Admin
+@inject IMeridianStore Db
+@inject IAuditLog Audit
+@inject CollaborationHub Hub
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<div class="admin-toolbar">
+    <MudTextField T="string" @bind-Value="_filter" Immediate="true" Placeholder="Search projects or owners…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Outlined.Search" Style="max-width:340px" />
+    <span class="grow"></span>
+    <span class="muted">@_projects.Count projects · @AdminFormat.Bytes(_projects.Sum(p => p.SizeBytes)) including history</span>
+</div>
+
+@if (_transfer is { } t)
+{
+    <div class="admin-panel" style="margin-bottom:12px">
+        <h3><MudIcon Icon="@Icons.Material.Outlined.SwapHoriz" Style="font-size:15px" /> Transfer “@t.Name”</h3>
+        <div class="d-flex gap-2 align-center">
+            <UserPicker Users="_users" @bind-Selected="_newOwner" Placeholder="New owner…" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_newOwner is null" OnClick="Transfer">Transfer ownership</MudButton>
+            <MudButton OnClick="() => _transfer = null">Cancel</MudButton>
+        </div>
+        <div class="admin-note mt-2">The new owner gets the Owner role; current owners stay on the project as editors.</div>
+    </div>
+}
+
+<div class="admin-panel" style="padding:4px 6px">
+    <table class="admin-table">
+        <thead>
+            <tr><th>Project</th><th>Owner</th><th class="num">Size</th><th class="num">Versions</th><th class="num">Members</th><th>Updated</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var p in Visible())
+            {
+                var project = p;
+                var live = Hub.Find(project.Id)?.Participants.Count ?? 0;
+                <tr>
+                    <td>
+                        <div class="who">
+                            <MudIcon Icon="@Icons.Material.Outlined.Description" Style="color:var(--accent)" />
+                            <div><b>@project.Name</b><small>rev @project.Revision · created @AdminFormat.When(project.CreatedAt)@if (live > 0) { <span style="color:var(--ok)"> · @live online</span> }</small></div>
+                        </div>
+                    </td>
+                    <td>
+                        @if (project.Owner is { } o)
+                        {
+                            <div class="who"><span class="avatar sm" style="background:@o.Color">@MembersDialog.Initials(o)</span>@o.DisplayName</div>
+                        }
+                        else { <span class="pill warn">No owner</span> }
+                    </td>
+                    <td class="num">@AdminFormat.Bytes(project.SizeBytes)</td>
+                    <td class="num">@project.VersionCount</td>
+                    <td class="num">@project.MemberCount</td>
+                    <td class="muted">@AdminFormat.When(project.UpdatedAt)</td>
+                    <td style="text-align:right; white-space:nowrap">
+                        <MudTooltip Text="Rename"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" /></MudTooltip>
+                        <MudTooltip Text="Transfer ownership"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.SwapHoriz" OnClick="() => { _transfer = project; _newOwner = null; }" /></MudTooltip>
+                        <MudTooltip Text="Delete"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" OnClick="() => Delete(project)" /></MudTooltip>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (!Visible().Any()) { <div class="admin-empty">No projects match.</div> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminUser Me { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IReadOnlyList<AdminProject> _projects = [];
+    private IReadOnlyList<UserAccount> _users = [];
+    private string? _filter;
+    private AdminProject? _transfer;
+    private UserAccount? _newOwner;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = (await Db.ListUsersAsync()).Where(u => !u.Disabled).Select(u => u.User).ToList();
+        await Reload();
+    }
+
+    private async Task Reload() => _projects = await Db.ListAllProjectsAsync();
+
+    private IEnumerable<AdminProject> Visible() => _projects.Where(p => string.IsNullOrWhiteSpace(_filter)
+        || p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        || (p.Owner?.Username.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (p.Owner?.DisplayName.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private async Task Rename(AdminProject p)
+    {
+        var parameters = new DialogParameters<PromptDialog> { { x => x.Title, "Rename project" }, { x => x.Label, "Project name" }, { x => x.Value, p.Name } };
+        var r = await (await Dialogs.ShowAsync<PromptDialog>("Rename", parameters)).Result;
+        if (r is not { Canceled: false, Data: string name } || string.IsNullOrWhiteSpace(name) || name.Trim() == p.Name) return;
+        await Db.RenameProjectAsync(p.Id, name);
+        if (Hub.Find(p.Id) is { } s) s.Name = name.Trim();
+        await Audit.RecordAsync(AuditActions.ProjectRename, Me.User, p.Id, name.Trim(), target: name.Trim(), details: new { from = p.Name, admin = true });
+        await Reload();
+    }
+
+    private async Task Transfer()
+    {
+        if (_transfer is not { } p || _newOwner is not { } owner) return;
+        await Db.TransferProjectAsync(p.Id, owner.Id);
+        await Audit.RecordAsync(AuditActions.ProjectTransfer, Me.User, p.Id, p.Name, target: owner.Username, details: new { from = p.Owner?.Username });
+        Snackbar.Add($"“{p.Name}” now belongs to {owner.DisplayName}", Severity.Success);
+        _transfer = null;
+        await Reload();
+    }
+
+    private async Task Delete(AdminProject p)
+    {
+        if ((Hub.Find(p.Id)?.Participants.Count ?? 0) > 0)
+        {
+            await Dialogs.ShowMessageBox("Project in use", "People are working in this project right now. Wait until everyone has closed it before deleting it.");
+            return;
+        }
+        var ok = await Dialogs.ShowMessageBox("Delete project",
+            $"Permanently delete “{p.Name}” ({p.VersionCount} versions, {AdminFormat.Bytes(p.SizeBytes)}) for everyone? Download a backup first if you may need it again. This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.DeleteProjectAsync(p.Id);
+        await Audit.RecordAsync(AuditActions.ProjectDelete, Me.User, p.Id, p.Name, target: p.Name, details: new { owner = p.Owner?.Username, versions = p.VersionCount, admin = true });
+        await Reload();
+        await Changed.InvokeAsync();
+    }
+}

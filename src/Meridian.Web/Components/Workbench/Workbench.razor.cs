@@ -30,6 +30,7 @@ public partial class Workbench
     [Inject] private CollaborationHub Hub { get; set; } = default!;
     [Inject] private AuthenticationStateProvider Auth { get; set; } = default!;
     [Inject] private MeridianHostInfo Host { get; set; } = default!;
+    [Inject] private Meridian.Web.Admin.IAuditLog Audit { get; set; } = default!;
     private bool _desktop;
     [Inject] private NavigationManager Nav { get; set; } = default!;
 
@@ -151,6 +152,7 @@ public partial class Workbench
     {
         if (Ws.User is null) return null;
         var id = await Db.CreateProjectAsync(name, ProjectFile.Serialize(model), Ws.User.Id);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectCreate, Ws.User, id, name, target: name);
         await OpenProject(id);
         return id;
     }
@@ -861,6 +863,7 @@ public partial class Workbench
     {
         await JS.InvokeVoidAsync("meridian.download", fileName, mime, Convert.ToBase64String(bytes));
         Ws.Log($"Downloaded {fileName}");
+        if (Ws.Session is { } s) await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectExport, Ws.User, s.ProjectId, s.Name, target: fileName, details: new { mime, bytes = bytes.Length });
         Ws.SetStatus($"Downloaded {fileName}");
     }
 
@@ -876,6 +879,7 @@ public partial class Workbench
         var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, message.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
         Snackbar.Add($"Committed version {n}", Severity.Success);
         Ws.Log($"Committed version {n}: {message}");
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.VersionCommit, Ws.User, Ws.Session.ProjectId, Ws.Session.Name, target: $"v{n}", details: new { message = message.Trim() });
     }
 
     private Task ExportXmi()

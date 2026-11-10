@@ -16,6 +16,7 @@ public class ComponentTests : TestContext
     {
         Services.AddMudServices();
         Services.AddScoped<Workspace>();
+        Services.AddSingleton(new Meridian.Web.Admin.AdminSettings(new(), new(), new()));
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 

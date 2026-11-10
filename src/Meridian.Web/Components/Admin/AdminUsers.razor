@@ -1,0 +1,193 @@
+@using Meridian.Data
+@using Meridian.Web.Admin
+@inject IMeridianStore Db
+@inject IAuditLog Audit
+@inject AdminAccess Access
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<div class="admin-toolbar">
+    <MudTextField T="string" @bind-Value="_filter" Immediate="true" Placeholder="Search users…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Outlined.Search" Style="max-width:320px" />
+    <MudChipSet T="string" @bind-SelectedValue="_show" SelectionMode="SelectionMode.SingleSelection" Size="Size.Small">
+        <MudChip T="string" Value="@("all")" Default="true">All</MudChip>
+        <MudChip T="string" Value="@("admins")">Administrators</MudChip>
+        <MudChip T="string" Value="@("disabled")">Disabled</MudChip>
+        <MudChip T="string" Value="@("locked")">Locked</MudChip>
+    </MudChipSet>
+    <span class="grow"></span>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PersonAdd" OnClick="StartCreate">New user</MudButton>
+</div>
+
+@if (_creating)
+{
+    <div class="admin-panel" style="margin-bottom:12px">
+        <h3><MudIcon Icon="@Icons.Material.Outlined.PersonAdd" Style="font-size:15px" /> New user</h3>
+        <div class="d-flex gap-3 flex-wrap align-start">
+            <MudTextField T="string" @bind-Value="_newUsername" Label="Username" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Style="min-width:200px" />
+            <MudTextField T="string" @bind-Value="_newDisplay" Label="Display name" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:200px" />
+            <MudTextField T="string" @bind-Value="_newPassword" Label="Initial password" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px"
+                          HelperText="Share it securely; at least 8 characters" />
+            <MudCheckBox T="bool" @bind-Value="_newAdmin" Label="Administrator" Class="mt-1" />
+        </div>
+        @if (_error != null) { <MudText Typo="Typo.caption" Color="Color.Error">@_error</MudText> }
+        <div class="d-flex gap-2 mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="string.IsNullOrWhiteSpace(_newUsername)" OnClick="Create">Create user</MudButton>
+            <MudButton OnClick="() => _creating = false">Cancel</MudButton>
+        </div>
+    </div>
+}
+
+<div class="admin-panel" style="padding:4px 6px">
+    <table class="admin-table">
+        <thead>
+            <tr><th>User</th><th>Role</th><th>Status</th><th>Sign-in</th><th>Last sign-in</th><th>Created</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var u in Visible())
+            {
+                var user = u;
+                var self = user.User.Id == Me.User.Id;
+                <tr>
+                    <td>
+                        <div class="who">
+                            <span class="avatar" style="background:@user.User.Color">@MembersDialog.Initials(user.User)</span>
+                            <div><b>@user.User.DisplayName @(self ? "(you)" : "")</b><small>@user.User.Username</small></div>
+                        </div>
+                    </td>
+                    <td>@if (user.IsAdmin) { <span class="pill admin">Admin</span> } else { <span class="pill">User</span> }</td>
+                    <td>
+                        @if (user.Disabled) { <span class="pill bad">Disabled</span> }
+                        else if (user.IsLockedOut(DateTime.UtcNow)) { <span class="pill warn" title="Until @AdminFormat.When(user.LockedUntil)">Locked</span> }
+                        else { <span class="pill ok">Active</span> }
+                    </td>
+                    <td>
+                        @foreach (var p in user.SsoProviders) { <span class="pill info" style="margin-right:4px">@p</span> }
+                        @if (user.HasPassword) { <span class="pill">Password</span> }
+                    </td>
+                    <td class="muted">@AdminFormat.When(user.LastLoginAt)</td>
+                    <td class="muted">@AdminFormat.When(user.CreatedAt)</td>
+                    <td style="text-align:right">
+                        <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                            @if (user.IsAdmin)
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Outlined.RemoveModerator" Disabled="self" OnClick="() => SetAdmin(user, false)">Remove administrator</MudMenuItem>
+                            }
+                            else
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Outlined.AdminPanelSettings" OnClick="() => SetAdmin(user, true)">Make administrator</MudMenuItem>
+                            }
+                            <MudMenuItem Icon="@Icons.Material.Outlined.Password" OnClick="() => ResetPassword(user)">Reset password…</MudMenuItem>
+                            @if (user.IsLockedOut(DateTime.UtcNow) || user.FailedLogins > 0)
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Outlined.LockOpen" OnClick="() => Unlock(user)">Unlock</MudMenuItem>
+                            }
+                            <MudDivider />
+                            @if (user.Disabled)
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Outlined.CheckCircle" OnClick="() => SetDisabled(user, false)">Enable account</MudMenuItem>
+                            }
+                            else
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Outlined.Block" Disabled="self" OnClick="() => SetDisabled(user, true)">Disable account</MudMenuItem>
+                            }
+                        </MudMenu>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (!Visible().Any()) { <div class="admin-empty">No users match.</div> }
+</div>
+<div class="admin-note mt-2">Disabling an account signs it out everywhere within seconds and blocks password and single sign-on. Accounts created by single sign-on have no password until you set one.</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminUser Me { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IReadOnlyList<AdminUser> _users = [];
+    private string? _filter;
+    private string? _show = "all";
+    private bool _creating;
+    private string? _newUsername, _newDisplay, _newPassword, _error;
+    private bool _newAdmin;
+
+    protected override Task OnInitializedAsync() => Reload();
+
+    private async Task Reload() => _users = await Db.ListUsersAsync();
+
+    private IEnumerable<AdminUser> Visible() => _users
+        .Where(u => string.IsNullOrWhiteSpace(_filter) || u.User.Username.Contains(_filter, StringComparison.OrdinalIgnoreCase) || u.User.DisplayName.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+        .Where(u => _show switch { "admins" => u.IsAdmin, "disabled" => u.Disabled, "locked" => u.IsLockedOut(DateTime.UtcNow), _ => true });
+
+    private void StartCreate()
+    {
+        _creating = true;
+        _newUsername = _newDisplay = _error = null;
+        _newPassword = AdminFormat.GeneratePassword();
+        _newAdmin = false;
+    }
+
+    private async Task Create()
+    {
+        _error = null;
+        try
+        {
+            var user = await Db.CreateUserAsync(_newUsername!, _newDisplay ?? "", _newPassword ?? "");
+            if (_newAdmin) await Db.SetUserAdminAsync(user.Id, true);
+            await Audit.RecordAsync(AuditActions.UserCreate, Me.User, target: user.Username, details: new { admin = _newAdmin });
+            Snackbar.Add($"Created {user.Username}", Severity.Success);
+            _creating = false;
+            await Reload();
+            await Changed.InvokeAsync();
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private async Task SetAdmin(AdminUser u, bool admin)
+    {
+        if (!admin && _users.Count(x => x.IsAdmin && !x.Disabled) <= 1) { Snackbar.Add("The server needs at least one active administrator.", Severity.Warning); return; }
+        await Db.SetUserAdminAsync(u.User.Id, admin);
+        Access.Invalidate(u.User.Id);
+        await Audit.RecordAsync(admin ? AuditActions.UserAdminGrant : AuditActions.UserAdminRevoke, Me.User, target: u.User.Username);
+        await Reload();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task SetDisabled(AdminUser u, bool disabled)
+    {
+        if (disabled)
+        {
+            if (u.IsAdmin && _users.Count(x => x.IsAdmin && !x.Disabled) <= 1) { Snackbar.Add("The server needs at least one active administrator.", Severity.Warning); return; }
+            var ok = await Dialogs.ShowMessageBox("Disable account", $"Disable {u.User.DisplayName} ({u.User.Username})? They are signed out and cannot sign in until re-enabled. Their projects and history are kept.", yesText: "Disable", cancelText: "Cancel");
+            if (ok != true) return;
+        }
+        await Db.SetUserDisabledAsync(u.User.Id, disabled);
+        Access.Invalidate(u.User.Id);
+        await Audit.RecordAsync(disabled ? AuditActions.UserDisable : AuditActions.UserEnable, Me.User, target: u.User.Username);
+        await Reload();
+    }
+
+    private async Task Unlock(AdminUser u)
+    {
+        await Db.UnlockUserAsync(u.User.Id);
+        await Audit.RecordAsync(AuditActions.UserUnlock, Me.User, target: u.User.Username);
+        Snackbar.Add($"Unlocked {u.User.Username}", Severity.Success);
+        await Reload();
+    }
+
+    private async Task ResetPassword(AdminUser u)
+    {
+        var parameters = new DialogParameters<PromptDialog> { { x => x.Title, $"Reset password for {u.User.Username}" }, { x => x.Label, "New password" }, { x => x.Value, AdminFormat.GeneratePassword() } };
+        var r = await (await Dialogs.ShowAsync<PromptDialog>("Reset password", parameters)).Result;
+        if (r is not { Canceled: false, Data: string password }) return;
+        try
+        {
+            await Db.SetPasswordAsync(u.User.Id, password);
+            await Audit.RecordAsync(AuditActions.UserPasswordReset, Me.User, target: u.User.Username);
+            await Dialogs.ShowMessageBox("Password reset", $"{u.User.Username}'s password has been changed and any lockout cleared. Share the new password with them securely.");
+            await Reload();
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+}

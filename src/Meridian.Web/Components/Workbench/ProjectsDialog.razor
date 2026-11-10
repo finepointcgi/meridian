@@ -3,6 +3,7 @@
 @inject Workspace Ws
 @inject IDialogService Dialogs
 @inject CollaborationHub Hub
+@inject Meridian.Web.Admin.IAuditLog Audit
 
 <MudDialog ContentStyle="padding-top:0">
     <TitleContent>
@@ -67,6 +68,7 @@
         if (r is not { Canceled: false, Data: string name } || string.IsNullOrWhiteSpace(name)) return;
         await Db.RenameProjectAsync(p.Id, name);
         if (Hub.Find(p.Id) is { } s) s.Name = name.Trim();
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectRename, Ws.User, p.Id, name.Trim(), target: name.Trim(), details: new { from = p.Name });
         await Reload();
     }
 
@@ -80,6 +82,7 @@
         var ok = await Dialogs.ShowMessageBox("Delete project", $"Permanently delete “{p.Name}”, its version history and comments for everyone? This cannot be undone.", yesText: "Delete", cancelText: "Cancel");
         if (ok != true) return;
         await Db.DeleteProjectAsync(p.Id);
+        await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectDelete, Ws.User, p.Id, p.Name, target: p.Name);
         await Reload();
     }
 }
