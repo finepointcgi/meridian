@@ -519,3 +519,65 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .delivery-log tr.fail td:last-child { color: var(--danger); }
 .delivery-log tr.ok td:last-child { color: var(--ok); }
 .token-value input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+/* ============================================================ version control: branches, merge, baselines, locks */
+.vc-branch { display: flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 500;
+  color: var(--text-2); border: 1px solid var(--border-strong); background: var(--panel-2); white-space: nowrap; }
+.vc-branch:hover { border-color: var(--sel-border); color: var(--text); }
+.vc-branch.on-branch { color: var(--accent-2); border-color: rgba(45, 212, 191, .45); background: rgba(45, 212, 191, .08); }
+.vc-branch .name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.vc-menu-label { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .55; padding: 6px 16px 2px; }
+.vc-online { color: #3fbf7f; font-size: 11.5px; }
+.vc-lock { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 0 5px; border-radius: 8px; font-size: 9.5px; font-weight: 700;
+  color: #fff; background: var(--lc, #ff6b6b); line-height: 15px; flex: none; }
+.vc-lock.mine { background: transparent; color: var(--accent-2); border: 1px solid rgba(45, 212, 191, .5); }
+.vc-ref { font-family: ui-monospace, Menlo, monospace; font-size: .85em; padding: 1px 7px; border-radius: 6px; margin: 0 2px;
+  background: rgba(79, 140, 255, .14); color: var(--mud-palette-primary); }
+.vc-stat { font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 20px; background: var(--mud-palette-action-default-hover); }
+.vc-stat.ok { color: #3fbf7f; background: rgba(63, 191, 127, .12); }
+.vc-stat.warn { color: #f0b429; background: rgba(240, 180, 41, .12); }
+.vc-stat.bad { color: #ff6b6b; background: rgba(255, 107, 107, .12); }
+.vc-stat.move { color: #a283ff; background: rgba(162, 131, 255, .12); }
+.vc-pill { font-size: 11px; padding: 2px 9px; border-radius: 20px; border: 1px solid var(--mud-palette-lines-default); opacity: .7; align-self: center; }
+.dim { font-size: 11.5px; opacity: .62; }
+.vc-table { border: 1px solid var(--mud-palette-lines-default); border-radius: 10px; overflow: hidden; }
+.vc-row { display: grid; grid-template-columns: 1.3fr 1.3fr .5fr 1.4fr auto; gap: 12px; align-items: center; padding: 8px 12px;
+  border-top: 1px solid var(--mud-palette-lines-default); }
+.vc-row:first-child { border-top: none; }
+.vc-row.current { background: rgba(79, 140, 255, .07); }
+.vc-head { font-size: 10.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; opacity: .55; background: var(--mud-palette-background-gray); }
+.vc-conflicts { border: 1px solid var(--mud-palette-lines-default); border-radius: 10px; max-height: 46vh; overflow: auto; }
+.vc-crow { display: grid; grid-template-columns: minmax(220px, 1.3fr) 1fr 1fr 1fr; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--mud-palette-lines-default); align-items: start; }
+.vc-crow:first-child { border-top: none; position: sticky; top: 0; z-index: 1; }
+.vc-what { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vc-kind { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; color: #f0b429; border: 1px solid rgba(240, 180, 41, .45); border-radius: 5px; padding: 0 5px; }
+.vc-val { font-size: 12.5px; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; min-height: 36px;
+  border: 1px solid var(--mud-palette-lines-default); }
+.vc-val.base { opacity: .6; border-style: dashed; }
+.vc-val.pick { cursor: pointer; position: relative; padding-left: 28px; transition: border-color .12s, background .12s; }
+.vc-val.pick:hover { border-color: rgba(79, 140, 255, .55); }
+.vc-val.pick.on { border-color: var(--mud-palette-primary); background: rgba(79, 140, 255, .10); }
+.vc-radio { position: absolute; left: 9px; top: 11px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--mud-palette-lines-inputs); }
+.vc-val.pick.on .vc-radio { border-color: var(--mud-palette-primary); background: radial-gradient(var(--mud-palette-primary) 45%, transparent 50%); }
+.vc-section { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12.5px; font-weight: 600; opacity: .8; padding: 4px 0; }
+.vc-section-title { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .55; margin-bottom: 6px; }
+.vc-group { margin-top: 10px; }
+.vc-group-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--c); padding: 4px 0; }
+.vc-group-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.vc-group-head .count { font-weight: 600; opacity: .7; }
+.vc-diff { padding: 7px 10px; border-left: 2px solid var(--mud-palette-lines-default); margin-left: 3px; }
+.vc-diff:hover { background: var(--mud-palette-action-default-hover); }
+.vc-kindname { font-size: 10.5px; opacity: .5; }
+.vc-fields { margin: 4px 0 0 22px; border-collapse: collapse; font-size: 12px; }
+.vc-fields td { padding: 1px 6px; vertical-align: top; }
+.vc-fields .k { font-weight: 600; opacity: .75; white-space: nowrap; }
+.vc-fields .before { text-decoration: line-through; opacity: .55; word-break: break-word; }
+.vc-fields .arrow { opacity: .4; }
+.vc-fields .after { word-break: break-word; }
+.vc-baselines { display: grid; grid-template-columns: 320px 1fr; gap: 18px; min-height: 480px; margin-top: 6px; }
+.vc-pane { min-width: 0; }
+.vc-pane:first-child { border-right: 1px solid var(--mud-palette-lines-default); padding-right: 16px; }
+.vc-blist { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.vc-bitem { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--mud-palette-lines-default); }
+.vc-bitem.on { border-color: var(--mud-palette-primary); background: rgba(79, 140, 255, .07); }
+.vc-diffscroll { max-height: 56vh; overflow: auto; padding-right: 4px; }
+@media (max-width: 900px) { .vc-baselines { grid-template-columns: 1fr; } .vc-pane:first-child { border-right: none; padding-right: 0; } .vc-crow { grid-template-columns: 1fr; } }

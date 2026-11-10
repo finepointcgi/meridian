@@ -60,6 +60,15 @@
                             @KindIcon.For(el)
                             <span class="label">@context.Text</span>
                             @if (el is Diagram d) { <span class="meta">@Metamodel.DiagramAbbreviation(d.DiagramType)</span> }
+                            @if (Ws.LockOf(el) is { } lk)
+                            {
+                                var mine = lk.User.Id == Ws.User?.Id;
+                                var lockTip = (mine ? "Locked by you" : "Locked by " + lk.User.DisplayName) + (lk.ElementId != el.Id ? " (with its container)" : "");
+                                <span class="vc-lock @(mine ? "mine" : "")" title="@lockTip"
+                                      style="@(mine ? "" : $"--lc:{lk.User.Color}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:11px" />@(mine ? "" : MembersDialog.Initials(lk.User))
+                                </span>
+                            }
                             @if (el.Kind != ElementKind.Model)
                             {
                                 <span class="star @(Ws.Favorites.Contains(el.Id) ? "on" : "")" title="Favorite" @onclick="() => Ws.ToggleFavorite(el)" @onclick:stopPropagation="true">

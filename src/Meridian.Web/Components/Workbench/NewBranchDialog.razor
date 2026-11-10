@@ -1,0 +1,56 @@
+@using Meridian.Data
+@inject IMeridianStore Db
+@inject Workspace Ws
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><MudText Typo="Typo.h6">New branch</MudText></div></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Style="opacity:.7">A branch is a separate line of work with its own live session. Merge it back when it's ready.</MudText>
+        <MudTextField T="string" @bind-Value="_name" Label="Branch name" Placeholder="e.g. pdr-updates" AutoFocus="true" Immediate="true"
+                      Variant="Variant.Outlined" Class="mt-3" OnKeyDown="KeyDown" Error="@(_error != null)" ErrorText="@_error" />
+        <MudSelect T="long" @bind-Value="_from" Label="Start from" Variant="Variant.Outlined" Class="mt-3" Dense="true">
+            <MudSelectItem T="long" Value="0L">Current state of @Ws.BranchName (live)</MudSelectItem>
+            @foreach (var v in _versions)
+            {
+                <MudSelectItem T="long" Value="v.Id">v@(v.Number) · @v.Message — @v.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="string.IsNullOrWhiteSpace(_name)" OnClick="Ok">Create branch</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Request(string Name, long? VersionId);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public long? FromVersionId { get; set; }
+
+    private string? _name;
+    private string? _error;
+    private long _from;
+    private IReadOnlyList<VersionInfo> _versions = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Ws.Session is { } s)
+        {
+            _versions = await Db.ListBranchVersionsAsync(s.ProjectId, s.BranchId);
+            // A version picked in the history may live on another line: list it too.
+            if (FromVersionId is { } v && _versions.All(x => x.Id != v))
+                _versions = [.. (await Db.ListVersionsAsync(s.ProjectId)).Where(x => x.Id == v), .. _versions];
+        }
+        _from = FromVersionId ?? 0;
+    }
+
+    private void Ok()
+    {
+        try { Branching.NormalizeBranchName(_name ?? ""); }
+        catch (InvalidOperationException ex) { _error = ex.Message; return; }
+        MudDialog.Close(DialogResult.Ok(new Request(_name!.Trim(), _from == 0 ? null : _from)));
+    }
+
+    private void KeyDown(KeyboardEventArgs e) { if (e.Key == "Enter") Ok(); }
+}

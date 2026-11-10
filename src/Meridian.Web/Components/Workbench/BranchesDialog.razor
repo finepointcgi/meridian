@@ -1,0 +1,97 @@
+@using Meridian.Data
+@inject IMeridianStore Db
+@inject Workspace Ws
+@inject CollaborationHub Hub
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><MudText Typo="Typo.h6">Branches</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="d-flex align-center gap-2 mt-1">
+            <MudText Typo="Typo.caption" Style="opacity:.7; flex:1">You are on <b>@Ws.BranchName</b>. Each branch has its own live session; merges are three-way, against the branch's merge base.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.AddCircleOutline" Disabled="Ws.ReadOnly"
+                       OnClick="@(() => Close("new", BranchRef.Main))">New branch</MudButton>
+        </div>
+        <div class="vc-table mt-3">
+            <div class="vc-row vc-head"><span>Branch</span><span>Created</span><span>Base</span><span>Activity</span><span></span></div>
+            <div class="vc-row @(Ws.BranchId is null ? "current" : "")">
+                <span class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Home" Style="font-size:16px" /><b>main</b></span>
+                <span class="dim">project line</span>
+                <span class="dim">—</span>
+                <span class="dim">@Online(null)</span>
+                <span class="d-flex gap-1 justify-end">@Actions(BranchRef.Main)</span>
+            </div>
+            @foreach (var b in _branches)
+            {
+                var line = new BranchRef(b.Id, b.Name);
+                <div class="vc-row @(Ws.BranchId == b.Id ? "current" : "")">
+                    <span class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" Style="font-size:16px" /><b>@b.Name</b></span>
+                    <span class="dim">@b.CreatedBy · @b.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                    <span class="dim">@(b.BaseVersionNumber is { } n ? $"v{n}" : "head")</span>
+                    <span class="dim">updated @b.UpdatedAt.ToLocalTime().ToString("MMM d, HH:mm") @Online(b.Id)</span>
+                    <span class="d-flex gap-1 justify-end">
+                        @Actions(line)
+                        <MudTooltip Text="Delete branch">
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="@(Ws.ReadOnly || Ws.BranchId == b.Id)" OnClick="() => Delete(b)" />
+                        </MudTooltip>
+                    </span>
+                </div>
+            }
+            @if (_branches.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="pa-3" Style="opacity:.7">No branches yet. Create one to work on changes in isolation, then merge them back into main.</MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Action(string Kind, BranchRef Line);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private IReadOnlyList<BranchInfo> _branches = [];
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _branches = Ws.Session is null ? [] : await Db.ListBranchesAsync(Ws.Session.ProjectId);
+
+    private void Close(string kind, BranchRef line) => MudDialog.Close(DialogResult.Ok(new Action(kind, line)));
+
+    private string Online(Guid? branchId)
+    {
+        var n = Ws.Session is null ? 0 : Hub.Find(Ws.Session.ProjectId, branchId)?.Participants.Count ?? 0;
+        return n > 0 ? $"· {n} online" : "";
+    }
+
+    private RenderFragment Actions(BranchRef line) => __builder =>
+    {
+        if (line.BranchId == Ws.BranchId)
+        {
+            <span class="vc-pill">current</span>
+            return;
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => Close("open", line))">Open</MudButton>
+        <MudTooltip Text="@($"Merge {Ws.BranchName} into {line.Name}")">
+            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="Ws.ReadOnly" StartIcon="@Icons.Material.Outlined.MergeType" OnClick="@(() => Close("merge-into", line))">Merge into</MudButton>
+        </MudTooltip>
+        <MudTooltip Text="@($"Merge {line.Name} into {Ws.BranchName}")">
+            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="Ws.ReadOnly" StartIcon="@Icons.Material.Outlined.Input" OnClick="@(() => Close("merge-from", line))">Merge from</MudButton>
+        </MudTooltip>
+    };
+
+    private async Task Delete(BranchInfo b)
+    {
+        if (Ws.Session is null) return;
+        var ok = await Dialogs.ShowMessageBox("Delete branch", $"Delete branch “{b.Name}” and its unmerged head? Baselines on its versions are kept.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        try
+        {
+            await VersionControl.DeleteBranchAsync(Db, Hub, Ws.Session.ProjectId, b.Id);
+            Snackbar.Add($"Deleted branch “{b.Name}”", Severity.Success);
+            await Reload();
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+    }
+}

@@ -14,20 +14,35 @@ public sealed record Presence(string ParticipantId, UserAccount User, string? Se
 /// </summary>
 public sealed partial class CollaborationHub(IMeridianStore db, ILogger<CollaborationHub> log, Integrations.ProjectEvents? events = null)
 {
-    private readonly ConcurrentDictionary<Guid, ProjectSession> _sessions = new();
+    // Sessions are keyed per project + branch (null branch = main).
+    private readonly ConcurrentDictionary<(Guid Project, Guid? Branch), ProjectSession> _sessions = new();
     private readonly SemaphoreSlim _openGate = new(1, 1);
 
-    public async Task<ProjectSession?> JoinAsync(Guid projectId, Presence me, ISessionClient client)
+    public async Task<ProjectSession?> JoinAsync(Guid projectId, Presence me, ISessionClient client, Guid? branchId = null)
     {
         await _openGate.WaitAsync();
         try
         {
-            if (!_sessions.TryGetValue(projectId, out var session))
+            var key = (projectId, branchId);
+            if (!_sessions.TryGetValue(key, out var session))
             {
                 var row = await db.LoadProjectAsync(projectId);
                 if (row is null) return null;
-                session = new ProjectSession(projectId, row.Value.Name, ProjectFile.Deserialize(row.Value.ModelJson), db, log, () => _sessions.TryRemove(projectId, out _)) { Events = events };
-                _sessions[projectId] = session;
+                var modelJson = row.Value.ModelJson;
+                string? branchName = null;
+                if (branchId is { } bid)
+                {
+                    var branch = await db.LoadBranchAsync(bid);
+                    if (branch is null || branch.ProjectId != projectId) return null;
+                    (modelJson, branchName) = (branch.HeadJson, branch.Name);
+                }
+                session = new ProjectSession(projectId, row.Value.Name, ProjectFile.Deserialize(modelJson), db, log, () => _sessions.TryRemove(key, out _))
+                {
+                    BranchId = branchId,
+                    BranchName = branchName ?? Branching.MainBranch,
+                    Events = events,
+                };
+                _sessions[key] = session;
             }
             session.Join(me, client);
             return session;
@@ -41,9 +56,16 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
         foreach (var s in _sessions.Values) await s.PersistAsync();
     }
 
-    public bool IsOpen(Guid projectId) => _sessions.ContainsKey(projectId);
+    public bool IsOpen(Guid projectId) => _sessions.ContainsKey((projectId, null));
 
-    public ProjectSession? Find(Guid projectId) => _sessions.GetValueOrDefault(projectId);
+    /// <summary>The live session of a project's main line.</summary>
+    public ProjectSession? Find(Guid projectId) => _sessions.GetValueOrDefault((projectId, null));
+
+    /// <summary>The live session of one branch (null = main).</summary>
+    public ProjectSession? Find(Guid projectId, Guid? branchId) => _sessions.GetValueOrDefault((projectId, branchId));
+
+    /// <summary>Every live session of a project (main and branches).</summary>
+    public IEnumerable<ProjectSession> SessionsOf(Guid projectId) => _sessions.Where(kv => kv.Key.Project == projectId).Select(kv => kv.Value);
 }
 
 /// <summary>What a session needs from a connected browser tab. Calls are made while the session lock is held, so
@@ -54,9 +76,12 @@ public interface ISessionClient
     void PresenceChanged();
     void Reset(string modelJson);
     void CommentsChanged();
+
+    /// <summary>The whole model was replaced (merge, or an edit rejected by an element lock); <paramref name="message"/> explains why.</summary>
+    void Replaced(string modelJson, string message) => Reset(modelJson);
 }
 
-public sealed class ProjectSession : IDisposable
+public sealed partial class ProjectSession : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, (Presence Presence, ISessionClient Client)> _participants = new();
@@ -83,6 +108,9 @@ public sealed class ProjectSession : IDisposable
     /// <summary>Webhook event sink (integrations); null when not configured.</summary>
     internal Integrations.ProjectEvents? Events { get; init; }
     public string Name { get; set; }
+    /// <summary>The branch this session edits; null for the project's main line.</summary>
+    public Guid? BranchId { get; init; }
+    public string BranchName { get; init; } = Branching.MainBranch;
     public long Sequence { get; private set; }
     public DateTime? LastPersisted { get; private set; }
 
@@ -111,6 +139,7 @@ public sealed class ProjectSession : IDisposable
         lock (_gate)
         {
             _participants.Remove(participantId);
+            ReleaseLocksOf(participantId);   // element locks end when their holder leaves
             BroadcastPresence();
             empty = _participants.Count == 0;
         }
@@ -130,6 +159,7 @@ public sealed class ProjectSession : IDisposable
     {
         lock (_gate)
         {
+            if (!AllowEdit(participantId, userId, op)) return;   // element locks (ProjectSession.Locks.cs)
             _master.ApplyRemote(op);
             Events?.OperationApplied(ProjectId, Name, userId, op, _master);
             Sequence++;
@@ -192,7 +222,8 @@ public sealed class ProjectSession : IDisposable
         }
         try
         {
-            await _db.SaveProjectAsync(ProjectId, json, editor);
+            if (BranchId is { } branch) await _db.SaveBranchAsync(branch, json, editor);
+            else await _db.SaveProjectAsync(ProjectId, json, editor);
             LastPersisted = DateTime.Now;
         }
         catch (Exception ex)

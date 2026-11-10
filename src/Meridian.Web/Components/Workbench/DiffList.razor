@@ -1,0 +1,55 @@
+@using Meridian.Core.Analysis
+@using Meridian.Core.Language
+
+@* A model comparison grouped by added / changed / moved / removed, with field-level detail. *@
+@if (Diff.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="pa-2" Style="opacity:.7">No differences.</MudText>
+}
+@foreach (var group in Groups())
+{
+    <div class="vc-group">
+        <div class="vc-group-head" style="--c:@group.Color">
+            <span class="dot"></span>@group.Title <span class="count">@group.Items.Count</span>
+        </div>
+        @foreach (var d in group.Items.Take(MaxItems))
+        {
+            <div class="vc-diff">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@UiKinds.Icon(d.ElementKind)" Style="font-size:15px; opacity:.75" />
+                    <span style="font-weight:500">@d.Name</span>
+                    <span class="vc-kindname">@Metamodel.DisplayName(d.ElementKind)</span>
+                    <span class="dim" style="margin-left:auto; text-align:right">@d.Path</span>
+                </div>
+                @if (d.Fields.Count > 0)
+                {
+                    <table class="vc-fields">
+                        @foreach (var f in d.Fields)
+                        {
+                            <tr><td class="k">@f.Key</td><td class="before">@Short(f.Before)</td><td class="arrow">→</td><td class="after">@Short(f.After)</td></tr>
+                        }
+                    </table>
+                }
+            </div>
+        }
+        @if (group.Items.Count > MaxItems) { <div class="dim pa-2">… and @(group.Items.Count - MaxItems) more (export CSV for the full list)</div> }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ElementDiff> Diff { get; set; } = [];
+    [Parameter] public int MaxItems { get; set; } = 500;
+
+    private sealed record Group(string Title, string Color, List<ElementDiff> Items);
+
+    private IEnumerable<Group> Groups()
+    {
+        foreach (var (kind, title, color) in new[] { (DiffKind.Added, "Added", "#3fbf7f"), (DiffKind.Changed, "Changed", "#f0b429"), (DiffKind.Moved, "Moved", "#a283ff"), (DiffKind.Removed, "Removed", "#ff6b6b") })
+        {
+            var items = Diff.Where(d => d.Kind == kind).ToList();
+            if (items.Count > 0) yield return new Group(title, color, items);
+        }
+    }
+
+    private static string Short(string? s) => s is null ? "∅" : s.Length > 140 ? s[..140] + "…" : s;
+}

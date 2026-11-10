@@ -107,6 +107,7 @@ public sealed partial class SqliteStore : IMeridianStore
         await MigrateReviewsAsync();
         await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (SqliteStore.Integrations.cs)
         await MigrateAdminAsync(); // enterprise administration tables: SqliteStore.Admin.cs
+        await MigrateBranchingAsync();   // branches, branch commits, baselines (SqliteStore.Branching.cs)
     }
 
     // =============================================================== users

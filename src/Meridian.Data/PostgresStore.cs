@@ -71,6 +71,7 @@ public sealed partial class PostgresStore : IMeridianStore
         await MigrateReviewsAsync();
         await MigrateIntegrationsAsync();   // integrations, webhooks and API tokens (PostgresStore.Integrations.cs)
         await MigrateAdminAsync(); // enterprise administration tables: PostgresStore.Admin.cs
+        await MigrateBranchingAsync();   // branches, branch commits, baselines (PostgresStore.Branching.cs)
     }
 
     // =============================================================== users
