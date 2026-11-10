@@ -81,6 +81,19 @@ in your local `appsettings.Development.json`, which git ignores.
 To run with a single SQLite file instead of PostgreSQL, set `Meridian__Storage=sqlite` and
 `Meridian__DataPath=<folder>`.
 
+## Scripting and plugins
+
+- **Script console** (dock tab *Script*, or ⌘K → "Script console"): C# scripts against a stable model API
+  (`Model`, `Selection`, `Log(...)`), run as one undo step with a time limit and Cancel. See [docs/SCRIPTING.md](docs/SCRIPTING.md).
+- **Plugins**: .NET assemblies implementing `IMeridianPlugin` add commands, validation rules, exporters and importers.
+  See [docs/PLUGINS.md](docs/PLUGINS.md) and the sample in `samples/HelloPlugin`.
+
+> **Security.** Scripts and plugins are arbitrary .NET code running inside the Meridian process with its permissions.
+> The script policy (no file system, process, network or reflection APIs by default) is a guard rail, **not a sandbox**.
+> The console is on by default only in the desktop app (local mode). On a server it is off unless an administrator sets
+> `Meridian:Scripting:Enabled=true`, and even then only project owners can run scripts. Plugins load only from
+> `Meridian:Plugins:Path` on a server, so only someone with access to the server's disk can install them.
+
 ## Build the desktop apps
 
 ```bash
@@ -98,7 +111,9 @@ GitHub release.
 | `src/Meridian.Core` | Model repository, metamodel and notation, layout, analysis, simulation, validation |
 | `src/Meridian.Serialization` | Project files, SVG rendering, and all import/export formats |
 | `src/Meridian.Data` | Storage: `PostgresStore` (server) and `SqliteStore` (desktop local mode) |
+| `src/Meridian.Scripting` | Scripting/plugin API (`IModelApi`), Roslyn script engine, plugin loader |
 | `src/Meridian.Web` | Blazor Server app (MudBlazor UI, live collaboration, SysML v2 API) |
 | `src/Meridian.Desktop` | Photino desktop host: start screen, in-process local server, native save dialogs |
+| `samples/HelloPlugin` | Sample plugin |
 | `tests/` | xUnit and bUnit tests |
 | `build/` | Packaging script, icons and platform files |

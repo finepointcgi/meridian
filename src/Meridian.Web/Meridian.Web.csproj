@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Meridian.Core\Meridian.Core.csproj" />
     <ProjectReference Include="..\Meridian.Serialization\Meridian.Serialization.csproj" />
     <ProjectReference Include="..\Meridian.Data\Meridian.Data.csproj" />
+    <ProjectReference Include="..\Meridian.Scripting\Meridian.Scripting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

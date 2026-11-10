@@ -1,0 +1,117 @@
+@using Meridian.Scripting
+@implements IDisposable
+@inject PluginManager Plugins
+@inject Workspace Ws
+@inject IJSRuntime JS
+@inject IDialogService Dialogs
+
+@* Ribbon group: plugin commands, exporters, importers, the script console and the loaded-plugins dialog. *@
+<div class="rgroup compact">
+    <div class="rlabel">Extend</div>
+    <div class="ritems">
+        <button class="rbtn @(ScriptOpen ? "on" : "")" @onclick="OnScript" title="C# script console"><MudIcon Icon="@Icons.Material.Outlined.Terminal" /><span class="t">Script</span></button>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+            <ActivatorContent><button class="rbtn" title="Commands, exporters and importers contributed by plugins"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><span class="t">Plugins</span></button></ActivatorContent>
+            <ChildContent>
+                @{ var commands = Plugins.Commands; var exporters = Plugins.Exporters; var importers = Plugins.Importers; }
+                @foreach (var c in commands)
+                {
+                    var cmd = c;
+                    <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunCommand(cmd)" Disabled="Ws.ReadOnly">@cmd.Title</MudMenuItem>
+                }
+                @if (exporters.Count > 0)
+                {
+                    <MudDivider />
+                    @foreach (var x in exporters)
+                    {
+                        var exporter = x;
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="() => Export(exporter)">Export: @exporter.Name (@exporter.Extension)</MudMenuItem>
+                    }
+                }
+                @if (importers.Count > 0)
+                {
+                    <MudDivider />
+                    @foreach (var x in importers)
+                    {
+                        var importer = x;
+                        <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="() => PickImport(importer)" Disabled="Ws.ReadOnly">Import: @importer.Name…</MudMenuItem>
+                    }
+                }
+                @if (commands.Count + exporters.Count + importers.Count > 0) { <MudDivider /> }
+                <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowPlugins">Loaded plugins…</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </div>
+    <div style="display:none">
+        <InputFile id="file-plugin-import" accept="@(_importer?.Extensions ?? "")" OnChange="OnImportFile" />
+    </div>
+</div>
+
+@code {
+    private const long MaxUpload = 64 * 1024 * 1024;
+    private PluginImporter? _importer;
+    private int _logged;
+
+    /// <summary>True while the script dock is showing (drives the button's "on" state).</summary>
+    [Parameter] public bool ScriptOpen { get; set; }
+
+    /// <summary>Opens or closes the script dock.</summary>
+    [Parameter] public EventCallback OnScript { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Plugin load results (and later plugin log lines) go to the Output dock.
+        FlushMessages();
+        Plugins.MessageLogged += OnMessage;
+    }
+
+    private void OnMessage(string message) => _ = Ws.Dispatch(FlushMessages);
+
+    private void FlushMessages()
+    {
+        var all = Plugins.Messages;
+        for (; _logged < all.Count; _logged++) Ws.Log(all[_logged]);
+    }
+
+    private WorkspaceBridge Bridge() => new(Ws, (name, mime, bytes) => JS.InvokeVoidAsync("meridian.download", name, mime, Convert.ToBase64String(bytes)).AsTask());
+
+    public void RunCommand(PluginCommand cmd) => PluginRunner.RunCommand(Ws, Bridge(), cmd);
+
+    public async Task Export(PluginExporter exporter)
+    {
+        if (PluginRunner.Export(Ws, Bridge(), exporter) is not { } bytes) return;
+        var name = (string.IsNullOrWhiteSpace(Ws.Model.Root.Name) ? "model" : Ws.Model.Root.Name) + exporter.Extension;
+        await JS.InvokeVoidAsync("meridian.download", name, "application/octet-stream", Convert.ToBase64String(bytes));
+        Ws.Log($"[{exporter.Plugin}] Exported {name}");
+        Ws.SetStatus($"Exported {name}");
+    }
+
+    public async Task PickImport(PluginImporter importer)
+    {
+        _importer = importer;
+        StateHasChanged();
+        await Task.Yield();
+        await JS.InvokeVoidAsync("meridian.click", "file-plugin-import");
+    }
+
+    private async Task OnImportFile(InputFileChangeEventArgs e)
+    {
+        if (_importer is not { } importer) return;
+        try
+        {
+            using var ms = new MemoryStream();
+            await e.File.OpenReadStream(MaxUpload).CopyToAsync(ms);
+            if (PluginRunner.Import(Ws, Bridge(), importer, ms.ToArray(), e.File.Name))
+                Ws.SetStatus($"Imported {e.File.Name} with {importer.Name}");
+        }
+        catch (Exception ex)
+        {
+            Ws.Log($"[{importer.Plugin}] Import failed: {ex.Message}");
+            Ws.SetStatus("Import failed — see Output");
+        }
+    }
+
+    public Task ShowPlugins() => Dialogs.ShowAsync<PluginsDialog>("Plugins", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+
+    public void Dispose() => Plugins.MessageLogged -= OnMessage;
+}

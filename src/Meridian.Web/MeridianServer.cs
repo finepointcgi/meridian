@@ -45,6 +45,7 @@ public static class MeridianServer
                 ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database.")));
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddScoped<Workspace>();
+        builder.Services.AddMeridianScripting(builder.Configuration, host);   // script console + plugins (docs/SCRIPTING.md, docs/PLUGINS.md)
         builder.Services.AddHttpContextAccessor();
 
         // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.
