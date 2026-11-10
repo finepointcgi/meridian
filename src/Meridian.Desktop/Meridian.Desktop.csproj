@@ -11,7 +11,13 @@
     <ApplicationIcon>..\..\build\assets\meridian.ico</ApplicationIcon>
     <Product>Meridian</Product>
     <Company>Meridian</Company>
+    <!-- MacOpenFiles: an Objective-C runtime callback for macOS open-document events. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Meridian.Desktop.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

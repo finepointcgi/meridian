@@ -119,7 +119,9 @@ public partial class Workbench
         // Reopen the project this browser last worked on, else the most recent one, else offer the project list.
         var projects = await Db.ListProjectsAsync(Ws.User.Id);
         var last = await JS.InvokeAsync<string?>("meridian.getLast");
-        var pick = projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
+        // The desktop host opens a just-imported file with ?project=<id>.
+        var requested = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query).TryGetValue("project", out var rq) ? rq.ToString() : null;
+        var pick = projects.FirstOrDefault(p => p.Id.ToString() == requested) ?? projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
         if (pick != null) await OpenProject(pick.Id);
         else await OpenProjects();
         StateHasChanged();

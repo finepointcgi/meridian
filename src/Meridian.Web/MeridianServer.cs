@@ -92,6 +92,9 @@ public static class MeridianServer
         app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
         app.UseAuthentication();
 
+        // Desktop local mode: the host can import a file it was asked to open (token-guarded; see LocalFileImport).
+        app.UseLocalFileImport(host, localUser);
+
         // Desktop local mode: a single user, signed in automatically — but only by the window that holds this launch's token,
         // so other browsers or local processes reaching the loopback port cannot get in.
         if (localUser != null)
@@ -104,7 +107,8 @@ public static class MeridianServer
                     System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(token), System.Text.Encoding.UTF8.GetBytes(expected)))
                 {
                     await SignIn(http, localUser);
-                    http.Response.Redirect(http.Request.Path.HasValue && http.Request.Path != "/login" ? http.Request.Path : "/");
+                    var keep = QueryString.Create(http.Request.Query.Where(q => q.Key != "launch")); // e.g. ?project=<id> from the desktop host
+                    http.Response.Redirect((http.Request.Path.HasValue && http.Request.Path != "/login" ? http.Request.Path.Value : "/") + keep);
                     return;
                 }
                 if (http.Request.Path.StartsWithSegments("/_framework") || http.Request.Path.StartsWithSegments("/_content") || Path.HasExtension(http.Request.Path.Value)) { await next(); return; }

@@ -13,3 +13,23 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet build Meridian.slnx -c Release
       - run: dotnet test Meridian.slnx -c Release --no-build
+
+  # Catches packaging regressions early: the Linux tar.gz and .deb (no signing, no AppImage tool needed).
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Check scripts
+        run: |
+          bash -n build/package.sh build/macos/import-cert.sh
+          sh -n build/linux/install.sh build/linux/AppRun
+      - name: Package linux-x64
+        run: SKIP_SERVER=1 build/package.sh 0.0.0-ci linux-x64
+      - name: Inspect the .deb
+        run: |
+          dpkg-deb --info artifacts/Meridian-0.0.0-ci-linux-x64.deb
+          dpkg-deb --contents artifacts/Meridian-0.0.0-ci-linux-x64.deb | grep -E 'usr/share/mime/packages/meridian.xml|opt/meridian/Meridian$'
+          grep -q 'Meridian-0.0.0-ci-linux-x64.tar.gz' artifacts/SHA256SUMS.txt

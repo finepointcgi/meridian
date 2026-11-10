@@ -13,6 +13,50 @@
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <!-- Documents Meridian opens: double-click, Open With, or drop on the Dock icon imports them into the local workspace. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Meridian Project</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>CFBundleTypeIconFile</key><string>Meridian</string>
+      <key>LSItemContentTypes</key><array><string>io.meridian.project</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>SysML v2 Textual Model</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Default</string>
+      <key>LSItemContentTypes</key><array><string>org.omg.sysml.text</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>io.meridian.project</string>
+      <key>UTTypeDescription</key><string>Meridian Project</string>
+      <key>UTTypeIconFile</key><string>Meridian</string>
+      <key>UTTypeConformsTo</key><array><string>public.json</string><string>public.data</string><string>public.content</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>meridian</string></array>
+        <key>public.mime-type</key><array><string>application/x-meridian</string></array>
+      </dict>
+    </dict>
+  </array>
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>org.omg.sysml.text</string>
+      <key>UTTypeDescription</key><string>SysML v2 Textual Model</string>
+      <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>sysml</string></array>
+        <key>public.mime-type</key><array><string>text/x-sysml</string></array>
+      </dict>
+    </dict>
+  </array>
   <key>NSAppTransportSecurity</key>
   <dict>
     <!-- Local mode serves the app over http://127.0.0.1; team servers may also be plain http on a LAN. -->

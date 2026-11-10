@@ -1,21 +1,142 @@
 name: Release
-# Push a tag like v0.2.0 to build the Windows, macOS and Linux desktop apps and the server, and attach them to a GitHub release.
+# Push a tag like v0.2.0 to build the macOS, Windows and Linux desktop apps and the server on their native runners,
+# then publish one GitHub release with every file and a SHA256SUMS.txt (the in-app updater verifies downloads against it).
+# Signing and notarization use repository secrets when they exist and are skipped otherwise; see docs/RELEASING.md.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build (no release is published for manual runs)
+        default: 0.0.0-dev
 permissions:
-  contents: write
+  contents: read
+
 jobs:
-  package:
-    runs-on: macos-latest
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: dotnet test Meridian.slnx -c Release
-      - run: build/package.sh "${GITHUB_REF_NAME#v}"
+      - run: dotnet build Meridian.slnx -c Release
+      - run: dotnet test Meridian.slnx -c Release --no-build
+
+  package:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-latest
+            rids: osx-arm64 osx-x64
+          - name: windows
+            os: windows-latest
+            rids: win-x64
+          - name: linux
+            os: ubuntu-latest
+            rids: linux-x64
+            server: true
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      NO_CHECKSUMS: '1'
+      SKIP_SERVER: ${{ matrix.server && '0' || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # ---------------------------------------------------------------- macOS: Developer ID signing + notarization
+      - name: Import signing certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: build/macos/import-cert.sh
+
+      # ---------------------------------------------------------------- Windows: Inno Setup + signtool
+      - name: Locate Inno Setup and signtool
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup was not installed" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if ($signtool) { "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV }
+
+      # ---------------------------------------------------------------- Linux: appimagetool (dpkg-deb is preinstalled)
+      - name: Install appimagetool
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/bin/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/bin/appimagetool" >> "$GITHUB_ENV"
+
+      - name: Package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: build/package.sh "${VERSION#v}" ${{ matrix.rids }}
+
+      - name: Check the expected files exist
+        run: |
+          v="${VERSION#v}"
+          case "${{ matrix.name }}" in
+            macos)   want="Meridian-$v-macos-arm64.dmg Meridian-$v-macos-arm64.zip Meridian-$v-macos-x64.dmg Meridian-$v-macos-x64.zip" ;;
+            windows) want="Meridian-$v-windows-x64-setup.exe Meridian-$v-windows-x64.zip" ;;
+            linux)   want="Meridian-$v-linux-x64.AppImage Meridian-$v-linux-x64.deb Meridian-$v-linux-x64.tar.gz Meridian-Server-$v.zip" ;;
+          esac
+          for f in $want; do test -s "artifacts/$f" || { echo "missing artifacts/$f"; exit 1; }; done
+          ls -l artifacts
+
+      - name: Remove signing keychain
+        if: always() && runner.os == 'macOS'
+        run: build/macos/import-cert.sh --cleanup
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: package
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      - name: Write SHA256SUMS.txt
+        working-directory: dist
+        run: |
+          rm -f SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: dist/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

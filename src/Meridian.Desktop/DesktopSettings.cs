@@ -19,6 +19,26 @@ internal sealed class DesktopSettings
     /// <summary>Recently used team servers, most recent first.</summary>
     public List<string> Servers { get; set; } = new();
 
+    /// <summary>Files opened with Meridian (double-click, "Open with", drag onto the app), most recent first.</summary>
+    public List<RecentFile> RecentFiles { get; set; } = new();
+
+    /// <summary>Look for a newer release on GitHub at most once a day.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
+    /// <summary>The newer release found by the last check, shown again on later launches until installed.</summary>
+    public UpdateInfo? AvailableUpdate { get; set; }
+
+    /// <summary>Moves a file to the top of the recent list.</summary>
+    public RecentFile Remember(string path, Guid? projectId, DateTime fileTimeUtc)
+    {
+        RecentFiles.RemoveAll(r => string.Equals(r.Path, path, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase));
+        var entry = new RecentFile { Path = path, ProjectId = projectId, FileTimeUtc = fileTimeUtc, OpenedAt = DateTimeOffset.Now };
+        RecentFiles.Insert(0, entry);
+        return entry;
+    }
+
     public static DesktopSettings Load()
     {
         try { return JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(FilePath)) ?? new(); }
@@ -31,8 +51,19 @@ internal sealed class DesktopSettings
         {
             Directory.CreateDirectory(Folder);
             if (Servers.Count > 8) Servers.RemoveRange(8, Servers.Count - 8);
+            if (RecentFiles.Count > 10) RecentFiles.RemoveRange(10, RecentFiles.Count - 10);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* settings are a convenience */ }
     }
+}
+
+/// <summary>A file opened in Meridian and the project it was imported as.</summary>
+internal sealed class RecentFile
+{
+    public string Path { get; set; } = "";
+    public Guid? ProjectId { get; set; }
+    /// <summary>The file's last-write time when it was imported; a newer file is imported again.</summary>
+    public DateTime FileTimeUtc { get; set; }
+    public DateTimeOffset OpenedAt { get; set; }
 }
