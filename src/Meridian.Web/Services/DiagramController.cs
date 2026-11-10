@@ -137,6 +137,16 @@ public sealed partial class DiagramController
     public Bounds BoundsOf(DiagramNode n) =>
         Notation.EffectiveBounds(Model, n, Diagram.DiagramType, _preview.TryGetValue(n, out var b) ? b : n.Bounds);
 
+    /// <summary>
+    /// <see cref="BoundsOf"/> remembered per shape, for one computation over the whole diagram (routing every path asks for
+    /// every obstacle's bounds, and each measures the shape's compartments). Don't keep it across edits.
+    /// </summary>
+    public Func<DiagramNode, Bounds> MemoBounds()
+    {
+        var memo = new Dictionary<DiagramNode, Bounds>(ReferenceEqualityComparer.Instance);
+        return n => memo.TryGetValue(n, out var b) ? b : memo[n] = BoundsOf(n);
+    }
+
     public IReadOnlyList<Pt>? WaypointsFor(DiagramEdge e) => WaypointPreview != null && ReferenceEquals(e, SelectedEdge) ? WaypointPreview : null;
 
     // ---------------------------------------------------------------- selection
@@ -390,7 +400,7 @@ public sealed partial class DiagramController
         var tol = 6 / Zoom;
         var view = DiagramExtras.VisibleView(Diagram);
         var layers = ReferenceEquals(view, Diagram) ? null : DiagramExtras.StateOf(Diagram);
-        var routes = EdgeRouter.RouteAll(view, BoundsOf);
+        var routes = EdgeRouter.RouteAll(view, MemoBounds());
         for (var i = view.Edges.Count - 1; i >= 0; i--)
         {
             var e = view.Edges[i];
@@ -934,7 +944,7 @@ public sealed partial class DiagramController
                     // Connectors whose whole path lies inside the box.
                     if (r.Width > 2 && r.Height > 2)
                     {
-                        var routes = EdgeRouter.RouteAll(DiagramExtras.VisibleView(Diagram), BoundsOf);
+                        var routes = EdgeRouter.RouteAll(DiagramExtras.VisibleView(Diagram), MemoBounds());
                         foreach (var e in Diagram.Edges.Where(Pickable))
                             if (routes.TryGetValue(e, out var pts) && pts.Count > 0 && pts.All(r.Contains)) _selEdges.Add(e);
                     }

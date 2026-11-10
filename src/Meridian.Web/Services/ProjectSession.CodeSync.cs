@@ -14,6 +14,7 @@ public sealed partial class ProjectSession
         if (ops.Count == 0) return;
         lock (_gate)
         {
+            _snapshotSequence = -1;   // cached snapshot (ProjectSession.Snapshot.cs) is stale from here on
             foreach (var op in ops) _master.ApplyRemote(op);
             ScheduleTextRefresh();
             Sequence += ops.Count;
