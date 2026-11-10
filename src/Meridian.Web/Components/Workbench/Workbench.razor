@@ -60,7 +60,8 @@
                 <MudMenuItem Disabled="true" Class="menu-heading">Help</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()">Settings… <Key>⌘,</Key></MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="StartTour">Take the guided tour</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="ShowTour" data-testid="help-tour">Tour…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.NewReleases" OnClick="ShowWhatsNew">What's new in @TourChapters.WhatsNewVersion</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
             </ChildContent>
         </MudMenu>
@@ -160,9 +161,9 @@
                     </ChildContent>
                 </MudMenu>
                 <MudTooltip Text="Automatic layout"><button class="rbtn" disabled="@(Ws.Active == null)" @onclick="() => Ws.Active?.Arrange()"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" /><span class="t">Arrange</span></button></MudTooltip>
-                <MudTooltip Text="Diagram it all out: a package overview, structure, internal structure, requirements and behavior views, laid out automatically (⌘K “Diagram the whole model”)"><button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => AutoDiagram(Ws.Selected is { Kind: ElementKind.Package } p ? p : null)"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /><span class="t">Auto-diagram</span></button></MudTooltip>
+                <MudTooltip Text="Diagram it all out: a package overview, structure, internal structure, requirements and behavior views, laid out automatically (⌘K “Diagram the whole model”)"><button class="rbtn" data-tour="auto-diagram" disabled="@Ws.ReadOnly" @onclick="() => AutoDiagram(Ws.Selected is { Kind: ElementKind.Package } p ? p : null)"><MudIcon Icon="@Icons.Material.Outlined.Dashboard" /><span class="t">Auto-diagram</span></button></MudTooltip>
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" Class="derive-menu">
-                    <ActivatorContent><MudTooltip Text="Create a diagram from the selection: use cases from requirements, activity from a use case, sequence from an activity, BDD + IBD or a state machine from a sequence"><button class="rbtn" data-testid="ribbon-create-from" disabled="@Ws.ReadOnly"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span class="t">Create from…</span></button></MudTooltip></ActivatorContent>
+                    <ActivatorContent><MudTooltip Text="Create a diagram from the selection: use cases from requirements, activity from a use case, sequence from an activity, BDD + IBD or a state machine from a sequence"><button class="rbtn" data-testid="ribbon-create-from" data-tour="create-from" disabled="@Ws.ReadOnly"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span class="t">Create from…</span></button></MudTooltip></ActivatorContent>
                     <ChildContent>
                         @foreach (var o in RibbonDerivations())
                         {
@@ -264,12 +265,12 @@
         <div class="rgroup compact">
             <div class="rlabel">AI</div>
             <div class="ritems">
-                <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
+                <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" data-tour="assistant" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
             </div>
         </div>
         @if (Ws.CodeChanges is not null)
         {
-            <div class="rgroup compact">
+            <div class="rgroup compact" data-tour="code-group">
                 <div class="rlabel">Code</div>
                 <div class="ritems">
                     <MudTooltip Text="What changed: code changes from connected repositories to accept or reject"><button class="rbtn @(Ws.ActiveView?.Kind == ViewTabKind.CodeChanges ? "on" : "")" @onclick="OpenCodeChanges"><MudIcon Icon="@Icons.Material.Outlined.Difference" /><span class="t">Changes</span></button></MudTooltip>
@@ -363,13 +364,7 @@
                 }
                 else
                 {
-                    <div class="empty-hint">
-                        <div style="max-width:420px">
-                            <MudIcon Icon="@Icons.Material.Outlined.Schema" Style="font-size:52px; opacity:.45" />
-                            <h3>No diagram open</h3>
-                            <div>Double-click a diagram in the explorer, or create one from the Diagram toolbar group.</div>
-                        </div>
-                    </div>
+                    <EmptyProjectHint OnAction="EmptyProjectAction" />
                 }
             </div>
 

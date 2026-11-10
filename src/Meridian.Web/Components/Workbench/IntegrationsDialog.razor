@@ -190,6 +190,15 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public int InitialTab { get; set; }
 
+    /// <summary>Index of the Code repositories tab, for <see cref="InitialTab"/>.</summary>
+    public const int CodeRepositoriesTab = 2;
+
+    /// <summary>Opens Integrations on the Code repositories tab ("Connect a repository" in What changed, ⌘K).</summary>
+    public static Task ShowCodeRepositoriesAsync(IDialogService dialogs) =>
+        dialogs.ShowAsync<IntegrationsDialog>("Integrations",
+            new DialogParameters<IntegrationsDialog> { { x => x.InitialTab, CodeRepositoriesTab } },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+
     private int _tab;
     private bool _canManage;
     private bool _busy;

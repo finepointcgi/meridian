@@ -92,8 +92,8 @@ public sealed class BrowserSession : IAsyncDisposable
             Permissions = ["clipboard-read", "clipboard-write"],
         });
         context.SetDefaultTimeout(15_000);
-        // No first-run tour in tests (one test opens it explicitly), and no internet: Google Fonts get an empty stylesheet.
-        await context.AddInitScriptAsync("try { localStorage.setItem('meridian.tour.v1', '1'); } catch (e) {}");
+        // No first-run tour or What's new card in tests (TourTests opens them explicitly), and no internet: Google Fonts get an empty stylesheet.
+        await context.AddInitScriptAsync("try { localStorage.setItem('meridian.tour.v1', '1'); localStorage.setItem('meridian.whatsnew', '1'); } catch (e) {}");
         await context.RouteAsync(url => !url.StartsWith(baseUrl, StringComparison.Ordinal) && (url.StartsWith("http://") || url.StartsWith("https://")),
             route => route.FulfillAsync(new() { Status = 200, ContentType = route.Request.ResourceType == "stylesheet" ? "text/css" : "text/plain", Body = "" }));
         var page = await context.NewPageAsync();

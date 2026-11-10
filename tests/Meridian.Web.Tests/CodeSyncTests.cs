@@ -554,6 +554,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         var (_, _) = await UiAsync(_vic, ProjectRole.Viewer, null);
         var empty = RenderComponent<CodeChangesTab>();
         Assert.Contains("No code changes to review", empty.Markup);
+        Assert.Empty(empty.FindAll(".chg-connect"));   // viewers can't connect repositories
 
         _applier.Script.Enqueue(AddBlocks("Battery"));
         await Runner().RunAsync(Request());
@@ -561,6 +562,14 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         empty.Find(".chg-row input[type=checkbox]").Change(true);
         Assert.True(empty.Find(".chg-accept").HasAttribute("disabled"));
         Assert.Contains("View only", empty.Markup);
+    }
+
+    [Fact]
+    public async Task What_Changed_Without_Changes_Offers_To_Connect_A_Repository()
+    {
+        await UiAsync(_ann, ProjectRole.Owner, null);
+        var empty = RenderComponent<CodeChangesTab>();
+        Assert.Contains("Connect a repository", empty.Find("button.chg-connect").TextContent);
     }
 
     [Fact]

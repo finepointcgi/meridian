@@ -2,84 +2,140 @@
 @inject IJSRuntime JS
 @inject Workspace Ws
 @inject IServiceProvider Services
+@using static Meridian.Web.Components.Workbench.TourChapters
 
-@* First-run guided tour: a spotlight on one part of the workbench per step. Shown once per browser; Help ▸ Take the tour reopens it. *@
-@if (_step >= 0)
+@* Guided tour (TourChapters.cs): a spotlight on one part of the workbench per step. "The basics" runs once on the first
+   visit; Help ▸ Tour lists every chapter; after an upgrade a "What's new" card is shown once. On a phone the card is a
+   bottom sheet (mobile.css) and steps whose target is hidden show no spotlight. *@
+@if (_mode != Mode.Closed)
 {
-    var s = Steps[_step];
-    <div class="tour" @onkeydown="Key" tabindex="-1" @ref="_root">
-        @if (_spot is { } r)
+    <div class="tour @(_mode == Mode.WhatsNew ? "tour-light" : "")" @onkeydown="Key" tabindex="-1" @ref="_root" data-mode="@_mode.ToString().ToLowerInvariant()">
+        @if (_mode == Mode.Step && _spot is { } r)
         {
             <div class="tour-spot" style="left:@Px(r.Left - 6); top:@Px(r.Top - 6); width:@Px(r.Width + 12); height:@Px(r.Height + 12)"></div>
         }
-        else
+        else if (_mode != Mode.WhatsNew)
         {
-            <div class="tour-dim"></div>
+            <div class="tour-dim" @onclick="Finish"></div>
         }
-        <div class="tour-card" style="@CardStyle()">
-            <div class="tour-step">Step @(_step + 1) of @Steps.Length</div>
-            <h3><MudIcon Icon="@s.Icon" /> @s.Title</h3>
-            <div class="tour-body">@((MarkupString)s.Html)</div>
-            <div class="tour-dots">
-                @for (var i = 0; i < Steps.Length; i++)
-                {
-                    var k = i;
-                    <span class="@(k == _step ? "on" : "")" @onclick="() => Go(k)"></span>
-                }
-            </div>
-            <div class="tour-actions">
-                <button class="tour-skip" @onclick="Finish">@(_step == Steps.Length - 1 ? "Close" : "Skip tour")</button>
-                <span style="flex:1"></span>
-                @if (_step > 0) { <button class="tour-btn" @onclick="() => Go(_step - 1)">Back</button> }
-                <button class="tour-btn primary" @onclick="Next">@(_step == Steps.Length - 1 ? "Start modeling" : "Next")</button>
-            </div>
-        </div>
+        @switch (_mode)
+        {
+            case Mode.Step:
+                var c = _chapter!;
+                var s = c.Steps[_step];
+                <div class="tour-card" style="@CardStyle()" role="dialog" aria-label="@($"{c.Title}: {s.Title}")">
+                    <div class="tour-step">@(c.Id == Basics ? "" : c.Title + " · ")Step @(_step + 1) of @c.Steps.Length</div>
+                    <h3><MudIcon Icon="@s.Icon" /> @s.Title</h3>
+                    <div class="tour-body">@((MarkupString)s.Html)</div>
+                    <div class="tour-dots">
+                        @for (var i = 0; i < c.Steps.Length; i++)
+                        {
+                            var k = i;
+                            <span class="@(k == _step ? "on" : "")" @onclick="() => Go(k)"></span>
+                        }
+                    </div>
+                    <div class="tour-actions">
+                        <button class="tour-skip" @onclick="Finish">@(Last ? "Close" : "Skip tour")</button>
+                        <button class="tour-skip tour-chapters-link" @onclick="ShowChaptersAsync">All chapters</button>
+                        <span style="flex:1"></span>
+                        @if (_step > 0) { <button class="tour-btn" @onclick="() => Go(_step - 1)">Back</button> }
+                        <button class="tour-btn primary" @onclick="Next">@(!Last ? "Next" : c.Id == Basics ? "Start modeling" : "Done")</button>
+                    </div>
+                </div>
+                break;
+            case Mode.Chapters:
+                <div class="tour-card tour-wide" style="@CenteredStyle(380, 470)" role="dialog" aria-label="Tour chapters">
+                    <div class="tour-step">Tour</div>
+                    <h3><MudIcon Icon="@Icons.Material.Outlined.Tour" /> Pick a chapter</h3>
+                    <div class="tour-chapter-list">
+                        @foreach (var ch in All)
+                        {
+                            var chapter = ch;
+                            <button class="tour-chapter" data-chapter="@chapter.Id" @onclick="() => StartChapterAsync(chapter.Id)">
+                                <MudIcon Icon="@chapter.Icon" />
+                                <span><b>@chapter.Title</b><span class="tour-chapter-blurb">@chapter.Blurb</span></span>
+                                <span class="tour-chapter-len">@chapter.Steps.Length steps</span>
+                            </button>
+                        }
+                    </div>
+                    <div class="tour-actions"><span style="flex:1"></span><button class="tour-btn" @onclick="Finish">Close</button></div>
+                </div>
+                break;
+            case Mode.WhatsNew:
+                <div class="tour-card tour-wide tour-whatsnew" role="dialog" aria-label="What's new">
+                    <div class="tour-step">Meridian @WhatsNewVersion</div>
+                    <h3><MudIcon Icon="@Icons.Material.Outlined.NewReleases" /> What's new in @WhatsNewVersion</h3>
+                    <div class="tour-whatsnew-list">
+                        @foreach (var item in TourChapters.WhatsNew)
+                        {
+                            var w = item;
+                            <div class="tour-new" data-chapter="@w.ChapterId">
+                                <div><b>@w.Title</b><div class="tour-chapter-blurb">@w.Text</div></div>
+                                <button class="tour-btn" @onclick="() => ShowMeAsync(w.ChapterId)">Show me</button>
+                            </div>
+                        }
+                    </div>
+                    <div class="tour-actions">
+                        <button class="tour-skip" @onclick="ShowChaptersAsync">All tour chapters</button>
+                        <span style="flex:1"></span>
+                        <button class="tour-btn primary tour-got-it" @onclick="Finish">Got it</button>
+                    </div>
+                </div>
+                break;
+        }
     </div>
 }
 
 @code {
+    /// <summary>Browser flag older versions used for "tour seen"; still honoured (and set) next to the user preference.</summary>
     public const string SeenKey = "meridian.tour.v1";
+    /// <summary>Browser flag that also hides the What's new card (end-to-end tests set it, like <see cref="SeenKey"/>).</summary>
+    public const string WhatsNewKey = "meridian.whatsnew";
+    /// <summary>Below this width the workbench uses the phone layout (mobile.css), where the first-run tour is not started.</summary>
+    public const double PhoneWidth = 900;
+
     private Meridian.Web.Settings.ThemeService? Theme => Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) as Meridian.Web.Settings.ThemeService;
 
-    private sealed record Step(string Selector, string Icon, string Title, string Html);
+    public enum Mode { Closed, Step, Chapters, WhatsNew }
 
-    private static readonly Step[] Steps =
-    [
-        new(".canvas .toolbox", Icons.Material.Outlined.Category, "Shapes panel",
-            "Drag a shape onto the canvas, or click it to insert one. Search to find any SysML, BPMN, ArchiMate or drawing shape. " +
-            "<b>Double-click</b> empty canvas to quick-add a shape where you clicked."),
-        new(".diagram-host", Icons.Material.Outlined.East, "Connect with hover arrows",
-            "Hover a shape and four blue arrows appear. <b>Click</b> one to add a connected shape next to it, or <b>drag</b> it onto another shape to connect the two. " +
-            "Drop pictures, paste screenshots, add links and layers from the format bar."),
-        new("aside.stack .card:first-child", Icons.Material.Outlined.Tune, "Inspector",
-            "Everything about the selected element: name, type, properties, documentation, stereotypes, relationships and comments."),
-        new("aside.stack .card:nth-child(2)", Icons.Material.Outlined.Assignment, "Requirements & traceability",
-            "Requirements with their satisfy / verify coverage. The Traceability group in the toolbar opens the matrix, impact analysis and validation."),
-        new(".titlebar .cmdk", Icons.Material.Outlined.Search, "Command palette ⌘K",
-            "Press <b>⌘K</b> (Ctrl+K) to run any command, open a diagram or jump to an element by name."),
-        new(".titlebar .btn-primary", Icons.Material.Outlined.Commit, "Commit versions",
-            "Edits save continuously and sync live with collaborators. <b>Commit</b> (⌘S) records a named version you can compare and restore."),
-        new("", Icons.Material.Outlined.RocketLaunch, "You're ready",
-            "Start from a template with <b>New project</b>, or open a diagram and start drawing. Reopen this tour any time from the project menu: <b>Take the guided tour</b>."),
-    ];
-
-    private int _step = -1;
+    private Mode _mode = Mode.Closed;
+    private Chapter? _chapter;
+    private int _step;
     private Rect? _spot;
     private Rect _vp = new(0, 0, 1280, 800);
     private bool _pending;
     private ElementReference _root;
 
-    private sealed record Rect(double Left, double Top, double Width, double Height);
+    public sealed record Rect(double Left, double Top, double Width, double Height);
+
+    /// <summary>What the tour shows now (for tests and the workbench).</summary>
+    public Mode Current => _mode;
+    public string? CurrentChapter => _mode == Mode.Step ? _chapter?.Id : null;
+
+    private bool Last => _chapter != null && _step >= _chapter.Steps.Length - 1;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         Ws.Changed += OnChanged;
-        if (Theme?.Prefs.TourSeen == true) return;   // seen on any device (Settings ▸ Editor shows it again)
-        string? seen;
-        try { seen = await JS.InvokeAsync<string?>("meridian.getFlag", SeenKey); }
-        catch (JSException) { return; }
-        if (seen != null) return;
+        var prefs = Theme?.Prefs;
+        var seen = prefs?.TourSeen == true;   // seen on any device (Settings ▸ Editor shows it again)
+        if (!seen)
+        {
+            try { seen = await JS.InvokeAsync<string?>("meridian.getFlag", SeenKey) != null; }
+            catch (JSException) { return; }
+        }
+        if (seen)
+        {
+            // Not a first visit: after an upgrade, say once what is new.
+            if (prefs is null || prefs.WhatsNewSeen == WhatsNewVersion) return;
+            try { if (await JS.InvokeAsync<string?>("meridian.getFlag", WhatsNewKey) != null) return; }
+            catch (JSException) { return; }
+            await ShowWhatsNewAsync();
+            return;
+        }
+        try { _vp = await JS.InvokeAsync<Rect?>("meridian.viewport") ?? _vp; } catch (JSException) { }
+        if (_vp.Width < PhoneWidth) return;   // the basics explain the desktop panels; phones pick chapters from the menu
         // Wait until a diagram is open so the canvas parts exist; start anyway after a few seconds.
         _pending = true;
         if (Ws.Active != null) await InvokeAsync(StartAsync);
@@ -91,23 +147,64 @@
         if (_pending && Ws.Active != null) _ = InvokeAsync(StartAsync);
     }
 
-    /// <summary>Opens the tour at the first step.</summary>
-    public async Task StartAsync()
+    /// <summary>Opens the first chapter ("The basics") at its first step.</summary>
+    public Task StartAsync() => StartChapterAsync(Basics);
+
+    /// <summary>Opens a chapter at its first step (unknown ids open the chapter list).</summary>
+    public async Task StartChapterAsync(string id)
     {
         _pending = false;
+        if (Find(id) is not { } chapter) { await ShowChaptersAsync(); return; }
+        _chapter = chapter;
+        _mode = Mode.Step;
         await Go(0);
+    }
+
+    /// <summary>Help ▸ Tour: the list of chapters.</summary>
+    public async Task ShowChaptersAsync()
+    {
+        _pending = false;
+        _mode = Mode.Chapters;
+        await RefreshViewportAsync();
+        await ShowAsync();
+    }
+
+    /// <summary>The "What's new" card (shown once after an upgrade; also on ⌘K).</summary>
+    public async Task ShowWhatsNewAsync()
+    {
+        _pending = false;
+        _mode = Mode.WhatsNew;
+        await ShowAsync();
+    }
+
+    private async Task ShowMeAsync(string chapterId)
+    {
+        await MarkWhatsNewSeenAsync();
+        await StartChapterAsync(chapterId);
     }
 
     private async Task Go(int step)
     {
-        _step = Math.Clamp(step, 0, Steps.Length - 1);
+        if (_chapter is null) return;
+        _step = Math.Clamp(step, 0, _chapter.Steps.Length - 1);
         _spot = null;
+        await RefreshViewportAsync();
         try
         {
-            _vp = await JS.InvokeAsync<Rect?>("meridian.viewport") ?? _vp;
-            if (Steps[_step].Selector.Length > 0) _spot = await JS.InvokeAsync<Rect?>("meridian.rectOf", Steps[_step].Selector);
+            if (_chapter.Steps[_step].Selector.Length > 0 && _vp.Width >= PhoneWidth)
+                _spot = await JS.InvokeAsync<Rect?>("meridian.rectOf", _chapter.Steps[_step].Selector);
         }
         catch (JSException) { }
+        await ShowAsync();
+    }
+
+    private async Task RefreshViewportAsync()
+    {
+        try { _vp = await JS.InvokeAsync<Rect?>("meridian.viewport") ?? _vp; } catch (JSException) { }
+    }
+
+    private async Task ShowAsync()
+    {
         StateHasChanged();
         await Task.Yield();
         try { await _root.FocusAsync(); } catch (Exception ex) when (ex is JSException or InvalidOperationException) { }
@@ -115,16 +212,26 @@
 
     private async Task Next()
     {
-        if (_step >= Steps.Length - 1) await Finish();
+        if (Last) await Finish();
         else await Go(_step + 1);
     }
 
     private async Task Finish()
     {
-        _step = -1;
+        var mode = _mode;
+        _mode = Mode.Closed;
         _pending = false;
+        StateHasChanged();
+        if (mode == Mode.WhatsNew) { await MarkWhatsNewSeenAsync(); return; }
         try { await JS.InvokeVoidAsync("meridian.setFlag", SeenKey, "done"); } catch (JSException) { }
-        if (Theme is { Prefs.TourSeen: false } theme) await theme.UpdateAsync(p => p.TourSeen = true);
+        // Someone who has been through the tour has nothing "new" to catch up on in this release.
+        if (Theme is { } theme && (!theme.Prefs.TourSeen || theme.Prefs.WhatsNewSeen != WhatsNewVersion))
+            await theme.UpdateAsync(p => { p.TourSeen = true; p.WhatsNewSeen = WhatsNewVersion; });
+    }
+
+    private async Task MarkWhatsNewSeenAsync()
+    {
+        if (Theme is { Prefs.WhatsNewSeen: var v } theme && v != WhatsNewVersion) await theme.UpdateAsync(p => p.WhatsNewSeen = WhatsNewVersion);
     }
 
     private async Task Key(KeyboardEventArgs e)
@@ -132,8 +239,8 @@
         switch (e.Key)
         {
             case "Escape": await Finish(); break;
-            case "ArrowRight" or "Enter": await Next(); break;
-            case "ArrowLeft" when _step > 0: await Go(_step - 1); break;
+            case "ArrowRight" or "Enter" when _mode == Mode.Step: await Next(); break;
+            case "ArrowLeft" when _mode == Mode.Step && _step > 0: await Go(_step - 1); break;
         }
     }
 
@@ -141,7 +248,7 @@
     private string CardStyle()
     {
         const double w = 330, h = 230, gap = 16;
-        if (_spot is not { } r) return $"left:{Px(_vp.Width / 2 - w / 2)}; top:{Px(_vp.Height / 2 - h / 2)}";
+        if (_spot is not { } r) return CenteredStyle(w, h);
         double x, y;
         if (r.Left + r.Width + gap + w < _vp.Width) { x = r.Left + r.Width + gap; y = r.Top + 10; }
         else if (r.Left - gap - w > 0) { x = r.Left - gap - w; y = r.Top + 10; }
@@ -151,6 +258,9 @@
         y = Math.Clamp(y, 12, Math.Max(12, _vp.Height - h - 12));
         return $"left:{Px(x)}; top:{Px(y)}";
     }
+
+    private string CenteredStyle(double w, double h) =>
+        $"left:{Px(Math.Max(12, _vp.Width / 2 - w / 2))}; top:{Px(Math.Max(12, _vp.Height / 2 - h / 2))}";
 
     private static string Px(double v) => v.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "px";
 
