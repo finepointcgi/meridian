@@ -88,7 +88,8 @@ public sealed class ArchitectureState : IDisposable
                 var rec = records.GetValueOrDefault(c.Id);
                 repos.Add(new ArchitectureRepo(c.Id, c.Name, rec, onlyList || rec is null ? null : ArchitectureCheckService.Check(_ws.Model, rec)));
             }
-            if (post && !onlyList && !_ws.ReadOnly && _ws.BranchId is null)
+            // A filtered model (packages hidden from me, package permissions) would store and post a wrong verdict: check locally only.
+            if (post && !onlyList && !_ws.ReadOnly && _ws.BranchId is null && !_ws.HasHiddenPackages)
                 foreach (var r in repos.Where(r => r.Result is not null))
                     await _checks.RecheckAsync(s.ProjectId, r.ConnectionId, _ws.Model);
             if (post && !onlyList)

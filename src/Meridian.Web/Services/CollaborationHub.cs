@@ -201,12 +201,12 @@ public sealed partial class ProjectSession : IDisposable
     }
 
     /// <summary>Applies an allowed operation and relays it (under the session lock).</summary>
-    private void ApplyLocked(string participantId, Guid userId, ModelOp op)
+    private void ApplyLocked(string participantId, Guid userId, ModelOp op, bool events = true)
     {
         var probes = ProbeFiltered(participantId, op);       // what participants with hidden packages may receive (ProjectSession.Permissions.cs)
         _master.ApplyRemote(op);
         ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
-        Events?.OperationApplied(ProjectId, Name, userId, op, _master);
+        if (events) Events?.OperationApplied(ProjectId, Name, userId, op, _master);
         Sequence++;
         MarkDirty();
         _lastEditor = userId;

@@ -288,6 +288,39 @@ public sealed class PackagePermissionsWebTests : TestContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Code_Sync_System_Operations_Are_Relayed_Filtered_And_Checked_For_A_User()
+    {
+        await Rule(_secretPkgId, _bob, PackageAccess.None);
+        var alice = await Open(_alice);
+        var bob = await Open(_bob);
+        var session = alice.Session!;
+
+        // What a code sync computes on a copy of the model: a change inside the hidden package and one outside.
+        var copy = Master();
+        var ops = new List<ModelOp>();
+        copy.OpEmitted += ops.Add;
+        copy.Set(copy.Find(_secretId)!, FieldKeys.Documentation, SecretDoc + " (from code)");
+        copy.Create(copy.AllElements.First(e => e.Name == SecretPackage), ElementKind.Block, SecretName + "FromCode");
+        copy.Set(copy.AllElements.First(e => e.Name == "Engine"), FieldKeys.Documentation, "from code");
+
+        session.ApplySystemOps(ops, null);   // the system: no permission check, filtered relay
+        Assert.Contains(alice.Model.AllElements, e => e.Name == SecretName + "FromCode");
+        Assert.Equal("from code", Named(bob, "Engine").Documentation);
+        AssertNoSecrets(ProjectFile.Serialize(bob.Model), "Bob's model after a code sync");
+
+        // On behalf of a user, all or nothing.
+        var more = new List<ModelOp>();
+        copy.OpEmitted -= ops.Add;
+        copy.OpEmitted += more.Add;
+        copy.Set(copy.AllElements.First(e => e.Name == "Engine"), FieldKeys.Documentation, "by Bob");
+        copy.Set(copy.Find(_secretId)!, FieldKeys.Documentation, "by Bob too");
+        Assert.Throws<PermissionDeniedException>(() => session.ApplySystemOps(more, _bob.Id, bob.Access));
+        Assert.Equal("from code", Named(alice, "Engine").Documentation);
+        session.ApplySystemOps(more, _alice.Id, alice.Access);
+        Assert.Equal("by Bob", Named(alice, "Engine").Documentation);
+    }
+
+    [Fact]
     public async Task Changing_Rules_Takes_Effect_At_Once_For_Connected_Users()
     {
         var bob = await Open(_bob);

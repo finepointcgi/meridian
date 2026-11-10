@@ -144,3 +144,25 @@ Anthropic API was never called (tests use a fake HTTP handler).
   has no service worker.
 - **View tabs and desktop bridge**: view tabs are per-circuit state (nothing crosses users); the desktop `open-url`
   message opens only absolute http(s) URLs with a host through the shell.
+
+## Per-package permissions
+
+Package permissions (docs/PERMISSIONS.md) add a confidentiality boundary inside a project: a package's contents can be
+read-only or hidden for some members. Reviewed and tested for this feature:
+
+- **Single write check.** `PermissionCheck.Check` runs in `ProjectSession.AllowEdit` for every operation (manual edits,
+  scripts, the assistant, imports, SysML text); one user action is accepted all or nothing (`SubmitAll`). Whole-model
+  writes are checked element by element (`PermissionCheck.CheckReplace`): merges (also code-sync accept), version
+  restore and code-sync reject. Code-sync system operations (`ApplySystemOps`) are system writes, relayed filtered, and
+  checked against a user's view when one is given. Tests: `PackagePermissionsWebTests`, one per write path.
+- **No hidden data to the client.** Users with hidden packages get a server-side filtered model (no names, ids,
+  documentation or relationships of hidden elements; nameless placeholders on diagrams), filtered live operations,
+  filtered REST/OSLC responses and stored versions, no shared SysML text, no code-change review or merge, and no
+  notifications about hidden elements. Tests assert the absence of hidden strings in the model JSON, the rendered tree
+  and canvas markup, XMI / SysML v2 text / HTML report / SVG / SysML v2 JSON exports, the assistant context, stored
+  versions and the REST API (`PermissionsTests` in the E2E suite, with two browsers).
+- **Authorisation of rule changes** is re-checked from the store on every change (owners, or "manage" on the package),
+  and audited.
+- **Accepted limits:** scripts are server-side code (administrator-gated) and can read anything; backups (which also
+  don't carry package permissions on restore), webhooks, issue trackers and pull-request previews carry whole models to
+  trusted or owner-configured destinations; review comment bodies are not filtered.
