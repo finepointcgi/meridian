@@ -224,7 +224,7 @@ public static partial class DbDiff
     [GeneratedRegex(@"\s+")]
     private static partial Regex Space();
 
-    [GeneratedRegex(@"::[\w ]+(\(\d+(,\d+)?\))?(\[\])?")]
+    [GeneratedRegex(@"::[\w .]+(\(\d+(,\d+)?\))?(\[\])?")]
     private static partial Regex Cast();
 
     /// <summary>SQL text in a comparable form: whitespace collapsed, lower case, trailing semicolon and quotes removed.</summary>

@@ -67,7 +67,9 @@ public static partial class DbTypes
     public static string Normalize(string? type)
     {
         var spec = Parse(type);
-        var b = Regex.Replace(spec.Base.ToLowerInvariant(), @"\s+", " ").Trim();
+        var b = Regex.Replace(spec.Base.ToLowerInvariant(), @"\s+", " ").Trim().Replace("\"", "");
+        // User types compare without their schema ("public.email" = "email", as catalogs print them on the search path).
+        if (b.LastIndexOf('.') is var dot and > 0 && !b.Contains(' ')) b = b[(dot + 1)..];
         if (Synonyms.TryGetValue(b, out var syn)) b = syn;
         // Sizes that don't change meaning: int(11) in MySQL, varchar without length.
         if (b is "integer" or "bigint" or "smallint" or "boolean" or "text" or "bytea") return b;
