@@ -120,7 +120,9 @@ public static class Expressions
 
     private sealed class Parser(List<Tok> toks, IReadOnlyDictionary<string, double> vars)
     {
-        private int _i;
+        /// <summary>Deepest nesting of parentheses / unary operators accepted (deeper input would overflow the stack).</summary>
+        internal const int MaxDepth = 200;
+        private int _i, _depth;
         private Tok? Cur => _i < toks.Count ? toks[_i] : null;
         private bool IsOp(string op) => Cur is { Kind: 'o' } t && t.Text == op;
 
@@ -169,12 +171,18 @@ public static class Expressions
             return v;
         }
 
+        // Every level of nesting (parentheses, function arguments, unary and power operators) passes through here.
         private double Unary()
         {
-            if (IsOp("-")) { _i++; return -Unary(); }
-            if (IsOp("+")) { _i++; return Unary(); }
-            if (IsOp("!")) { _i++; return Unary() == 0 ? 1 : 0; }
-            return Pow();
+            if (++_depth > MaxDepth) throw new ExpressionException($"Expression is nested too deeply (more than {MaxDepth} levels)");
+            try
+            {
+                if (IsOp("-")) { _i++; return -Unary(); }
+                if (IsOp("+")) { _i++; return Unary(); }
+                if (IsOp("!")) { _i++; return Unary() == 0 ? 1 : 0; }
+                return Pow();
+            }
+            finally { _depth--; }
         }
 
         private double Pow()

@@ -168,8 +168,12 @@ public static partial class SysMLv2Parser
     private static readonly HashSet<string> ExpressionContexts = new(StringComparer.Ordinal)
         { "constraint", "calc", "analysis", "require", "assume", "assert", "case" };
 
+    /// <summary>Deepest nesting of bodies accepted; deeper blocks are reported and skipped (they would overflow the stack).</summary>
+    public const int MaxNesting = 100;
+
     private sealed class Parser(SysmlDocument doc, List<Token> toks)
     {
+        private int _nesting;
         private int _i = Skip(toks, 0);
         private int _last = -1;       // index of the last consumed (non-comment) token
         private int _watermark = -1;  // comment tokens at or below this index were taken by doc / comment / @id
@@ -961,11 +965,16 @@ public static partial class SysMLv2Parser
             d.HeaderSpan = TextSpan.Cover(start.Span, LastTok.Span);
             if (Is("{"))
             {
+                // Checked before the '{' is consumed, so recovery skips the whole (balanced) block without recursing.
+                if (_nesting >= MaxNesting || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+                    throw new ParseError($"Blocks are nested more than {MaxNesting} levels deep", Cur.Span);
                 var open = Next();
                 d.HasBody = true;
                 into.Add(d);
                 UpdatePrevious(d, ctx);
-                ParseBody(d.Body, new BodyContext(d), top: false, opener: open);
+                _nesting++;
+                try { ParseBody(d.Body, new BodyContext(d), top: false, opener: open); }
+                finally { _nesting--; }
                 d.Span = TextSpan.Cover(start.Span, LastTok.Span);
                 return;
             }

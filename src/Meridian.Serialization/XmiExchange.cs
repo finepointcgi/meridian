@@ -15,6 +15,9 @@ public sealed record ImportReport(int Elements, int Relationships, IReadOnlyList
 /// </summary>
 public static class XmiExchange
 {
+    /// <summary>Deepest element nesting an import accepts.</summary>
+    public const int MaxImportDepth = 200;
+
     public static readonly XNamespace Xmi = "http://www.omg.org/spec/XMI/20131001";
     public static readonly XNamespace Uml = "http://www.omg.org/spec/UML/20161101";
     public static readonly XNamespace SysML = "http://www.omg.org/spec/SysML/20181001/SysML";
@@ -427,8 +430,10 @@ public static class XmiExchange
         var typeRefs = new List<(Element feature, XElement x)>();
         var count = 0;
 
-        void Walk(XElement x, Element owner)
+        void Walk(XElement x, Element owner, int depth = 0)
         {
+            // Deeper element trees would overflow the stack (here and in everything that walks the model later).
+            if (depth > MaxImportDepth) throw new FormatException($"The XMI file nests elements more than {MaxImportDepth} levels deep.");
             foreach (var c in x.Elements())
             {
                 var tag = c.Name.LocalName;
@@ -449,7 +454,7 @@ public static class XmiExchange
                     }
                     continue;
                 }
-                if (tag == "region") { Walk(c, owner); continue; }
+                if (tag == "region") { Walk(c, owner, depth + 1); continue; }
                 if (tag is "generalization") { pending.Add((ElementKind.Generalization, id, XmiId(x), Attr(c, "general") ?? Href(c, "general"), owner, c)); continue; }
                 if (tag is "interfaceRealization") { pending.Add((ElementKind.Realization, id, XmiId(x), Attr(c, "contract") ?? Attr(c, "supplier"), owner, c)); continue; }
                 if (tag is "include" || type == "Include") { pending.Add((ElementKind.Include, id, Attr(c, "includingCase") ?? XmiId(x), Attr(c, "addition"), owner, c)); continue; }
@@ -522,7 +527,7 @@ public static class XmiExchange
                 model.AttachForLoad(parentForChild, el);
                 if (id != null) map[id] = el;
                 count++;
-                if (ek is not (ElementKind.Property or ElementKind.Port or ElementKind.Operation)) Walk(c, el);
+                if (ek is not (ElementKind.Property or ElementKind.Port or ElementKind.Operation)) Walk(c, el, depth + 1);
                 else foreach (var cm in c.Elements().Where(z => z.Name.LocalName == "ownedComment"))
                         ModelRepository.SetFieldForLoad(el, FieldKeys.Documentation, cm.Element("body")?.Value ?? Attr(cm, "body"));
             }
