@@ -65,6 +65,7 @@ public partial class Workbench
             CA("Export Word document", Icons.Material.Outlined.Description, ExportDocx),
             CA("Export XMI", Icons.Material.Outlined.SwapHoriz, ExportXmi),
             CA("Export SysML v2 text", Icons.Material.Outlined.Code, ExportSysML),
+            C("Edit as SysML v2 text", Icons.Material.Outlined.EditNote, EditAsSysml),
             CA("Export ReqIF", Icons.Material.Outlined.Assignment, ExportReqIf),
             CA("Export ArchiMate exchange file", Icons.Material.Outlined.Layers, ExportArchiMate),
             CA("Generate C# code", Icons.Material.Outlined.DataObject, GenerateCode),
@@ -491,6 +492,15 @@ public partial class Workbench
         _validation?.Run();
         var h = Ws.Health;
         Ws.SetStatus(h.Errors == 0 ? $"Validation passed — {h.Warnings} warnings, {h.Infos} notes" : $"Validation found {h.Errors} errors");
+    }
+
+    private readonly SysmlTextPanel.EditorState _sysml = new();
+
+    /// <summary>Opens the SysML v2 text editor on the selection's package (dock 12).</summary>
+    private void EditAsSysml()
+    {
+        _sysml.RequestScope(Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model));
+        OpenDock(12);
     }
 
     private void OpenDock(int index)
