@@ -6,9 +6,9 @@ namespace Meridian.Data;
 /// <summary>Branches, branch commits and baselines (PostgreSQL).</summary>
 public sealed partial class PostgresStore
 {
-    private async Task MigrateBranchingAsync()
+    private static async Task MigrateBranchingAsync(NpgsqlConnection conn)
     {
-        await using var cmd = _ds.CreateCommand("""
+        await using var cmd = new NpgsqlCommand("""
             create table if not exists project_branches (
                 id uuid primary key,
                 project_id uuid not null references projects(id) on delete cascade,
@@ -40,7 +40,8 @@ public sealed partial class PostgresStore
 
             create index if not exists branches_project on project_branches(project_id);
             create index if not exists version_branches_branch on version_branches(branch_id);
-            """);
+            create index if not exists baselines_version on baselines(version_id);
+            """, conn);
         await cmd.ExecuteNonQueryAsync();
     }
 

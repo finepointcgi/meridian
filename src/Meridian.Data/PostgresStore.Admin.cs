@@ -8,9 +8,9 @@ public sealed partial class PostgresStore
 {
     // =============================================================== schema (administration block)
 
-    private async Task MigrateAdminAsync()
+    private static async Task MigrateAdminAsync(NpgsqlConnection conn)
     {
-        await using var cmd = _ds.CreateCommand("""
+        await using var cmd = new NpgsqlCommand("""
             alter table users add column if not exists is_admin boolean not null default false;
             alter table users add column if not exists disabled boolean not null default false;
             alter table users add column if not exists failed_logins int not null default 0;
@@ -70,13 +70,15 @@ public sealed partial class PostgresStore
             create index if not exists audit_log_action on audit_log(action);
             create index if not exists team_members_user on team_members(user_id);
             create index if not exists external_logins_user on external_logins(user_id);
+            create index if not exists team_project_roles_project on team_project_roles(project_id);
+            create index if not exists audit_log_project on audit_log(project_id);
 
             create or replace function meridian_audit_append_only() returns trigger language plpgsql as $fn$
             begin raise exception 'audit_log is append-only'; end $fn$;
             drop trigger if exists audit_log_append_only on audit_log;
             create trigger audit_log_append_only before update or delete on audit_log
                 for each row execute function meridian_audit_append_only();
-            """);
+            """, conn);
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -186,18 +188,33 @@ public sealed partial class PostgresStore
     public async Task<UserAccount> CreateExternalUserAsync(string username, string displayName, ExternalLogin login)
     {
         var baseName = LoginPolicy.SuggestUsername(username);
-        var count = await ScalarAsync<long>("select count(*) from users");
+        await using var conn = await _ds.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        async Task<object?> Run(string sql, params object?[] args)
+        {
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            foreach (var a in args) cmd.Parameters.Add(a as NpgsqlParameter ?? new NpgsqlParameter { Value = a ?? DBNull.Value });
+            return await cmd.ExecuteScalarAsync();
+        }
+        // One provisioning per identity at a time: two concurrent first sign-ins must not create two accounts
+        // (the loser's insert into external_logins would be silently skipped, leaving an orphaned, unlinked account).
+        await Run("select pg_advisory_xact_lock(hashtext($1 || chr(10) || $2))", login.Issuer, login.Subject);
+        if (await Run("select user_id from external_logins where issuer = $1 and subject = $2", login.Issuer, login.Subject) is Guid linked)
+        {
+            await tx.CommitAsync();
+            return (await GetUserAsync(linked))!.User;
+        }
+        var count = (long)(await Run("select count(*) from users"))!;
         for (var attempt = 1; attempt < 200; attempt++)
         {
             var candidate = attempt == 1 ? baseName : $"{baseName}{attempt}";
             var user = new UserAccount(Guid.NewGuid(), candidate, string.IsNullOrWhiteSpace(displayName) ? candidate : displayName.Trim(), Accounts.Palette[count % Accounts.Palette.Length]);
-            try
-            {
-                await ExecAsync("insert into users(id, username, display_name, password_hash, color) values ($1,$2,$3,$4,$5)",
-                    user.Id, user.Username, user.DisplayName, LoginPolicy.NoPassword, user.Color);
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation) { continue; }
-            await LinkExternalLoginAsync(user.Id, login);
+            if (await Run("insert into users(id, username, display_name, password_hash, color) values ($1,$2,$3,$4,$5) on conflict (username) do nothing returning id",
+                    user.Id, user.Username, user.DisplayName, LoginPolicy.NoPassword, user.Color) is null)
+                continue;   // taken
+            await Run("insert into external_logins(issuer, subject, provider, user_id, email) values ($1,$2,$3,$4,$5)",
+                login.Issuer, login.Subject, login.Provider, user.Id, Typed(login.Email, NpgsqlDbType.Text));
+            await tx.CommitAsync();
             return user;
         }
         throw new InvalidOperationException("Could not find a free username for this account.");

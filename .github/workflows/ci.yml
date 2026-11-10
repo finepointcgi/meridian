@@ -14,6 +14,25 @@ jobs:
       - run: dotnet build Meridian.slnx -c Release
       - run: dotnet test Meridian.slnx -c Release --no-build
 
+  # The IMeridianStore contract against a real PostgreSQL (Testcontainers starts postgres:17-alpine; Docker is preinstalled
+  # on ubuntu runners). MERIDIAN_REQUIRE_POSTGRES turns "Docker unavailable → skip" into a failure, so this job cannot pass vacuously.
+  postgres-store:
+    runs-on: ubuntu-latest
+    env:
+      MERIDIAN_REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: docker version
+      - run: dotnet build tests/Meridian.Tests/Meridian.Tests.csproj -c Release
+      - name: Store contract (PostgreSQL and SQLite)
+        run: >
+          dotnet test tests/Meridian.Tests/Meridian.Tests.csproj -c Release --no-build
+          --filter "FullyQualifiedName~Meridian.Tests.StoreContract"
+          --logger "console;verbosity=normal"
+
   # Catches packaging regressions early: the Linux tar.gz and .deb (no signing, no AppImage tool needed).
   package-smoke:
     runs-on: ubuntu-latest

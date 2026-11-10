@@ -6,9 +6,9 @@ namespace Meridian.Data;
 /// <summary>Reviews, review comments and checklists, threaded replies, @mentions and notifications (PostgreSQL).</summary>
 public sealed partial class PostgresStore
 {
-    private async Task MigrateReviewsAsync()
+    private static async Task MigrateReviewsAsync(NpgsqlConnection conn)
     {
-        await using var cmd = _ds.CreateCommand("""
+        await using var cmd = new NpgsqlCommand("""
             create table if not exists reviews (
                 id bigserial primary key,
                 project_id uuid not null references projects(id) on delete cascade,
@@ -75,7 +75,15 @@ public sealed partial class PostgresStore
             create index if not exists review_comments_review on review_comments(review_id);
             create index if not exists mentions_source on mentions(source, source_id);
             create index if not exists notifications_user on notifications(user_id, is_read, created_at);
-            """);
+            -- Foreign keys that cascade (or set null) when a project, version, review or comment is deleted.
+            create index if not exists reviews_base_version on reviews(base_version);
+            create index if not exists reviews_head_version on reviews(head_version);
+            create index if not exists review_comments_parent on review_comments(parent_id);
+            create index if not exists comment_replies_parent on comment_replies(parent_id);
+            create index if not exists mentions_project on mentions(project_id);
+            create index if not exists notifications_project on notifications(project_id);
+            create index if not exists notifications_review on notifications(review_id);
+            """, conn);
         await cmd.ExecuteNonQueryAsync();
     }
 
