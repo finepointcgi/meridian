@@ -161,6 +161,13 @@
             </div>
         </div>
         <div class="rgroup compact">
+            <div class="rlabel">Model views</div>
+            <div class="ritems">
+                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(_dockOpen && _dock == 8 && _tablesRequest.Mode == TablesPanel.Mode.Table ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Tables</span></button></MudTooltip>
+                <MudTooltip Text="Model query / search builder"><button class="rbtn @(_dockOpen && _dock == 8 && _tablesRequest.Mode == TablesPanel.Mode.Query ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
+            </div>
+        </div>
+        <div class="rgroup compact">
             <div class="rlabel">Simulate</div>
             <div class="ritems">
                 <button class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
@@ -273,6 +280,7 @@
                     @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
+                    @DockTab(8, "Tables", Icons.Material.Outlined.TableChart, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -288,6 +296,7 @@
                             case 4: <ImpactPanel />; break;
                             case 5: <SimulationPanel />; break;
                             case 6: <ParametricsPanel />; break;
+                            case 8: <TablesPanel Open="_tablesRequest" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>

@@ -18,6 +18,8 @@ public static class UiKinds
         ElementKind.Activity or ElementKind.Action or ElementKind.StateMachine or ElementKind.State or ElementKind.Interaction or ElementKind.Lifeline or ElementKind.Message => "#2a7fbf",
         ElementKind.Package or ElementKind.Model => "#5b6577",
         ElementKind.Diagram => "#0b8a6a",
+        ElementKind.TableView or ElementKind.QueryView => "#2d9cdb",
+        ElementKind.ValidationRule => "#d9822b",
         ElementKind.Operation => "#8a5a00",
         _ => "#6b7586",
     };
@@ -108,6 +110,9 @@ public static class UiKinds
         ElementKind.Binding => MudBlazor.Icons.Material.Outlined.DragHandle,
         ElementKind.ArchiRelation or ElementKind.BpmnFlow => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
         ElementKind.Diagram => MudBlazor.Icons.Material.Outlined.Schema,
+        ElementKind.TableView => MudBlazor.Icons.Material.Outlined.TableChart,
+        ElementKind.QueryView => MudBlazor.Icons.Material.Outlined.ManageSearch,
+        ElementKind.ValidationRule => MudBlazor.Icons.Material.Outlined.Rule,
         ElementKind.Satisfy => MudBlazor.Icons.Material.Outlined.TaskAlt,
         ElementKind.Verify => MudBlazor.Icons.Material.Outlined.Verified,
         ElementKind.DeriveReqt => MudBlazor.Icons.Material.Outlined.CallSplit,
