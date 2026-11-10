@@ -185,7 +185,14 @@ public sealed class Workspace : IDisposable, ISessionClient
 
     // ---------------------------------------------------------------- UI state
 
+    /// <summary>Mirrors <see cref="Settings.ThemeService.IsDark"/> (set by it); read the ThemeService in new code.</summary>
     public bool DarkMode { get; set; } = true;
+    /// <summary>The user's preferences (set by <see cref="Settings.ThemeService"/>): diagram defaults, snapping, tabs.</summary>
+    public Settings.UserPreferences Preferences { get; set; } = new();
+    /// <summary>Asks the user to confirm (title, message); set by the workbench. Null: no confirmation possible.</summary>
+    public Func<string, string, Task<bool>>? Confirm { get; set; }
+    /// <summary>Raised when the favourites change (they are saved with the user's preferences).</summary>
+    public event Action? FavoritesChanged;
     public HashSet<string> Favorites { get; } = new();
     private readonly List<Diagram> _back = new();
     private readonly List<Diagram> _forward = new();
@@ -195,6 +202,7 @@ public sealed class Workspace : IDisposable, ISessionClient
     public void ToggleFavorite(Element e)
     {
         if (!Favorites.Remove(e.Id)) Favorites.Add(e.Id);
+        FavoritesChanged?.Invoke();
         Bump();
     }
 
@@ -292,7 +300,9 @@ public sealed class Workspace : IDisposable, ISessionClient
         if (c == null)
         {
             c = new DiagramController(this, d);
-            _open.Add(c);
+            // "Open new diagrams as tabs" off: the new diagram takes the active tab's place.
+            if (!Preferences.OpenDiagramsAsTabs && Active != null && _open.IndexOf(Active) is var at and >= 0) _open[at] = c;
+            else _open.Add(c);
         }
         Active = c;
         ActiveView = null;

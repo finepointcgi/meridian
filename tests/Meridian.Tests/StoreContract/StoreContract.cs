@@ -12,7 +12,7 @@ namespace Meridian.Tests.StoreContract;
 /// The behaviour every <see cref="IMeridianStore"/> must have. The same tests run against SQLite (desktop / local mode)
 /// and PostgreSQL (team server); each test gets a fresh, empty database.
 /// </summary>
-public abstract class StoreContract
+public abstract partial class StoreContract
 {
     protected static readonly string Json = ProjectFile.Serialize(SampleModels.Vehicle());
 

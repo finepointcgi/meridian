@@ -1,4 +1,5 @@
 @inject Workspace Ws
+@inject IServiceProvider Services
 @inject IJSRuntime JS
 
 @* Picture export: one diagram (PNG at 1x–3x or SVG, or copy to the clipboard), or every diagram of a package as a zip. *@
@@ -74,7 +75,8 @@
     private string? _previewFor;
     private string? _preview;
 
-    protected override void OnInitialized() => _bg = Ws.DarkMode ? ExportBackground.Dark : ExportBackground.Light;
+    protected override void OnInitialized() =>
+        _bg = Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) is Meridian.Web.Settings.ThemeService theme ? theme.ExportBackground : Ws.DarkMode ? ExportBackground.Dark : ExportBackground.Light;   // the canvas look (Settings ▸ Appearance)
 
     private string Title => Diagram != null ? $"Export “{Diagram.Name}”" : $"Export diagrams of “{Container?.DisplayName}”";
 

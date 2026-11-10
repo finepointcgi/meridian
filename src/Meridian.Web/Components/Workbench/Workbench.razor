@@ -5,7 +5,7 @@
 <PageTitle>@(Ws.Session?.Name ?? "Meridian") — Meridian</PageTitle>
 
 <CascadingValue Value="this" IsFixed="true">
-<div class="app @(Ws.DarkMode ? "dark" : "light")">
+<div class="app @Theme.AppClass" style="@Theme.AppStyle">
 
     @* ================================================================ title bar *@
     <header class="titlebar">
@@ -56,6 +56,7 @@
                 <MudDivider />
                 <MudMenuItem Disabled="true" Class="menu-heading">Help</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()">Settings… <Key>⌘,</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="StartTour">Take the guided tour</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
             </ChildContent>
@@ -90,8 +91,9 @@
             <MudTooltip Text="Undo (⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Undo" Disabled="!Ws.Model.History.CanUndo" OnClick="Undo" /></MudTooltip>
             <MudTooltip Text="Redo (⇧⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Redo" Disabled="!Ws.Model.History.CanRedo" OnClick="Redo" /></MudTooltip>
             <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
-                <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
+                <MudIconButton Class="tb-theme" Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
             </MudTooltip>
+            <MudTooltip Text="Settings (⌘,)"><MudIconButton Class="tb-settings" Size="Size.Small" Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()" aria-label="Settings" /></MudTooltip>
             <button class="btn-primary" @onclick="Save" disabled="@Ws.ReadOnly" title="Save a named version you can compare or restore later. Your work is already saved automatically as you go."><MudIcon Icon="@Icons.Material.Outlined.Commit" Style="font-size:16px" /> Commit</button>
             @if (Ws.User is { } me)
             {
@@ -102,6 +104,7 @@
                         <MudText Typo="Typo.caption" Class="px-4 pb-2" Style="opacity:.6">@me.Username</MudText>
                         <MudText Typo="Typo.caption" Class="px-4 pb-2" Style="opacity:.6">@(Host.LocalMode ? "Local workspace on this computer" : Nav.BaseUri.TrimEnd('/'))</MudText>
                         <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()">Settings… <Key>⌘,</Key></MudMenuItem>
                         @if (_desktop)
                         {
                             <MudMenuItem Icon="@Icons.Material.Outlined.SwapHoriz" OnClick="SwitchWorkspace">Switch workspace or server…</MudMenuItem>

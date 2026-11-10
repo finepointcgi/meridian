@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject IJSRuntime JS
 @inject Workspace Ws
+@inject IServiceProvider Services
 
 @* First-run guided tour: a spotlight on one part of the workbench per step. Shown once per browser; Help ▸ Take the tour reopens it. *@
 @if (_step >= 0)
@@ -38,6 +39,7 @@
 
 @code {
     public const string SeenKey = "meridian.tour.v1";
+    private Meridian.Web.Settings.ThemeService? Theme => Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) as Meridian.Web.Settings.ThemeService;
 
     private sealed record Step(string Selector, string Icon, string Title, string Html);
 
@@ -73,6 +75,7 @@
     {
         if (!firstRender) return;
         Ws.Changed += OnChanged;
+        if (Theme?.Prefs.TourSeen == true) return;   // seen on any device (Settings ▸ Editor shows it again)
         string? seen;
         try { seen = await JS.InvokeAsync<string?>("meridian.getFlag", SeenKey); }
         catch (JSException) { return; }
@@ -121,6 +124,7 @@
         _step = -1;
         _pending = false;
         try { await JS.InvokeVoidAsync("meridian.setFlag", SeenKey, "done"); } catch (JSException) { }
+        if (Theme is { Prefs.TourSeen: false } theme) await theme.UpdateAsync(p => p.TourSeen = true);
     }
 
     private async Task Key(KeyboardEventArgs e)

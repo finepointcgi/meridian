@@ -9,18 +9,20 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
   position: fixed; inset: 0; background: var(--bg); color: var(--text);
   font-size: 13px; letter-spacing: -0.003em;
 }
-.app.dark {
+/* Token sets: on .app, and on <body> (m-theme-*) for dialogs and popovers outside it. Text tokens meet WCAG AA; see ThemeContrastTests. */
+.app.dark, body.m-theme-dark {
   --bg: #0a0f19; --chrome: rgba(13, 19, 32, .92); --panel: rgba(19, 27, 43, .82); --panel-solid: #131b2b; --panel-2: #172132; --panel-3: #1c2740;
   --border: rgba(148, 163, 184, .10); --border-strong: rgba(148, 163, 184, .20);
-  --text: #e7ecf6; --text-2: #a3aec4; --text-3: #6d7a93;
+  --text: #e7ecf6; --text-2: #a3aec4; --text-3: #8b97ae;
   --hover: rgba(148, 163, 184, .08); --sel: rgba(79, 140, 255, .16); --sel-border: rgba(79, 140, 255, .55);
   --canvas: #0f1522; --grid: rgba(148, 163, 184, .09); --shadow: 0 10px 40px rgba(0, 0, 0, .45); --shadow-sm: 0 2px 10px rgba(0, 0, 0, .35);
   color-scheme: dark;
 }
-.app.light {
+.app.light, body.m-theme-light {
   --bg: #e9edf4; --chrome: rgba(255, 255, 255, .92); --panel: rgba(255, 255, 255, .86); --panel-solid: #ffffff; --panel-2: #f5f7fb; --panel-3: #eef2f8;
   --border: rgba(15, 23, 42, .08); --border-strong: rgba(15, 23, 42, .15);
-  --text: #141b2b; --text-2: #4c586d; --text-3: #8a94a7;
+  --text: #141b2b; --text-2: #4c586d; --text-3: #5b6578;
+  --accent-2: #0f766e; --danger: #b42d27; --warn: #a86a00; --ok: #1f7a52;
   --hover: rgba(15, 23, 42, .05); --sel: rgba(79, 140, 255, .12); --sel-border: rgba(79, 140, 255, .55);
   --canvas: #f6f8fc; --grid: rgba(15, 23, 42, .07); --shadow: 0 10px 40px rgba(30, 41, 70, .12); --shadow-sm: 0 2px 10px rgba(30, 41, 70, .08);
   color-scheme: light;

@@ -84,6 +84,7 @@ public partial class Workbench
         list.AddRange(RequirementPaletteCommands());
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
+        list.AddRange(SettingsPaletteCommands());
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -114,6 +115,7 @@ public partial class Workbench
     protected override async Task OnInitializedAsync()
     {
         Ws.Dispatch = a => InvokeAsync(a);
+        Ws.Confirm = ConfirmAsync;
         Ws.Changed += OnWorkspaceChanged;
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         if (Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
@@ -128,6 +130,7 @@ public partial class Workbench
         if (!firstRender) return;
         _self = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("meridian.installShortcuts", _self);
+        await JS.InvokeVoidAsync("meridianSettings.installShortcut", _self);   // ⌘, / Ctrl+, opens Settings
         await JS.InvokeVoidAsync("meridian.splitter", _leftSplitter, "--left", "left", 180, 640);
         await JS.InvokeVoidAsync("meridian.splitter", _rightSplitter, "--right", "right", 240, 640);
         await JS.InvokeVoidAsync("meridian.splitter", _bottomSplitter, "--bottom", "bottom", 90, 700);
@@ -136,7 +139,7 @@ public partial class Workbench
 
         // Reopen the project this browser last worked on, else the most recent one, else offer the project list.
         var projects = await Db.ListProjectsAsync(Ws.User.Id);
-        var last = await JS.InvokeAsync<string?>("meridian.getLast");
+        var last = Theme.Prefs.LastProjectId?.ToString() ?? await JS.InvokeAsync<string?>("meridian.getLast");   // follows the user across devices
         var deep = Integrations.DeepLink.Parse(Nav.Uri);   // ?project=…&element=… links from issue trackers / OSLC
         var pick = projects.FirstOrDefault(p => p.Id == deep?.Project) ?? projects.FirstOrDefault(p => p.Id.ToString() == last) ?? projects.FirstOrDefault();
         if (pick != null) await OpenProject(pick.Id);
@@ -163,6 +166,7 @@ public partial class Workbench
         if (!await Ws.JoinAsync(Hub, projectId, role.Value)) { Snackbar.Add("That project no longer exists.", Severity.Warning); return; }
         _csvTarget = Ws.Model.Root;
         await JS.InvokeVoidAsync("meridian.setLast", projectId.ToString());
+        if (Theme.Prefs.LastProjectId != projectId) await Theme.UpdateAsync(p => p.LastProjectId = projectId);
         Ws.Log($"Opened “{Ws.Session!.Name}” as {role.Value.ToString().ToLowerInvariant()}");
         Ws.SetStatus(role == ProjectRole.Viewer ? "View-only: you can browse, comment and export, but not edit." : $"Opened {Ws.Session.Name}");
     }
@@ -236,6 +240,7 @@ public partial class Workbench
             case "Open": await OpenProjects(); break;
             case "Find": await FocusSearch(); break;
             case "Palette": if (_palette != null) await _palette.Show(); break;
+            case "Settings": await OpenSettings(); break;
             case "Undo": Undo(); break;
             case "Redo": Redo(); break;
             case "F7": Validate(); break;
@@ -287,6 +292,7 @@ public partial class Workbench
             using (Ws.Model.History.Transaction($"New {Metamodel.DisplayName(type)}"))
             {
                 d = Ws.Model.CreateDiagram(owner, type);
+                ApplyDiagramDefaults(d);   // Settings ▸ Diagrams
                 var c = Ws.Open(d);
                 // A new IBD shows the context block's parts and ports, as Cameo does.
                 if (type == DiagramType.InternalBlock)
@@ -309,7 +315,7 @@ public partial class Workbench
         if (e.Owner == null) return;
         var owned = e.Descendants().Count();
         var rels = Ws.Model.RelationshipsOf(e).Count;
-        if (owned > 0 || rels > 2)
+        if (owned > 0 || rels > 2 || Ws.Preferences.ConfirmDeleteFromModel)
         {
             var ok = await Dialogs.ShowMessageBox("Delete", $"Delete {e.DisplayName}? This also deletes {owned} owned elements, {rels} relationships and every diagram view of them. You can undo this.", yesText: "Delete", cancelText: "Cancel");
             if (ok != true) return;
@@ -521,11 +527,8 @@ public partial class Workbench
         else OpenDock(index);
     }
 
-    private void ToggleTheme()
-    {
-        Ws.DarkMode = !Ws.DarkMode;
-        Ws.Bump();
-    }
+    /// <summary>The title-bar sun/moon: a quick light/dark switch that updates the Appearance setting.</summary>
+    private void ToggleTheme() => _ = Theme.ToggleDarkAsync();
 
     private string SavedText()
     {
@@ -687,7 +690,7 @@ public partial class Workbench
     private async Task CopyDiagramImage()
     {
         if (Ws.Active is not { } c) { Ws.SetStatus("Open a diagram first"); return; }
-        var problem = await DiagramImageExport.CopyAsync(JS, Ws.Model, c.Diagram, 2, Ws.DarkMode ? ExportBackground.Dark : ExportBackground.Light);
+        var problem = await DiagramImageExport.CopyAsync(JS, Ws.Model, c.Diagram, 2, Theme.ExportBackground);
         if (problem != null) Snackbar.Add(problem, Severity.Warning);
         else Ws.SetStatus($"Copied {c.Diagram.Name} to the clipboard as a picture");
     }

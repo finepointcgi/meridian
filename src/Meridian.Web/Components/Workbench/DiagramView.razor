@@ -328,7 +328,8 @@
     private (double Left, double Top) _origin;
     private object? _editorShownFor;
     private string? _editText;
-    private static bool _shapesOpen = true;
+    private bool _shapesOpen = true;
+    protected override void OnInitialized() => _shapesOpen = Ws.Preferences.ShowShapesPanel;   // Settings ▸ Diagrams
     private string? _shapeQuery;
     private PaletteItem? _paletteDrag;
     private Pt? _quickShownFor;
@@ -433,7 +434,7 @@
         <MudTooltip Text="@tip"><button class="tool" @onclick="() => C.Align(mode)"><MudIcon Icon="@icon" /></button></MudTooltip>
     };
 
-    private SvgTheme Theme => Ws.DarkMode ? SvgTheme.Dark : SvgTheme.Light;
+    private SvgTheme Theme => Ws.DarkMode && !Ws.Preferences.CanvasAlwaysLight ? SvgTheme.Dark : SvgTheme.Light;   // as ThemeService.SvgTheme
     private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
     protected override bool ShouldRender()
@@ -489,7 +490,7 @@
         // Room for the shapes panel on the left, except on a phone-sized canvas, where the panel is hidden.
         C.LeftInset = r.Width < 600 ? 8 : _shapesOpen && !Ws.ReadOnly ? 236 : 64;
         C.ViewHeight = r.Height;
-        if (C.NeedsFit && r.Width > 50) { C.ZoomToFit(); StateHasChanged(); }
+        if (C.NeedsFit && r.Width > 50) { C.InitialZoom(); StateHasChanged(); }
     }
 
     [JSInvokable]

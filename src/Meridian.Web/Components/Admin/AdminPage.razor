@@ -3,6 +3,8 @@
 @using Meridian.Data
 @using Meridian.Web.Admin
 @inject Workspace Ws
+@inject Meridian.Web.Settings.ThemeService Theme
+@implements IDisposable
 @inject IMeridianStore Db
 @inject AdminAccess Access
 @inject AuthenticationStateProvider Auth
@@ -10,7 +12,7 @@
 
 <PageTitle>Administration — Meridian</PageTitle>
 
-<div class="app admin @(Ws.DarkMode ? "dark" : "light")">
+<div class="app admin @Theme.AppClass" style="@Theme.AppStyle">
     <header class="titlebar">
         <a class="brand" href="/" style="color:inherit; text-decoration:none">
             <span class="logo"><MudIcon Icon="@Icons.Material.Filled.Hub" Style="font-size:16px; color:#fff" /></span>
@@ -19,7 +21,7 @@
         <span class="crumb-title"><MudIcon Icon="@Icons.Material.Outlined.AdminPanelSettings" Style="font-size:17px; color:var(--accent-2)" /> Administration</span>
         <span style="flex:1"></span>
         <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
-            <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="() => { Ws.DarkMode = !Ws.DarkMode; Ws.Bump(); }" />
+            <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="Theme.ToggleDarkAsync" />
         </MudTooltip>
         <a class="rbtn" href="/" style="text-decoration:none"><MudIcon Icon="@Icons.Material.Outlined.ArrowBack" /><span class="t">Back to workbench</span></a>
         @if (_me is { } me)
@@ -75,6 +77,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Theme.Changed += OnThemeChanged;   // "Match system" follows the OS while this page is open
         var principal = (await Auth.GetAuthenticationStateAsync()).User;
         if (await Access.IsAdminAsync(principal) && MeridianAuth.UserId(principal) is { } id)
         {
@@ -92,4 +95,7 @@
         _stats = (users.Count, users.Count(u => u.IsAdmin), projects.Count, orgs.Count, projects.Sum(p => p.SizeBytes));
         StateHasChanged();
     }
+
+    private void OnThemeChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Theme.Changed -= OnThemeChanged;
 }
