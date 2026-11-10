@@ -54,7 +54,7 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .ribbon::-webkit-scrollbar { display: none; }
 @media (max-width: 2600px) { .rgroup.compact .rbtn .t { display: none; } .rgroup.compact .rbtn { padding: 0 7px; } }
 @media (max-width: 2200px) { .rgroup.compact-md .rbtn .t { display: none; } .rgroup.compact-md .rbtn { padding: 0 7px; } }
-@media (max-width: 1700px) { .rgroup .rbtn .t { display: none; } .rgroup .rbtn { padding: 0 5px; } .rgroup { padding: 0 4px; } }
+@media (max-width: 1700px) { .rgroup .rbtn .t { display: none; } .rgroup .rbtn { padding: 0 4px; } .rgroup { padding: 0 3px; } .rgroup .ritems { gap: 1px; } .ribbon { padding: 5px 4px; } }
 .rgroup .rlabel { font-size: 9.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--text-3); padding: 0 4px 2px; }
 .rgroup .ritems { display: flex; gap: 2px; flex: 1; align-items: center; }
 .rbtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; border: 1px solid transparent; background: transparent;
