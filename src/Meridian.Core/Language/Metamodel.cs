@@ -10,10 +10,13 @@ public enum NodeShape
 {
     Rectangle, Rounded, Ellipse, StickFigure, Folder, Note, FilledCircle, BullsEye, Diamond, Bar, SmallSquare, Lifeline, Fragment,
     Swimlane, Event, Gateway, DataObject, Pool,
+    // Appended: timing, interaction overview
+    Timeline, TimeMarker, DurationMarker, InteractionUse, InlineInteraction,
 }
 
 /// <summary>A palette entry: an element or relationship kind, optionally with a subtype (BPMN, ArchiMate…).</summary>
-public sealed record PaletteItem(ElementKind Kind, string? Subtype = null, string? Label = null)
+/// <param name="Stereotype">Stereotype applied to elements created from this entry (UAF viewpoints).</param>
+public sealed record PaletteItem(ElementKind Kind, string? Subtype = null, string? Label = null, string? Stereotype = null)
 {
     public string Title => Label ?? (Subtype != null ? Subtypes.Display(Subtype) : Metamodel.DisplayName(Kind));
 }
@@ -31,7 +34,7 @@ public static class Metamodel
         ElementKind.Trace, ElementKind.DeriveReqt, ElementKind.Copy, ElementKind.Include, ElementKind.Extend,
         ElementKind.Transition, ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate, ElementKind.Connector,
         ElementKind.Message, ElementKind.Binding, ElementKind.BpmnFlow, ElementKind.ArchiRelation, ElementKind.ForeignKey, ElementKind.Line,
-        ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes,
+        ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes, ElementKind.CommunicationLink,
     };
 
     private static readonly HashSet<ElementKind> Classifiers = new()
@@ -51,7 +54,7 @@ public static class Metamodel
     private static readonly HashSet<ElementKind> ActivityNodes = new()
     {
         ElementKind.Action, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
-        ElementKind.InputPin, ElementKind.OutputPin, ElementKind.ObjectNode,
+        ElementKind.InputPin, ElementKind.OutputPin, ElementKind.ObjectNode, ElementKind.InteractionUse, ElementKind.InlineInteraction,
     };
 
     private static readonly HashSet<ElementKind> Vertices = new()
@@ -71,6 +74,7 @@ public static class Metamodel
     {
         ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
         ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment, ElementKind.CombinedFragment, ElementKind.Shape,
+        ElementKind.DurationConstraint, ElementKind.TimeConstraint,
     };
 
     public static readonly IReadOnlyList<string> FragmentOperators = ["alt", "opt", "loop", "par", "break", "critical", "neg", "seq", "strict"];
@@ -108,7 +112,8 @@ public static class Metamodel
             ElementKind.Class or ElementKind.Block or ElementKind.Component or ElementKind.ConstraintBlock or ElementKind.DataType or ElementKind.ValueType =>
                 child is ElementKind.Property or ElementKind.Operation or ElementKind.Port || IsStructuralClassifier(child) || IsBehavior(child),
             ElementKind.Actor or ElementKind.UseCase => child is ElementKind.Property or ElementKind.Operation || IsBehavior(child),
-            ElementKind.Interaction => child is ElementKind.Lifeline or ElementKind.CombinedFragment,
+            ElementKind.Interaction => child is ElementKind.Lifeline or ElementKind.CombinedFragment or ElementKind.TimingLifeline
+                or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.CommunicationLifeline,
             ElementKind.Requirement => child is ElementKind.Requirement,  // requirement containment
             ElementKind.TestCase => child is ElementKind.Activity,
             ElementKind.Activity => IsActivityNode(child) && !IsPin(child) || child == ElementKind.Partition,
@@ -149,6 +154,8 @@ public static class Metamodel
             ElementKind.ForeignKey => source == ElementKind.Table && target == ElementKind.Table ? null : "Foreign keys connect two tables",
             ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes =>
                 source == ElementKind.Feature && target == ElementKind.Feature ? null : $"{DisplayName(rel)} must connect two Features",
+            ElementKind.CommunicationLink => source is ElementKind.CommunicationLifeline or ElementKind.Lifeline && target is ElementKind.CommunicationLifeline or ElementKind.Lifeline
+                ? null : "Communication links connect lifelines",
             _ => null, // Dependency, Refine, Trace, Allocate: any to any
         };
     }
@@ -166,6 +173,7 @@ public static class Metamodel
         ],
         DiagramType.ArchiMate => Subtypes.ArchiElements.Select(s => new PaletteItem(ElementKind.ArchiElement, s)).Append(new(ElementKind.Comment)).ToList(),
         DiagramType.Whiteboard => GeneralItems.Append(new(ElementKind.Comment, Label: "Sticky note")).ToList(),
+        _ when UafViewpoints.Of(t) is { } uaf => UafViewpoints.PaletteItems(uaf),
         _ => PaletteNodes(t).Select(k => new PaletteItem(k)).ToList(),
     };
 
@@ -174,6 +182,7 @@ public static class Metamodel
         DiagramType.Bpmn => [new(ElementKind.BpmnFlow, "sequence"), new(ElementKind.BpmnFlow, "message"), new(ElementKind.BpmnFlow, "association")],
         DiagramType.ArchiMate => Subtypes.ArchiRelations.Select(s => new PaletteItem(ElementKind.ArchiRelation, s)).ToList(),
         DiagramType.Whiteboard => GeneralLinks,
+        _ when UafViewpoints.Of(t) is { } uaf => UafViewpoints.PaletteLinks(uaf),
         _ => PaletteEdges(t).Select(k => new PaletteItem(k)).ToList(),
     };
 
@@ -198,6 +207,11 @@ public static class Metamodel
         DiagramType.Sequence => [ElementKind.Lifeline, ElementKind.CombinedFragment, ElementKind.Comment],
         DiagramType.Database => [ElementKind.Table, ElementKind.Comment],
         DiagramType.FeatureModel => [ElementKind.Feature, ElementKind.Configuration, ElementKind.Comment],
+        DiagramType.Timing => [ElementKind.TimingLifeline, ElementKind.DurationConstraint, ElementKind.TimeConstraint, ElementKind.Comment],
+        DiagramType.InteractionOverview => [ElementKind.InteractionUse, ElementKind.InlineInteraction, ElementKind.InitialNode, ElementKind.ActivityFinalNode,
+                                            ElementKind.DecisionNode, ElementKind.ForkNode, ElementKind.Comment],
+        DiagramType.Communication => [ElementKind.CommunicationLifeline, ElementKind.Comment],
+        _ when UafViewpoints.Of(t) is { } uaf => uaf.Elements.Select(x => x.Kind).Distinct().Append(ElementKind.Comment).ToList(),
         _ => [],
     };
 
@@ -215,6 +229,9 @@ public static class Metamodel
         DiagramType.Sequence => [ElementKind.Message],
         DiagramType.Database => [ElementKind.ForeignKey],
         DiagramType.FeatureModel => [ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes],
+        DiagramType.InteractionOverview => [ElementKind.ControlFlow],
+        DiagramType.Communication => [ElementKind.CommunicationLink],
+        _ when UafViewpoints.Of(t) is { } uaf => uaf.Links.Select(x => x.Kind).Distinct().ToList(),
         _ => [],
     };
 
@@ -224,7 +241,8 @@ public static class Metamodel
         DiagramType.InternalBlock or DiagramType.Parametric => owner is ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.ConstraintBlock,
         DiagramType.Activity => owner == ElementKind.Activity,
         DiagramType.StateMachine => owner == ElementKind.StateMachine,
-        DiagramType.Sequence => owner == ElementKind.Interaction,
+        DiagramType.Sequence or DiagramType.Timing or DiagramType.Communication => owner == ElementKind.Interaction,
+        DiagramType.InteractionOverview => owner == ElementKind.Activity,
         DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard or DiagramType.FeatureModel => owner is ElementKind.Model or ElementKind.Package,
         _ => IsNamespace(owner),
     };
@@ -246,6 +264,10 @@ public static class Metamodel
         DiagramType.Database => "erd",
         DiagramType.Whiteboard => "board",
         DiagramType.FeatureModel => "fm",
+        DiagramType.Timing => "timing",
+        DiagramType.InteractionOverview => "io",
+        DiagramType.Communication => "comm",
+        _ when UafViewpoints.Of(t) is { } uaf => "uaf " + uaf.Code,
         _ => "diagram",
     };
 
@@ -288,6 +310,13 @@ public static class Metamodel
         ElementKind.ValidationRule => "Validation Rule",
         ElementKind.TradeStudy => "Trade Study",
         ElementKind.FeatureDecomposition => "Feature Decomposition",
+        ElementKind.TimingLifeline => "Timing Lifeline",
+        ElementKind.DurationConstraint => "Duration Constraint",
+        ElementKind.TimeConstraint => "Time Constraint",
+        ElementKind.InteractionUse => "Interaction Use",
+        ElementKind.InlineInteraction => "Inline Interaction",
+        ElementKind.CommunicationLifeline => "Lifeline",
+        ElementKind.CommunicationLink => "Link",
         _ => k.ToString(),
     };
 
@@ -304,6 +333,10 @@ public static class Metamodel
         DiagramType.Database => "Entity-Relationship Diagram",
         DiagramType.Whiteboard => "Whiteboard",
         DiagramType.FeatureModel => "Feature Model Diagram",
+        DiagramType.Timing => "Timing Diagram",
+        DiagramType.InteractionOverview => "Interaction Overview Diagram",
+        DiagramType.Communication => "Communication Diagram",
+        _ when UafViewpoints.Of(t) is { } uaf => uaf.Name,
         _ => $"{t} Diagram",
     };
 
@@ -349,6 +382,11 @@ public static class Metamodel
         ElementKind.CombinedFragment => NodeShape.Fragment,
         ElementKind.Partition => NodeShape.Swimlane,
         ElementKind.BpmnPool or ElementKind.BpmnLane => NodeShape.Pool,
+        ElementKind.TimingLifeline => NodeShape.Timeline,
+        ElementKind.TimeConstraint => NodeShape.TimeMarker,
+        ElementKind.DurationConstraint => NodeShape.DurationMarker,
+        ElementKind.InteractionUse => NodeShape.InteractionUse,
+        ElementKind.InlineInteraction => NodeShape.InlineInteraction,
         _ => NodeShape.Rectangle,
     };
 
@@ -368,6 +406,12 @@ public static class Metamodel
         NodeShape.Swimlane => (240, 460),
         NodeShape.Pool when k == ElementKind.BpmnLane => (640, 140),
         NodeShape.Pool => (700, 260),
+        NodeShape.Timeline => (640, 130),
+        NodeShape.TimeMarker => (90, 150),
+        NodeShape.DurationMarker => (180, 40),
+        NodeShape.InteractionUse => (200, 70),
+        NodeShape.InlineInteraction => (280, 170),
+        _ when k == ElementKind.CommunicationLifeline => (150, 46),
         _ when k == ElementKind.Requirement => (220, 120),
         _ when k is ElementKind.Property or ElementKind.ObjectNode => (160, 60),
         _ when k == ElementKind.ArchiElement => (150, 70),
@@ -403,6 +447,7 @@ public static class Metamodel
         ElementKind.FeatureDecomposition => new(false, ArrowHead.Dot, ArrowHead.None, null),
         ElementKind.Requires => new(true, ArrowHead.Open, ArrowHead.None, "requires"),
         ElementKind.Excludes => new(true, ArrowHead.Open, ArrowHead.Open, "excludes"),
+        ElementKind.CommunicationLink => new(false, ArrowHead.None, ArrowHead.None, null),
         _ => new(false, ArrowHead.None, ArrowHead.None, null),
     };
 
@@ -436,6 +481,7 @@ public static class Metamodel
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
         f.AddRange(ExtFieldKeys.EditableFields(k));
+        f.AddRange(InteractionNotation.EditableFields(k));
         f.Add(FieldKeys.Stereotypes);
         f.Add(FieldKeys.Documentation);
         return f;

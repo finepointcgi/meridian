@@ -399,6 +399,8 @@ public sealed class ModelRepository
             throw new InvalidOperationException($"A {Metamodel.DisplayName(type)} cannot be owned by a {Metamodel.DisplayName(owner.Kind)}");
         var d = new Diagram(type);
         d.SetRaw(FieldKeys.Name, name ?? $"{owner.DisplayName} {Metamodel.DiagramAbbreviation(type)}");
+        // New diagrams route their connectors (existing diagrams without the field keep the classic look).
+        d.SetRaw(EdgeRouter.DiagramKey, EdgeRouter.Format(EdgeRouter.DefaultFor(type)));
         return Add(owner, d);
     }
 

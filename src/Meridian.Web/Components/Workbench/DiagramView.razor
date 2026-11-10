@@ -39,7 +39,7 @@
                         @foreach (var it in items)
                         {
                             var item = it;
-                            var on = C.Tool == item.Kind && C.ToolSubtype == item.Subtype;
+                            var on = C.IsTool(item);
                             var link = Metamodel.IsRelationship(item.Kind);
                             <div class="tile @(on ? "on" : "")" draggable="@(link ? "false" : "true")" data-drag="palette"
                                  title="@(link ? $"{item.Title}: click, then drag from one shape to another" : $"{item.Title}: click to add, or drag onto the canvas (Shift+click keeps the tool)")"
@@ -65,7 +65,7 @@
             @foreach (var it in Metamodel.PaletteItems(C.Diagram.DiagramType).Concat(Metamodel.PaletteLinks(C.Diagram.DiagramType)))
             {
                 var item = it;
-                var on = C.Tool == item.Kind && C.ToolSubtype == item.Subtype;
+                var on = C.IsTool(item);
                 <MudTooltip Text="@item.Title" Placement="Placement.Right">
                     <button class="tool @(on ? "on" : "")" draggable="@(Metamodel.IsRelationship(item.Kind) ? "false" : "true")" data-drag="palette"
                             @ondragstart="() => _paletteDrag = item" @onclick="e => TileClick(item, e)">
@@ -101,6 +101,32 @@
             @if (nodes) { @ColorBtn("fill", "Fill", Icons.Material.Outlined.FormatColorFill) }
             @ColorBtn("stroke", nodes ? "Line color" : "Connector color", Icons.Material.Outlined.BorderColor)
             @if (nodes) { @ColorBtn("text", "Text color", Icons.Material.Outlined.FormatColorText) }
+            @if (nodes && C.SelectionHasContainer)
+            {
+                <MudTooltip Text="Fit to contents"><button class="tool" @onclick="C.FitSelectionToContents"><MudIcon Icon="@Icons.Material.Outlined.FitScreen" /></button></MudTooltip>
+                <span class="sep"></span>
+            }
+            @if (C.SelectedEdge is { } routedEdge && !nodes && EdgeRouter.Routable(routedEdge))
+            {
+                var current = C.SelectedRouting;
+                <span class="fmt-wrap">
+                    <MudTooltip Text="@($"Connector style: {(current is { } cr ? EdgeRouter.Display(cr) : "manual bends")}")">
+                        <button class="tool @(_fmtMenu == "routing" ? "on" : "")" @onclick='() => ToggleFmt("routing")'>@((MarkupString)RoutingIcon(current ?? EdgeRouting.Legacy))</button>
+                    </MudTooltip>
+                    @if (_fmtMenu == "routing")
+                    {
+                        <div class="fmt-pop shapes-grid">
+                            @foreach (var r in new[] { EdgeRouting.Orthogonal, EdgeRouting.Straight, EdgeRouting.Curved, EdgeRouting.Legacy })
+                            {
+                                var style = r;
+                                <div class="tile @(current == style ? "on" : "")" title="@EdgeRouter.Display(style)" @onclick="() => { C.SetSelectedRouting(style); _fmtMenu = null; }">
+                                    <span class="thumb">@((MarkupString)RoutingIcon(style))</span><span>@EdgeRouter.Display(style).Replace(" (routed)", "")</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </span>
+            }
             @if (C.SelectedEdge != null && !nodes)
             {
                 <span class="fmt-wrap">
@@ -233,9 +259,10 @@
         <div class="minimap" @onpointerdown="MiniMapClick" @onpointerdown:stopPropagation="true" @ref="_minimap">
             @{ var cb = C.ContentBounds(); var vp = C.Viewport; var shown = DiagramExtras.VisibleView(C.Diagram); }
             <svg viewBox="@F(cb.X) @F(cb.Y) @F(cb.Width) @F(cb.Height)" preserveAspectRatio="xMidYMid meet">
+                @{ var miniRoutes = EdgeRouter.RouteAll(shown, C.BoundsOf); }
                 @foreach (var e in shown.Edges)
                 {
-                    var pts = Notation.RouteIn(C.Diagram, e, C.BoundsOf);
+                    var pts = miniRoutes[e];
                     <polyline points="@SvgRenderer.Points(pts)" fill="none" stroke="@Theme.Edge" stroke-opacity="0.6" stroke-width="@F(cb.Width / 200)" />
                 }
                 @foreach (var n in shown.Nodes)
@@ -466,7 +493,8 @@
 
     private async Task RefreshOrigin()
     {
-        var r = await JS.InvokeAsync<RectDto>("meridian.rect", _canvas);
+        var r = await JS.InvokeAsync<RectDto?>("meridian.rect", _canvas);
+        if (r == null) return;   // not laid out (prerendering, tests)
         _origin = (r.Left, r.Top);
         C.ViewWidth = r.Width;
         C.LeftInset = _shapesOpen && !Ws.ReadOnly ? 236 : 64;
@@ -627,6 +655,20 @@
             <span class="thumb"><MudIcon Icon="@UiKinds.Icon(item.Kind, item.Subtype)" Style="@(on || Metamodel.IsRelationship(item.Kind) ? "" : $"color:{UiKinds.Accent(item.Kind)}")" /></span>
         }
     };
+
+    /// <summary>Small drawing of a connector routing style (format bar).</summary>
+    private static string RoutingIcon(EdgeRouting r)
+    {
+        const string a = "fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linejoin=\"round\" stroke-linecap=\"round\"";
+        var body = r switch
+        {
+            EdgeRouting.Straight => $"<rect x=\"2\" y=\"15\" width=\"6\" height=\"6\" {a}/><rect x=\"16\" y=\"3\" width=\"6\" height=\"6\" {a}/><line x1=\"8\" y1=\"16\" x2=\"16\" y2=\"8\" {a}/>",
+            EdgeRouting.Orthogonal => $"<rect x=\"2\" y=\"15\" width=\"6\" height=\"6\" {a}/><rect x=\"16\" y=\"3\" width=\"6\" height=\"6\" {a}/><polyline points=\"8,18 12,18 12,6 16,6\" {a}/>",
+            EdgeRouting.Curved => $"<rect x=\"2\" y=\"15\" width=\"6\" height=\"6\" {a}/><rect x=\"16\" y=\"3\" width=\"6\" height=\"6\" {a}/><path d=\"M8,18 C14,18 10,6 16,6\" {a}/>",
+            _ => $"<rect x=\"2\" y=\"15\" width=\"6\" height=\"6\" {a}/><rect x=\"16\" y=\"3\" width=\"6\" height=\"6\" {a}/><polyline points=\"5,15 5,11 19,11 19,9\" {a} stroke-dasharray=\"2,2\"/>",
+        };
+        return $"<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\">{body}</svg>";
+    }
 
     private static string? ThumbSvg(PaletteItem item)
     {

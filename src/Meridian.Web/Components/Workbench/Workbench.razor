@@ -137,7 +137,7 @@
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
                     <ActivatorContent><button class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">More</span></button></ActivatorContent>
                     <ChildContent>
-                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Package })
+                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Package, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication })
                         {
                             var type = t;
                             <MudMenuItem Icon="@UiKinds.DiagramIcon(type)" OnClick="() => NewDiagramSmart(type)">@Metamodel.DisplayName(type)</MudMenuItem>

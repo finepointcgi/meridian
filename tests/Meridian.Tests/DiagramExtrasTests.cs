@@ -205,7 +205,8 @@ public class DiagramExtrasTests
             var d = Templates.CreateDiagram(m, pkg, t.Id);
             Assert.Equal(t.Type, d.DiagramType);
             Assert.True(d.Nodes.Count >= 3, t.Id);
-            Assert.Same(pkg, d.Owner);
+            // Behavior diagrams (timing, communication, interaction overview) live in a behavior created in the package.
+            Assert.Same(pkg, Metamodel.IsBehavior(d.Owner!.Kind) ? d.Owner.Owner : d.Owner);
             m.History.Undo();
             Assert.Empty(m.Diagrams);
             Assert.Empty(pkg.OwnedElements);

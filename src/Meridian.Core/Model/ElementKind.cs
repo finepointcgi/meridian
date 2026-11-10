@@ -122,6 +122,14 @@ public enum ElementKind
     FeatureDecomposition,   // parent feature -> child feature (tree edge on feature model diagrams)
     Requires,               // cross-tree constraint: selecting the source requires the target
     Excludes,               // cross-tree constraint: source and target may not both be selected
+    // Timing, interaction overview and communication diagrams (appended: keep existing ordinals stable)
+    TimingLifeline,         // lifeline with a state timeline over the time axis
+    DurationConstraint,     // {min..max} between two time points
+    TimeConstraint,         // {t = ...} at one time point
+    InteractionUse,         // "ref" frame referring to another interaction (interaction overview)
+    InlineInteraction,      // "sd" frame with an inline sequence (interaction overview)
+    CommunicationLifeline,  // lifeline drawn as a box (communication diagram)
+    CommunicationLink,      // link between communication lifelines carrying numbered messages
 }
 
 public enum DiagramType
@@ -141,6 +149,19 @@ public enum DiagramType
     Database,
     Whiteboard,
     FeatureModel,
+    // Appended: keep existing ordinals stable
+    Timing,
+    InteractionOverview,
+    Communication,
+    UafStrategic,
+    UafOperational,
+    UafServices,
+    UafPersonnel,
+    UafResources,
+    UafSecurity,
+    UafProjects,
+    UafStandards,
+    UafActualResources,
 }
 
 public static class FieldKeys
