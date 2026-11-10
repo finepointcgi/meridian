@@ -585,7 +585,7 @@ public class FmiTests
         Assert.Equal(ElementKind.Property, cap.Kind);
         Assert.Equal("75", cap.Get(FieldKeys.DefaultValue));
         Assert.DoesNotContain(block.OwnedElements, e => e.Name == "time");
-        Assert.Equal("not implemented (interface only)", block.Get(FieldKeys.TagPrefix + "fmi.cosimulation"));
+        Assert.Equal("supported", block.Get(FieldKeys.TagPrefix + "fmi.cosimulation"));
 
         // The imported block can type a part, and its ports can be connected.
         var sys = m.Create(m.Root, ElementKind.Block, "System");

@@ -5,6 +5,8 @@
     <ProjectReference Include="..\Meridian.Serialization\Meridian.Serialization.csproj" />
     <ProjectReference Include="..\Meridian.Data\Meridian.Data.csproj" />
     <ProjectReference Include="..\Meridian.Scripting\Meridian.Scripting.csproj" />
+    <!-- Out-of-process FMU runner for co-simulation (docs/FMI.md): its output lands next to the server. -->
+    <ProjectReference Include="..\Meridian.FmuHost\Meridian.FmuHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

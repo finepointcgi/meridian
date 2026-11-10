@@ -18,8 +18,9 @@ public sealed record FmiModelDescription(
 /// with value properties (parameters, locals) and in / out ports (inputs, outputs), so the FMU can be typed as a part and
 /// connected in internal block diagrams.
 /// <para>
-/// Co-simulation is NOT implemented: the FMU's native binaries are listed but never loaded or executed. Only the
-/// interface is imported; the block's fmi.* tagged values record where the FMU came from.
+/// Importing never runs the FMU's native code. Co-simulation (<see cref="Meridian.Core.Analysis.CoSimulation"/> with
+/// <see cref="Fmi.FmuUnit"/>) runs it out of process; the block's fmi.sha256 tagged value names the stored .fmu
+/// (<see cref="Fmi.FmuStore"/>) and the other fmi.* tagged values record where the FMU came from.
 /// </para>
 /// </summary>
 public static class FmiImport
@@ -95,8 +96,12 @@ public static class FmiImport
         _ => "Real",
     };
 
+    /// <summary>The element name an FMI variable gets on import (array brackets and spaces replaced).</summary>
+    public static string SimpleName(string fmiName) => fmiName.Replace("[", "_").Replace("]", "").Replace(" ", "_");
+
     /// <summary>Creates a block for the FMU in <paramref name="owner"/>. One undo step.</summary>
-    public static Element CreateBlock(ModelRepository m, Element owner, FmiModelDescription md, string? fileName = null)
+    /// <param name="fmuHash">SHA-256 of the .fmu in the <see cref="Fmi.FmuStore"/>, recorded so co-simulation can find it.</param>
+    public static Element CreateBlock(ModelRepository m, Element owner, FmiModelDescription md, string? fileName = null, string? fmuHash = null)
     {
         using (m.History.Transaction($"Import FMU {md.ModelName}"))
         {
@@ -111,13 +116,14 @@ public static class FmiImport
             m.Set(block, FieldKeys.TagPrefix + "fmi.modelIdentifier", md.ModelIdentifier);
             m.Set(block, FieldKeys.TagPrefix + "fmi.interface", md.CoSimulation && md.ModelExchange ? "CoSimulation, ModelExchange" : md.CoSimulation ? "CoSimulation" : md.ModelExchange ? "ModelExchange" : null);
             m.Set(block, FieldKeys.TagPrefix + "fmi.file", fileName);
-            m.Set(block, FieldKeys.TagPrefix + "fmi.cosimulation", "not implemented (interface only)");
+            m.Set(block, FieldKeys.TagPrefix + "fmi.cosimulation", md.CoSimulation ? "supported" : "not supported by this FMU (Model Exchange only)");
+            m.Set(block, FieldKeys.TagPrefix + "fmi.sha256", fmuHash);
 
             foreach (var v in md.Variables)
             {
                 var isPort = v.Causality is "input" or "output";
                 if (!isPort && v.Causality is not ("parameter" or "calculatedParameter" or "local" or "structuralParameter")) continue;   // skip independent (time)
-                var simple = v.Name.Replace("[", "_").Replace("]", "").Replace(" ", "_");
+                var simple = SimpleName(v.Name);
                 if (simple.StartsWith("der(", StringComparison.Ordinal)) continue;   // derivatives are internal
                 var e = m.Create(block, isPort ? ElementKind.Port : ElementKind.Property, simple);
                 m.Set(e, FieldKeys.Type, PrimitiveType(v.Type));

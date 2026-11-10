@@ -1,5 +1,6 @@
 @using Meridian.Serialization
 @inherits WorkspaceComponent
+@inject IServiceProvider Services
 
 <div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
     <label class="mud-button-root mud-button mud-button-outlined mud-button-outlined-size-small" style="cursor:pointer; padding:3px 10px; @(Ws.ReadOnly ? "opacity:.5; pointer-events:none" : "")">
@@ -36,19 +37,24 @@
 <div class="var-hint">
     Imports an FMU's interface (FMI 2.0 or 3.0 <code>modelDescription.xml</code>): inputs and outputs become in / out proxy ports, parameters
     and locals become value properties with their start values, and units are kept, so the block can type parts and be wired in internal
-    block diagrams. <b>Co-simulation is not implemented</b>: the FMU's native binaries are not loaded or executed.
+    block diagrams. Importing never runs the FMU's code. To simulate, type parts of a system block with the imported block, connect
+    their ports in an internal block diagram and use the <b>Co-simulation</b> tab@(Settings.Enabled ? "" : " (running FMUs is turned off on this server)").
+    @if (Settings.Enabled) { <text>The .fmu file is kept with the server's FMU store so the co-simulation can run it later.</text> }
 </div>
 
 @code {
     private FmiModelDescription? _md;
+    private byte[]? _fmuBytes;
     private string? _fileName;
+    private FmiCoSimSettings? _settings;
+    private FmiCoSimSettings Settings => _settings ??= FmiCoSimSettings.From(Services.GetService<IConfiguration>(), Services.GetService<MeridianHostInfo>());
     private string? _error;
 
     private Element Target => Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
 
     private async Task OnFile(InputFileChangeEventArgs e)
     {
-        _error = null; _md = null;
+        _error = null; _md = null; _fmuBytes = null;
         try
         {
             await using var s = e.File.OpenReadStream(200 * 1024 * 1024);
@@ -56,6 +62,7 @@
             await s.CopyToAsync(ms);
             ms.Position = 0;
             _md = FmiImport.Read(ms);
+            _fmuBytes = _md.Binaries.Count > 0 ? ms.ToArray() : null;   // a complete .fmu (not just modelDescription.xml)
             _fileName = e.File.Name;
         }
         catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException)
@@ -69,10 +76,12 @@
         if (_md == null) return;
         try
         {
-            var block = FmiImport.CreateBlock(Ws.Model, Target, _md, _fileName);
+            // Keep the .fmu (content-addressed) so the Co-simulation tab can run it; only where running FMUs is enabled.
+            var hash = _fmuBytes != null && Settings.Enabled ? Settings.Store.Save(_fmuBytes) : null;
+            var block = FmiImport.CreateBlock(Ws.Model, Target, _md, _fileName, hash);
             Ws.Select(block);
-            Ws.SetStatus($"Imported FMU '{_md.ModelName}' as block {block.Name} (interface only)");
+            Ws.SetStatus($"Imported FMU '{_md.ModelName}' as block {block.Name}" + (hash != null ? " (FMU stored for co-simulation)" : " (interface only)"));
         }
-        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { _error = ex.Message; }
     }
 }

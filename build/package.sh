@@ -38,6 +38,8 @@ publish_desktop() {
   # The web app first (its static assets and endpoint manifest), then the desktop host on top: one self-contained folder.
   dotnet publish "$ROOT/src/Meridian.Web" -c Release -r "$rid" --self-contained -p:Version="$VERSION" -o "$dir" --nologo -v q
   dotnet publish "$ROOT/src/Meridian.Desktop" -c Release -r "$rid" --self-contained -p:Version="$VERSION" -o "$dir" --nologo -v q
+  # The FMU host (co-simulation runs each FMU in this separate process; docs/FMI.md), self-contained next to the app.
+  dotnet publish "$ROOT/src/Meridian.FmuHost" -c Release -r "$rid" --self-contained -p:Version="$VERSION" -o "$dir" --nologo -v q
   # The server executable is not needed inside the desktop app (the desktop host runs it in-process).
   rm -f "$dir/Meridian.Web" "$dir/Meridian.Web.exe" "$dir"/*.pdb "$dir"/appsettings.Development*.json
 }
@@ -69,7 +71,10 @@ macos_sign_app() {
   [ -n "${MACOS_KEYCHAIN:-}" ] && kc=(--keychain "$MACOS_KEYCHAIN")
   # Inside out: every nested Mach-O (native libraries, createdump), then the bundle (main executable) with the entitlements.
   while IFS= read -r -d '' f; do
-    if file -b "$f" | grep -q 'Mach-O'; then
+    if [ "$(basename "$f")" = "Meridian.FmuHost" ]; then
+      # The FMU host is a .NET executable that loads FMUs' (unsigned) native libraries: same entitlements as the app.
+      codesign --force --timestamp --options runtime --entitlements "$ent" ${kc[@]+"${kc[@]}"} --sign "$MACOS_SIGN_IDENTITY" "$f"
+    elif file -b "$f" | grep -q 'Mach-O'; then
       codesign --force --timestamp --options runtime ${kc[@]+"${kc[@]}"} --sign "$MACOS_SIGN_IDENTITY" "$f"
     fi
   done < <(find "$app/Contents/MacOS" -type f ! -path "$app/Contents/MacOS/Meridian" -print0)
@@ -121,7 +126,7 @@ package_macos() {
   cp -R "$WORK/$rid-files/." "$app/Contents/MacOS/"
   cp "$ROOT/build/assets/meridian.icns" "$app/Contents/Resources/Meridian.icns"
   sed -e "s/__VERSION__/$VERSION/g" "$ROOT/build/macos/Info.plist" > "$app/Contents/Info.plist"
-  chmod +x "$app/Contents/MacOS/Meridian"
+  chmod +x "$app/Contents/MacOS/Meridian" "$app/Contents/MacOS/Meridian.FmuHost"
   macos_sign_app "$app"
 
   if command -v hdiutil >/dev/null 2>&1; then
@@ -205,7 +210,7 @@ package_linux() {
   rm -rf "$dir" && mkdir -p "$dir"
   cp -R "$files/." "$dir/"
   cp "$ROOT/build/linux/meridian.desktop" "$ROOT/build/linux/install.sh" "$ROOT/build/linux/README.txt" "$ROOT/build/linux/meridian-mime.xml" "$dir/"
-  chmod +x "$dir/Meridian" "$dir/install.sh"
+  chmod +x "$dir/Meridian" "$dir/Meridian.FmuHost" "$dir/install.sh"
   (cd "$WORK/$rid" && tar -czf "$OUT/Meridian-$VERSION-linux-$arch.tar.gz" "meridian-$VERSION")
 
   # AppImage: one file; the AppDir carries the .desktop MimeType and the mime XML for appimaged / AppImageLauncher.
@@ -214,7 +219,7 @@ package_linux() {
   rm -rf "$appdir"
   mkdir -p "$appdir/usr/lib/meridian" "$appdir/usr/share/applications" "$appdir/usr/share/mime/packages" "$appdir/usr/share/icons/hicolor/256x256/apps"
   cp -R "$files/." "$appdir/usr/lib/meridian/"
-  cp "$ROOT/build/linux/AppRun" "$appdir/AppRun" && chmod +x "$appdir/AppRun" "$appdir/usr/lib/meridian/Meridian"
+  cp "$ROOT/build/linux/AppRun" "$appdir/AppRun" && chmod +x "$appdir/AppRun" "$appdir/usr/lib/meridian/Meridian" "$appdir/usr/lib/meridian/Meridian.FmuHost"
   linux_desktop_file Meridian meridian "$appdir/meridian.desktop"
   cp "$appdir/meridian.desktop" "$appdir/usr/share/applications/meridian.desktop"
   cp "$ROOT/build/assets/meridian.png" "$appdir/meridian.png"

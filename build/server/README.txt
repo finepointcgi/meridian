@@ -17,3 +17,8 @@ Requires the ASP.NET Core 10 runtime. Run:
 Put it behind HTTPS (a reverse proxy such as Caddy or nginx) for anything beyond
 a trusted network. Set Meridian__KeysPath to a persistent folder so sign-ins
 survive restarts. A Dockerfile and docker-compose.yml are in the source repository.
+
+FMI co-simulation runs FMUs' native code on the server (in a separate
+Meridian.FmuHost process per FMU: crash isolation, not a sandbox). It is off on
+servers unless Meridian__Fmi__Enabled=true, and only project owners can run it.
+See docs/FMI.md in the source repository.

@@ -1,0 +1,423 @@
+@using Meridian.Core.Analysis
+@using Meridian.Serialization
+@using Meridian.Serialization.Fmi
+@using System.Globalization
+@inherits WorkspaceComponent
+@inject IServiceProvider Services
+@inject IJSRuntime JS
+
+<div class="d-flex align-center gap-2 px-3 py-2 flex-wrap">
+    <MudSelect T="string" Label="System (block or IBD)" Value="_targetId" ValueChanged="PickTarget" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:240px"
+               ToStringFunc="@(id => Targets().FirstOrDefault(t => t.Id == id).Label ?? "")">
+        @foreach (var t in Targets()) { <MudSelectItem Value="@t.Id">@t.Label</MudSelectItem> }
+    </MudSelect>
+    <MudNumericField T="double" Label="Start [s]" @bind-Value="_start" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudNumericField T="double" Label="End [s]" @bind-Value="_stop" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudNumericField T="double" Label="Step [s]" @bind-Value="_step" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudSelect T="CoSimAlgorithm" Label="Master" @bind-Value="_algorithm" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:150px">
+        <MudSelectItem Value="CoSimAlgorithm.GaussSeidel">Gauss-Seidel</MudSelectItem>
+        <MudSelectItem Value="CoSimAlgorithm.Jacobi">Jacobi</MudSelectItem>
+    </MudSelect>
+    @if (_running)
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Outlined.Stop" OnClick="Cancel">Cancel</MudButton>
+        <span style="font-size:12px; color:var(--text-3)">@((_progress * 100).ToString("0", CultureInfo.InvariantCulture)) %</span>
+    }
+    else
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PlayArrow" Disabled="@(!CanRun)" OnClick="Run">Run</MudButton>
+    }
+    @if (_result is { Time.Count: > 0 })
+    {
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Download" OnClick="ExportCsv">CSV</MudButton>
+    }
+</div>
+@if (_running) { <MudProgressLinear Color="Color.Primary" Value="@(_progress * 100)" Class="mx-3" Style="width:calc(100% - 24px)" /> }
+
+@if (_plan is { } plan)
+{
+    @if (NativeBlocked is { } why && plan.Parts.Any(p => p.Kind == CoSimPartKind.Fmu))
+    {
+        <div class="var-problem" style="margin:0 14px; cursor:default">🔒 @why</div>
+    }
+    @foreach (var p in plan.Problems.OrderByDescending(p => p.Severity))
+    {
+        <div class="var-problem" style="margin:0 14px; color:@(p.Severity switch { CoSimSeverity.Error => "var(--danger)", CoSimSeverity.Warning => "var(--warn)", _ => "var(--text-3)" })"
+             @onclick="() => Reveal(p.ElementId)">
+            @(p.Severity == CoSimSeverity.Info ? "ℹ" : "⚠") @p.Message
+        </div>
+    }
+    <div style="display:grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.3fr); gap:12px; padding:6px 12px">
+        <table class="req-table">
+            <thead><tr><th>Part</th><th>Kind</th><th>Ports</th><th>FMU file</th></tr></thead>
+            <tbody>
+                @foreach (var part in plan.Parts)
+                {
+                    <tr>
+                        <td><b>@part.Name</b> : @part.Type.Name</td>
+                        <td>@(part.Kind == CoSimPartKind.Fmu ? $"FMU {part.Type.Get(FieldKeys.TagPrefix + "fmi.version")}" : "parametric")</td>
+                        <td style="color:var(--text-3)">@part.Inputs.Count in · @part.Outputs.Count out</td>
+                        <td>
+                            @if (part.Kind != CoSimPartKind.Fmu) { <span style="color:var(--text-3)">—</span> }
+                            else if (Settings.FmuPath(part.Type) != null) { <span style="color:var(--ok)">✓ stored</span> }
+                            else
+                            {
+                                <label style="cursor:pointer; color:var(--accent); @(AttachBlocked ? "opacity:.5; pointer-events:none" : "")">
+                                    <InputFile accept=".fmu" OnChange="@(e => Attach(part.Type, e))" style="display:none" />
+                                    Attach .fmu…
+                                </label>
+                            }
+                        </td>
+                    </tr>
+                }
+                @foreach (var c in plan.Connections)
+                {
+                    <tr><td colspan="4" style="color:var(--text-3)">↳ @c.ToString()@(c.From.Unit is { } u ? $" [{u}]" : "")</td></tr>
+                }
+            </tbody>
+        </table>
+        <div>
+            <div class="d-flex align-center gap-2 pb-1">
+                <MudSelect T="string" Label="Parameter values from" Value="_altId" ValueChanged="PickAlternative" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Clearable="true" Style="min-width:220px"
+                           ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "Defaults")">
+                    @foreach (var a in Alternatives(plan)) { <MudSelectItem Value="@a.Id">@a.DisplayName (@Metamodel.DisplayName(a.Kind))</MudSelectItem> }
+                </MudSelect>
+            </div>
+            <table class="req-table">
+                <thead><tr><th>Parameter</th><th>Default</th><th>Value</th><th>Unit</th></tr></thead>
+                <tbody>
+                    @foreach (var p in plan.AllParameters)
+                    {
+                        var key = p.Key;
+                        <tr>
+                            <td>@key@(p.IsInput ? " (unconnected input)" : "")</td>
+                            <td style="color:var(--text-3)">@CoSimChart.N(p.Default)</td>
+                            <td style="width:120px">
+                                <input class="cosim-input" value="@(_overrides.TryGetValue(key, out var ov) ? ov : "")" placeholder="@(_altValues.TryGetValue(key, out var av) ? CoSimChart.N(av) : "")"
+                                       @onchange="@(e => SetOverride(key, e.Value?.ToString()))" style="width:110px; font:inherit; padding:2px 4px; border:1px solid var(--border); border-radius:4px; background:var(--panel); color:var(--text)" />
+                            </td>
+                            <td style="color:var(--text-3)">@p.Unit</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+else
+{
+    <div class="var-hint">No block has a part typed by an imported FMU yet. Import an FMU in the <b>FMI import</b> tab, use it to type parts of a system block, and connect their ports in an internal block diagram.</div>
+}
+
+@if (_result is { } r)
+{
+    <div class="px-3" style="font-size:12.5px">
+        @if (r.Error != null) { <div class="var-problem" style="cursor:default; white-space:pre-wrap">✖ @r.Error</div> }
+        else if (r.Cancelled) { <span style="color:var(--warn)">Cancelled after @r.Steps.ToString("N0", CultureInfo.InvariantCulture) steps.</span> }
+        else { <span style="color:var(--ok)">Completed</span> }
+        <span style="color:var(--text-3)"> · @r.Steps.ToString("N0", CultureInfo.InvariantCulture) steps, @r.Time.Count.ToString("N0", CultureInfo.InvariantCulture) samples, @r.Elapsed.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture) s</span>
+    </div>
+    @if (r.Time.Count > 0)
+    {
+        <div class="d-flex flex-wrap gap-1 px-3 pt-2">
+            @foreach (var (key, i) in r.Series.Keys.Select((k, i) => (k, i)))
+            {
+                var on = _shown.Contains(key);
+                <MudChip T="string" Size="Size.Small" Variant="@(on ? Variant.Filled : Variant.Outlined)" OnClick="@(() => Toggle(key))"
+                         Style="@(on ? $"background:{SeriesColor(key)}; color:#fff" : "")">@key@(r.Units.GetValueOrDefault(key) is { Length: > 0 } u ? $" [{u}]" : "")</MudChip>
+            }
+            @if (_zoom != null) { <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.ZoomOutMap" OnClick="ResetZoom">Reset zoom</MudButton> }
+        </div>
+        <div style="overflow-x:auto; padding:4px 12px 0">
+            <div style="position:relative; width:@(CoSimChart.Width)px; user-select:none; cursor:crosshair"
+                 @onmousedown="ChartDown" @onmousemove="ChartMove" @onmouseup="ChartUp" @onmouseleave="ChartLeave" @ondblclick="ResetZoom">
+                @((MarkupString)CoSimChart.Svg(r.Time, Lines(r), X0(r), X1(r), _hover, _threshold != null && _checkKey != null && _shown.Contains(_checkKey) ? _threshold : null,
+                    _dragFrom is { } df && _dragTo is { } dt && Math.Abs(dt - df) > 0 ? (df, dt) : null))
+                @if (_hover >= 0 && _hover < r.Time.Count && _dragFrom == null)
+                {
+                    var hx = CoSimChart.Left + (r.Time[_hover] - X0(r)) / (X1(r) - X0(r)) * CoSimChart.PlotWidth;
+                    <div style="position:absolute; top:10px; left:@((hx > CoSimChart.Width - 200 ? hx - 190 : hx + 10).ToString("0", CultureInfo.InvariantCulture))px; pointer-events:none;
+                                background:var(--panel-solid); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:11.5px; box-shadow:var(--shadow-sm); min-width:150px">
+                        <div style="color:var(--text-3)">t = @CoSimChart.N(r.Time[_hover]) s</div>
+                        @foreach (var key in _shown.Where(r.Series.ContainsKey))
+                        {
+                            <div><span style="color:@SeriesColor(key)">●</span> @key = <b>@CoSimChart.N(r.Series[key][_hover])</b></div>
+                        }
+                    </div>
+                }
+            </div>
+            <div style="font-size:11px; color:var(--text-3); padding:2px 0 6px">Drag across the chart to zoom into a time range, double-click to reset; hover for values.</div>
+        </div>
+
+        <div class="d-flex align-center gap-2 px-3 pb-2 flex-wrap">
+            <MudSelect T="string" Label="Check output" @bind-Value="_checkKey" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:180px" Clearable="true">
+                @foreach (var k in r.Series.Keys) { <MudSelectItem Value="@k">@k</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" Label="Requirement" Value="_reqId" ValueChanged="PickRequirement" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:200px" Clearable="true"
+                       ToStringFunc="@(id => Ws.Model.Find(id) is { } q ? $"{q.Get(FieldKeys.RequirementId)} {q.Name}" : "")">
+                @foreach (var q in Ws.Model.OfKind(ElementKind.Requirement).OrderBy(q => q.Get(FieldKeys.RequirementId)))
+                {
+                    <MudSelectItem Value="@q.Id">@q.Get(FieldKeys.RequirementId) @q.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" Label="Meets if" @bind-Value="_op" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:90px">
+                @foreach (var o in new[] { "<", "<=", ">", ">=" }) { <MudSelectItem Value="@o">@o</MudSelectItem> }
+            </MudSelect>
+            <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" HideSpinButtons="true" />
+            <MudSelect T="string" Label="Over" @bind-Value="_mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px">
+                <MudSelectItem Value="@("always")">whole run</MudSelectItem>
+                <MudSelectItem Value="@("final")">final value</MudSelectItem>
+            </MudSelect>
+            @if (_checkKey != null && _threshold is { } th && r.Check(_checkKey, _op, th, _mode) is { } check)
+            {
+                <span class="cosim-verdict" style="font-weight:600; color:@(check.Pass ? "var(--ok)" : "var(--danger)")">
+                    @(check.Pass ? "PASS" : "FAIL")
+                </span>
+                <span style="font-size:12px; color:var(--text-3)">
+                    @(_mode == "final" ? "final" : "worst") @CoSimChart.N(check.Worst) @_op @CoSimChart.N(th)
+                    @if (check.FirstViolation is { } fv) { <text> · first violated at t = @CoSimChart.N(fv) s</text> }
+                </span>
+            }
+        </div>
+    }
+    @if (r.Log.Count > 0)
+    {
+        <details class="px-3 pb-2" style="font-size:12px">
+            <summary style="cursor:pointer; color:var(--text-3)">FMU log (@r.Log.Count lines)</summary>
+            <pre style="max-height:200px; overflow:auto; font-size:11px; margin:4px 0">@string.Join("\n", r.Log.Take(1000))</pre>
+        </details>
+    }
+}
+<div class="var-hint">
+    Co-simulates the parts of a system block: parts typed by imported FMU blocks (FMI 2.0 / 3.0 Co-Simulation) run the FMU's
+    own code, parts typed by ordinary blocks compute their out ports from the port's default value expression (e.g. <code>k * u</code>)
+    or the block's parametric constraints. Values flow along the IBD's connectors between ports, with a fixed communication step;
+    connected ports must have the same unit. Each FMU runs in its own <code>Meridian.FmuHost</code> process, so a crashing FMU
+    cannot take Meridian down; this is <b>not a sandbox</b>: FMUs run with Meridian's own permissions, so only run FMUs you trust.
+</div>
+
+@code {
+    private FmiCoSimSettings? _settings;
+    private FmiCoSimSettings Settings => _settings ??= FmiCoSimSettings.From(Services.GetService<IConfiguration>(), Services.GetService<MeridianHostInfo>());
+
+    private string? _targetId;
+    private CoSimPlan? _plan;
+    private double _start, _stop = 10, _step = 0.01;
+    private CoSimAlgorithm _algorithm = CoSimAlgorithm.GaussSeidel;
+    private readonly Dictionary<string, string> _overrides = new(StringComparer.Ordinal);
+    private Dictionary<string, double> _altValues = new(StringComparer.Ordinal);
+    private string? _altId;
+
+    private bool _running;
+    private double _progress;
+    private CancellationTokenSource? _cts;
+    private CoSimResult? _result;
+    private readonly HashSet<string> _shown = new(StringComparer.Ordinal);
+
+    private (double From, double To)? _zoom;
+    private double? _dragFrom, _dragTo;
+    private int _hover = -1;
+
+    private string? _checkKey, _reqId;
+    private string _op = "<=", _mode = "always";
+    private double? _threshold;
+
+    private string? NativeBlocked => Settings.WhyNotAllowed(Ws);
+    private bool AttachBlocked => Ws.ReadOnly || NativeBlocked != null;
+    private bool CanRun => _plan is { CanRun: true } p && (NativeBlocked == null || p.Parts.All(x => x.Kind != CoSimPartKind.Fmu));
+
+    private IEnumerable<(string Id, string Label)> Targets()
+    {
+        var systems = CoSimulation.Systems(Ws.Model).ToList();
+        foreach (var s in systems) yield return (s.Id, s.DisplayName);
+        foreach (var d in Ws.Model.Diagrams.Where(d => d.DiagramType == DiagramType.InternalBlock && d.Owner != null && systems.Contains(d.Owner)).OrderBy(d => d.Name))
+            yield return (d.Id, $"{d.DisplayName} (IBD of {d.Owner!.DisplayName})");
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        var targets = Targets().ToList();
+        if (Ws.Active?.Diagram is { DiagramType: DiagramType.InternalBlock } ibd && targets.Any(t => t.Id == ibd.Id)) _targetId = ibd.Id;
+        else if (CoSimulation.SystemOf(Ws.Model, Ws.Selected) is { } sys && targets.Any(t => t.Id == sys.Id)) _targetId = sys.Id;
+        else _targetId = targets.FirstOrDefault().Id;
+        Replan();
+    }
+
+    protected override void OnWorkspaceChanged()
+    {
+        if (_targetId != null && Ws.Model.Find(_targetId) == null) _targetId = Targets().FirstOrDefault().Id;
+        Replan();
+    }
+
+    private void Replan()
+    {
+        try { _plan = Ws.Model.Find(_targetId) is { } t ? CoSimulation.Plan(Ws.Model, t) : null; }
+        catch (ArgumentException) { _plan = null; }
+        if (_plan != null && _altId != null && Ws.Model.Find(_altId) is { } alt) _altValues = CoSimulation.ParametersFrom(Ws.Model, _plan, alt);
+    }
+
+    private void PickTarget(string? id)
+    {
+        _targetId = id;
+        _altId = null; _altValues.Clear(); _overrides.Clear();
+        Replan();
+    }
+
+    private IEnumerable<Element> Alternatives(CoSimPlan plan) =>
+        TradeStudies.CandidateAlternatives(Ws.Model).Where(a => !ReferenceEquals(a, plan.System) && plan.Parts.All(p => !ReferenceEquals(p.Type, a))
+            && CoSimulation.ParametersFrom(Ws.Model, plan, a).Count > 0).Take(100);
+
+    private void PickAlternative(string? id)
+    {
+        _altId = id;
+        _altValues = _plan != null && Ws.Model.Find(id) is { } alt ? CoSimulation.ParametersFrom(Ws.Model, _plan, alt) : new(StringComparer.Ordinal);
+    }
+
+    private void SetOverride(string key, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) _overrides.Remove(key);
+        else _overrides[key] = text.Trim();
+    }
+
+    private void Reveal(string? id)
+    {
+        if (Ws.Model.Find(id) is { } e && e is not Relationship) Ws.Select(e);
+    }
+
+    private async Task Attach(Element block, InputFileChangeEventArgs e)
+    {
+        if (AttachBlocked) return;
+        try
+        {
+            await using var s = e.File.OpenReadStream(500L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var md = FmiImport.Read(new MemoryStream(bytes));
+            if (md.Binaries.Count == 0) throw new FormatException("the file has no binaries/ folder (it must be a complete .fmu)");
+            var expected = block.Get(FieldKeys.TagPrefix + "fmi.guid");
+            if (expected.Length > 0 && md.Guid != null && md.Guid != expected)
+                throw new FormatException($"it is a different FMU (GUID {md.Guid}, the block was imported from {expected})");
+            var hash = Settings.Store.Save(bytes);
+            Ws.Model.Set(block, FieldKeys.TagPrefix + "fmi.sha256", hash);
+            Ws.SetStatus($"Attached {e.File.Name} to {block.Name}");
+        }
+        catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException or InvalidOperationException)
+        {
+            Ws.SetStatus($"Could not attach {e.File.Name}: {ex.Message}");
+        }
+    }
+
+    private async Task Run()
+    {
+        if (Ws.Model.Find(_targetId) is not { } target || _running) return;
+        var plan = CoSimulation.Plan(Ws.Model, target);
+        _plan = plan;
+        if (plan.Parts.Any(p => p.Kind == CoSimPartKind.Fmu) && NativeBlocked is { } why) { Ws.SetStatus(why); return; }   // enforced here, on the server
+        var missing = plan.Parts.Where(p => p.Kind == CoSimPartKind.Fmu && Settings.FmuPath(p.Type) == null).Select(p => p.Type.Name).Distinct().ToList();
+        if (missing.Count > 0) { _result = new CoSimResult { Error = $"Attach the .fmu file for: {string.Join(", ", missing)}" }; return; }
+
+        var options = new CoSimOptions { Start = _start, Stop = _stop, Step = _step, Algorithm = _algorithm };
+        foreach (var (k, v) in _altValues) options.Parameters[k] = v;
+        foreach (var (k, text) in _overrides)
+        {
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) options.Parameters[k] = d;
+            else { _result = new CoSimResult { Error = $"{k}: '{text}' is not a number" }; return; }
+        }
+
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+        _running = true; _progress = 0; _hover = -1; _zoom = null;
+        var settings = Settings;
+        var model = Ws.Model;
+        var lastPaint = DateTime.UtcNow;
+        var progress = new CallbackProgress(f =>
+        {
+            _progress = f;
+            if ((DateTime.UtcNow - lastPaint).TotalMilliseconds < 150) return;
+            lastPaint = DateTime.UtcNow;
+            _ = InvokeAsync(StateHasChanged);
+        });
+        StateHasChanged();
+        try
+        {
+            _result = await Task.Run(() => CoSimulation.Run(model, plan, options, FmuUnit.Factory(settings.FmuPath, settings.Runtime, ct), progress, ct));
+        }
+        finally
+        {
+            _running = false;
+            _cts.Dispose(); _cts = null;
+        }
+        if (_shown.Count == 0 || !_shown.All(_result.Series.ContainsKey))
+        {
+            _shown.Clear();
+            foreach (var k in _result.Series.Keys.Take(4)) _shown.Add(k);
+        }
+        Ws.SetStatus(_result.Error != null ? $"Co-simulation failed: {_result.Error.Split('\n')[0]}"
+            : _result.Cancelled ? "Co-simulation cancelled" : $"Co-simulation of {plan.System.Name}: {_result.Steps:N0} steps in {_result.Elapsed.TotalSeconds:0.00} s");
+    }
+
+    private void Cancel() => _cts?.Cancel();
+
+    private sealed class CallbackProgress(Action<double> report) : IProgress<double> { public void Report(double value) => report(value); }
+
+    private string SeriesColor(string key) => CoSimChart.Palette[Math.Max(0, _result?.Series.Keys.ToList().IndexOf(key) ?? 0) % CoSimChart.Palette.Length];
+
+    private List<CoSimChart.Line> Lines(CoSimResult r) =>
+        r.Series.Where(kv => _shown.Contains(kv.Key)).Select(kv => new CoSimChart.Line(kv.Key, SeriesColor(kv.Key), kv.Value)).ToList();
+
+    private double X0(CoSimResult r) => _zoom?.From ?? r.Time[0];
+    private double X1(CoSimResult r) => _zoom?.To ?? (r.Time[^1] > r.Time[0] ? r.Time[^1] : r.Time[0] + 1);
+
+    private void Toggle(string key) { if (!_shown.Remove(key)) _shown.Add(key); }
+
+    private void ChartDown(MouseEventArgs e)
+    {
+        if (_result is not { Time.Count: > 1 } r || e.Button != 0) return;
+        _dragFrom = _dragTo = CoSimChart.TimeAt(e.OffsetX, X0(r), X1(r));
+    }
+
+    private void ChartMove(MouseEventArgs e)
+    {
+        if (_result is not { Time.Count: > 0 } r) return;
+        var t = CoSimChart.TimeAt(e.OffsetX, X0(r), X1(r));
+        if (_dragFrom != null) _dragTo = t;
+        else _hover = CoSimChart.NearestIndex(r.Time, t);
+    }
+
+    private void ChartUp(MouseEventArgs e)
+    {
+        if (_result is { } r && _dragFrom is { } a && _dragTo is { } b && Math.Abs(b - a) > (X1(r) - X0(r)) / 100)
+            _zoom = (Math.Min(a, b), Math.Max(a, b));
+        _dragFrom = _dragTo = null;
+    }
+
+    private void ChartLeave() { _hover = -1; _dragFrom = _dragTo = null; }
+
+    private void ResetZoom() { _zoom = null; _dragFrom = _dragTo = null; }
+
+    private void PickRequirement(string? id)
+    {
+        _reqId = id;
+        if (Ws.Model.Find(id) is { } q && MonteCarlo.ParseThreshold(q.Get(FieldKeys.Text)) is { } t)
+        {
+            _op = t.Op;
+            _threshold = t.Value;
+        }
+    }
+
+    private async Task ExportCsv()
+    {
+        if (_result == null) return;
+        var name = string.Concat($"{_plan?.System.Name ?? "cosim"} co-simulation.csv".Split(Path.GetInvalidFileNameChars()));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(_result.ToCsv());
+        await JS.InvokeVoidAsync("meridian.download", name, "text/csv", Convert.ToBase64String(bytes));
+    }
+
+    public override void Dispose()
+    {
+        _cts?.Cancel();
+        base.Dispose();
+    }
+}

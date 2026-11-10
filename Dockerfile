@@ -6,6 +6,7 @@ COPY src/Meridian.Core/Meridian.Core.csproj src/Meridian.Core/
 COPY src/Meridian.Serialization/Meridian.Serialization.csproj src/Meridian.Serialization/
 COPY src/Meridian.Data/Meridian.Data.csproj src/Meridian.Data/
 COPY src/Meridian.Web/Meridian.Web.csproj src/Meridian.Web/
+COPY src/Meridian.FmuHost/Meridian.FmuHost.csproj src/Meridian.FmuHost/
 RUN dotnet restore src/Meridian.Web/Meridian.Web.csproj
 COPY src/ src/
 RUN dotnet publish src/Meridian.Web/Meridian.Web.csproj -c Release -o /app --no-restore
