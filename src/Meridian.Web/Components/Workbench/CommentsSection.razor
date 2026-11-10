@@ -1,43 +1,96 @@
 @using Meridian.Data
 @inherits WorkspaceComponent
 @inject IMeridianStore Db
+@inject ReviewService Reviews
+@inject MeridianHostInfo Host
 
 @if (Ws.Session != null && ElementId != null)
 {
     var thread = _all.Where(c => c.ElementId == ElementId).ToList();
+    var ids = thread.Select(c => c.Id).ToHashSet();
+    var roots = thread.Where(c => !_parents.TryGetValue(c.Id, out var p) || !ids.Contains(p)).ToList();
+    var element = Ws.Model.Find(ElementId);
     <div class="section-title">Comments @(thread.Count > 0 ? $"({thread.Count(c => !c.Resolved)})" : "") <span class="grow"></span></div>
-    @foreach (var c in thread)
+    @if (!Host.LocalMode && element != null && _people.Count > 1)
     {
-        var comment = c;
-        <div class="comment @(comment.Resolved ? "resolved" : "")">
-            <div class="d-flex align-center gap-2">
-                <span class="avatar sm" style="background:@comment.Author.Color">@MembersDialog.Initials(comment.Author)</span>
-                <span style="font-weight:600; font-size:12px">@comment.Author.DisplayName</span>
-                <span style="font-size:11px; color:var(--text-3)">@comment.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
-                <span style="flex:1"></span>
-                <MudTooltip Text="@(comment.Resolved ? "Reopen" : "Resolve")">
-                    <MudIconButton Size="Size.Small" Icon="@(comment.Resolved ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.CheckCircle)" OnClick="() => Resolve(comment)" />
-                </MudTooltip>
-                @if (comment.Author.Id == Ws.User?.Id)
+        var owner = element.Get(ReviewService.OwnerKey);
+        <div class="owner-row">
+            <MudIcon Icon="@Icons.Material.Outlined.PersonPin" Style="font-size:15px" />
+            <span>Owner</span>
+            <select value="@owner" disabled="@Ws.ReadOnly" title="The owner is notified about comments on this element"
+                    @onchange="e => SetOwner(element, e.Value?.ToString())">
+                <option value="">Nobody</option>
+                @foreach (var p in _people)
                 {
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Remove(comment)" />
+                    <option value="@p.Username">@p.DisplayName</option>
                 }
-            </div>
-            <div class="body">@comment.Body</div>
+            </select>
         </div>
     }
-    <div class="d-flex gap-1 align-start">
-        <MudTextField T="string" @bind-Value="_draft" Placeholder="Add a comment…" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" AutoGrow="true" Immediate="true" />
-        <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary" Disabled="string.IsNullOrWhiteSpace(_draft)" OnClick="Post" Class="mt-1" />
-    </div>
+    @foreach (var c in roots)
+    {
+        @Comment(c, false)
+        foreach (var reply in Replies(thread, c.Id))
+        {
+            @Comment(reply, true)
+        }
+        if (_replyTo == c.Id)
+        {
+            <div class="reply-box">
+                <MentionInput @bind-Value="_replyDraft" People="_people" Placeholder="@($"Reply to {c.Author.DisplayName}…")" Compact="true" OnSubmit="() => Post(c.Id)" />
+            </div>
+        }
+    }
+    <MentionInput @bind-Value="_draft" People="_people" OnSubmit="() => Post(null)" />
 }
 
 @code {
     [Parameter] public string? ElementId { get; set; }
     private IReadOnlyList<CommentInfo> _all = [];
-    private string? _draft;
+    private IReadOnlyDictionary<long, long> _parents = new Dictionary<long, long>();
+    private IReadOnlyList<UserAccount> _people = [];
+    private string? _draft, _replyDraft;
+    private long? _replyTo;
     private int _loadedVersion = -1;
     private Guid? _loadedProject;
+
+    private RenderFragment Comment(CommentInfo comment, bool reply) => __builder =>
+    {
+        <div class="comment @(comment.Resolved ? "resolved" : "") @(reply ? "reply" : "")">
+            <div class="d-flex align-center gap-2">
+                <span class="avatar sm" style="background:@comment.Author.Color">@MembersDialog.Initials(comment.Author)</span>
+                <span style="font-weight:600; font-size:12px">@comment.Author.DisplayName</span>
+                <span style="font-size:11px; color:var(--text-3)">@comment.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                <span style="flex:1"></span>
+                @if (!reply)
+                {
+                    <MudTooltip Text="Reply">
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => StartReply(comment)" />
+                    </MudTooltip>
+                    <MudTooltip Text="@(comment.Resolved ? "Reopen" : "Resolve")">
+                        <MudIconButton Size="Size.Small" Icon="@(comment.Resolved ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.CheckCircle)" OnClick="() => Resolve(comment)" />
+                    </MudTooltip>
+                }
+                @if (comment.Author.Id == Ws.User?.Id)
+                {
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Remove(comment)" />
+                }
+            </div>
+            <div class="body"><MentionText Text="@comment.Body" People="_people" /></div>
+        </div>
+    };
+
+    /// <summary>Every reply below a root comment (replies to replies included), oldest first.</summary>
+    private IEnumerable<CommentInfo> Replies(List<CommentInfo> thread, long root)
+    {
+        long RootOf(long id)
+        {
+            var seen = new HashSet<long>();
+            while (_parents.TryGetValue(id, out var p) && seen.Add(id)) id = p;
+            return id;
+        }
+        return thread.Where(c => c.Id != root && RootOf(c.Id) == root);
+    }
 
     protected override async Task OnParametersSetAsync() => await Refresh();
 
@@ -50,14 +103,30 @@
         _loadedVersion = Ws.CommentsVersion;
         _loadedProject = Ws.Session.ProjectId;
         _all = await Db.ListCommentsAsync(Ws.Session.ProjectId);
+        _parents = await Db.ListCommentParentsAsync(Ws.Session.ProjectId);
+        _people = await Reviews.PeopleAsync();
     }
 
-    private async Task Post()
+    private void StartReply(CommentInfo c)
     {
-        if (Ws.Session is null || Ws.User is null || ElementId is null || string.IsNullOrWhiteSpace(_draft)) return;
-        await Db.AddCommentAsync(Ws.Session.ProjectId, ElementId, Ws.User.Id, _draft.Trim());
-        _draft = null;
-        Ws.Session.NotifyComments();
+        _replyTo = _replyTo == c.Id ? null : c.Id;
+        _replyDraft = null;
+    }
+
+    private async Task Post(long? parent)
+    {
+        if (ElementId is null) return;
+        var text = parent is null ? _draft : _replyDraft;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        await Reviews.CommentOnElementAsync(ElementId, text, parent);
+        if (parent is null) _draft = null;
+        else { _replyDraft = null; _replyTo = null; }
+    }
+
+    private void SetOwner(Element e, string? username)
+    {
+        if (Ws.ReadOnly || !Ws.Model.Contains(e)) return;
+        Ws.Model.Set(e, ReviewService.OwnerKey, username);
     }
 
     private async Task Resolve(CommentInfo c)

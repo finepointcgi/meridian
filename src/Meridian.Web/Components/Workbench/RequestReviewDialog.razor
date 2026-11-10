@@ -1,0 +1,170 @@
+@using Meridian.Data
+@using Meridian.Serialization
+@inject Workspace Ws
+@inject ReviewService Reviews
+@inject IMeridianStore Db
+@inject MeridianHostInfo Host
+
+<MudDialog>
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.RateReview" /><MudText Typo="Typo.h6">@(Host.LocalMode ? "New review checklist" : "Request review")</MudText></div></TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" AutoFocus="true" />
+        <MudTextField T="string" @bind-Value="_description" Label="What should reviewers look at?" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" Class="mt-2" />
+
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Scope</MudText>
+        <MudRadioGroup T="ReviewScopeKind" @bind-Value="_scope">
+            <MudRadio T="ReviewScopeKind" Value="ReviewScopeKind.Elements" Color="Color.Primary" Dense="true">Elements</MudRadio>
+            <MudRadio T="ReviewScopeKind" Value="ReviewScopeKind.Package" Color="Color.Primary" Dense="true">Package</MudRadio>
+            <MudRadio T="ReviewScopeKind" Value="ReviewScopeKind.Versions" Color="Color.Primary" Dense="true" Disabled="_versions.Count == 0">Version range</MudRadio>
+        </MudRadioGroup>
+
+        @switch (_scope)
+        {
+            case ReviewScopeKind.Elements:
+                <div class="d-flex flex-wrap gap-1 mt-1">
+                    @foreach (var e in _elements)
+                    {
+                        var el = e;
+                        <MudChip T="string" Size="Size.Small" Icon="@UiKinds.Icon(el.Kind)" OnClose="() => _elements.Remove(el)">@el.DisplayName</MudChip>
+                    }
+                    @if (_elements.Count == 0) { <MudText Typo="Typo.caption" Style="opacity:.7">No elements yet — add some below.</MudText> }
+                </div>
+                <MudAutocomplete T="Element" Label="Add element…" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" SearchFunc="Search"
+                                 ToStringFunc="@(e => e?.DisplayName ?? "")" ValueChanged="Add" ResetValueOnEmptyText="true" CoerceText="false" Clearable="true" MaxItems="30" />
+                break;
+            case ReviewScopeKind.Package:
+                <MudSelect T="Element" @bind-Value="_package" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" ToStringFunc="@(e => e?.QualifiedName ?? "")">
+                    @foreach (var p in Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Package or ElementKind.Model).OrderBy(e => e.QualifiedName))
+                    {
+                        <MudSelectItem T="Element" Value="p">@p.QualifiedName</MudSelectItem>
+                    }
+                </MudSelect>
+                break;
+            default:
+                <div class="d-flex gap-2">
+                    <MudSelect T="long?" @bind-Value="_from" Label="From version" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var v in _versions) { <MudSelectItem T="long?" Value="v.Id">v@(v.Number) · @v.Message</MudSelectItem> }
+                    </MudSelect>
+                    <MudSelect T="long?" @bind-Value="_to" Label="To" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem T="long?" Value="null">Live model</MudSelectItem>
+                        @foreach (var v in _versions) { <MudSelectItem T="long?" Value="v.Id">v@(v.Number) · @v.Message</MudSelectItem> }
+                    </MudSelect>
+                </div>
+                break;
+        }
+
+        @if (_scope != ReviewScopeKind.Versions)
+        {
+            <MudSelect T="long" @bind-Value="_base" Label="Compare against (base version)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3">
+                @if (!Ws.ReadOnly) { <MudSelectItem T="long" Value="-1L">Commit a new baseline now</MudSelectItem> }
+                @foreach (var v in _versions) { <MudSelectItem T="long" Value="v.Id">v@(v.Number) · @v.Message</MudSelectItem> }
+                <MudSelectItem T="long" Value="0L">No baseline (no diff)</MudSelectItem>
+            </MudSelect>
+        }
+
+        @if (!Host.LocalMode)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Reviewers</MudText>
+            <div class="d-flex flex-column">
+                @foreach (var m in _members.Where(m => m.User.Id != Ws.User?.Id))
+                {
+                    var member = m;
+                    <MudCheckBox T="bool" Value="_reviewers.Contains(member.User.Id)" ValueChanged="v => ToggleReviewer(member.User.Id, v)" Dense="true" Color="Color.Primary">
+                        <span class="d-inline-flex align-center gap-2">
+                            <span class="avatar sm" style="background:@member.User.Color">@MembersDialog.Initials(member.User)</span>
+                            @member.User.DisplayName <span style="opacity:.55; font-size:12px">@member.Role</span>
+                        </span>
+                    </MudCheckBox>
+                }
+                @if (_members.Count <= 1) { <MudText Typo="Typo.caption" Style="opacity:.7">Share the project with teammates to ask them for a review.</MudText> }
+            </div>
+        }
+        <MudCheckBox T="bool" @bind-Value="_applyStatus" Dense="true" Color="Color.Primary" Class="mt-2">When approved, set the in-scope requirements' status to “approved”</MudCheckBox>
+        @if (_error != null) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_error</MudAlert> }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || string.IsNullOrWhiteSpace(_title)" OnClick="Create">@(Host.LocalMode ? "Create checklist" : "Request review")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<Element> Initial { get; set; } = [];
+
+    private string? _title, _description, _error;
+    private ReviewScopeKind _scope;
+    private readonly List<Element> _elements = new();
+    private Element? _package;
+    private long? _from, _to;
+    private long _base;
+    private bool _applyStatus, _busy;
+    private IReadOnlyList<VersionInfo> _versions = [];
+    private IReadOnlyList<ProjectMember> _members = [];
+    private readonly HashSet<Guid> _reviewers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        foreach (var e in Initial.Where(e => e.Owner != null)) if (!_elements.Contains(e)) _elements.Add(e);
+        var single = _elements.Count == 1 ? _elements[0] : null;
+        if (single?.Kind is ElementKind.Package) { _scope = ReviewScopeKind.Package; _package = single; _elements.Clear(); }
+        _title = single != null ? $"Review {single.DisplayName}" : _elements.Count > 1 ? $"Review {_elements.Count} elements" : null;
+        _applyStatus = _elements.Any(e => e.Kind == ElementKind.Requirement || e.Descendants().Any(d => d.Kind == ElementKind.Requirement)) || _package != null;
+        if (Ws.Session is { } s)
+        {
+            _versions = await Db.ListVersionsAsync(s.ProjectId);
+            _members = await Reviews.MembersAsync(refresh: true);
+        }
+        _base = !Ws.ReadOnly ? -1 : _versions.FirstOrDefault()?.Id ?? 0;
+        _from = _versions.FirstOrDefault()?.Id;
+    }
+
+    private Task<IEnumerable<Element>> Search(string? text, CancellationToken _)
+    {
+        var q = text?.Trim() ?? "";
+        IEnumerable<Element> all = Ws.Model.AllElements.Where(e => e is not Relationship && e.Owner != null && !_elements.Contains(e));
+        if (q.Length > 0) all = all.Where(e => e.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Get(FieldKeys.RequirementId).Contains(q, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(all.OrderBy(e => e.DisplayName).Take(30));
+    }
+
+    private void Add(Element? e)
+    {
+        if (e != null && !_elements.Contains(e)) _elements.Add(e);
+    }
+
+    private void ToggleReviewer(Guid id, bool on)
+    {
+        if (on) _reviewers.Add(id); else _reviewers.Remove(id);
+    }
+
+    private async Task Create()
+    {
+        if (Ws.Session is not { } s || Ws.User is not { } me) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            var ids = _scope switch
+            {
+                ReviewScopeKind.Elements => _elements.Select(e => e.Id).ToList(),
+                ReviewScopeKind.Package => _package is { } p ? [p.Id] : new List<string>(),
+                _ => new List<string>(),
+            };
+            long? baseVersion = _scope == ReviewScopeKind.Versions ? _from : _base > 0 ? _base : null;
+            if (_scope != ReviewScopeKind.Versions && _base == -1 && ids.Count > 0 && !string.IsNullOrWhiteSpace(_title))
+            {
+                await s.PersistAsync();
+                var number = await Db.CommitVersionAsync(s.ProjectId, $"Baseline for review: {_title.Trim()}", ProjectFile.Serialize(Ws.Model), me.Id);
+                baseVersion = (await Db.ListVersionsAsync(s.ProjectId)).FirstOrDefault(v => v.Number == number)?.Id;
+            }
+            // In local mode a review is a personal checklist: you are its reviewer.
+            var reviewers = Host.LocalMode ? new List<Guid> { me.Id } : _reviewers.ToList();
+            var draft = new ReviewDraft(_title ?? "", _description ?? "", _scope, ids, baseVersion,
+                _scope == ReviewScopeKind.Versions ? _to : null, _applyStatus, reviewers);
+            var id = await Reviews.CreateAsync(draft);
+            MudDialog.Close(DialogResult.Ok(id));
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

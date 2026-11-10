@@ -64,6 +64,10 @@
         </div>
         @if (!Host.LocalMode)
         {
+            <NotificationBell />
+        }
+        @if (!Host.LocalMode)
+        {
             <MudTooltip Text="Share & members"><button class="rbtn" style="height:30px" @onclick="ShareProject"><MudIcon Icon="@Icons.Material.Outlined.Group" /><span class="t">Share</span></button></MudTooltip>
         }
         <MudTooltip Text="Version history"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory" /></MudTooltip>
@@ -158,6 +162,15 @@
                 <button class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
                 <button class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
                 <button class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
+            </div>
+        </div>
+        <div class="rgroup compact">
+            <div class="rlabel">Review</div>
+            <div class="ritems">
+                <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request a review of the selection")">
+                    <button class="rbtn" disabled="@(Ws.Session == null)" @onclick="() => RequestReview()"><MudIcon Icon="@Icons.Material.Outlined.RateReview" /><span class="t">Request</span></button>
+                </MudTooltip>
+                <button class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
             </div>
         </div>
         <div class="rgroup compact">
@@ -273,6 +286,7 @@
                     @DockTab(4, "Impact analysis", Icons.Material.Outlined.CallSplit, null)
                     @DockTab(5, "Simulation", Icons.Material.Outlined.PlayCircle, null)
                     @DockTab(6, "Parametrics", Icons.Material.Outlined.Functions, null)
+                    @DockTab(ReviewsDock, "Reviews", Icons.Material.Outlined.Checklist, null)
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
                     <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
@@ -288,6 +302,7 @@
                             case 4: <ImpactPanel />; break;
                             case 5: <SimulationPanel />; break;
                             case 6: <ParametricsPanel />; break;
+                            case ReviewsDock: <ReviewsPanel Focus="_reviewFocus" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
                     </div>

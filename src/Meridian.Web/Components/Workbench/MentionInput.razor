@@ -1,0 +1,150 @@
+@using Meridian.Data
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* A comment box with @mention autocomplete over the project's members. ⌘/Ctrl+Enter posts. *@
+<div class="mention-input @(Compact ? "compact" : "")">
+    <textarea @ref="_el" rows="@Rows" placeholder="@Placeholder" disabled="@Disabled" value="@Value" @oninput="OnInput"
+              data-mention-open="@(Open ? "1" : "0")"></textarea>
+    @if (Open)
+    {
+        <div class="mention-pop" role="listbox">
+            @for (var i = 0; i < _matches.Count; i++)
+            {
+                var u = _matches[i];
+                var idx = i;
+                <div class="mention-item @(idx == _index ? "on" : "")" role="option" @onmouseenter="() => _index = idx"
+                     @onmousedown="() => Pick(u)" @onmousedown:preventDefault="true">
+                    <span class="avatar sm" style="background:@u.Color">@MembersDialog.Initials(u)</span>
+                    <span class="name">@u.DisplayName</span>
+                    <span class="user">@@@u.Username</span>
+                </div>
+            }
+        </div>
+    }
+    @if (OnSubmit.HasDelegate)
+    {
+        <MudTooltip Text="@SubmitLabel">
+            <MudIconButton Class="send" Size="Size.Small" Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                           Disabled="@(Disabled || string.IsNullOrWhiteSpace(Value))" OnClick="Submit" />
+        </MudTooltip>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<UserAccount> People { get; set; } = [];
+    [Parameter] public string Placeholder { get; set; } = "Add a comment… (@ to mention)";
+    [Parameter] public int Rows { get; set; } = 2;
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public string SubmitLabel { get; set; } = "Post (⌘↵)";
+    [Parameter] public EventCallback OnSubmit { get; set; }
+
+    private ElementReference _el;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<MentionInput>? _self;
+    private List<UserAccount> _matches = new();
+    private int _index, _start, _end;
+
+    public bool Open => _matches.Count > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/mentions.js");
+            _self = DotNetObjectReference.Create(this);
+            if (_module != null) await _module.InvokeVoidAsync("attach", _el, _self);
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException) { _module = null; }
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString();
+        await ValueChanged.InvokeAsync(Value);
+        // Without the browser module (tests, prerendering) the query is taken from the end of the text.
+        if (_module is null)
+        {
+            var text = Value ?? "";
+            var m = System.Text.RegularExpressions.Regex.Match(text, @"(^|[^\w@])@([A-Za-z0-9._-]{0,40})$");
+            if (m.Success) MentionQuery(m.Groups[2].Value, text.Length - m.Groups[2].Length - 1, text.Length);
+            else _matches.Clear();
+        }
+    }
+
+    /// <summary>Matching members for the "@query" at the caret (null closes the list).</summary>
+    [JSInvokable]
+    public void MentionQuery(string? query, int start, int end)
+    {
+        _start = start;
+        _end = end;
+        _index = 0;
+        _matches = query is null ? new() : Match(People, query).ToList();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public static IEnumerable<UserAccount> Match(IEnumerable<UserAccount> people, string query)
+    {
+        var q = query.Trim();
+        return people
+            .Select(u => (u, score: u.Username.StartsWith(q, StringComparison.OrdinalIgnoreCase) ? 3
+                : u.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(w => w.StartsWith(q, StringComparison.OrdinalIgnoreCase)) ? 2
+                : u.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) || u.Username.Contains(q, StringComparison.OrdinalIgnoreCase) ? 1 : 0))
+            .Where(x => x.score > 0).OrderByDescending(x => x.score).ThenBy(x => x.u.DisplayName).Select(x => x.u).Take(6);
+    }
+
+    [JSInvokable]
+    public async Task MentionKey(string key)
+    {
+        if (!Open) return;
+        switch (key)
+        {
+            case "ArrowDown": _index = (_index + 1) % _matches.Count; break;
+            case "ArrowUp": _index = (_index - 1 + _matches.Count) % _matches.Count; break;
+            case "Enter" or "Tab": await Pick(_matches[_index]); return;
+            default: _matches.Clear(); break;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task MentionSubmit() => InvokeAsync(Submit);
+
+    private async Task Pick(UserAccount u)
+    {
+        var token = "@" + u.Username + " ";
+        _matches.Clear();
+        var text = Value ?? "";
+        var start = Math.Clamp(_start, 0, text.Length);
+        var updated = text[..start] + token + text[Math.Clamp(_end, start, text.Length)..];
+        // The browser edits the box first so the caret lands after the mention; the bound value then matches it.
+        if (_module != null)
+        {
+            try { await _module.InvokeVoidAsync("insert", _el, _start, _end, token); }
+            catch (JSException) { }
+        }
+        Value = updated;
+        await ValueChanged.InvokeAsync(Value);
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        if (Disabled || string.IsNullOrWhiteSpace(Value)) return;
+        _matches.Clear();
+        await OnSubmit.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module != null)
+        {
+            try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+        _self?.Dispose();
+    }
+}

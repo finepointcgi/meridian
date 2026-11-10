@@ -7,7 +7,7 @@ namespace Meridian.Data;
 /// Single-file SQLite store used by the desktop app's local mode: same schema and behaviour as
 /// <see cref="PostgresStore"/>, with ids as text, timestamps as ISO-8601 UTC text and models as JSON text.
 /// </summary>
-public sealed class SqliteStore : IMeridianStore
+public sealed partial class SqliteStore : IMeridianStore
 {
     private readonly string _connectionString;
 
@@ -104,6 +104,7 @@ public sealed class SqliteStore : IMeridianStore
             create index if not exists comments_project_element on comments(project_id, element_id);
             create index if not exists members_user on project_members(user_id);
             """);
+        await MigrateReviewsAsync();
     }
 
     // =============================================================== users

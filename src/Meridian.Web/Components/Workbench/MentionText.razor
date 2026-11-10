@@ -1,0 +1,20 @@
+@using Meridian.Data
+@inject Workspace Ws
+
+@* Comment text with @mentions of project members rendered as chips. *@
+@foreach (var s in Mentions.Split(Text ?? "", People))
+{
+    if (s.User is { } u)
+    {
+        <span class="mention-chip @(u.Id == Ws.User?.Id ? "me" : "")" title="@u.DisplayName">@s.Text</span>
+    }
+    else
+    {
+        @s.Text
+    }
+}
+
+@code {
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public IReadOnlyList<UserAccount> People { get; set; } = [];
+}
