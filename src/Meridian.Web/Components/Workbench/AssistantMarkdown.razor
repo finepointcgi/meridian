@@ -1,0 +1,107 @@
+@using Meridian.Assistant.Markdown
+@* Renders an assistant answer (safe Markdown subset, see MarkdownLite) with element mentions as clickable chips. *@
+
+<div class="ai-md">
+    @foreach (var block in MarkdownLite.Parse(Text))
+    {
+        @Block(block)
+    }
+</div>
+
+@code {
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>Element id → current display name (null when the element no longer exists).</summary>
+    [Parameter] public Func<string, string?>? Resolve { get; set; }
+
+    [Parameter] public EventCallback<string> OnMention { get; set; }
+
+    private RenderFragment Block(MdBlock block) => __builder =>
+    {
+        switch (block)
+        {
+            case MdHeading h:
+                <div class="ai-h ai-h@(Math.Min(h.Level, 4))">@Inlines(h.Inlines)</div>
+                break;
+            case MdParagraph p:
+                <p>@Inlines(p.Inlines)</p>
+                break;
+            case MdQuote q:
+                <blockquote>@Inlines(q.Inlines)</blockquote>
+                break;
+            case MdCodeBlock c:
+                <pre class="ai-code"><code>@c.Code</code></pre>
+                break;
+            case MdRule:
+                <hr />
+                break;
+            case MdList l when l.Ordered:
+                <ol>@foreach (var item in l.Items) { @Item(item) }</ol>
+                break;
+            case MdList l:
+                <ul>@foreach (var item in l.Items) { @Item(item) }</ul>
+                break;
+            case MdTable t:
+                <div class="ai-table-wrap">
+                    <table class="ai-table">
+                        <thead><tr>@foreach (var h in t.Header) { <th>@Inlines(h)</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var row in t.Rows)
+                            {
+                                <tr>@foreach (var cell in row) { <td>@Inlines(cell)</td> }</tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                break;
+        }
+    };
+
+    private RenderFragment Item(MdListItem item) => __builder =>
+    {
+        <li class="@(item.Checked != null ? "ai-check" : "")" style="@(item.Indent > 0 ? $"margin-left:{item.Indent * 16}px" : "")">
+            @if (item.Checked is { } done)
+            {
+                <MudIcon Icon="@(done ? Icons.Material.Outlined.CheckBox : Icons.Material.Outlined.CheckBoxOutlineBlank)" Style="font-size:15px; vertical-align:-3px" />
+            }
+            @Inlines(item.Inlines)
+        </li>
+    };
+
+    private RenderFragment Inlines(IEnumerable<MdInline> inlines) => __builder =>
+    {
+        foreach (var inline in inlines)
+        {
+            switch (inline)
+            {
+                case MdText t:
+                    @t.Text
+                    break;
+                case MdStrong s:
+                    <strong>@Inlines(s.Children)</strong>
+                    break;
+                case MdEmphasis e:
+                    <em>@Inlines(e.Children)</em>
+                    break;
+                case MdCode c:
+                    <code>@c.Text</code>
+                    break;
+                case MdLink l:
+                    <a href="@l.Url" target="_blank" rel="noopener noreferrer">@l.Text</a>
+                    break;
+                case MdMention m:
+                    var name = Resolve?.Invoke(m.ElementId);
+                    var id = m.ElementId;
+                    if (name != null)
+                    {
+                        <button class="ai-chip" title="Select in the model" @onclick="() => OnMention.InvokeAsync(id)">@(string.IsNullOrWhiteSpace(m.Label) ? name : m.Label)</button>
+                    }
+                    else
+                    {
+                        <span class="ai-chip missing" title="Not in the model">@m.Label</span>
+                    }
+                    break;
+            }
+        }
+    };
+}

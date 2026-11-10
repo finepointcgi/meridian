@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Meridian.Tests" />
+    <InternalsVisibleTo Include="Meridian.Web.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meridian.Core\Meridian.Core.csproj" />
+    <ProjectReference Include="..\Meridian.Serialization\Meridian.Serialization.csproj" />
+    <ProjectReference Include="..\Meridian.Scripting\Meridian.Scripting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Official Anthropic C# SDK (Claude API). Pinned; see docs/AI.md. -->
+    <PackageReference Include="Anthropic" Version="13.4.0" />
+  </ItemGroup>
+
+</Project>
