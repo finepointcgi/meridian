@@ -1,0 +1,134 @@
+@inject Workspace Ws
+@inject IJSRuntime JS
+
+@* Picture export: one diagram (PNG at 1x–3x or SVG, or copy to the clipboard), or every diagram of a package as a zip. *@
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Image" /><MudText Typo="Typo.h6">@Title</MudText></div>
+    </TitleContent>
+    <DialogContent>
+        <div class="export-dlg">
+            @if (Diagram is { } d)
+            {
+                <div class="export-preview @(_bg == ExportBackground.Transparent ? "checker" : "")">
+                    <img src="@PreviewUri(d)" alt="Preview of @d.Name" />
+                </div>
+            }
+            else if (Container is { } c)
+            {
+                var count = DiagramImageExport.DiagramsIn(c).Count;
+                <div class="export-note">@count diagram@(count == 1 ? "" : "s") in “@c.DisplayName” will be exported into one zip file, in folders that follow the model tree.</div>
+            }
+            <div class="export-row">
+                <span class="lbl">Format</span>
+                <div class="seg">
+                    <button class="@(_png ? "on" : "")" @onclick="() => _png = true">PNG</button>
+                    <button class="@(_png ? "" : "on")" @onclick="() => _png = false">SVG</button>
+                </div>
+            </div>
+            @if (_png)
+            {
+                <div class="export-row">
+                    <span class="lbl">Scale</span>
+                    <div class="seg">
+                        @foreach (var s in new[] { 1, 2, 3 })
+                        {
+                            var scale = s;
+                            <button class="@(_scale == scale ? "on" : "")" @onclick="() => _scale = scale">@(scale)x</button>
+                        }
+                    </div>
+                </div>
+            }
+            <div class="export-row">
+                <span class="lbl">Background</span>
+                <div class="seg">
+                    <button class="@(_bg == ExportBackground.Transparent ? "on" : "")" @onclick="() => _bg = ExportBackground.Transparent">Transparent</button>
+                    <button class="@(_bg == ExportBackground.Light ? "on" : "")" @onclick="() => _bg = ExportBackground.Light">Light</button>
+                    <button class="@(_bg == ExportBackground.Dark ? "on" : "")" @onclick="() => _bg = ExportBackground.Dark">Dark</button>
+                </div>
+            </div>
+            @if (_busy != null) { <div class="export-note"><MudProgressCircular Size="Size.Small" Indeterminate="true" /> @_busy</div> }
+            @if (_error != null) { <div class="export-error">@_error</div> }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        @if (Diagram != null)
+        {
+            <MudButton StartIcon="@Icons.Material.Outlined.ContentCopy" Disabled="@(_busy != null)" OnClick="Copy">Copy as image</MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Outlined.Download" Disabled="@(_busy != null)" OnClick="Export">Export</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Diagram? Diagram { get; set; }
+    [Parameter] public Element? Container { get; set; }
+
+    private bool _png = true;
+    private int _scale = 2;
+    private ExportBackground _bg;
+    private string? _busy, _error;
+    private string? _previewFor;
+    private string? _preview;
+
+    protected override void OnInitialized() => _bg = Ws.DarkMode ? ExportBackground.Dark : ExportBackground.Light;
+
+    private string Title => Diagram != null ? $"Export “{Diagram.Name}”" : $"Export diagrams of “{Container?.DisplayName}”";
+
+    private string PreviewUri(Diagram d)
+    {
+        var key = $"{Ws.Version}|{_bg}";
+        if (_previewFor != key)
+        {
+            _previewFor = key;
+            _preview = "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(DiagramImageExport.Svg(Ws.Model, d, _bg)));
+        }
+        return _preview!;
+    }
+
+    private async Task Export()
+    {
+        _error = null;
+        try
+        {
+            if (Diagram is { } d)
+            {
+                _busy = _png ? "Rendering PNG…" : "Exporting…";
+                StateHasChanged();
+                await DiagramImageExport.ExportAsync(JS, Ws.Model, d, _png, _scale, _bg);
+                Ws.Log($"Exported {d.Name} as {(_png ? $"PNG ({_scale}x)" : "SVG")}");
+            }
+            else if (Container is { } c)
+            {
+                var bytes = await DiagramImageExport.ZipAsync(JS, Ws.Model, c, _png, _scale, _bg, (i, n) => { _busy = $"Rendering diagram {Math.Min(i + 1, n)} of {n}…"; InvokeAsync(StateHasChanged); });
+                await DiagramImageExport.DownloadAsync(JS, DiagramImageExport.SafeName(c.DisplayName) + (_png ? " png" : " svg") + ".zip", "application/zip", bytes);
+                Ws.Log($"Exported the diagrams of {c.DisplayName} as a zip");
+            }
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) when (ex is JSException or TaskCanceledException or InvalidOperationException or FormatException)
+        {
+            _error = "Export failed: " + ex.Message;
+        }
+        finally { _busy = null; }
+    }
+
+    private async Task Copy()
+    {
+        if (Diagram is not { } d) return;
+        _error = null;
+        _busy = "Copying…";
+        StateHasChanged();
+        try
+        {
+            var problem = await DiagramImageExport.CopyAsync(JS, Ws.Model, d, _scale, _bg);
+            if (problem != null) _error = problem;
+            else { Ws.SetStatus($"Copied {d.Name} to the clipboard as a picture"); MudDialog.Close(DialogResult.Ok(true)); }
+        }
+        catch (Exception ex) when (ex is JSException or TaskCanceledException) { _error = "Copy failed: " + ex.Message; }
+        finally { _busy = null; }
+    }
+}

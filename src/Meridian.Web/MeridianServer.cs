@@ -44,6 +44,7 @@ public static class MeridianServer
             : new PostgresStore(builder.Configuration.GetConnectionString("Meridian")
                 ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database.")));
         builder.Services.AddSingleton<CollaborationHub>();
+        builder.Services.AddSingleton<ImageCache>();
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddHttpContextAccessor();
 
@@ -116,6 +117,7 @@ public static class MeridianServer
         app.UseAntiforgery();
 
         app.MapStaticAssets();
+        ImageCache.Map(app);
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
 

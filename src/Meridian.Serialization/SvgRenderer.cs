@@ -67,6 +67,12 @@ public sealed record SvgTheme(
             ElementKind.ConstraintBlock => "#ff6b6b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#4aa3ff", _ => "#7f8ca3",
         });
 
+    /// <summary>Maps an embedded image's data URI to the URL drawn (the editor serves cached copies so the canvas markup stays small).</summary>
+    public Func<string, string>? ImageHref { get; init; }
+
+    /// <summary>Wraps shapes that carry a web link in an SVG anchor (exported files), so the link works in a browser.</summary>
+    public bool LinkAnchors { get; init; }
+
     public string Defs =>
         $"<defs><filter id=\"msh\" x=\"-10%\" y=\"-10%\" width=\"125%\" height=\"135%\"><feDropShadow dx=\"0\" dy=\"2\" stdDeviation=\"2.5\" flood-color=\"{ShadowColor}\" flood-opacity=\"{ShadowOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"/></filter></defs>";
 }
@@ -78,14 +84,17 @@ public static class SvgRenderer
     private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
     private static string E(string s) => WebUtility.HtmlEncode(s);
 
-    public static string Render(ModelRepository model, Diagram d, double margin = 24)
+    /// <param name="theme">Colours (light by default).</param>
+    /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
+    public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false)
     {
         Func<DiagramNode, Bounds> bounds = n => Notation.EffectiveBounds(model, n, d.DiagramType);
-        var nodes = d.Nodes;
+        var view = DiagramExtras.VisibleView(d);   // hidden layers are not exported
+        var nodes = view.Nodes;
         double minX = 0, minY = 0, maxX = 400, maxY = 300;
         if (nodes.Count > 0)
         {
-            var pts = d.Edges.SelectMany(e => e.Waypoints).ToList();
+            var pts = view.Edges.SelectMany(e => e.Waypoints).ToList();
             minX = Math.Min(nodes.Min(n => n.Bounds.X), pts.Count > 0 ? pts.Min(p => p.X) : double.MaxValue) - margin - (d.DiagramType == DiagramType.InternalBlock ? 40 : 0);
             minY = Math.Min(nodes.Min(n => n.Bounds.Y), pts.Count > 0 ? pts.Min(p => p.Y) : double.MaxValue) - margin - 30 - (d.DiagramType == DiagramType.InternalBlock ? 50 : 0);
             maxX = Math.Max(nodes.Max(n => n.Bounds.Right), pts.Count > 0 ? pts.Max(p => p.X) : double.MinValue) + margin + 60;
@@ -93,9 +102,9 @@ public static class SvgRenderer
         }
         var sb = new StringBuilder();
         sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{F(minX)} {F(minY)} {F(maxX - minX)} {F(maxY - minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" font-family=\"Inter, Helvetica, Arial, sans-serif\" font-size=\"12\">");
-        var t = SvgTheme.Light;
+        var t = (theme ?? SvgTheme.Light) with { LinkAnchors = true };
         sb.Append(t.Defs);
-        sb.Append($"<rect x=\"{F(minX)}\" y=\"{F(minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" fill=\"{t.Background}\"/>");
+        if (!transparent) sb.Append($"<rect x=\"{F(minX)}\" y=\"{F(minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" fill=\"{t.Background}\"/>");
         sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
         RenderHeader(sb, d, minX + 4, minY + 4, t);
         RenderBody(sb, model, d, bounds, null, t);
@@ -121,6 +130,7 @@ public static class SvgRenderer
                                   Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null)
     {
         var t = theme ?? SvgTheme.Light;
+        d = DiagramExtras.VisibleView(d);   // layers: hidden ones are skipped, the rest drawn bottom layer first
         if (viewport is { } vp && d.Nodes.Count > 150)
         {
             // Large diagrams: draw only what intersects the (padded) viewport.
@@ -319,6 +329,29 @@ public static class SvgRenderer
 
     private static void RenderNode(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
     {
+        var link = DiagramExtras.LinkOf(n);
+        var anchor = t.LinkAnchors && link != null && DiagramExtras.IsExternalLink(link);
+        if (anchor) sb.Append($"<a href=\"{E(link!)}\" target=\"_blank\">");
+        RenderNodeCore(sb, m, d, n, b, t);
+        if (link != null) LinkBadge(sb, b, link, t);
+        if (anchor) sb.Append("</a>");
+    }
+
+    /// <summary>The small chain-link icon in the bottom-right corner of a shape that has a hyperlink.</summary>
+    private static void LinkBadge(StringBuilder sb, Bounds b, string link, SvgTheme t)
+    {
+        var r = DiagramExtras.LinkBadgeBounds(b);
+        var accent = t.TraceTitle;
+        double x = r.X, y = r.Y, s = r.Width;
+        sb.Append($"<g class=\"link-badge\"><title>{E(link)}</title>");
+        sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(s)}\" height=\"{F(s)}\" rx=\"3.5\" fill=\"{t.NodeFill}\" stroke=\"{accent}\" stroke-width=\"0.9\"/>");
+        // Two interlocking chain links, drawn diagonally.
+        sb.Append($"<path d=\"M{F(x + s * .44)},{F(y + s * .64)} L{F(x + s * .30)},{F(y + s * .78)} A{F(s * .14)},{F(s * .14)} 0 0 1 {F(x + s * .22)},{F(y + s * .70)} L{F(x + s * .36)},{F(y + s * .56)} M{F(x + s * .56)},{F(y + s * .36)} L{F(x + s * .70)},{F(y + s * .22)} A{F(s * .14)},{F(s * .14)} 0 0 1 {F(x + s * .78)},{F(y + s * .30)} L{F(x + s * .64)},{F(y + s * .44)} M{F(x + s * .40)},{F(y + s * .60)} L{F(x + s * .60)},{F(y + s * .40)}\" fill=\"none\" stroke=\"{accent}\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>");
+        sb.Append("</g>");
+    }
+
+    private static void RenderNodeCore(StringBuilder sb, ModelRepository m, Diagram d, DiagramNode n, Bounds b, SvgTheme t)
+    {
         var c = Notation.Content(m, n.Element, d.DiagramType);
         var shape = Notation.ShapeOf(n.Element);
         // Per-shape overrides from the format bar: line and text colour apply to every notation.
@@ -504,6 +537,27 @@ public static class SvgRenderer
         var textW = w - 14;
         switch (n.Element.Get(FieldKeys.Subtype))
         {
+            case DiagramExtras.ImageSubtype:
+            {
+                var data = n.Element.Get(DiagramExtras.ImageField);
+                if (DiagramExtras.IsSafeImageDataUri(data))
+                {
+                    var href = t.ImageHref?.Invoke(data) ?? data;
+                    sb.Append($"<image href=\"{E(href)}\" x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" preserveAspectRatio=\"xMidYMid meet\"/>");
+                    if (n.Style.TryGetValue("stroke", out var border) && border.Length > 0)
+                        sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"none\" stroke=\"{E(border)}\" stroke-width=\"1.4\"/>");
+                }
+                else
+                {
+                    // Placeholder: a dashed frame with a little landscape.
+                    sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" rx=\"4\" fill=\"{t.FrameFill}\" stroke=\"{t.Muted}\" stroke-dasharray=\"5,4\"/>");
+                    sb.Append($"<path d=\"M{F(cx - 14)},{F(cy + 8)} l9,-11 l6,7 l4,-4 l9,8 Z\" fill=\"{t.Muted}\" fill-opacity=\"0.5\"/><circle cx=\"{F(cx + 7)}\" cy=\"{F(cy - 8)}\" r=\"3\" fill=\"{t.Muted}\" fill-opacity=\"0.5\"/>");
+                }
+                // A caption goes under the picture.
+                if (!string.IsNullOrEmpty(text))
+                    WrappedCentered(sb, cx, bo + 14, Math.Max(40, w), text, n.Style.TryGetValue("text", out var cc) && cc.Length > 0 ? cc : t.Text);
+                return;
+            }
             case "text":
                 sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"transparent\"/>");
                 break;

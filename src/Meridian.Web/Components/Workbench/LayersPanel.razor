@@ -1,0 +1,128 @@
+@inject Workspace Ws
+
+@* Layers popover: add, rename, reorder, hide/show, lock, choose the layer new shapes go on, and move the selection. *@
+<div class="layers-pop" @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+    <div class="layers-head">
+        <span class="fmt-title" style="margin:0">Layers</span>
+        <span style="flex:1"></span>
+        @if (!Ws.ReadOnly)
+        {
+            <button class="fmt-link" @onclick="Add"><MudIcon Icon="@Icons.Material.Outlined.Add" Style="font-size:15px; vertical-align:-3px" /> Add layer</button>
+        }
+    </div>
+    @{ var layers = DiagramExtras.Layers(C.Diagram); var selLayer = C.SelectionLayer(); var hasSel = C.SelectedNodes.Count > 0 || C.SelectedEdge != null; }
+    <div class="layers-list">
+        @* Top of the list is the front-most layer. *@
+        @for (var i = layers.Count - 1; i >= 0; i--)
+        {
+            var layer = layers[i];
+            var index = i;
+            var count = C.Diagram.Nodes.Count(n => DiagramExtras.LayerIdOf(n) == layer.Id || (layer.Id == DiagramExtras.DefaultLayerId && DiagramExtras.FindLayer(C.Diagram, DiagramExtras.LayerIdOf(n)) == null));
+            <div class="layer-row @(C.ActiveLayerId == layer.Id ? "active" : "")" title="@(C.ActiveLayerId == layer.Id ? "New shapes go on this layer" : "Click to draw new shapes on this layer")" @onclick="() => C.ActiveLayerId = layer.Id">
+                <button class="lbtn" title="@(layer.Visible ? "Hide" : "Show")" disabled="@Ws.ReadOnly" @onclick="() => Toggle(layer, visible: !layer.Visible)" @onclick:stopPropagation="true">
+                    <MudIcon Icon="@(layer.Visible ? Icons.Material.Outlined.Visibility : Icons.Material.Outlined.VisibilityOff)" />
+                </button>
+                <button class="lbtn" title="@(layer.Locked ? "Unlock" : "Lock (can't be selected or moved)")" disabled="@Ws.ReadOnly" @onclick="() => Toggle(layer, locked: !layer.Locked)" @onclick:stopPropagation="true">
+                    <MudIcon Icon="@(layer.Locked ? Icons.Material.Outlined.Lock : Icons.Material.Outlined.LockOpen)" />
+                </button>
+                @if (_renaming == layer.Id)
+                {
+                    <input class="layer-name-edit" value="@_renameText" @oninput="e => _renameText = e.Value?.ToString()" @onkeydown="e => RenameKey(e, layer)" @onblur="() => CommitRename(layer)" @onclick:stopPropagation="true" autofocus />
+                }
+                else
+                {
+                    <span class="layer-name @(layer.Visible ? "" : "off")" @ondblclick="() => StartRename(layer)">@layer.Name</span>
+                }
+                <span class="layer-count">@count</span>
+                @if (!Ws.ReadOnly)
+                {
+                    <button class="lbtn" title="Bring forward" disabled="@(index == layers.Count - 1)" @onclick="() => Reorder(layer, +1)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Outlined.ArrowUpward" /></button>
+                    <button class="lbtn" title="Send backward" disabled="@(index == 0)" @onclick="() => Reorder(layer, -1)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Outlined.ArrowDownward" /></button>
+                    <button class="lbtn" title="Rename" @onclick="() => StartRename(layer)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Outlined.Edit" /></button>
+                    <button class="lbtn" title="Delete layer (its shapes move to Default)" disabled="@(layer.Id == DiagramExtras.DefaultLayerId)" @onclick="() => Remove(layer)" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Outlined.DeleteOutline" /></button>
+                }
+            </div>
+        }
+    </div>
+    @if (!Ws.ReadOnly)
+    {
+        <div class="layers-move">
+            <span>Move selection to</span>
+            <select disabled="@(!hasSel)" value="@(selLayer ?? "")" @onchange="e => Move(e.Value?.ToString())">
+                @if (selLayer == null) { <option value="">@(hasSel ? "(mixed)" : "(nothing selected)")</option> }
+                @foreach (var l in layers.Reverse())
+                {
+                    <option value="@l.Id">@l.Name</option>
+                }
+            </select>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DiagramController C { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private string? _renaming;
+    private string? _renameText;
+
+    private async Task Add()
+    {
+        var layer = Ws.Model.AddLayer(C.Diagram);
+        C.ActiveLayerId = layer.Id;
+        _renaming = layer.Id;
+        _renameText = layer.Name;
+        await Changed.InvokeAsync();
+    }
+
+    private async Task Toggle(DiagramLayer layer, bool? visible = null, bool? locked = null)
+    {
+        Ws.Model.UpdateLayer(C.Diagram, layer with { Visible = visible ?? layer.Visible, Locked = locked ?? layer.Locked });
+        C.ClearInvalidSelection();
+        Ws.SetStatus(visible == false ? $"Hid layer “{layer.Name}”" : visible == true ? $"Showing layer “{layer.Name}”" : locked == true ? $"Locked layer “{layer.Name}”" : $"Unlocked layer “{layer.Name}”");
+        await Changed.InvokeAsync();
+    }
+
+    private async Task Reorder(DiagramLayer layer, int delta)
+    {
+        Ws.Model.ReorderLayer(C.Diagram, layer.Id, delta);
+        await Changed.InvokeAsync();
+    }
+
+    private async Task Remove(DiagramLayer layer)
+    {
+        try { Ws.Model.RemoveLayer(C.Diagram, layer.Id); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+        C.ClearInvalidSelection();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task Move(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        C.MoveSelectionToLayer(id);
+        await Changed.InvokeAsync();
+    }
+
+    private void StartRename(DiagramLayer layer)
+    {
+        if (Ws.ReadOnly) return;
+        _renaming = layer.Id;
+        _renameText = layer.Name;
+    }
+
+    private void RenameKey(KeyboardEventArgs e, DiagramLayer layer)
+    {
+        if (e.Key == "Enter") CommitRename(layer);
+        else if (e.Key == "Escape") _renaming = null;
+    }
+
+    private void CommitRename(DiagramLayer layer)
+    {
+        if (_renaming != layer.Id) return;
+        _renaming = null;
+        var name = _renameText?.Trim();
+        if (!string.IsNullOrEmpty(name) && name != layer.Name && DiagramExtras.FindLayer(C.Diagram, layer.Id) is { } current)
+            Ws.Model.UpdateLayer(C.Diagram, current with { Name = name });
+    }
+}

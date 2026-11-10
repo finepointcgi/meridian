@@ -72,6 +72,12 @@ public sealed class DiagramController
     /// <summary>Set by input handling when the user asks to open an element's sub-diagram.</summary>
     public Element? DrillRequest { get; set; }
 
+    /// <summary>Set when a shape's hyperlink is followed (its link icon, or Ctrl/⌘-click); the view opens it.</summary>
+    public string? LinkRequest { get; set; }
+
+    /// <summary>Layer that new shapes are put on (the default layer unless the user picks another in the layers panel).</summary>
+    public string ActiveLayerId { get; set; } = DiagramExtras.DefaultLayerId;
+
     /// <summary>Node whose name is being edited inline, if any.</summary>
     public DiagramNode? Editing { get; set; }
 
@@ -112,21 +118,53 @@ public sealed class DiagramController
     {
         _selNodes.Clear();
         SelectedEdge = null;
-        if (e is Relationship r && Diagram.EdgeFor(r) is { } edge) SelectedEdge = edge;
-        else if (e != null && Diagram.NodeFor(e) is { } node) _selNodes.Add(node);
+        if (e is Relationship r && Diagram.EdgeFor(r) is { } edge && Pickable(edge)) SelectedEdge = edge;
+        else if (e != null && Diagram.NodeFor(e) is { } node && Pickable(node)) _selNodes.Add(node);
     }
 
     public void SelectAll()
     {
         SelectedEdge = null;
-        foreach (var n in Diagram.Nodes) _selNodes.Add(n);
+        foreach (var n in Diagram.Nodes.Where(Pickable)) _selNodes.Add(n);
         Notify();
+    }
+
+    // ---------------------------------------------------------------- layers
+
+    /// <summary>Shapes on hidden or locked layers can't be selected, moved or hit.</summary>
+    public bool Pickable(DiagramNode n) => !DiagramExtras.IsHidden(Diagram, n) && !DiagramExtras.IsLocked(Diagram, n);
+    public bool Pickable(DiagramEdge e) => !DiagramExtras.IsHidden(Diagram, e) && !DiagramExtras.IsLocked(Diagram, e);
+
+    /// <summary>Shapes drawn, in drawing order (hidden layers left out).</summary>
+    public IReadOnlyList<DiagramNode> VisibleNodes => DiagramExtras.VisibleView(Diagram).Nodes;
+
+    /// <summary>Puts the selected shapes and connector on a layer.</summary>
+    public void MoveSelectionToLayer(string layerId)
+    {
+        if (_ws.ReadOnly || (_selNodes.Count == 0 && SelectedEdge == null)) return;
+        try
+        {
+            Model.MoveToLayer(Diagram, _selNodes.ToList(), SelectedEdge != null ? [SelectedEdge] : [], layerId);
+            var name = DiagramExtras.FindLayer(Diagram, layerId)?.Name ?? "Default";
+            _ws.SetStatus($"Moved to layer “{name}”");
+            ClearInvalidSelection();
+            Notify();
+        }
+        catch (InvalidOperationException ex) { _ws.SetStatus(ex.Message); }
+    }
+
+    /// <summary>The selection's layer when it is the same for everything selected.</summary>
+    public string? SelectionLayer()
+    {
+        var ids = _selNodes.Select(DiagramExtras.LayerIdOf).Concat(SelectedEdge != null ? [DiagramExtras.LayerIdOf(SelectedEdge)] : []).Distinct().ToList();
+        return ids.Count == 1 ? ids[0] : null;
     }
 
     public void ClearInvalidSelection()
     {
-        _selNodes.RemoveWhere(n => !Diagram.Nodes.Contains(n));
-        if (SelectedEdge != null && !Diagram.Edges.Contains(SelectedEdge)) SelectedEdge = null;
+        _selNodes.RemoveWhere(n => !Diagram.Nodes.Contains(n) || !Pickable(n));
+        if (SelectedEdge != null && (!Diagram.Edges.Contains(SelectedEdge) || !Pickable(SelectedEdge))) SelectedEdge = null;
+        if (DiagramExtras.FindLayer(Diagram, ActiveLayerId) == null) ActiveLayerId = DiagramExtras.DefaultLayerId;
         if (Editing != null && !Diagram.Nodes.Contains(Editing)) Editing = null;
         if (EditingEdge != null && !Diagram.Edges.Contains(EditingEdge)) EditingEdge = null;
         if (Hover != null && !Diagram.Nodes.Contains(Hover)) Hover = null;
@@ -197,12 +235,19 @@ public sealed class DiagramController
     }
 
     private DiagramNode? HitBadge(Pt p) =>
-        Diagram.Nodes.LastOrDefault(n => HasSubDiagram(n.Element) && BadgeBounds(n).Contains(p));
+        VisibleNodes.LastOrDefault(n => HasSubDiagram(n.Element) && BadgeBounds(n).Contains(p));
+
+    /// <summary>The visible shape whose link icon is under <paramref name="p"/> (locked layers included: links still work there).</summary>
+    public DiagramNode? HitLinkBadge(Pt p) =>
+        VisibleNodes.LastOrDefault(n => DiagramExtras.LinkOf(n) != null && Inflate(DiagramExtras.LinkBadgeBounds(BoundsOf(n)), 2 / Zoom).Contains(p));
+
+    private static Bounds Inflate(Bounds b, double d) => new(b.X - d, b.Y - d, b.Width + 2 * d, b.Height + 2 * d);
 
     public Bounds ContentBounds()
     {
-        if (Diagram.Nodes.Count == 0) return new Bounds(0, 0, 800, 600);
-        var bs = Diagram.Nodes.Select(BoundsOf).ToList();
+        var visible = VisibleNodes;
+        if (visible.Count == 0) return new Bounds(0, 0, 800, 600);
+        var bs = visible.Select(BoundsOf).ToList();
         double x0 = bs.Min(b => b.X) - 40, y0 = bs.Min(b => b.Y) - 40, x1 = bs.Max(b => b.Right) + 40, y1 = bs.Max(b => b.Bottom) + 40;
         return new Bounds(x0, y0, x1 - x0, y1 - y0);
     }
@@ -219,10 +264,14 @@ public sealed class DiagramController
 
     public DiagramNode? HitNode(Pt p, DiagramNode? except = null)
     {
-        for (var i = Diagram.Nodes.Count - 1; i >= 0; i--)
+        // Front-most first, in layer order; hidden layers aren't drawn and locked ones can't be picked.
+        var view = DiagramExtras.VisibleView(Diagram);
+        var layers = ReferenceEquals(view, Diagram) ? null : DiagramExtras.StateOf(Diagram);
+        var nodes = view.Nodes;
+        for (var i = nodes.Count - 1; i >= 0; i--)
         {
-            var n = Diagram.Nodes[i];
-            if (ReferenceEquals(n, except)) continue;
+            var n = nodes[i];
+            if (ReferenceEquals(n, except) || layers?.IsLocked(n) == true) continue;
             var b = BoundsOf(n);
             var pad = b.Width < 30 ? 5 : 0;
             if (!new Bounds(b.X - pad, b.Y - pad, b.Width + 2 * pad, b.Height + 2 * pad).Contains(p)) continue;
@@ -244,9 +293,12 @@ public sealed class DiagramController
     public DiagramEdge? HitEdge(Pt p)
     {
         var tol = 6 / Zoom;
-        for (var i = Diagram.Edges.Count - 1; i >= 0; i--)
+        var view = DiagramExtras.VisibleView(Diagram);
+        var layers = ReferenceEquals(view, Diagram) ? null : DiagramExtras.StateOf(Diagram);
+        for (var i = view.Edges.Count - 1; i >= 0; i--)
         {
-            var e = Diagram.Edges[i];
+            var e = view.Edges[i];
+            if (layers?.IsLocked(e) == true) continue;
             var pts = Notation.RouteIn(Diagram, e, BoundsOf);
             for (var k = 1; k < pts.Count; k++)
                 if (Notation.DistanceToSegment(p, pts[k - 1], pts[k]) <= tol) return e;
@@ -482,6 +534,20 @@ public sealed class DiagramController
             return false;
         }
 
+        // Hyperlinks: the link icon, or Ctrl/⌘-click anywhere on a linked shape, follows the link.
+        if (HitLinkBadge(_pressModel) is { } badgeNode)
+        {
+            LinkRequest = DiagramExtras.LinkOf(badgeNode);
+            return false;
+        }
+        if ((mods.HasFlag(Mods.Ctrl) || mods.HasFlag(Mods.Meta)) && clicks < 2
+            && VisibleNodes.LastOrDefault(n => DiagramExtras.LinkOf(n) != null && BoundsOf(n).Contains(_pressModel)) is { } linked
+            && ReferenceEquals(HitNode(_pressModel) ?? linked, linked))
+        {
+            LinkRequest = DiagramExtras.LinkOf(linked);
+            return false;
+        }
+
         if (HitArrow(_pressModel) is >= 0 and var dir)
         {
             Current = Gesture.QuickConnect;
@@ -554,7 +620,8 @@ public sealed class DiagramController
     }
 
     /// <returns>True if the view needs re-rendering.</returns>
-    public bool PointerMove(double sx, double sy)
+    /// <param name="mods">Modifier keys held: Shift frees an image's aspect ratio while resizing (and locks it for other shapes).</param>
+    public bool PointerMove(double sx, double sy, Mods mods = Mods.None)
     {
         CurrentModel = ToModel(sx, sy);
         switch (Current)
@@ -621,6 +688,9 @@ public sealed class DiagramController
                 if (_handle is 2 or 3 or 4) x1 = Math.Max(px, x0 + minW);
                 if (_handle is 0 or 1 or 2) y0 = Math.Min(py, y1 - minH);
                 if (_handle is 4 or 5 or 6) y1 = Math.Max(py, y0 + minH);
+                // Pictures keep their proportions (Shift resizes freely); other shapes keep them while Shift is held.
+                if (DiagramExtras.IsImage(n) != mods.HasFlag(Mods.Shift) && b.Width > 0 && b.Height > 0)
+                    (x0, y0, x1, y1) = KeepAspect(b, _handle, x0, y0, x1, y1);
                 _preview[n] = new Bounds(x0, y0, x1 - x0, y1 - y0);
                 return true;
             }
@@ -680,7 +750,7 @@ public sealed class DiagramController
                 {
                     var r = Bounds.FromPoints(_pressModel, CurrentModel);
                     if (r.Width > 2 && r.Height > 2)
-                        foreach (var n in Diagram.Nodes)
+                        foreach (var n in Diagram.Nodes.Where(Pickable))
                         {
                             var b = BoundsOf(n);
                             if (r.Contains(new Pt(b.X, b.Y)) && r.Contains(new Pt(b.Right, b.Bottom))) _selNodes.Add(n);
@@ -703,6 +773,23 @@ public sealed class DiagramController
             _quickDir = -1;
             _handle = -1;
         }
+    }
+
+    /// <summary>Adjusts a resize rectangle to the original's aspect ratio, anchored on the side or corner opposite the handle.</summary>
+    public static (double X0, double Y0, double X1, double Y1) KeepAspect(Bounds original, int handle, double x0, double y0, double x1, double y1)
+    {
+        var ratio = original.Width / original.Height;
+        double w = x1 - x0, h = y1 - y0;
+        if (handle is 0 or 2 or 4 or 6) { if (w / h > ratio) w = h * ratio; else h = w / ratio; }
+        else if (handle is 1 or 5) w = h * ratio;   // top / bottom edge: height leads
+        else h = w / ratio;                         // left / right edge: width leads
+        if (handle is 0 or 6 or 7) x0 = x1 - w;
+        else if (handle is 1 or 5) x0 = original.Center.X - w / 2;
+        x1 = x0 + w;
+        if (handle is 0 or 1 or 2) y0 = y1 - h;
+        else if (handle is 3 or 7) y0 = original.Center.Y - h / 2;
+        y1 = y0 + h;
+        return (x0, y0, x1, y1);
     }
 
     /// <summary>Tracks the shape under the pointer. Returns true when the hover adornments change.</summary>
@@ -970,6 +1057,75 @@ public sealed class DiagramController
         }
     }
 
+    // ---------------------------------------------------------------- hyperlinks & images
+
+    /// <summary>The link shared by the selected shapes, or null.</summary>
+    public string? SelectionLink() => _selNodes.Count > 0 ? SelectionStyle(DiagramExtras.LinkStyle) : null;
+
+    /// <summary>Sets (or clears, with null/empty) the hyperlink of every selected shape.</summary>
+    public void SetSelectionLink(string? link)
+    {
+        if (_ws.ReadOnly || _selNodes.Count == 0) return;
+        try
+        {
+            Model.SetLink(Diagram, _selNodes.ToList(), link);
+            _ws.SetStatus(string.IsNullOrWhiteSpace(link) ? "Link removed" : "Link set: Ctrl/⌘-click the shape or its link icon to follow it");
+        }
+        catch (InvalidOperationException ex) { _ws.SetStatus(ex.Message); }
+    }
+
+    /// <summary>
+    /// Inserts a picture (a data URI already downscaled by the browser) at a screen point, or in a free spot near the
+    /// middle of the view, at its natural size capped to 320 px. Returns the new shape, or null when it was refused.
+    /// </summary>
+    public DiagramNode? InsertImage(string dataUri, double naturalW, double naturalH, double? sx = null, double? sy = null, string? name = null)
+    {
+        if (_ws.ReadOnly) return null;
+        try
+        {
+            var (w, h) = DiagramExtras.FitImageSize(naturalW, naturalH);
+            Pt at;
+            if (sx is { } x && sy is { } y)
+            {
+                var p = ToModel(x, y);
+                at = new Pt(Snap(p.X - w / 2), Snap(p.Y - h / 2));
+            }
+            else
+            {
+                var vp = Viewport;
+                at = new Pt(Snap(vp.X + vp.Width / 2 - w / 2), Snap(vp.Y + vp.Height / 3 - h / 2));
+                while (Diagram.Nodes.Any(n => BoundsOf(n).X == at.X && BoundsOf(n).Y == at.Y)) at = new Pt(at.X + 20, at.Y + 20);
+            }
+            var owner = Model.DefaultOwnerFor(Diagram.Owner ?? Model.Root, ElementKind.Shape);
+            DiagramNode node;
+            using (Model.History.Transaction("Insert image"))
+            {
+                node = Model.AddImage(Diagram, owner, dataUri, new Bounds(at.X, at.Y, w, h), name);
+                PutOnActiveLayer(node);
+            }
+            _selNodes.Clear();
+            SelectedEdge = null;
+            _selNodes.Add(node);
+            Tool = null;
+            ToolSubtype = null;
+            EnsureVisible(BoundsOf(node));
+            Notify();
+            _ws.SetStatus("Image inserted: drag a corner to resize (Shift to stretch)");
+            return node;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _ws.SetStatus(ex.Message);
+            return null;
+        }
+    }
+
+    private void PutOnActiveLayer(DiagramNode node)
+    {
+        if (ActiveLayerId != DiagramExtras.DefaultLayerId && DiagramExtras.FindLayer(Diagram, ActiveLayerId) != null && node.ParentId == null)
+            Model.SetNodeStyle(Diagram, node, DiagramExtras.LayerStyle, ActiveLayerId);
+    }
+
     public bool CanPasteFormat => _formatClipboard != null;
 
     public void CopyFormat()
@@ -995,8 +1151,10 @@ public sealed class DiagramController
     {
         using (Model.History.Transaction("Clear format"))
         {
-            foreach (var n in _selNodes) foreach (var key in n.Style.Keys.ToList()) Model.SetNodeStyle(Diagram, n, key, null);
-            if (SelectedEdge != null) foreach (var key in SelectedEdge.Style.Keys.ToList()) Model.SetEdgeStyle(Diagram, SelectedEdge, key, null);
+            // Links and layers aren't "looks": keep them.
+            static bool Look(string key) => key is not (DiagramExtras.LinkStyle or DiagramExtras.LayerStyle);
+            foreach (var n in _selNodes) foreach (var key in n.Style.Keys.Where(Look).ToList()) Model.SetNodeStyle(Diagram, n, key, null);
+            if (SelectedEdge != null) foreach (var key in SelectedEdge.Style.Keys.Where(Look).ToList()) Model.SetEdgeStyle(Diagram, SelectedEdge, key, null);
         }
     }
 
@@ -1170,6 +1328,7 @@ public sealed class DiagramController
                 var bounds = new Bounds(Snap(p.X - w / 2), Snap(p.Y - h / 3), w, h);
                 if (Notation.IsBorderShape(kind) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
                 node = Model.AddNode(Diagram, e, bounds, parent: container);
+                PutOnActiveLayer(node);
             }
             _selNodes.Clear();
             SelectedEdge = null;
