@@ -62,10 +62,8 @@
     private void Pick(Element el)
     {
         _target = el;
-        var options = C.BulkLinkOptions(el);
-        // Requirements: «satisfy» first (design elements satisfy requirements), else «trace»; anything else: the first valid kind.
-        _option = (RequirementsOnly ? options.FirstOrDefault(o => o.Kind == ElementKind.Satisfy) ?? options.FirstOrDefault(o => o.Kind == ElementKind.Trace) : null)
-                  ?? options.FirstOrDefault();
+        // Preselected by the same rules a drawn line uses (association to an actor, «include» to a use case, «satisfy» to a requirement…).
+        _option = C.DefaultBulkLink(el);
     }
 
     private void Ok()

@@ -247,6 +247,7 @@ public sealed partial class DiagramController
     {
         _selNodes.RemoveWhere(n => !Diagram.Nodes.Contains(n) || !Pickable(n));
         _selEdges.RemoveWhere(e => !Diagram.Edges.Contains(e) || !Pickable(e));
+        if (AutoConnected != null && !Diagram.Edges.Contains(AutoConnected)) DismissAutoConnected();
         if (DiagramExtras.FindLayer(Diagram, ActiveLayerId) == null) ActiveLayerId = DiagramExtras.DefaultLayerId;
         if (Editing != null && !Diagram.Nodes.Contains(Editing)) Editing = null;
         if (EditingEdge != null && !Diagram.Edges.Contains(EditingEdge)) EditingEdge = null;
@@ -481,14 +482,82 @@ public sealed partial class DiagramController
         };
     }
 
-    /// <summary>The connector a quick-connect gesture draws between two kinds: the first valid one in this diagram's palette.</summary>
+    /// <summary>
+    /// The connector a quick-connect gesture draws between two kinds (see <see cref="ConnectorRules"/>): association between
+    /// actor and use case, «include» between use cases, «satisfy» to a requirement, composition between blocks on a BDD…
+    /// Free shapes and notes get a plain arrow; UAF viewpoints use their palette's first valid (stereotyped) link.
+    /// </summary>
     public PaletteItem? DefaultLink(ElementKind source, ElementKind target)
     {
         if (source is ElementKind.Shape or ElementKind.Comment || target is ElementKind.Shape or ElementKind.Comment) return new PaletteItem(ElementKind.Line, "arrow");
-        foreach (var l in Metamodel.PaletteLinks(Diagram.DiagramType))
-            if (l.Kind != ElementKind.Allocate && Metamodel.CheckEnds(l.Kind, source, target) == null) return l;
-        return null;
+        if (UafViewpoints.IsUaf(Diagram.DiagramType))
+        {
+            foreach (var l in Metamodel.PaletteLinks(Diagram.DiagramType))
+                if (l.Kind != ElementKind.Allocate && Metamodel.CheckEnds(l.Kind, source, target) == null) return l;
+            return null;
+        }
+        return ConnectorRules.Default(Diagram.DiagramType, source, target) is { } c ? new PaletteItem(c.Kind, c.Subtype) : null;
     }
+
+    /// <summary>The connector just drawn by quick-connect, whose type was picked automatically (the view shows a chip to switch it).</summary>
+    public DiagramEdge? AutoConnected { get; private set; }
+
+    private (DiagramNode From, DiagramNode To)? _autoEnds;
+
+    /// <summary>The types <see cref="AutoConnected"/> could be switched to, the chosen one first.</summary>
+    public IReadOnlyList<ConnectorChoice> AutoAlternatives =>
+        AutoConnected != null && _autoEnds is var (f, t) ? ConnectorRules.Candidates(Diagram.DiagramType, f.Element.Kind, t.Element.Kind) : [];
+
+    /// <summary>Is <paramref name="c"/> the type <see cref="AutoConnected"/> has now?</summary>
+    public bool IsAutoChoice(ConnectorChoice c) =>
+        AutoConnected is { } e && _autoEnds is var (f, _) && e.Relationship.Kind == c.Kind && ReferenceEquals(e.Relationship.Source, f.Element) != c.Reverse
+        && (c.Subtype == null || e.Relationship.Get(FieldKeys.Subtype) == c.Subtype);
+
+    /// <summary>Draws the automatically chosen connector from <paramref name="from"/> to <paramref name="to"/> (reversed when the rule says so).</summary>
+    private DiagramEdge? AutoConnect(DiagramNode from, DiagramNode to, bool select = true)
+    {
+        var plain = from.Element.Kind is ElementKind.Shape or ElementKind.Comment || to.Element.Kind is ElementKind.Shape or ElementKind.Comment;
+        if (plain || UafViewpoints.IsUaf(Diagram.DiagramType))
+        {
+            if (DefaultLink(from.Element.Kind, to.Element.Kind) is not { } link) return null;
+            return Connect(link.Kind, link.Subtype, from, to, select, link.Stereotype);
+        }
+        if (ConnectorRules.Default(Diagram.DiagramType, from.Element.Kind, to.Element.Kind) is not { } c) return null;
+        var (a, b) = c.Reverse ? (to, from) : (from, to);
+        var edge = Connect(c.Kind, c.Subtype, a, b, select);
+        if (edge == null) return null;
+        AutoConnected = edge;
+        _autoEnds = (from, to);
+        _ws.SetStatus($"Connected with {c.Label}" + (AutoAlternatives.Count > 1 ? " — use the chip on the line to change it" : ""));
+        return edge;
+    }
+
+    /// <summary>Replaces the automatically chosen connector with another type, keeping its bends and label. One undo step.</summary>
+    public void SwitchAutoConnector(ConnectorChoice choice)
+    {
+        if (_ws.ReadOnly || AutoConnected is not { } old || _autoEnds is not var (f, t) || !Diagram.Edges.Contains(old)) return;
+        try
+        {
+            DiagramEdge? edge;
+            using (Model.History.Transaction($"Change connector to {choice.Label}"))
+            {
+                var bends = old.Waypoints.ToList();
+                var name = old.Relationship.Name;
+                Model.Delete(old.Relationship);
+                var (a, b) = choice.Reverse ? (t, f) : (f, t);
+                edge = Connect(choice.Kind, choice.Subtype, a, b);
+                if (edge != null && bends.Count > 0 && choice.Kind != ElementKind.Message) Model.SetWaypoints(Diagram, edge, bends);
+                if (edge != null && !string.IsNullOrEmpty(name)) Model.Set(edge.Relationship, FieldKeys.Name, name);
+            }
+            AutoConnected = edge;
+            _autoEnds = edge != null ? (f, t) : null;
+            _ws.SetStatus($"Changed to {choice.Label}");
+        }
+        catch (InvalidOperationException ex) { _ws.SetStatus(ex.Message); }
+    }
+
+    /// <summary>Hides the connector-type chip.</summary>
+    public void DismissAutoConnected() { AutoConnected = null; _autoEnds = null; }
 
     /// <summary>Click on a hover arrow: add a connected copy on that side, or link to the shape already there.</summary>
     private void QuickClone(DiagramNode from, int dir)
@@ -509,9 +578,9 @@ public sealed partial class DiagramController
             && Notation.ShapeOf(n.Element) is not (NodeShape.Swimlane or NodeShape.Pool or NodeShape.Fragment) && BoundsOf(n).Intersects(target));
         try
         {
-            if (occupant != null && DefaultLink(from.Element.Kind, occupant.Element.Kind) is { } l0)
+            if (occupant != null && DefaultLink(from.Element.Kind, occupant.Element.Kind) != null)
             {
-                Connect(l0.Kind, l0.Subtype, from, occupant, stereotype: l0.Stereotype);
+                AutoConnect(from, occupant);
                 return;
             }
             using (Model.History.Transaction($"Add connected {next.Title}"))
@@ -519,10 +588,10 @@ public sealed partial class DiagramController
                 // CreateNode positions by (centre x, top + h/3); convert from the centre.
                 var node = CreateNode(next.Kind, next.Subtype, new Pt(Snap(cx), Snap(cy - h / 2) + h / 3), size: (w, h), stereotype: next.Stereotype);
                 if (node == null) return;
-                if (DefaultLink(from.Element.Kind, node.Element.Kind) is { } link)
+                if (DefaultLink(from.Element.Kind, node.Element.Kind) != null)
                 {
                     if (from.Element.Kind == ElementKind.Lifeline) _pressModel = new Pt(_pressModel.X, b.Y + Notation.LifelineHeader + 40);
-                    Connect(link.Kind, link.Subtype, from, node, select: false, stereotype: link.Stereotype);
+                    AutoConnect(from, node, select: false);
                 }
                 _selNodes.Clear();
                 SelectedEdge = null;
@@ -542,9 +611,8 @@ public sealed partial class DiagramController
         {
             if (to != null)
             {
-                var link = DefaultLink(from.Element.Kind, to.Element.Kind);
-                if (link == null) { _ws.SetStatus($"Nothing can connect {Metamodel.DisplayName(from.Element.Kind)} to {Metamodel.DisplayName(to.Element.Kind)} here"); return; }
-                Connect(link.Kind, link.Subtype, from, to, stereotype: link.Stereotype);
+                if (DefaultLink(from.Element.Kind, to.Element.Kind) == null) { _ws.SetStatus($"Nothing can connect {Metamodel.DisplayName(from.Element.Kind)} to {Metamodel.DisplayName(to.Element.Kind)} here"); return; }
+                AutoConnect(from, to);
                 return;
             }
             if (Successor(from.Element) is not { } next) return;
@@ -552,7 +620,7 @@ public sealed partial class DiagramController
             {
                 var node = CreateNode(next.Kind, next.Subtype, at, stereotype: next.Stereotype);
                 if (node == null) return;
-                if (DefaultLink(from.Element.Kind, node.Element.Kind) is { } link) Connect(link.Kind, link.Subtype, from, node, select: false, stereotype: link.Stereotype);
+                if (DefaultLink(from.Element.Kind, node.Element.Kind) != null) AutoConnect(from, node, select: false);
                 _selNodes.Clear();
                 SelectedEdge = null;
                 _selNodes.Add(node);
@@ -588,6 +656,7 @@ public sealed partial class DiagramController
         _pressScreen = new Pt(sx, sy);
         _pressModel = ToModel(sx, sy);
         _selAtPress = (_selNodes.ToList(), _selEdges.ToList());
+        DismissAutoConnected();
         CurrentModel = _pressModel;
         Editing = null;
         EditingEdge = null;
@@ -990,6 +1059,7 @@ public sealed partial class DiagramController
                 RemoveSelectionFromDiagram();
                 return true;
             case "Escape":
+                DismissAutoConnected();
                 Tool = null; ToolSubtype = null; ToolStereotype = null; Editing = null; EditingEdge = null; QuickAddRequest = null; _selNodes.Clear(); SelectedEdge = null; Notify();
                 return true;
             case "a" or "A" when cmd:
@@ -1613,8 +1683,9 @@ public sealed partial class DiagramController
         }
     }
 
-    private void Connect(ElementKind kind, string? subtype, DiagramNode from, DiagramNode to, bool select = true, string? stereotype = null)
+    private DiagramEdge? Connect(ElementKind kind, string? subtype, DiagramNode from, DiagramNode to, bool select = true, string? stereotype = null)
     {
+        DiagramEdge? edge;
         using (Model.History.Transaction($"Create {Metamodel.DisplayName(kind)}"))
         {
             var r = Model.Connect(kind, from.Element, to.Element);
@@ -1627,15 +1698,16 @@ public sealed partial class DiagramController
             // Ports belong to a block type, so remember which part they were reached through.
             if (Notation.IsBorderShape(from.Element) && Diagram.ParentOf(from) is { } fp) Model.Set(r, FieldKeys.SourcePart, fp.Element.Id);
             if (Notation.IsBorderShape(to.Element) && Diagram.ParentOf(to) is { } tp) Model.Set(r, FieldKeys.TargetPart, tp.Element.Id);
-            var edge = Model.AddEdge(Diagram, r);
+            edge = Model.AddEdge(Diagram, r);
             // A message's vertical position is its place in time: use where the user started dragging.
             if (edge != null && kind == ElementKind.Message)
                 Model.SetWaypoints(Diagram, edge, [new Pt(0, Snap(Math.Max(_pressModel.Y, from.Bounds.Y + Notation.LifelineHeader + 20)))]);
-            if (!select) return;
+            if (!select) return edge;
             _selNodes.Clear();
             SelectedEdge = edge;
         }
         Notify();
+        return edge;
     }
 
     private void InsertWaypoint(DiagramEdge edge, Pt at)

@@ -213,6 +213,32 @@
         </div>
     }
 
+    @* The connector type quick-connect picked automatically: a chip on the new line, one click to switch it. *@
+    @if (C.AutoConnected is { } auto && C.Diagram.Edges.Contains(auto) && C.Current == DiagramController.Gesture.None && C.AutoAlternatives is { Count: > 0 } alts)
+    {
+        var at = C.ToScreen(Notation.Midpoint(Notation.RouteIn(C.Diagram, auto, C.BoundsOf)));
+        var current = alts.FirstOrDefault(C.IsAutoChoice);
+        <div class="conn-chip" data-testid="connector-chip" style="left:@F(at.X)px; top:@F(at.Y + 10)px"
+             @onpointerdown:stopPropagation="true" @onkeydown:stopPropagation="true" @onwheel:stopPropagation="true">
+            <button class="chip on" title="Connector type chosen automatically — click to change" @onclick="() => _connMenu = !_connMenu">
+                @(current?.Label ?? Metamodel.DisplayName(auto.Relationship.Kind)) @(alts.Count > 1 ? "▾" : "")
+            </button>
+            @if (_connMenu && !Ws.ReadOnly)
+            {
+                <div class="conn-menu">
+                    @foreach (var a in alts)
+                    {
+                        var choice = a;
+                        <div class="conn-opt @(C.IsAutoChoice(choice) ? "on" : "")" data-testid="connector-option" @onclick="() => { C.SwitchAutoConnector(choice); _connMenu = false; }">
+                            <span>@choice.Label</span>@if (choice.Reverse) { <span class="rev" title="Points the other way">⇄</span> }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else { _connMenu = false; }
+
     @if (C.Tool is { } activeTool)
     {
         <div class="hint">
@@ -365,6 +391,7 @@
 
     private string? _fmtMenu;
     private bool _layersOpen;
+    private bool _connMenu;
 
     /// <summary>The shapes panel's "Image" tile: opens a file picker instead of creating a shape directly.</summary>
     private static readonly PaletteItem ImageItem = new(ElementKind.Shape, DiagramExtras.ImageSubtype, "Image");

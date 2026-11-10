@@ -9,7 +9,7 @@
 const LONG_PRESS_MS = 500;
 const TAP_SLOP = 8;                    // px a finger may drift and still count as a tap
 const MIN_ZOOM = 0.2, MAX_ZOOM = 4;    // DiagramController.SetZoom's range
-const PASS_THROUGH = ".toolbox, .selbar, .minimap, .layers-fab, .inline-editor, .quickadd, .fmt-pop, button, input, textarea, select, a, [contenteditable]";
+const PASS_THROUGH = ".toolbox, .selbar, .conn-chip, .minimap, .layers-fab, .inline-editor, .quickadd, .fmt-pop, button, input, textarea, select, a, [contenteditable]";
 
 let dotnet = null;
 let phoneMax = 900, tabletMax = 1280;

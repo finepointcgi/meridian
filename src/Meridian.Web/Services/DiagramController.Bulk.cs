@@ -41,8 +41,20 @@ public sealed partial class DiagramController
             if (sel.All(e => Metamodel.CheckEnds(kind, e.Kind, target.Kind) == null)) options.Add(new BulkLinkOption(kind, true));
             else if (sel.All(e => Metamodel.CheckEnds(kind, target.Kind, e.Kind) == null)) options.Add(new BulkLinkOption(kind, false));
         }
-        return options;
+        // Most fitting first, by the same rules a drawn line uses (use case → actor: association, → use case: «include»,
+        // → requirement: «satisfy», test case → requirement: «verify», action → block: «allocate»…).
+        var ranked = sel.Select(e => e.Kind).Distinct()
+            .Select(k => ConnectorRules.Candidates(Diagram.DiagramType, k, target.Kind)).ToList();
+        int Rank(BulkLinkOption o) => ranked.Sum(list =>
+        {
+            var i = list.ToList().FindIndex(c => c.Kind == o.Kind && c.Reverse != o.SelectionIsSource);
+            return i < 0 ? 1000 : i;
+        });
+        return options.OrderBy(Rank).ToList();   // stable: ties keep the menu order
     }
+
+    /// <summary>The relationship "Link to…" preselects for <paramref name="target"/>: the most fitting valid one.</summary>
+    public BulkLinkOption? DefaultBulkLink(Element target) => BulkLinkOptions(target).FirstOrDefault();
 
     /// <summary>Elements "Link to…" can point at: anything that some relationship can connect to the whole selection.</summary>
     public IEnumerable<Element> BulkLinkCandidates(string? query, bool requirementsOnly = false)
@@ -97,13 +109,10 @@ public sealed partial class DiagramController
         return created;
     }
 
-    /// <summary>"Trace to requirement…": «satisfy» when the selection can satisfy it, otherwise «trace».</summary>
+    /// <summary>"Trace to requirement…": the fitting link to it (design elements «satisfy», test cases «verify», requirements «deriveReqt»).</summary>
     public IReadOnlyList<Relationship> TraceToRequirement(Element requirement)
     {
-        var options = BulkLinkOptions(requirement);
-        var pick = options.FirstOrDefault(o => o.Kind == ElementKind.Satisfy && o.SelectionIsSource)
-                   ?? options.FirstOrDefault(o => o.Kind == ElementKind.Trace && o.SelectionIsSource)
-                   ?? options.FirstOrDefault();
+        var pick = DefaultBulkLink(requirement);
         return pick == null ? [] : BulkLink(pick.Kind, requirement, pick.SelectionIsSource);
     }
 

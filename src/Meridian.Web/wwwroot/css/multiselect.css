@@ -13,3 +13,14 @@
 
 /* The halo drawn under every selected connector (also visible on a light canvas in dark mode). */
 .canvas svg.main .edge-sel { pointer-events: none; }
+
+/* The connector type chosen automatically for a line just drawn: a chip on the line with a menu to switch it. */
+.canvas .conn-chip { position: absolute; transform: translateX(-50%); z-index: 6; }
+.canvas .conn-chip .chip { background: var(--panel-solid); box-shadow: var(--shadow-sm); white-space: nowrap; }
+.canvas .conn-chip .chip.on { background: var(--panel-solid); border-color: var(--sel-border); color: var(--text); }
+.canvas .conn-chip .conn-menu { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); min-width: 150px; padding: 4px;
+  background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.canvas .conn-chip .conn-opt { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.canvas .conn-chip .conn-opt:hover { background: var(--hover); color: var(--text); }
+.canvas .conn-chip .conn-opt.on { background: var(--sel); color: var(--text); }
+.canvas .conn-chip .conn-opt .rev { color: var(--text-3); }

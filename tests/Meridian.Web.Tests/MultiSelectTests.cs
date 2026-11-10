@@ -235,6 +235,96 @@ public class MultiSelectTests : TestContext
         Assert.Equal("core", f.UseCases[0].Element.Get(FieldKeys.Stereotypes).Split(',')[0].Trim());
     }
 
+    /// <summary>Hovers <paramref name="from"/>, then drags its right-hand quick-connect arrow onto <paramref name="to"/>.</summary>
+    private static void QuickConnect(DiagramController c, DiagramNode from, DiagramNode to)
+    {
+        var (hx, hy) = Screen(c, from.Bounds.Center);
+        c.PointerMove(hx, hy);
+        var (ax, ay) = Screen(c, c.ArrowPoint(from, 1));
+        c.PointerMove(ax, ay);
+        c.PointerDown(ax, ay, 0, Mods.None, 1);
+        var (tx, ty) = Screen(c, to.Bounds.Center);
+        c.PointerMove(tx, ty);
+        c.PointerUp(Mods.None);
+    }
+
+    [Fact]
+    public void Drawing_A_Line_Picks_The_Connector_Type_And_The_Chip_Switches_It()
+    {
+        var f = Build();
+        var (_, c) = Open(f);
+        f.M.Rename(f.UseCases[0].Element, "Browse");
+        var before = f.M.RelationshipsOf(f.UseCases[2].Element).Count();
+
+        // Use case → use case: «include».
+        QuickConnect(c, f.UseCases[1], f.UseCases[2]);
+        var auto = Assert.IsType<DiagramEdge>(c.AutoConnected);
+        Assert.Equal(ElementKind.Include, auto.Relationship.Kind);
+        Assert.Same(f.UseCases[1].Element, auto.Relationship.Source);
+        Assert.Equal(ElementKind.Include, c.AutoAlternatives[0].Kind);
+        Assert.Contains(c.AutoAlternatives, a => a.Kind == ElementKind.Extend);
+        Assert.True(c.IsAutoChoice(c.AutoAlternatives[0]));
+
+        // The chip on the new line shows it; picking «extend» there replaces it in one undo step.
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<DiagramView>(p => p.Add(x => x.C, c));
+        Assert.Contains("«include»", cut.Find("[data-testid=connector-chip]").TextContent);
+        cut.Find("[data-testid=connector-chip] button").Click();
+        cut.FindAll("[data-testid=connector-option]").First(o => o.TextContent.Contains("«extend»")).Click();
+        var switched = f.M.RelationshipsOf(f.UseCases[2].Element).Single(r => ReferenceEquals(r.Source, f.UseCases[1].Element));
+        Assert.Equal(ElementKind.Extend, switched.Kind);
+        Assert.NotNull(f.D.EdgeFor(switched));
+        Assert.Contains("«extend»", cut.Find("[data-testid=connector-chip]").TextContent);
+        f.M.History.Undo();
+        Assert.Equal(ElementKind.Include, f.M.RelationshipsOf(f.UseCases[2].Element).Single(r => ReferenceEquals(r.Source, f.UseCases[1].Element)).Kind);
+        Assert.Equal(before + 1, f.M.RelationshipsOf(f.UseCases[2].Element).Count());
+
+        // Use case → actor: association; Esc hides the chip.
+        QuickConnect(c, f.UseCases[2], f.Actor);
+        Assert.Equal(ElementKind.Association, c.AutoConnected!.Relationship.Kind);
+        c.Key("Escape", Mods.None);
+        Assert.Null(c.AutoConnected);
+    }
+
+    [Fact]
+    public void A_Line_From_A_Requirement_To_A_Block_Becomes_Satisfy_From_The_Block()
+    {
+        var m = new ModelRepository("Reqs");
+        var d = m.CreateDiagram(m.Root, DiagramType.Requirement, "Reqs");
+        var req = m.AddNode(d, m.Create(m.Root, ElementKind.Requirement, "Brake"), new Bounds(0, 0, 160, 80));
+        var block = m.AddNode(d, m.Create(m.Root, ElementKind.Block, "Brakes"), new Bounds(400, 0, 140, 70));
+        var ws = Services.GetRequiredService<Workspace>();
+        ws.UseLocalModel(m);
+        var c = ws.Open(d);
+        c.SetZoom(1);
+
+        QuickConnect(c, req, block);
+        var r = c.AutoConnected!.Relationship;
+        Assert.Equal(ElementKind.Satisfy, r.Kind);
+        Assert.Same(block.Element, r.Source);
+        Assert.Same(req.Element, r.Target);
+    }
+
+    [Fact]
+    public void Link_To_Preselects_The_Fitting_Relationship()
+    {
+        var f = Build();
+        var (_, c) = Open(f);
+        var tc = f.M.Create(f.M.Root, ElementKind.TestCase, "Checkout test");
+        c.SelectElements(f.UseCases.Select(n => n.Element));
+        Assert.Equal(ElementKind.Association, c.DefaultBulkLink(f.Actor.Element)!.Kind);
+        Assert.Equal(ElementKind.Include, c.DefaultBulkLink(f.M.Create(f.M.Root, ElementKind.UseCase, "Log in"))!.Kind);
+        Assert.Equal(ElementKind.Satisfy, c.DefaultBulkLink(f.Requirement)!.Kind);
+
+        var shown = f.M.AddNode(f.D, tc, new Bounds(600, 400, 120, 60));
+        c.SelectElements([tc]);
+        var verify = c.DefaultBulkLink(f.Requirement)!;
+        Assert.Equal(ElementKind.Verify, verify.Kind);
+        Assert.True(verify.SelectionIsSource);
+        Assert.Equal(ElementKind.Verify, c.TraceToRequirement(f.Requirement).Single().Kind);
+        Assert.NotNull(shown);
+    }
+
     [Fact]
     public void Touch_Long_Press_Adds_To_The_Selection_It_Had_Before_The_Press()
     {
