@@ -484,7 +484,8 @@
         if (r == null) return;   // not laid out (prerendering, tests)
         _origin = (r.Left, r.Top);
         C.ViewWidth = r.Width;
-        C.LeftInset = _shapesOpen && !Ws.ReadOnly ? 236 : 64;
+        // Room for the shapes panel on the left, except on a phone-sized canvas, where the panel is hidden.
+        C.LeftInset = r.Width < 600 ? 8 : _shapesOpen && !Ws.ReadOnly ? 236 : 64;
         C.ViewHeight = r.Height;
         if (C.NeedsFit && r.Width > 50) { C.ZoomToFit(); StateHasChanged(); }
     }
