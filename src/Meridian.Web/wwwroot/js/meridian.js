@@ -90,3 +90,45 @@ window.meridian = (() => {
     uninstallCanvas: el => el?._meridianRo?.disconnect(),
   };
 })();
+
+// Desktop app: the host announces a newer Meridian release over the Photino bridge; show a small dismissible notice.
+(() => {
+  const ext = window.external;
+  if (typeof ext?.sendMessage !== "function" || typeof ext?.receiveMessage !== "function") return;
+  const css = "position:fixed;right:16px;bottom:16px;z-index:10000;max-width:360px;padding:10px 12px;border-radius:10px;" +
+    "background:#131b2b;color:#e7ecf6;border:1px solid rgba(79,140,255,.5);box-shadow:0 8px 28px rgba(0,0,0,.35);" +
+    "font:13px/1.4 Inter,-apple-system,'Segoe UI',system-ui,sans-serif;display:flex;gap:10px;align-items:center;";
+  const btn = "border:none;border-radius:7px;cursor:pointer;font:inherit;";
+  let box = null;
+  const show = (text, action) => {
+    if (!box) {
+      box = document.createElement("div");
+      box.setAttribute("role", "status");
+      box.style.cssText = css;
+      document.body.appendChild(box);
+    }
+    box.replaceChildren();
+    const span = document.createElement("span");
+    span.style.flex = "1";
+    span.textContent = text;
+    box.appendChild(span);
+    if (action) {
+      const go = Object.assign(document.createElement("button"), { textContent: action });
+      go.style.cssText = btn + "background:#4f8cff;color:#fff;padding:5px 10px;font-weight:600;";
+      go.onclick = () => { ext.sendMessage(JSON.stringify({ command: "update" })); show("Downloading the update…"); };
+      box.appendChild(go);
+    }
+    const x = Object.assign(document.createElement("button"), { textContent: "×", title: "Dismiss" });
+    x.style.cssText = btn + "background:none;color:#a3aec4;font-size:16px;";
+    x.onclick = () => { box?.remove(); box = null; };
+    box.appendChild(x);
+  };
+  ext.receiveMessage(raw => {
+    let m; try { m = JSON.parse(raw); } catch { return; }
+    if (m?.type === "update") show(`Meridian ${m.version} is available.`, "Install");
+    else if (m?.type === "update-progress" && box) show(`Downloading Meridian… ${Math.round(m.percent)}%`);
+    else if (m?.type === "update-error") show(`Update failed: ${m.message}`);
+  });
+  const hello = () => ext.sendMessage(JSON.stringify({ command: "hello" }));
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hello); else hello();
+})();

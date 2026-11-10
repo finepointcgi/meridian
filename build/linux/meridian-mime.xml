@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- shared-mime-info types for Meridian documents (installed by install.sh, the .deb and AppImage integrators). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-meridian">
+    <comment>Meridian project</comment>
+    <sub-class-of type="application/json"/>
+    <generic-icon name="meridian"/>
+    <glob pattern="*.meridian"/>
+  </mime-type>
+  <mime-type type="text/x-sysml">
+    <comment>SysML v2 textual model</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.sysml"/>
+  </mime-type>
+</mime-info>

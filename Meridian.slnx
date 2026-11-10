@@ -11,6 +11,7 @@
     <Project Path="src/Meridian.Web/Meridian.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Meridian.Desktop.Tests/Meridian.Desktop.Tests.csproj" />
     <Project Path="tests/Meridian.Tests/Meridian.Tests.csproj" />
     <Project Path="tests/Meridian.Web.Tests/Meridian.Web.Tests.csproj" />
   </Folder>

@@ -1,0 +1,4 @@
+#!/bin/sh
+# AppImage entry point: run the bundled Meridian with any files passed by the desktop.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/lib/meridian/Meridian" "$@"
