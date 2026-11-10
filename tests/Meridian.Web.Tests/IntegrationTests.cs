@@ -359,7 +359,7 @@ public class OslcTests
         Assert.Contains("0 to 100", accel.Element(Oslc.Dcterms + "description")!.Value);
         Assert.Equal(2, accel.Elements(Oslc.Rm + "satisfiedBy").Count());
         Assert.Single(accel.Elements(Oslc.Rm + "validatedBy"));
-        Assert.StartsWith("https://meridian.test/?project=", accel.Element(Oslc.Rm + "satisfiedBy")!.Attribute(Oslc.Rdf + "resource")!.Value);
+        Assert.StartsWith("https://meridian.test/oslc/projects/", accel.Element(Oslc.Rm + "satisfiedBy")!.Attribute(Oslc.Rdf + "resource")!.Value);
         Assert.Equal(all.Count.ToString(), reparsed.Root.Element(Oslc.Core + "ResponseInfo")!.Element(Oslc.Core + "totalCount")!.Value);
     }
 
@@ -396,7 +396,7 @@ public class OslcTests
     public void Selector_Page_Escapes_Model_Text()
     {
         var reqs = new List<Oslc.Req> { new("https://m/r/1", "REQ-1", "<script>alert(1)</script>", "", [], [], "https://m") };
-        var html = IntegrationsSetup.SelectorPage("P & Q", "\"x", reqs);
+        var html = OslcEndpoints.SelectorPage("P & Q", "\"x", reqs);
         Assert.DoesNotContain("<script>alert(1)", html);
         Assert.Contains("&lt;script&gt;", html);
         Assert.Contains("P &amp; Q", html);
