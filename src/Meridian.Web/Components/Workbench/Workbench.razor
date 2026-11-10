@@ -32,6 +32,8 @@
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.Commit" OnClick="Save" Disabled="Ws.ReadOnly">Commit version… <Key>⌘S</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory">Version history…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.CallSplit" OnClick="ShowBranches">Branches &amp; merge…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Flag" OnClick="ShowBaselines">Baselines…</MudMenuItem>
                 @if (!Host.LocalMode)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
@@ -46,6 +48,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
             </ChildContent>
         </MudMenu>
+        <BranchPicker />
 
         <div class="cmdk" @onclick="() => _palette!.Show()">
             <MudIcon Icon="@Icons.Material.Outlined.Search" Style="font-size:16px" />

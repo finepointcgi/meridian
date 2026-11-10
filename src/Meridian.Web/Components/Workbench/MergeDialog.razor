@@ -1,0 +1,148 @@
+@using Meridian.Core.Analysis
+@using Meridian.Core.Model
+
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.MergeType" />
+            <MudText Typo="Typo.h6">Merge <span class="vc-ref">@Plan.Source.Name</span> into <span class="vc-ref">@Plan.Target.Name</span></MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="d-flex align-center gap-2 mt-1 flex-wrap">
+            <span class="vc-stat">@_incoming.Count change@(_incoming.Count == 1 ? "" : "s") to @Plan.Target.Name</span>
+            @if (Conflicts.Count > 0)
+            {
+                <span class="vc-stat warn">@Conflicts.Count conflict@(Conflicts.Count == 1 ? "" : "s") · @Conflicts.Count(c => c.Choice != MergeChoice.Ours) taken from @Plan.Source.Name</span>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => All(MergeChoice.Ours)">Keep all @Plan.Target.Name</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => All(MergeChoice.Theirs)">Take all @Plan.Source.Name</MudButton>
+            }
+            else
+            {
+                <span class="vc-stat ok">No conflicts — the changes combine cleanly</span>
+            }
+        </div>
+
+        @if (Conflicts.Count > 0)
+        {
+            <div class="vc-conflicts mt-3">
+                <div class="vc-crow vc-head">
+                    <span>Conflict</span><span>Base</span><span>@Plan.Target.Name (ours)</span><span>@Plan.Source.Name (theirs)</span>
+                </div>
+                @foreach (var c in Conflicts)
+                {
+                    var conflict = c;
+                    <div class="vc-crow">
+                        <div class="vc-what">
+                            <div class="d-flex align-center gap-2">
+                                <span class="vc-kind">@KindLabel(conflict.Kind)</span>
+                                <MudIcon Icon="@UiKinds.Icon(conflict.ElementKind)" Style="font-size:15px; opacity:.7" />
+                                <b>@conflict.ElementName</b>
+                            </div>
+                            <div class="dim">@conflict.Path@(conflict.Path.Length > 0 ? " · " : "")<b>@conflict.Subject</b></div>
+                            <div class="dim">@conflict.Description</div>
+                            @if (conflict.AllowsCustom)
+                            {
+                                <div class="d-flex align-center gap-2 mt-1">
+                                    <MudCheckBox T="bool" Value="@(conflict.Choice == MergeChoice.Custom)" ValueChanged="v => SetCustom(conflict, v)" Dense="true" Size="Size.Small" Label="Custom value" />
+                                </div>
+                                @if (conflict.Choice == MergeChoice.Custom)
+                                {
+                                    <MudTextField T="string" Value="conflict.CustomValue" ValueChanged="v => { conflict.CustomValue = v; Recompute(); }" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Lines="@(conflict.Subject is "documentation" or "text" ? 3 : 1)" Placeholder="Empty clears the field" />
+                                }
+                            }
+                        </div>
+                        <div class="vc-val base">@Show(conflict.Base)</div>
+                        <div class="vc-val pick @(conflict.Choice == MergeChoice.Ours ? "on" : "")" @onclick="() => Choose(conflict, MergeChoice.Ours)">
+                            <span class="vc-radio"></span>@Show(conflict.Ours)
+                        </div>
+                        <div class="vc-val pick @(conflict.Choice == MergeChoice.Theirs ? "on" : "")" @onclick="() => Choose(conflict, MergeChoice.Theirs)">
+                            <span class="vc-radio"></span>@Show(conflict.Theirs)
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="mt-3">
+            <div class="vc-section" @onclick="() => _showChanges = !_showChanges">
+                <MudIcon Icon="@(_showChanges ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Style="font-size:16px" />
+                Result preview: what changes on @Plan.Target.Name
+            </div>
+            @if (_showChanges)
+            {
+                <DiffList Diff="_incoming" MaxItems="300" />
+            }
+        </div>
+
+        <MudTextField T="string" @bind-Value="_message" Label="Merge commit message" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3" Immediate="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.MergeType" Disabled="string.IsNullOrWhiteSpace(_message)" OnClick="Merge">
+            Merge into @Plan.Target.Name
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Decision(ModelRepository Merged, string Message);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public MergePlan Plan { get; set; } = default!;
+
+    private IReadOnlyList<MergeConflict> Conflicts => Plan.Result.Conflicts;
+    private ModelRepository _merged = default!;
+    private IReadOnlyList<ElementDiff> _incoming = [];
+    private string _message = "";
+    private bool _showChanges;
+
+    protected override void OnInitialized()
+    {
+        _message = $"Merge “{Plan.Source.Name}” into “{Plan.Target.Name}”";
+        _merged = Plan.Result.Model;
+        _incoming = Plan.IncomingChanges(_merged);
+        _showChanges = Conflicts.Count == 0;
+    }
+
+    private void Recompute()
+    {
+        _merged = Plan.Result.Resolve();
+        _incoming = Plan.IncomingChanges(_merged);
+    }
+
+    private void Choose(MergeConflict c, MergeChoice choice)
+    {
+        c.Choice = choice;
+        Recompute();
+    }
+
+    private void SetCustom(MergeConflict c, bool on)
+    {
+        if (on) c.CustomValue ??= c.Ours ?? c.Theirs;
+        c.Choice = on ? MergeChoice.Custom : MergeChoice.Ours;
+        Recompute();
+    }
+
+    private void All(MergeChoice choice)
+    {
+        Plan.Result.ChooseAll(choice);
+        Recompute();
+    }
+
+    private void Merge() => MudDialog.Close(DialogResult.Ok(new Decision(Plan.Result.Resolve(), _message)));
+
+    private static string Show(string? v) => v is null ? "∅ (none)" : v.Length > 400 ? v[..400] + "…" : v;
+
+    private static string KindLabel(MergeConflictKind k) => k switch
+    {
+        MergeConflictKind.Field => "FIELD",
+        MergeConflictKind.DeleteModify => "DELETE / EDIT",
+        MergeConflictKind.Move => "MOVE",
+        MergeConflictKind.MoveEdit => "MOVE / EDIT",
+        MergeConflictKind.DiagramNode => "SHAPE",
+        _ => "PATH",
+    };
+}

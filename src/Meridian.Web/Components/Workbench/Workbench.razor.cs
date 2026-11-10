@@ -178,7 +178,12 @@ public partial class Workbench
     private async Task ShowHistory()
     {
         if (Ws.Session is null) return;
-        await Dialogs.ShowAsync<HistoryDialog>("Version history", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var dialog = await Dialogs.ShowAsync<HistoryDialog>("Version history", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        switch ((await dialog.Result)?.Data)
+        {
+            case HistoryDialog.BranchFrom b: await NewBranch(b.VersionId); break;
+            case "__baselines__": await ShowBaselines(); break;
+        }
     }
 
     private async Task DownloadProject()
@@ -345,6 +350,7 @@ public partial class Workbench
             m.Add(MenuEntry.Do($"Show on “{active.Diagram.Name}”", () => ShowOnActiveDiagram(e)));
         m.Add(MenuEntry.Async("Rename…", () => Rename(e), "F2"));
         if (e.Owner != null) m.Add(MenuEntry.Async("Delete", () => Delete(e), "⌦"));
+        m.AddRange(LockEntries(e));   // element locking (Workbench.VersionControl.cs)
         m.Add(MenuEntry.Sep());
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
@@ -872,9 +878,8 @@ public partial class Workbench
         if (Ws.Session is null || Ws.User is null) return;
         var message = await Prompt("Commit version", "Describe this version", $"Snapshot {DateTime.Now:MMM d HH:mm}");
         if (string.IsNullOrWhiteSpace(message)) return;
-        await Ws.Session.PersistAsync();
-        var n = await Db.CommitVersionAsync(Ws.Session.ProjectId, message.Trim(), ProjectFile.Serialize(Ws.Model), Ws.User.Id);
-        Snackbar.Add($"Committed version {n}", Severity.Success);
+        var (_, n) = await VersionControl.CommitAsync(Db, Ws.Session, message, Ws.User.Id);   // on the open branch
+        Snackbar.Add($"Committed version {n}{(Ws.BranchId is null ? "" : $" on {Ws.BranchName}")}", Severity.Success);
         Ws.Log($"Committed version {n}: {message}");
     }
 

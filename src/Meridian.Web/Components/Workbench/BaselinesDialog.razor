@@ -1,0 +1,177 @@
+@using Meridian.Data
+@using Meridian.Core.Analysis
+@using Meridian.Serialization
+@inject IMeridianStore Db
+@inject Workspace Ws
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Flag" /><MudText Typo="Typo.h6">Baselines</MudText></div></TitleContent>
+    <DialogContent>
+        <div class="vc-baselines">
+            <div class="vc-pane">
+                <div class="vc-section-title">New baseline</div>
+                <MudTextField T="string" @bind-Value="_name" Placeholder="e.g. PDR 1.0" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Disabled="Ws.ReadOnly" />
+                <MudTextField T="string" @bind-Value="_description" Label="Description (optional)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" Disabled="Ws.ReadOnly" />
+                <MudSelect T="long" @bind-Value="_version" Label="Version" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-2" Dense="true" Disabled="Ws.ReadOnly">
+                    <MudSelectItem T="long" Value="0L">Commit the current state of @Ws.BranchName now</MudSelectItem>
+                    @foreach (var v in _versions)
+                    {
+                        <MudSelectItem T="long" Value="v.Id">v@(v.Number) · @v.Message</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2" FullWidth="true" StartIcon="@Icons.Material.Outlined.Flag"
+                           Disabled="@(Ws.ReadOnly || string.IsNullOrWhiteSpace(_name))" OnClick="Create">Create baseline</MudButton>
+
+                <div class="vc-section-title mt-4">Baselines (@_baselines.Count)</div>
+                <div class="vc-blist">
+                    @foreach (var b in _baselines)
+                    {
+                        var baseline = b;
+                        <div class="vc-bitem @(_before == Key(b) || _after == Key(b) ? "on" : "")">
+                            <div class="d-flex align-center gap-2">
+                                <MudIcon Icon="@Icons.Material.Filled.Flag" Style="font-size:15px; color:var(--mud-palette-primary)" />
+                                <b style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis">@b.Name</b>
+                                <MudTooltip Text="Compare with the current model"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.CompareArrows" OnClick="() => CompareWithCurrent(baseline)" /></MudTooltip>
+                                @if (Ws.Role == ProjectRole.Owner)
+                                {
+                                    <MudTooltip Text="Delete baseline"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(baseline)" /></MudTooltip>
+                                }
+                            </div>
+                            <div class="dim">v@(b.VersionNumber) on @b.BranchName · @b.CreatedBy · @b.CreatedAt.ToLocalTime().ToString("MMM d, yyyy HH:mm")</div>
+                            @if (!string.IsNullOrWhiteSpace(b.Description)) { <div class="dim" style="font-style:italic">@b.Description</div> }
+                        </div>
+                    }
+                    @if (_baselines.Count == 0) { <MudText Typo="Typo.body2" Class="pa-2" Style="opacity:.7">No baselines yet. A baseline is an immutable, named tag on a version (e.g. for a design review).</MudText> }
+                </div>
+            </div>
+            <div class="vc-pane">
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <MudSelect T="string" Value="_before" ValueChanged="v => { _before = v; _ = Compare(); }" Label="Before" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:220px">
+                        @Options()
+                    </MudSelect>
+                    <MudIcon Icon="@Icons.Material.Outlined.ArrowForward" Style="opacity:.6" />
+                    <MudSelect T="string" Value="_after" ValueChanged="v => { _after = v; _ = Compare(); }" Label="After" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="min-width:220px">
+                        @Options()
+                    </MudSelect>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.FileDownload" Disabled="_diff is null" OnClick="ExportCsv">Export CSV</MudButton>
+                </div>
+                @if (_diff is { } diff)
+                {
+                    <div class="d-flex gap-2 mt-3 flex-wrap">
+                        <span class="vc-stat ok">@diff.Count(d => d.Kind == DiffKind.Added) added</span>
+                        <span class="vc-stat warn">@diff.Count(d => d.Kind == DiffKind.Changed) changed</span>
+                        <span class="vc-stat move">@diff.Count(d => d.Kind == DiffKind.Moved) moved</span>
+                        <span class="vc-stat bad">@diff.Count(d => d.Kind == DiffKind.Removed) removed</span>
+                    </div>
+                    <div class="vc-diffscroll mt-2"><DiffList Diff="diff" /></div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mt-4" Style="opacity:.7">Pick two baselines (or a baseline and the current model) to compare them.</MudText>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    private const string Live = "current";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private IReadOnlyList<BaselineInfo> _baselines = [];
+    private IReadOnlyList<VersionInfo> _versions = [];
+    private string? _name, _description;
+    private long _version;
+    private string? _before, _after = Live;
+    private IReadOnlyList<ElementDiff>? _diff;
+
+    private static string Key(BaselineInfo b) => "b" + b.Id;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+        if (_baselines.Count > 0) { _before = Key(_baselines[0]); await Compare(); }
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.Session is not { } s) return;
+        _baselines = await Db.ListBaselinesAsync(s.ProjectId);
+        _versions = await Db.ListBranchVersionsAsync(s.ProjectId, s.BranchId);
+    }
+
+    private RenderFragment Options() => __builder =>
+    {
+        <MudSelectItem T="string" Value="@Live">Current model (@Ws.BranchName, live)</MudSelectItem>
+        foreach (var b in _baselines)
+        {
+            <MudSelectItem T="string" Value="@Key(b)">@b.Name — v@(b.VersionNumber)</MudSelectItem>
+        }
+    };
+
+    private string Label(string? key) => key == Live ? $"Current {Ws.BranchName}" : _baselines.FirstOrDefault(b => Key(b) == key)?.Name ?? "?";
+
+    private async Task<Meridian.Core.Model.ModelRepository?> Load(string? key)
+    {
+        if (key == Live) return Ws.Model;
+        if (Ws.Session is null || _baselines.FirstOrDefault(b => Key(b) == key) is not { } b) return null;
+        var json = await Db.LoadVersionAsync(Ws.Session.ProjectId, b.VersionId);
+        return json is null ? null : ProjectFile.Deserialize(json);
+    }
+
+    private async Task Compare()
+    {
+        var a = await Load(_before);
+        var b = await Load(_after);
+        _diff = a is null || b is null ? null : ModelDiff.Compare(a, b);
+        StateHasChanged();
+    }
+
+    private async Task CompareWithCurrent(BaselineInfo b)
+    {
+        _before = Key(b);
+        _after = Live;
+        await Compare();
+    }
+
+    private async Task Create()
+    {
+        if (Ws.Session is not { } s || Ws.User is null || string.IsNullOrWhiteSpace(_name)) return;
+        try
+        {
+            var versionId = _version;
+            if (versionId == 0)
+                versionId = (await VersionControl.CommitAsync(Db, s, $"Baseline {_name.Trim()}", Ws.User.Id)).Id;
+            await Db.CreateBaselineAsync(s.ProjectId, versionId, _name, _description ?? "", Ws.User.Id);
+            Snackbar.Add($"Created baseline “{_name.Trim()}”", Severity.Success);
+            _name = _description = null;
+            _version = 0;
+            await Reload();
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
+    }
+
+    private async Task Delete(BaselineInfo b)
+    {
+        var ok = await Dialogs.ShowMessageBox("Delete baseline", $"Delete the baseline “{b.Name}”? The version it tags (v{b.VersionNumber}) stays in the history.", yesText: "Delete", cancelText: "Cancel");
+        if (ok != true) return;
+        await Db.DeleteBaselineAsync(b.Id);
+        if (_before == Key(b)) { _before = null; _diff = null; }
+        if (_after == Key(b)) { _after = Live; _diff = null; }
+        await Reload();
+    }
+
+    private async Task ExportCsv()
+    {
+        if (_diff is null) return;
+        var csv = DiffCsv.Export(_diff, Label(_before), Label(_after));
+        var name = $"{Ws.Session?.Name} {Label(_before)} vs {Label(_after)}.csv";
+        await JS.InvokeVoidAsync("meridian.download", string.Concat(name.Split(Path.GetInvalidFileNameChars())), "text/csv",
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(csv)));
+    }
+}

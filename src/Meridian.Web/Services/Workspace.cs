@@ -58,13 +58,13 @@ public sealed class Workspace : IDisposable, ISessionClient
     public IReadOnlyList<Presence> Others =>
         Session?.Participants.Where(p => p.ParticipantId != ParticipantId).ToList() ?? (IReadOnlyList<Presence>)[];
 
-    public async Task<bool> JoinAsync(CollaborationHub hub, Guid projectId, ProjectRole role)
+    public async Task<bool> JoinAsync(CollaborationHub hub, Guid projectId, ProjectRole role, Guid? branchId = null)
     {
         if (User is null) return false;
         LeaveSession();
         _joining = true;
         _buffered.Clear();
-        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null), this);
+        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null), this, branchId);
         if (session is null) { _joining = false; return false; }
         var replica = ProjectFile.Deserialize(session.Snapshot());
         Session = session;
@@ -130,6 +130,39 @@ public sealed class Workspace : IDisposable, ISessionClient
     });
 
     void ISessionClient.CommentsChanged() => _ = Dispatch(() => { CommentsVersion++; Bump(); });
+
+    void ISessionClient.Replaced(string modelJson, string message) => _ = Dispatch(() =>
+    {
+        var activeId = Active?.Diagram.Id;
+        var selectedId = Selected?.Id;
+        Install(ProjectFile.Deserialize(modelJson));
+        Session?.Resynced(ParticipantId);
+        if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
+        else OpenDefaultDiagrams();
+        if (Model.Find(selectedId) is { } sel) Select(sel);
+        Log(message);
+        SetStatus(message);
+    });
+
+    // ---------------------------------------------------------------- branches & element locks
+
+    /// <summary>The branch being edited (null = main).</summary>
+    public Guid? BranchId => Session?.BranchId;
+    public string BranchName => Session?.BranchName ?? Meridian.Data.Branching.MainBranch;
+
+    /// <summary>The lock covering an element (held by anyone, including me), if any.</summary>
+    public ElementLock? LockOf(Element e)
+    {
+        if (Session is null) return null;
+        var locks = Session.Locks;
+        if (locks.Count == 0) return null;
+        foreach (var a in e.AncestorsAndSelf())
+            if (locks.FirstOrDefault(l => l.ElementId == a.Id && (l.Subtree || ReferenceEquals(a, e))) is { } l) return l;
+        return null;
+    }
+
+    /// <summary>True when someone else's lock stops me editing <paramref name="e"/>.</summary>
+    public bool IsLockedForMe(Element e) => User != null && LockOf(e) is { } l && l.User.Id != User.Id;
 
     private void SharePresence() => Session?.UpdatePresence(ParticipantId, Selected?.Id, Active?.Diagram.Id);
 

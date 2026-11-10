@@ -45,6 +45,26 @@ public interface IMeridianStore
     Task<long> AddCommentAsync(Guid projectId, string elementId, Guid author, string body);
     Task SetCommentResolvedAsync(long commentId, bool resolved);
     Task DeleteCommentAsync(long commentId);
+
+    // ---------------------------------------------------------------- branches & baselines (see Branching.cs)
+    // The project row itself is the "main" branch; named branches each keep their own head model.
+
+    Task<Guid> CreateBranchAsync(Guid projectId, string name, string headModelJson, string baseModelJson, long? baseVersionId, Guid? creator);
+    Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(Guid projectId);
+    Task<BranchInfo?> GetBranchAsync(Guid branchId);
+    Task<BranchModels?> LoadBranchAsync(Guid branchId);
+    Task<long> SaveBranchAsync(Guid branchId, string modelJson, Guid? userId);
+    /// <summary>Moves the branch's merge base (after a merge, the merged-in state becomes the new common ancestor).</summary>
+    Task SetBranchBaseAsync(Guid branchId, string baseModelJson, long? baseVersionId);
+    Task DeleteBranchAsync(Guid branchId);
+    /// <summary>Commits a version on a branch (null = main). Version numbers are shared by the whole project.</summary>
+    Task<(long Id, int Number)> CommitBranchVersionAsync(Guid projectId, Guid? branchId, string message, string modelJson, Guid? author);
+    /// <summary>Versions committed on one branch (null = main).</summary>
+    Task<IReadOnlyList<VersionInfo>> ListBranchVersionsAsync(Guid projectId, Guid? branchId);
+
+    Task<long> CreateBaselineAsync(Guid projectId, long versionId, string name, string description, Guid? creator);
+    Task<IReadOnlyList<BaselineInfo>> ListBaselinesAsync(Guid projectId);
+    Task DeleteBaselineAsync(long baselineId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

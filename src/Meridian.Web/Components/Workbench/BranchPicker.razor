@@ -1,0 +1,68 @@
+@inherits WorkspaceComponent
+@using Meridian.Data
+@inject IMeridianStore Db
+
+@* Title-bar branch picker: current branch, switch, new branch, merge. *@
+@if (Ws.Session is { } session)
+{
+    <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
+        <ActivatorContent>
+            <div class="vc-branch @(Ws.BranchId is null ? "" : "on-branch")" @onclick="Reload" title="Branch">
+                <MudIcon Icon="@Icons.Material.Outlined.CallSplit" Style="font-size:15px" />
+                <span class="name">@Ws.BranchName</span>
+                <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Style="font-size:15px; color:var(--text-3)" />
+            </div>
+        </ActivatorContent>
+        <ChildContent>
+            <div class="vc-menu-label">Switch branch</div>
+            @foreach (var line in _lines)
+            {
+                var l = line;
+                var current = l.BranchId == Ws.BranchId;
+                <MudMenuItem Icon="@(current ? Icons.Material.Filled.Check : (l.IsMain ? Icons.Material.Outlined.Home : Icons.Material.Outlined.CallSplit))"
+                             IconColor="@(current ? Color.Primary : Color.Default)" OnClick="() => Shell.SwitchBranch(l)">
+                    <span style="@(current ? "font-weight:600" : "")">@l.Name</span>
+                    @if (_live.TryGetValue(l.BranchId ?? Guid.Empty, out var n) && n > 0) { <span class="vc-online"> · @n online</span> }
+                </MudMenuItem>
+            }
+            <MudDivider />
+            <MudMenuItem Icon="@Icons.Material.Outlined.AddCircleOutline" OnClick="() => Shell.NewBranch()" Disabled="Ws.ReadOnly">New branch from @Ws.BranchName…</MudMenuItem>
+            @foreach (var line in _lines.Where(l => l.BranchId != Ws.BranchId))
+            {
+                var l = line;
+                <MudMenuItem Icon="@Icons.Material.Outlined.MergeType" OnClick="() => Shell.Merge(Current, l)" Disabled="Ws.ReadOnly">Merge @Ws.BranchName into @l.Name…</MudMenuItem>
+            }
+            @if (Ws.BranchId != null)
+            {
+                <MudMenuItem Icon="@Icons.Material.Outlined.Sync" OnClick="() => Shell.Merge(BranchRef.Main, Current)" Disabled="Ws.ReadOnly">Update from main…</MudMenuItem>
+            }
+            <MudDivider />
+            <MudMenuItem Icon="@Icons.Material.Outlined.AccountTree" OnClick="Shell.ShowBranches">Manage branches…</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Outlined.Flag" OnClick="Shell.ShowBaselines">Baselines…</MudMenuItem>
+        </ChildContent>
+    </MudMenu>
+}
+
+@code {
+    [Inject] private CollaborationHub Hub { get; set; } = default!;
+    private IReadOnlyList<BranchRef> _lines = [BranchRef.Main];
+    private Dictionary<Guid, int> _live = new();
+    private (Guid?, Guid?) _loadedFor;
+
+    private BranchRef Current => new(Ws.BranchId, Ws.BranchName);
+
+    protected override async Task OnParametersSetAsync() => await Reload();
+
+    protected override void OnWorkspaceChanged()
+    {
+        if (_loadedFor != (Ws.Session?.ProjectId, Ws.BranchId)) _ = InvokeAsync(async () => { await Reload(); StateHasChanged(); });
+    }
+
+    private async Task Reload()
+    {
+        if (Ws.Session is not { } s) return;
+        _loadedFor = (s.ProjectId, s.BranchId);
+        _lines = await VersionControl.LinesAsync(Db, s.ProjectId);
+        _live = Hub.SessionsOf(s.ProjectId).ToDictionary(x => x.BranchId ?? Guid.Empty, x => x.Participants.Count);
+    }
+}

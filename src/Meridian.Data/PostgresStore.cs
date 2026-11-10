@@ -7,7 +7,7 @@ namespace Meridian.Data;
 /// PostgreSQL system of record. Models are stored as JSON documents (jsonb) in their native project format;
 /// every version snapshot is a full document, so history, diff and restore need no replay.
 /// </summary>
-public sealed class PostgresStore : IMeridianStore
+public sealed partial class PostgresStore : IMeridianStore
 {
     private readonly NpgsqlDataSource _ds;
 
@@ -68,6 +68,7 @@ public sealed class PostgresStore : IMeridianStore
             create index if not exists members_user on project_members(user_id);
             """);
         await cmd.ExecuteNonQueryAsync();
+        await MigrateBranchingAsync();   // branches, branch commits, baselines (PostgresStore.Branching.cs)
     }
 
     // =============================================================== users
