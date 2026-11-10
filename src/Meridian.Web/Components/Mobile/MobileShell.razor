@@ -166,6 +166,19 @@
     }
 
     /// <summary>
+    /// Long press while editing (one finger, held still): adds the shape or connector under it to the selection, or takes it
+    /// out, like Shift/⌘-click with a mouse.
+    /// </summary>
+    [JSInvokable]
+    public bool TouchLongPressAdd(double sx, double sy)
+    {
+        if (Ws.Active is not { } c || !c.LongPressToggle(sx, sy)) return false;
+        Ws.SetStatus(c.SelectionCount > 1 ? $"{c.SelectionCount} selected — long-press more to add, Esc or tap empty space to clear" : "Long-press shapes or connectors to add them to the selection");
+        Shell?.Repaint();
+        return true;
+    }
+
+    /// <summary>
     /// Pinch / pan finished: the gesture maps a screen point p to c1 + scale·(p − c0). Zoom is clamped as on the desktop,
     /// keeping the pinch centre fixed.
     /// </summary>

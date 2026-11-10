@@ -1,0 +1,26 @@
+/* Multi-selection on the diagram canvas: the bulk inspector, the "Link to…" dialog and the selected-connector halo.
+   Colours come from the theme tokens in app.css, so light and dark both work. */
+
+.bulk-insp .bulk-row { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 2px; font-size: 12px; }
+.bulk-insp .bulk-row .lbl { color: var(--text-2); min-width: 86px; }
+.bulk-insp .bulk-row .val { color: var(--text-3); font: 11px Menlo, Consolas, monospace; }
+.bulk-insp .bulk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; margin-top: 6px; }
+.bulk-insp .bulk-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.bulk-insp .pill.mixed { border-style: dashed; color: var(--text-2); }
+
+.bulk-link .bulk-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.bulk-link .link-hint { margin: 2px 0 8px; }
+
+/* The halo drawn under every selected connector (also visible on a light canvas in dark mode). */
+.canvas svg.main .edge-sel { pointer-events: none; }
+
+/* The connector type chosen automatically for a line just drawn: a chip on the line with a menu to switch it. */
+.canvas .conn-chip { position: absolute; transform: translateX(-50%); z-index: 6; }
+.canvas .conn-chip .chip { background: var(--panel-solid); box-shadow: var(--shadow-sm); white-space: nowrap; }
+.canvas .conn-chip .chip.on { background: var(--panel-solid); border-color: var(--sel-border); color: var(--text); }
+.canvas .conn-chip .conn-menu { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); min-width: 150px; padding: 4px;
+  background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+.canvas .conn-chip .conn-opt { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.canvas .conn-chip .conn-opt:hover { background: var(--hover); color: var(--text); }
+.canvas .conn-chip .conn-opt.on { background: var(--sel); color: var(--text); }
+.canvas .conn-chip .conn-opt .rev { color: var(--text-3); }
