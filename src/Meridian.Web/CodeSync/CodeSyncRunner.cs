@@ -27,9 +27,9 @@ public sealed class CodeSyncEvents
 /// blocks when the project allows it), commits the result on the branch and records a run for review.
 /// Runs of one project are serialized; review decisions take the same lock.
 /// </summary>
-public sealed class CodeSyncRunner(
+public sealed partial class CodeSyncRunner(
     IMeridianStore db, CollaborationHub hub, IEnumerable<ICodeReader> readers, ICodeModelApplier applier,
-    CodeSyncEvents events, ILogger<CodeSyncRunner> log, IConfiguration? config = null) : ICodeSyncRunner
+    CodeSyncEvents events, ILogger<CodeSyncRunner> log, IConfiguration? config = null) : ICodeSyncRunner, Hosts.IPullRequestPreviews
 {
     /// <summary>Prefix of review branch names.</summary>
     public const string BranchPrefix = "code-sync/";
@@ -51,32 +51,126 @@ public sealed class CodeSyncRunner(
         var clean = new string((repoDisplay ?? "").Trim().Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' or '/' ? c : '-').ToArray()).Trim('/', '-');
         if (clean.Length == 0) clean = "repository";
         var name = BranchPrefix + clean;
-        return name.Length <= 60 ? name : name[..60].TrimEnd('/', '-');
+        name = name.Length <= 60 ? name : name[..60].TrimEnd('/', '-');
+        // A repository called "pr-5" must not read as a pull request preview.
+        return PreviewPattern().IsMatch(name) ? name[..Math.Min(name.Length, 59)] + "_" : name;
     }
+
+    /// <summary>The preview branch of pull / merge request <paramref name="number"/> ("code-sync/acme/sat-fsw/pr-12").</summary>
+    public static string PreviewBranchNameFor(string repoDisplay, int number)
+    {
+        var suffix = $"/pr-{number}";
+        var main = BranchNameFor(repoDisplay);
+        if (main.Length + suffix.Length > 60) main = main[..(60 - suffix.Length)].TrimEnd('/', '-');
+        return main + suffix;
+    }
+
+    /// <summary>The pull request a preview branch shows ("code-sync/acme/sat/pr-12" → 12); null for other branches.</summary>
+    public static int? PreviewNumber(string? branchName) =>
+        branchName is not null && PreviewPattern().Match(branchName) is { Success: true } m && int.TryParse(m.Groups[1].ValueSpan, out var n) ? n : null;
+
+    public static bool IsPreviewBranch(string? branchName) => PreviewNumber(branchName) is not null;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^code-sync/.+/pr-([0-9]{1,9})$")]
+    private static partial System.Text.RegularExpressions.Regex PreviewPattern();
 
     public static bool IsReviewBranch(string branchName) => branchName.StartsWith(BranchPrefix, StringComparison.Ordinal);
 
-    public async Task<CodeSyncOutcome> RunAsync(CodeSyncRequest request, CancellationToken ct = default)
+    public Task<CodeSyncOutcome> RunAsync(CodeSyncRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return RunCoreAsync(request, BranchNameFor(request.RepoDisplay), ct);
+    }
+
+    /// <summary>
+    /// Syncs the head of pull / merge request <paramref name="pullRequest"/> into its preview branch
+    /// (<see cref="PreviewBranchNameFor"/>, created from main). Previews are for looking only: they are never accepted
+    /// into main; the sync of the target branch after the merge brings the changes to review.
+    /// </summary>
+    public Task<CodeSyncOutcome> RunPreviewAsync(CodeSyncRequest request, int pullRequest, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pullRequest);
+        return RunCoreAsync(request, PreviewBranchNameFor(request.RepoDisplay, pullRequest), ct);
+    }
+
+    /// <summary>
+    /// Ends the preview of a pull request that was merged or closed: its open runs are closed and its branch deleted
+    /// (kept, and said so, while someone has it open). Returns a short message.
+    /// </summary>
+    public async Task<string> ClosePreviewAsync(Guid projectId, string repoDisplay, int pullRequest, bool merged, CancellationToken ct = default)
+    {
+        var name = PreviewBranchNameFor(repoDisplay, pullRequest);
+        var gate = LockFor(projectId);
+        await gate.WaitAsync(ct);
+        try
+        {
+            var branch = (await db.ListBranchesAsync(projectId)).FirstOrDefault(b => b.Name == name);
+            if (branch is null) return $"No preview of PR #{pullRequest}.";
+            var why = merged
+                ? $"PR #{pullRequest} was merged; the sync of the target branch brings its changes to review"
+                : $"PR #{pullRequest} was closed without merging";
+            foreach (var run in (await db.ListCodeSyncRunsAsync(projectId, 500)).Where(r => r.IsOpen && r.BranchId == branch.Id))
+                await db.UpdateCodeSyncRunAsync(run.Id, merged ? CodeSyncRunStatus.NoChanges : CodeSyncRunStatus.Rejected,
+                    CodeSyncRuns.Clip($"{run.Summary.Split(" — ")[0]} — preview closed: {why}", 1000)!, run.ChangesJson);
+            try
+            {
+                await VersionControl.DeleteBranchAsync(db, hub, projectId, branch.Id);
+                return $"Preview {name} deleted: {why}.";
+            }
+            catch (InvalidOperationException ex)
+            {
+                log.LogInformation("Kept preview branch {Branch} of project {Project}: {Reason}", name, projectId, ex.Message);
+                return $"Preview closed ({why}); {name} is kept because {ex.Message.TrimEnd('.')}.";
+            }
+        }
+        finally
+        {
+            gate.Release();
+            events.Notify(projectId);
+        }
+    }
+
+    /// <summary>The net model changes of a preview branch's open runs (as the review lists them).</summary>
+    public async Task<IReadOnlyList<Hosts.PreviewChange>> PreviewChangesAsync(Guid projectId, string repoDisplay, int pullRequest)
+    {
+        var name = PreviewBranchNameFor(repoDisplay, pullRequest);
+        if ((await db.ListBranchesAsync(projectId)).FirstOrDefault(b => b.Name == name) is not { } branch) return [];
+        var runs = (await db.ListCodeSyncRunsAsync(projectId, 500)).Where(r => r.IsOpen && r.BranchId == branch.Id).ToList();
+        if (runs.Count == 0 || await db.LoadBranchAsync(branch.Id) is not { } models) return [];
+        var baseModel = ProjectFile.Deserialize(models.BaseJson);
+        var head = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(db, hub, projectId, branch.Id));
+        return CodeSyncReviewService.Pending(baseModel, head, baseModel, runs)
+            .Select(c => new Hosts.PreviewChange(c.Kind, c.Name, c.Path, Metamodel.DisplayName(c.ElementKind))).ToList();
+    }
+
+    /// <summary>The branch a run is working on, and whether the run created it (a failed run deletes a branch it created).</summary>
+    private sealed class RunBranch
+    {
+        public Guid? Id;
+        public bool Created;
+    }
+
+    private async Task<CodeSyncOutcome> RunCoreAsync(CodeSyncRequest request, string branchName, CancellationToken ct)
+    {
         var gate = LockFor(request.ProjectId);
         await gate.WaitAsync(ct);
-        Guid? branchId = null;
+        var branch = new RunBranch();
         var runId = Guid.NewGuid();
         try
         {
-            return await RunLockedAsync(request, runId, id => branchId = id, ct);
+            return await RunLockedAsync(request, branchName, runId, branch, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await RecordFailureAsync(request, runId, branchId, "Cancelled before the sync finished.");
+            await RecordFailureAsync(request, runId, await DiscardCreatedAsync(request, branch), "Cancelled before the sync finished.");
             throw;
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Code sync of {Repo}@{Commit} into project {Project} failed", request.RepoDisplay, request.Commit, request.ProjectId);
             var summary = ex is NotImplementedException or InvalidOperationException ? ex.Message : $"The sync failed: {ex.GetType().Name}: {ex.Message}";
-            await RecordFailureAsync(request, runId, branchId, summary);
+            await RecordFailureAsync(request, runId, await DiscardCreatedAsync(request, branch), summary);
             return new CodeSyncOutcome(CodeSyncStatus.Failed, summary, null, runId);
         }
         finally
@@ -86,7 +180,23 @@ public sealed class CodeSyncRunner(
         }
     }
 
-    private async Task<CodeSyncOutcome> RunLockedAsync(CodeSyncRequest request, Guid runId, Action<Guid> branchCreated, CancellationToken ct)
+    /// <summary>A failed run leaves no branch it created behind. Returns the branch id to record (null once deleted).</summary>
+    private async Task<Guid?> DiscardCreatedAsync(CodeSyncRequest request, RunBranch branch)
+    {
+        if (branch.Id is not { } id || !branch.Created) return branch.Id;
+        try
+        {
+            await VersionControl.DeleteBranchAsync(db, hub, request.ProjectId, id);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Could not delete code-sync branch {Branch} after a failed sync of project {Project}", id, request.ProjectId);
+            return id;
+        }
+    }
+
+    private async Task<CodeSyncOutcome> RunLockedAsync(CodeSyncRequest request, string branchName, Guid runId, RunBranch runBranch, CancellationToken ct)
     {
         if (await db.LoadProjectAsync(request.ProjectId) is null) throw new InvalidOperationException("That project no longer exists.");
 
@@ -104,24 +214,25 @@ public sealed class CodeSyncRunner(
         ct.ThrowIfCancellationRequested();
 
         // The review branch: found, or made from main's head. It accumulates runs until they are accepted.
-        var name = BranchNameFor(request.RepoDisplay);
-        var branch = (await db.ListBranchesAsync(request.ProjectId)).FirstOrDefault(b => b.Name == name);
+        var branch = (await db.ListBranchesAsync(request.ProjectId)).FirstOrDefault(b => b.Name == branchName);
         var created = branch is null;
-        var branchId = branch?.Id ?? await VersionControl.CreateBranchAsync(db, hub, request.ProjectId, name, BranchRef.Main, null, null);
-        branchCreated(branchId);
+        var branchId = branch?.Id ?? await VersionControl.CreateBranchAsync(db, hub, request.ProjectId, branchName, BranchRef.Main, null, null);
+        (runBranch.Id, runBranch.Created) = (branchId, created);
 
         if (hub.Find(request.ProjectId, branchId) is { } open) await open.PersistAsync();
         var headJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, branchId);
         var before = ProjectFile.Deserialize(headJson);
         var model = ProjectFile.Deserialize(headJson);
+        // Every change the sync makes, as replicable operations: applied to the live branch they keep concurrent edits.
+        var ops = new List<ModelOp>();
+        model.OpEmitted += ops.Add;
 
         var root = model.Root;
+        var connection = await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson) : null;
         var options = new CodeSyncOptions
         {
             // The project's override, else the repository connection's root package (defaults to the repository name).
-            RootPackage = root.Get(RootPackageField) is { Length: > 0 } rp ? rp
-                : await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson).EffectiveRootPackage
-                : "Code",
+            RootPackage = root.Get(RootPackageField) is { Length: > 0 } rp ? rp : connection?.EffectiveRootPackage ?? "Code",
             RepoId = request.ConnectionId.ToString(),
             Commit = request.Commit,
             // A partial push (only the changed files) must not read as "everything else was deleted".
@@ -133,23 +244,17 @@ public sealed class CodeSyncRunner(
         if (changes.IsEmpty)
         {
             if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
+            runBranch.Id = null;
             var nothing = $"No model changes from {Short(request.Commit)}.";
             await RecordAsync(request, runId, created ? null : branchId, CodeSyncRunStatus.NoChanges, nothing, [], 0, 0, 0);
             return new CodeSyncOutcome(CodeSyncStatus.NoChanges, nothing, null, runId);
         }
 
-        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: root.Get(AutoDiagramsField) != "false");
+        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection));
+        model.OpEmitted -= ops.Add;
         var list = ChangeList(before, model, changes, refresh);
-        var json = ProjectFile.Serialize(model);
         var message = CommitMessage(request);
-
-        // Live users of the branch see the result at once; otherwise it goes straight to the store.
-        if (hub.Find(request.ProjectId, branchId) is { } live)
-        {
-            live.Replace(json, null, $"{message} — the code changes are on this branch for review");
-            await live.PersistAsync();
-        }
-        else await db.SaveBranchAsync(branchId, json, null);
+        var json = await WriteAsync(request.ProjectId, branchId, headJson, model, ops);
         await db.CommitBranchVersionAsync(request.ProjectId, branchId, message, json, null);
 
         int added = list.Count(c => c.Kind == CodeSyncChangeKind.Added), changed = list.Count(c => c.Kind == CodeSyncChangeKind.Changed),
@@ -158,6 +263,44 @@ public sealed class CodeSyncRunner(
                       + (changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
         await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
         return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
+    }
+
+    /// <summary>
+    /// Whether to diagram new namespaces and blocks: the model root's <see cref="AutoDiagramsField"/> when set, else the
+    /// repository connection's setting (on by default).
+    /// </summary>
+    public static bool AutoDiagrams(Element root, Hosts.CodeRepoConfig? connection) => root.Get(AutoDiagramsField) switch
+    {
+        "false" => false,
+        "true" => true,
+        _ => connection?.AutoDiagrams ?? true,
+    };
+
+    /// <summary>
+    /// Writes the sync onto the branch without losing edits made while it ran. With the branch open, the sync's
+    /// operations are applied to the live session (everyone sees them at once, and what they changed meanwhile stays).
+    /// Otherwise the result replaces the stored head, unless the head moved since it was read: then the operations are
+    /// replayed onto the new head instead. Returns the model JSON to commit.
+    /// </summary>
+    private async Task<string> WriteAsync(Guid projectId, Guid branchId, string readJson, ModelRepository model, IReadOnlyList<ModelOp> ops)
+    {
+        if (hub.Find(projectId, branchId) is { } live)
+        {
+            live.ApplySystemOps(ops, null);
+            await live.PersistAsync();
+            return live.Snapshot();
+        }
+        var stored = (await db.LoadBranchAsync(branchId))?.HeadJson ?? throw new InvalidOperationException("The review branch was deleted during the sync.");
+        string json;
+        if (stored == readJson) json = ProjectFile.Serialize(model);
+        else
+        {
+            var current = ProjectFile.Deserialize(stored);
+            foreach (var op in ops) current.ApplyRemote(op);
+            json = ProjectFile.Serialize(current);
+        }
+        await db.SaveBranchAsync(branchId, json, null);
+        return json;
     }
 
     /// <summary>"3 added, 1 changed, 2 removed".</summary>

@@ -91,4 +91,50 @@ public sealed class CodeSyncTests(ServerFixture f) : E2ETest(f)
         await Expect(p.Canvas().Locator(".chg-legend")).ToHaveCountAsync(0);
         Assert.Contains("\"Battery\"", (await db.LoadProjectAsync(project))!.Value.ModelJson);   // merged into main
     }
+
+    [E2EFact]
+    public async Task A_pull_request_preview_shows_as_PR_n_and_goes_away_when_merged()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        var name = "PR preview " + Guid.NewGuid().ToString("N")[..6];
+        await p.NewProjectAsync("Vehicle sample", name);
+
+        var db = F.App.Services.GetRequiredService<IMeridianStore>();
+        var alice = (await db.FindUserAsync(F.Alice.Username))!;
+        var project = (await db.ListProjectsAsync(alice.Id)).Single(x => x.Name == name).Id;
+
+        // PR #7 opened: the git host integration syncs its head into the preview branch (in-process here).
+        var previews = Assert.IsAssignableFrom<Meridian.Web.CodeSync.Hosts.IPullRequestPreviews>(F.App.Services.GetRequiredService<ICodeSyncRunner>());
+        CodeSyncE2E.Script.Enqueue(m =>
+        {
+            var structure = m.OfKind(ElementKind.Package).First(x => x.Name == "Structure");
+            var thruster = m.Create(structure, ElementKind.Block, "Thruster");
+            return new CodeSyncChanges([thruster.Id], [], [], []);
+        });
+        var outcome = await previews.RunPreviewAsync(new CodeSyncRequest(
+            project, Guid.NewGuid(), "acme/sat", "feature/thruster", "89abcdef0123456789abcdef0123456789abcdef", null,
+            "Cleo Ray", "Add thruster", [new CodeFile("src/Thruster.cs", "class Thruster {}")], IsFullSnapshot: true), 7);
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+
+        // The badge says PR #7 (no changes to accept on main); the review lists the preview, read-only.
+        var badge = p.Locator("[data-testid=code-changes-badge]");
+        await Expect(badge).ToContainTextAsync("PR #7");
+        await Expect(badge).Not.ToContainTextAsync("Code changes (");
+        await badge.ClickAsync();
+        var review = p.ViewTab();
+        await Expect(review.Locator("h3.chg-preview")).ToContainTextAsync("PR #7");
+        await Expect(review.Locator("h3.chg-preview")).ToContainTextAsync("code-sync/acme/sat/pr-7");
+        var row = review.Locator(".chg-row[data-kind=added]");
+        await Expect(row).ToContainTextAsync("Thruster");
+        await Expect(row.Locator("input[type=checkbox]")).ToBeDisabledAsync();
+        if (Environment.GetEnvironmentVariable("MERIDIAN_E2E_SCREENSHOTS") is { Length: > 0 } shots)
+            await p.ScreenshotAsync(new() { Path = Path.Combine(shots, "code-sync-pr-preview.png") });
+
+        // Merged: the preview branch goes away (the push to main brings the code to review).
+        await previews.ClosePreviewAsync(project, "acme/sat", 7, merged: true);
+        await Expect(badge).ToHaveCountAsync(0);
+        await Expect(review).ToContainTextAsync("No code changes to review");
+        Assert.DoesNotContain(await db.ListBranchesAsync(project), b => b.Name == "code-sync/acme/sat/pr-7");
+    }
 }

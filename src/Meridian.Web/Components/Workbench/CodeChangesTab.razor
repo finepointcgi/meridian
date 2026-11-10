@@ -46,12 +46,17 @@
     }
     else
     {
-        @foreach (var r in State.Reviews)
+        @foreach (var r in State.Reviews.OrderBy(x => x.IsPreview).ThenBy(x => x.PullRequest))
         {
             var review = r;
             var onBranch = review.Branch.BranchId == Ws.BranchId;
-            <h3>
+            var preview = review.IsPreview;
+            <h3 class="@(preview ? "chg-preview" : null)" data-pr="@review.PullRequest">
                 <MudIcon Icon="@Icons.Material.Outlined.CallSplit" Style="font-size:15px" />
+                @if (preview)
+                {
+                    <span class="chg-pr" style="text-transform:none; letter-spacing:0">PR #@review.PullRequest</span>
+                }
                 @review.Branch.Name
                 <span class="dim" style="text-transform:none; letter-spacing:0">· @review.Changes.Count change@(review.Changes.Count == 1 ? "" : "s") from @review.Runs.Count push@(review.Runs.Count == 1 ? "" : "es")</span>
                 @if (!onBranch && Shell is not null)
@@ -59,12 +64,16 @@
                     <button class="chg-link" style="text-transform:none; letter-spacing:0" @onclick="() => Shell.SwitchBranch(review.Branch)">Open branch</button>
                 }
             </h3>
+            @if (preview)
+            {
+                <div class="dim">Preview of pull request #@review.PullRequest, for looking only. Once it is merged, the sync of the followed branch brings these changes here to accept.</div>
+            }
             @foreach (var run in review.Runs)
             {
                 var rr = run;
                 var ids = review.Changes.Where(c => c.RunIds.Contains(rr.Id)).Select(c => c.ElementId).ToList();
                 <div class="chg-run" data-run="@rr.Id">
-                    <input type="checkbox" checked="@(ids.Count > 0 && ids.All(_selected.Contains))" disabled="@(ids.Count == 0)" @onchange="e => SelectMany(ids, e.Value is true)" title="Select this push's changes" />
+                    <input type="checkbox" checked="@(ids.Count > 0 && ids.All(_selected.Contains))" disabled="@(ids.Count == 0 || preview)" @onchange="e => SelectMany(ids, e.Value is true)" title="Select this push's changes" />
                     @if (rr.CommitUrl is { Length: > 0 } url && Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "https" or "http")
                     {
                         <a class="sha" href="@url" target="_blank" rel="noopener noreferrer">@rr.ShortCommit</a>
@@ -89,7 +98,7 @@
                     var change = c;
                     var open = _expanded.Contains(change.ElementId);
                     <div class="chg-row" data-element="@change.ElementId" data-kind="@Css(k)">
-                        <input type="checkbox" checked="@_selected.Contains(change.ElementId)" @onchange="e => Toggle(change.ElementId, e.Value is true)" aria-label="@($"Select {change.Name}")" />
+                        <input type="checkbox" checked="@(!preview && _selected.Contains(change.ElementId))" disabled="@preview" @onchange="e => Toggle(change.ElementId, e.Value is true)" aria-label="@($"Select {change.Name}")" />
                         <MudIcon Class="@($"chg-kind {Css(k)}")" Icon="@KindIcon(k)" Style="font-size:17px" />
                         <MudIcon Icon="@UiKinds.Icon(change.ElementKind)" Style="@($"font-size:15px; color:{UiKinds.Accent(change.ElementKind)}")" />
                         <span class="name" title="@change.Path">
@@ -124,7 +133,8 @@
 
     private bool CanDecide => !Ws.ReadOnly && Ws.User is not null && Ws.Session is not null;
 
-    private List<CodeSyncPendingChange> Visible => State.Reviews.SelectMany(r => r.Changes).Where(Matches).ToList();
+    // Pull request previews are not decided here, so "Select all" leaves them out.
+    private List<CodeSyncPendingChange> Visible => State.Reviews.Where(r => !r.IsPreview).SelectMany(r => r.Changes).Where(Matches).ToList();
     private bool AllSelected => Visible is { Count: > 0 } v && v.All(c => _selected.Contains(c.ElementId));
 
     protected override void OnInitialized()
