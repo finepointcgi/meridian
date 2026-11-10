@@ -12,7 +12,33 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet build Meridian.slnx -c Release
-      - run: dotnet test Meridian.slnx -c Release --no-build
+      # Browser tests run in the e2e job below (they skip themselves when Playwright's Chromium is missing anyway).
+      - run: dotnet test Meridian.slnx -c Release --no-build --filter "FullyQualifiedName!~Meridian.E2E"
+
+  # End-to-end browser tests: the real app in-process (SQLite) driven by Playwright's headless Chromium.
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      MERIDIAN_E2E: require   # a missing browser fails this job instead of skipping
+      CONFIGURATION: Release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Playwright Chromium (and its system libraries)
+        run: tests/Meridian.E2E/install-browsers.sh --with-deps
+      - name: Browser tests
+        run: dotnet test tests/Meridian.E2E -c Release --no-build --logger "console;verbosity=normal"
+        env:
+          MERIDIAN_E2E_SCREENSHOTS: ${{ github.workspace }}/e2e-screenshots
+      - name: Upload screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: e2e-screenshots
+          if-no-files-found: ignore
 
   # The IMeridianStore contract against a real PostgreSQL (Testcontainers starts postgres:17-alpine; Docker is preinstalled
   # on ubuntu runners). MERIDIAN_REQUIRE_POSTGRES turns "Docker unavailable → skip" into a failure, so this job cannot pass vacuously.

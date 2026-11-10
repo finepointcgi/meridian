@@ -17,6 +17,26 @@ window.meridian = (() => {
     focus: el => el?.focus({ preventScroll: true }),
     select: el => { el?.focus(); el?.select?.(); },
     caretEnd: el => { if (!el) return; el.focus(); const n = el.value?.length ?? 0; try { el.setSelectionRange(n, n); } catch { } },
+    // Opens the inline label editor. Keys typed on the canvas before it had focus were recorded in order by installCanvas
+    // (the server may see them later, or in the middle of opening the editor): start the editor with all of them, so
+    // nothing typed quickly is lost or reordered. `seed` is the first key when typing on a selected shape started the edit;
+    // without typed keys the current label is selected, ready to be replaced. The editor's value is set here, never
+    // rendered by the server: a re-render lagging behind fast typing would overwrite newer characters.
+    beginEdit: (el, canvas, seed, label) => {
+      if (!el) return;
+      const typed = canvas?._typed || "", enter = !!canvas?._typedEnter;
+      if (canvas) { canvas._typed = ""; canvas._typedEnter = false; }
+      const value = typed && (!seed || typed.startsWith(seed)) ? typed : seed;
+      el._typing = true;
+      el.focus();
+      if (value == null) { el.value = label ?? ""; el.select?.(); return; }
+      el.value = value;
+      try { el.setSelectionRange(value.length, value.length); } catch { }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      // Enter was already pressed too: commit, as it would have in the editor (leaving the editor commits it; doing it
+      // right away means no later blur can arrive for an editor the server has already removed).
+      if (enter && value === typed) canvas?.focus({ preventScroll: true });
+    },
     click: id => document.getElementById(id)?.click(),
     // Desktop app (Photino) bridge: window.external.sendMessage reaches the native host.
     isDesktop: () => typeof window.external?.sendMessage === "function",
@@ -43,11 +63,28 @@ window.meridian = (() => {
       el.addEventListener("wheel", e => e.preventDefault(), { passive: false });
       el.addEventListener("keydown", e => {
         if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+        // The label editor is open but lost focus (e.g. a re-render focused the canvas): keep typing into it.
+        const editor = el.querySelector(".inline-editor input, .inline-editor textarea");
+        if (editor?._typing && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          const at = editor.selectionStart ?? editor.value.length, end = editor.selectionEnd ?? at;
+          editor.value = editor.value.slice(0, at) + e.key + editor.value.slice(end);
+          editor.focus();
+          try { editor.setSelectionRange(at + 1, at + 1); } catch { }
+          editor.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
+        }
+        // Remember printable keys typed on the canvas, for beginTyping (type-to-rename).
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) el._typed = (el._typedEnter ? "" : el._typed || "") + e.key, el._typedEnter = false;
+        else if (e.key === "Enter" && el._typed) el._typedEnter = true;
+        else if (e.key !== "Shift") { el._typed = ""; el._typedEnter = false; }
         if (["Backspace", "Delete", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) ||
             ((e.metaKey || e.ctrlKey) && ["a", "d"].includes(e.key.toLowerCase()))) e.preventDefault();
       });
       el.addEventListener("contextmenu", e => e.preventDefault());
       el.addEventListener("pointerdown", e => {
+        el._typed = "";
         if (e.target.closest?.(".inline-editor, .toolbox, .minimap, .selbar, .quickadd")) return;
         try { el.setPointerCapture(e.pointerId); } catch { }
         if (e.button === 1) e.preventDefault();

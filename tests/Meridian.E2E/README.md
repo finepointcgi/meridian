@@ -1,0 +1,57 @@
+# Meridian end-to-end browser tests
+
+Real browser tests for the Meridian web app, written with [Microsoft.Playwright](https://playwright.dev/dotnet/) and xUnit.
+
+Each test collection starts the real app **in-process** (`MeridianServer.CreateAsync`) on a free loopback port, with
+SQLite in a fresh temp folder, and drives it with headless Chromium:
+
+- **Server mode** (`ServerFixture`): three accounts are registered through the real sign-up form with passwords generated
+  at runtime. The first one becomes the server administrator; the other two are normal users (used for sharing,
+  reviews and live collaboration).
+- **Local mode** (`LocalModeTests`): the desktop app's private server, signed in only through `/?launch=<token>`.
+
+Every test fails if any page logs a `console.error` or throws an uncaught exception, or if the server logs an error.
+After each test the last screen of every page is saved to `bin/<config>/net10.0/e2e-screenshots`
+(or `$MERIDIAN_E2E_SCREENSHOTS`).
+
+## Install the browser (once per machine / Playwright version)
+
+```bash
+tests/Meridian.E2E/install-browsers.sh              # macOS, Linux, WSL
+tests/Meridian.E2E/install-browsers.sh --with-deps  # Linux CI: also installs Chromium's system libraries (needs sudo)
+```
+
+The script builds this project and runs the Playwright driver that ships inside the NuGet package
+(`bin/<config>/net10.0/.playwright`), so neither PowerShell nor a global tool is needed. With PowerShell installed,
+`pwsh tests/Meridian.E2E/bin/Debug/net10.0/playwright.ps1 install chromium` does the same. Browsers go to the standard
+Playwright cache (`~/Library/Caches/ms-playwright` on macOS, `~/.cache/ms-playwright` on Linux, or `$PLAYWRIGHT_BROWSERS_PATH`).
+
+## Run
+
+```bash
+dotnet test tests/Meridian.E2E
+```
+
+- Without the browser installed, every test is **skipped** with a message saying how to install it, so a plain
+  `dotnet test Meridian.slnx` never fails on a machine without Chromium.
+- `MERIDIAN_E2E=require` turns a missing browser into a failure (the CI `e2e` job sets it).
+- `HEADED=1` shows the browser window while the tests run.
+
+## What is covered
+
+| Test class | Flows |
+|---|---|
+| `AuthTests` | sign-in (wrong then right password), sample project opens, duplicate registration, sign-out |
+| `LocalModeTests` | launch-token sign-in, private workspace without the token |
+| `DrawingTests` | shapes panel, rename by typing (also very fast typing), move, undo/redo, quick-connect arrow drag, fill colour, delete; whiteboard shapes and lines |
+| `RequirementsTests` | new requirement, Inspector attributes, satisfy link from the traceability table, coverage, suspect link and clearing it |
+| `TablesTests` | text query, open as table, inline cell edit, save the view |
+| `BranchTests` | new branch, edit, switch to main, conflicting merge, resolve, verify |
+| `ReviewTests` | share with a second user, request a review, live notification bell, approve, vote notification |
+| `SysmlTextTests` | edit SysML v2 text, apply, tree updates, error reporting, undo |
+| `TemplateAndExportTests` | every project template creates a project that opens cleanly; SVG and PNG downloads |
+| `AdminTests` | `/admin` for the admin, forbidden for a normal user, admin API protection |
+| `CollaborationTests` | two browsers on one project see each other's edits live |
+
+Tests in the `server` collection share one server and run one at a time; each creates its own project, so they do not
+depend on each other's data.
