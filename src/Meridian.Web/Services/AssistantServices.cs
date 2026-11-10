@@ -165,8 +165,8 @@ public sealed class AssistantSettings
             AssistantProvider.ClaudeCode => !_host.LocalMode ? "Claude Code can only be used by the desktop app or a local Meridian; a server uses an API key or a local model server."
                 : ClaudeCodePath() == null ? ClaudeCodeProvider.NotInstalled : null,
             _ => HasKey ? null
-                : _host.LocalMode ? "Add your Anthropic API key in the assistant settings to turn the assistant on. Get a key at console.anthropic.com."
-                : "The AI assistant is off: no Anthropic API key is configured. An administrator can enable it by setting Meridian:AI:ApiKey (or the ANTHROPIC_API_KEY environment variable) on the server.",
+                : _host.LocalMode ? "Add an Anthropic API key, or choose a local model or Claude Code, in Settings ▸ AI assistant to turn the assistant on."
+                : "The AI assistant is off. An administrator can turn it on with an Anthropic API key (Meridian:AI:ApiKey or ANTHROPIC_API_KEY) or a local model server (Meridian:AI:Provider=Local with Meridian:AI:Local:BaseUrl and Meridian:AI:Local:Model).",
         };
 
     // ================================================================ provider (Claude, local model, Claude Code)

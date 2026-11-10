@@ -68,7 +68,7 @@ public class AssistantPanelTests : TestContext
     {
         Setup(localMode: true);
         var cut = RenderComponent<AssistantPanel>();
-        Assert.Contains("Add your Anthropic API key", cut.Markup);
+        Assert.Contains("Add an Anthropic API key", cut.Markup);
         Assert.Empty(cut.FindAll("input.ai-key"));   // the key is entered in Settings ▸ AI assistant; the panel links there
         Assert.NotEmpty(cut.FindAll("button.ai-open-settings"));
 
