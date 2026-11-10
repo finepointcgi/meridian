@@ -130,6 +130,9 @@ public static class XmiExchange
         FieldKeys.Unique, FieldKeys.FkColumns, FieldKeys.RefColumns,
         Core.Analysis.ViewFields.Query, Core.Analysis.ViewFields.Columns, Core.Analysis.ViewFields.Severity, Core.Analysis.ViewFields.Message,
         .. ExtFieldKeys.All,
+        // Requirement management attributes and test verdicts.
+        ReqFields.Priority, ReqFields.Status, ReqFields.Owner, ReqFields.Rationale, ReqFields.VerificationMethod, ReqFields.Risk,
+        ReqFields.Verdict, ReqFields.SourceFingerprint, ReqFields.TargetFingerprint,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -147,7 +150,7 @@ public static class XmiExchange
         if (e.Kind == ElementKind.Diagram || e.Kind == ElementKind.Comment) { if (e.Kind == ElementKind.Comment) AddComment(parent, e); return; }
 
         // Custom stereotypes and tagged values survive a Meridian round trip through an extension.
-        foreach (var kv in e.Fields.Where(f => f.Key == FieldKeys.Stereotypes || f.Key.StartsWith(FieldKeys.TagPrefix) || ExtensionOnlyFields.Contains(f.Key)))
+        foreach (var kv in e.Fields.Where(f => f.Key == FieldKeys.Stereotypes || f.Key.StartsWith(FieldKeys.TagPrefix) || f.Key.StartsWith(ReqFields.CustomPrefix, StringComparison.Ordinal) || ExtensionOnlyFields.Contains(f.Key)))
             ext.Add(new XElement(Meridian + "field", new XAttribute("ref", e.Id), new XAttribute("key", kv.Key), new XAttribute("value", kv.Value)));
 
         if (e is Relationship r)
