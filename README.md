@@ -17,7 +17,7 @@ The user guide is in [`docs-site/`](docs-site/) (built with DocFX).
 
 ## Download
 
-Get the latest build from [Releases](../../releases):
+Get the latest build from [Releases](../../releases) (on a GitLab copy of the repository: *Deploy ▸ Releases*):
 
 | Platform | File | Notes |
 | --- | --- | --- |
@@ -151,7 +151,8 @@ in your local `appsettings.Development.json`, which git ignores.
 
 For production (HTTPS with Caddy, Kubernetes with Helm, backups, upgrades, scaling, monitoring and a hardening
 checklist), follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. Signed multi-arch images are published to
-`ghcr.io/finepointcgi/meridian` for every release tag.
+`ghcr.io/finepointcgi/meridian` for every release tag; a GitLab copy publishes the same image to its own GitLab
+Container Registry (`registry.gitlab.com/<group>/<project>`).
 
 To run with a single SQLite file instead of PostgreSQL, set `Meridian__Storage=sqlite` and
 `Meridian__DataPath=<folder>`.
@@ -194,7 +195,8 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
                            "AdminClaim": "roles", "AdminValue": "Meridian.Admin" } },
       { "Name": "okta",     "Authority": "https://<org>.okta.com/oauth2/default",        "ClientId": "…", "ClientSecret": "…" },
       { "Name": "google",   "DisplayName": "Google", "Authority": "https://accounts.google.com", "ClientId": "…", "ClientSecret": "…" },
-      { "Name": "keycloak", "Authority": "https://sso.example.com/realms/<realm>",      "ClientId": "…", "ClientSecret": "…" }
+      { "Name": "keycloak", "Authority": "https://sso.example.com/realms/<realm>",      "ClientId": "…", "ClientSecret": "…" },
+      { "Name": "gitlab",   "Authority": "https://gitlab.com",                         "ClientId": "…", "ClientSecret": "…" }
     ]
   },
   "Security": { "MaxFailedLogins": 5, "LockoutMinutes": 15, "LoginAttemptsPerMinute": 10,
@@ -207,6 +209,9 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
   linked by issuer + subject (never matched to an existing account by name or e-mail); set `AutoProvision: false`
   on a provider to refuse unknown identities. `DisableLocalPasswords` turns off password sign-in, registration
   and HTTP Basic API auth.
+- A provider named `gitlab` (or with `"Preset": "gitlab"`) gets GitLab's defaults: gitlab.com, the scopes
+  `openid profile email` and the GitLab username as the Meridian username. For self-managed GitLab set `Authority`
+  to its root address. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#sign-in-with-gitlab).
 - SSO needs HTTPS. Behind a TLS-terminating reverse proxy set `Security:TrustForwardedHeaders` to `true`.
 - Password sign-in is rate limited per client IP, and an account is locked for `LockoutMinutes` after
   `MaxFailedLogins` wrong passwords in a row (an administrator can unlock it). Disabled accounts are signed out
@@ -227,10 +232,13 @@ build/package.sh 0.6.0 osx-arm64       # just one
 ```
 
 Pushing a tag such as `v0.6.0` runs the release workflow, which builds every platform and publishes a
-GitHub release.
+GitHub release. The repository also builds on GitLab: `.gitlab-ci.yml` runs the same tests on merge requests and,
+for a `v*` tag, publishes a GitLab release, the container image in the GitLab Container Registry and the docs on
+GitLab Pages (see [docs/RELEASING.md](docs/RELEASING.md#releasing-with-gitlab)).
 
 The desktop app updates itself (Settings ▸ Desktop). It checks GitHub releases, GitHub with a token for a private
-repository, or a manifest your own Meridian server hosts at `/api/desktop/latest`. It installs the installer when one
+repository, GitLab releases (gitlab.com or self-managed, with an optional token), or a manifest your own Meridian
+server hosts at `/api/desktop/latest`. It installs the installer when one
 exists and otherwise swaps in the portable `.zip` / `.tar.gz`, after verifying each file against its SHA-256. See
 [docs/RELEASING.md](docs/RELEASING.md#auto-update).
 

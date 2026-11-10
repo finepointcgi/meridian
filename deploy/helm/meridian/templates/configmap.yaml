@@ -21,6 +21,9 @@ data:
   Meridian__Sso__Providers__{{ $i }}__DisplayName: {{ $p.displayName | default $p.name | quote }}
   Meridian__Sso__Providers__{{ $i }}__Authority: {{ required "sso provider authority is required" $p.authority | quote }}
   Meridian__Sso__Providers__{{ $i }}__ClientId: {{ required "sso provider clientId is required" $p.clientId | quote }}
+  {{- with $p.preset }}
+  Meridian__Sso__Providers__{{ $i }}__Preset: {{ . | quote }}
+  {{- end }}
   {{- if hasKey $p "autoProvision" }}
   Meridian__Sso__Providers__{{ $i }}__AutoProvision: {{ $p.autoProvision | quote }}
   {{- end }}

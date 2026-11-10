@@ -290,6 +290,37 @@ public class SettingsDialogTests : TestContext
         Assert.Contains(DesktopCommands(), a => (string?)a[0] == "updateToken");
     }
 
+    [Fact]
+    public void Desktop_Update_Source_Switches_To_GitLab_Releases_With_An_Optional_Token()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.5.0", UpdateSource: "GitHub"));
+        Choose(d, "update-source", "GitLab releases");
+        d.Find("input.desktop-gitlab-url").Input("https://gitlab.acme.test");
+        d.Find("input.desktop-gitlab-project").Input("tools/meridian");
+        var token = d.Find("input.desktop-gitlab-token");
+        Assert.Equal("password", token.GetAttribute("type"));
+        Assert.False(token.HasAttribute("value"));
+        d.Find("button.desktop-source-save").Click();
+        var call = System.Text.Json.JsonSerializer.Serialize(DesktopCommands().Last()[1]);
+        Assert.Contains("\"GitLab\"", call);
+        Assert.Contains("https://gitlab.acme.test", call);
+        Assert.Contains("tools/meridian", call);
+
+        d.Find("button.desktop-gitlab-token-save").Click();
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.desktopSaveToken"
+            && (string?)i.Arguments[0] == "desktop-gitlab-token" && (string?)i.Arguments[1] == "GitLab");
+    }
+
+    [Fact]
+    public void Desktop_GitLab_Source_Shows_The_Saved_Project_And_Removes_Its_Token()
+    {
+        var saved = OpenDesktop(new(false, true, 0, Version: "0.5.0", UpdateSource: "GitLab", GitLabUrl: "https://gitlab.acme.test", GitLabProject: "tools/meridian", HasGitLabToken: true));
+        Assert.Equal("tools/meridian", saved.Find("input.desktop-gitlab-project").GetAttribute("value"));
+        Assert.True(saved.Find("button.desktop-source-save").HasAttribute("disabled"));
+        saved.Find("button.desktop-gitlab-token-remove").Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "updateToken" && System.Text.Json.JsonSerializer.Serialize(a[1]).Contains("GitLab"));
+    }
+
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);

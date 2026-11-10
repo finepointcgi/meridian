@@ -100,12 +100,12 @@ window.meridianSettings = (() => {
      * Sends the GitHub token from the input straight to the desktop host and clears the input. The token never goes through
      * Blazor (or a team server, when the window shows one). Resolves true when a token was sent.
      */
-    desktopSaveToken: id => {
+    desktopSaveToken: (id, provider) => {
       const input = document.getElementById(id);
       const token = (input?.value || "").trim();
       if (input) input.value = "";
       if (!token || typeof window.external?.sendMessage !== "function") return false;
-      window.external.sendMessage(JSON.stringify({ command: "updateToken", token }));
+      window.external.sendMessage(JSON.stringify(provider ? { command: "updateToken", token, provider } : { command: "updateToken", token }));
       return true;
     },
   };

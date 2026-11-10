@@ -266,7 +266,7 @@
             yield return new(SettingsSection.Desktop, "Automatically check daily", "Look for a new release once a day when Meridian starts.", Scope.Device,
                 Toggle("updates", _desktopUpdates, v => { _desktopUpdates = v; Bridge("updates", v); return Task.CompletedTask; }), "update release version automatic");
             yield return new(SettingsSection.Desktop, "Update source", "Where Meridian looks for new versions.", Scope.Device,
-                UpdateSourceForm, "update source github token private repository manifest url server self-hosted", "desktop-update-source");
+                UpdateSourceForm, "update source github gitlab token private repository project manifest url server self-hosted", "desktop-update-source");
             yield return new(SettingsSection.Desktop, "Recent files", _desktopRecent == 0 ? "No recent files." : $"{_desktopRecent} recent file{(_desktopRecent == 1 ? "" : "s")} on the start screen.", Scope.Device,
                 ClearRecent, "history recent clear");
         }
@@ -781,15 +781,15 @@
     private int _desktopRecent;
     // Updates: what the desktop host reported (Program.DesktopState / update-status messages).
     private string? _dVersion, _dLastCheck, _dMessage, _dStatus, _dAvailable, _dManifestUrl;
-    private string _dSource = "GitHub", _dDraftSource = "GitHub", _dDraftUrl = "";
-    private bool _dHasToken, _dChecksDisabled, _dChecking, _dInstalling;
+    private string _dSource = "GitHub", _dDraftSource = "GitHub", _dDraftUrl = "", _dGitLabUrl = "", _dGitLabProject = "", _dDraftGitLabUrl = "", _dDraftGitLabProject = "";
+    private bool _dHasToken, _dHasGitLabToken, _dChecksDisabled, _dChecking, _dInstalling;
     private int? _dProgress;
     private DotNetObjectReference<SettingsDialog>? _dotnet;
 
     /// <summary>The desktop host's settings (the GitHub token is never part of it, only whether one is saved).</summary>
     public sealed record DesktopState(bool AutoOpen, bool CheckForUpdates, int RecentFiles, string? Version = null, string? LastCheck = null,
         string? LastMessage = null, string? LastStatus = null, string? Available = null, string? UpdateSource = null, string? ManifestUrl = null,
-        bool HasToken = false, bool ChecksDisabled = false);
+        bool HasToken = false, bool ChecksDisabled = false, string? GitLabUrl = null, string? GitLabProject = null, bool HasGitLabToken = false);
 
     private async Task LoadDesktopAsync()
     {
@@ -818,6 +818,9 @@
         _dManifestUrl = d.ManifestUrl;
         _dDraftUrl = d.ManifestUrl ?? "";
         _dHasToken = d.HasToken;
+        _dGitLabUrl = _dDraftGitLabUrl = d.GitLabUrl ?? "";
+        _dGitLabProject = _dDraftGitLabProject = d.GitLabProject ?? "";
+        _dHasGitLabToken = d.HasGitLabToken;
         _dChecksDisabled = d.ChecksDisabled;
     }
 
@@ -882,6 +885,7 @@
     private void SaveSource()
     {
         if (_dDraftSource == "Manifest") DesktopCommand("updateSource", new { source = "Manifest", url = _dDraftUrl.Trim() });
+        else if (_dDraftSource == "GitLab") DesktopCommand("updateSource", new { source = "GitLab", url = _dDraftGitLabUrl.Trim(), project = _dDraftGitLabProject.Trim() });
         else DesktopCommand("updateSource", new { source = _dDraftSource });
     }
 
@@ -896,6 +900,25 @@
     }
 
     private void RemoveToken() => DesktopCommand("updateToken", new { token = "" });
+
+    /// <summary>Like <see cref="SaveToken"/>, for the GitLab token (sent only to the configured GitLab instance).</summary>
+    private async Task SaveGitLabToken()
+    {
+        try
+        {
+            if (await JS.InvokeAsync<bool>("meridianSettings.desktopSaveToken", "desktop-gitlab-token", "GitLab")) (_dStatus, _dMessage) = ("saving", "Saving the token…");
+        }
+        catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException) { }
+    }
+
+    private void RemoveGitLabToken() => DesktopCommand("updateToken", new { token = "", provider = "GitLab" });
+
+    private bool SourceUnchanged => _dDraftSource == _dSource && _dDraftSource switch
+    {
+        "Manifest" => _dDraftUrl.Trim() == (_dManifestUrl ?? ""),
+        "GitLab" => _dDraftGitLabUrl.Trim().TrimEnd('/') == _dGitLabUrl && _dDraftGitLabProject.Trim().Trim('/') == _dGitLabProject,
+        _ => true,
+    };
 
     private string LastCheckText()
     {
@@ -934,7 +957,7 @@
     private RenderFragment UpdateSourceForm => __builder =>
     {
         <div class="settings-local desktop-source">
-            @Seg("update-source", _dDraftSource, [("GitHub", "GitHub releases"), ("GitHubToken", "GitHub with a token"), ("Manifest", "Custom URL")], v => { _dDraftSource = v; return Task.CompletedTask; })
+            @Seg("update-source", _dDraftSource, [("GitHub", "GitHub releases"), ("GitHubToken", "GitHub with a token"), ("GitLab", "GitLab releases"), ("Manifest", "Custom URL")], v => { _dDraftSource = v; return Task.CompletedTask; })
             @if (_dDraftSource == "GitHub")
             {
                 <div class="settings-hint">Public releases of finepointcgi/meridian on GitHub.</div>
@@ -950,6 +973,22 @@
                     @if (_dHasToken) { <button class="settings-btn danger desktop-token-remove" @onclick="RemoveToken">Remove</button> }
                 </div>
             }
+            else if (_dDraftSource == "GitLab")
+            {
+                <div class="settings-hint">Releases of a GitLab project on gitlab.com or your own GitLab. Leave the address empty for gitlab.com.</div>
+                <input class="settings-input desktop-gitlab-url" type="url" aria-label="GitLab address" placeholder="https://gitlab.com"
+                       value="@_dDraftGitLabUrl" @oninput="e => _dDraftGitLabUrl = e.Value?.ToString() ?? string.Empty" />
+                <input class="settings-input desktop-gitlab-project" type="text" aria-label="GitLab project" placeholder="my-group/meridian or 12345"
+                       value="@_dDraftGitLabProject" @oninput="e => _dDraftGitLabProject = e.Value?.ToString() ?? string.Empty" />
+                <div class="settings-hint">For a private project: a personal or project access token with read_api. Stored encrypted on this computer and sent only to that GitLab address.</div>
+                <div class="settings-inline">
+                    @* Not bound: the token is read by meridianSettings.desktopSaveToken and sent straight to the desktop app. *@
+                    <input id="desktop-gitlab-token" class="settings-input desktop-gitlab-token" type="password" autocomplete="off" aria-label="GitLab token"
+                           placeholder="@(_dHasGitLabToken ? "A token is saved (paste to replace)" : "glpat-… (optional)")" />
+                    <button class="settings-btn desktop-gitlab-token-save" @onclick="SaveGitLabToken">Save token</button>
+                    @if (_dHasGitLabToken) { <button class="settings-btn danger desktop-gitlab-token-remove" @onclick="RemoveGitLabToken">Remove</button> }
+                </div>
+            }
             else
             {
                 <div class="settings-hint">An https:// address of an update manifest, for example your Meridian server's /api/desktop/latest.</div>
@@ -958,7 +997,7 @@
             }
             @if (_dDraftSource != "GitHubToken" || _dSource != "GitHubToken")
             {
-                <button class="settings-btn desktop-source-save" disabled="@(_dDraftSource == _dSource && (_dDraftSource != "Manifest" || _dDraftUrl.Trim() == (_dManifestUrl ?? "")))" @onclick="SaveSource">Use this source</button>
+                <button class="settings-btn desktop-source-save" disabled="@SourceUnchanged" @onclick="SaveSource">Use this source</button>
             }
         </div>
     };
