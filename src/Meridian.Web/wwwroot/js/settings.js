@@ -18,6 +18,7 @@ window.meridianSettings = (() => {
 
   let schemeListener = null;
   let shortcut = null;
+  let desktopListener = null, desktopHooked = false;
   const local = key => { try { return localStorage.getItem(key); } catch { return null; } };
 
   return {
@@ -81,6 +82,31 @@ window.meridianSettings = (() => {
     }),
     desktop: (command, payload) => {
       if (typeof window.external?.sendMessage === "function") window.external.sendMessage(JSON.stringify({ command, ...(payload || {}) }));
+    },
+    /** Forwards the host's update messages (check results, progress, errors, refreshed settings) to the open Settings dialog. */
+    desktopListen: dotnet => {
+      desktopListener = dotnet;
+      const ext = window.external;
+      if (desktopHooked || typeof ext?.receiveMessage !== "function") return;
+      desktopHooked = true;
+      ext.receiveMessage(raw => {
+        let m; try { m = JSON.parse(raw); } catch { return; }
+        if (!desktopListener || !["desktop-settings", "update-status", "update-progress", "update-error", "update"].includes(m?.type)) return;
+        desktopListener.invokeMethodAsync("OnDesktopMessage", raw).catch(() => { });
+      });
+    },
+    desktopUnlisten: dotnet => { if (desktopListener === dotnet) desktopListener = null; },
+    /**
+     * Sends the GitHub token from the input straight to the desktop host and clears the input. The token never goes through
+     * Blazor (or a team server, when the window shows one). Resolves true when a token was sent.
+     */
+    desktopSaveToken: id => {
+      const input = document.getElementById(id);
+      const token = (input?.value || "").trim();
+      if (input) input.value = "";
+      if (!token || typeof window.external?.sendMessage !== "function") return false;
+      window.external.sendMessage(JSON.stringify({ command: "updateToken", token }));
+      return true;
     },
   };
 })();

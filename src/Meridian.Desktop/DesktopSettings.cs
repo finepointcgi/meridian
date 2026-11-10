@@ -27,8 +27,29 @@ internal sealed class DesktopSettings
 
     public DateTimeOffset? LastUpdateCheck { get; set; }
 
+    /// <summary>The last check's result, as shown in Settings ▸ Desktop ("You're up to date (0.5.0)").</summary>
+    public string? LastUpdateMessage { get; set; }
+    public UpdateStatus? LastUpdateStatus { get; set; }
+
     /// <summary>The newer release found by the last check, shown again on later launches until installed.</summary>
     public UpdateInfo? AvailableUpdate { get; set; }
+
+    /// <summary>Where updates come from: GitHub releases (default), GitHub with a token, or a custom manifest address.</summary>
+    public UpdateSourceKind UpdateSource { get; set; } = UpdateSourceKind.GitHub;
+
+    /// <summary>The manifest address for <see cref="UpdateSourceKind.Manifest"/> (https://, or http://localhost for testing).</summary>
+    public string? UpdateManifestUrl { get; set; }
+
+    /// <summary>The GitHub token for <see cref="UpdateSourceKind.GitHubToken"/>, encrypted with Data Protection (<see cref="UpdateTokenProtector"/>).</summary>
+    public string? ProtectedGitHubToken { get; set; }
+
+    /// <summary>The update source to check, with the token decrypted.</summary>
+    public UpdateSource ResolveUpdateSource(UpdateTokenProtector? tokens) => UpdateSource switch
+    {
+        UpdateSourceKind.GitHubToken => new UpdateSource(UpdateSourceKind.GitHubToken, Token: tokens?.Unprotect(ProtectedGitHubToken)),
+        UpdateSourceKind.Manifest => new UpdateSource(UpdateSourceKind.Manifest, ManifestUrl: UpdateManifestUrl),
+        _ => Meridian.Desktop.UpdateSource.Default,
+    };
 
     /// <summary>Moves a file to the top of the recent list.</summary>
     public RecentFile Remember(string path, Guid? projectId, DateTime fileTimeUtc)

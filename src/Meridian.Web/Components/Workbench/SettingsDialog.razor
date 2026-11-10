@@ -105,7 +105,15 @@
     }
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
-    public void Dispose() => Theme.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Theme.Changed -= OnChanged;
+        if (_dotnet is { } dotnet)
+        {
+            _ = JS.InvokeVoidAsync("meridianSettings.desktopUnlisten", dotnet).AsTask().ContinueWith(_ => dotnet.Dispose());
+            _dotnet = null;
+        }
+    }
 
     private IEnumerable<SettingsSection> Sections
     {
@@ -253,8 +261,12 @@
         {
             yield return new(SettingsSection.Desktop, "Open the last workspace automatically", "Skip the start screen when Meridian launches.", Scope.Device,
                 Toggle("auto-open", _desktopAutoOpen, v => { _desktopAutoOpen = v; Bridge("autoOpen", v); return Task.CompletedTask; }), "start launch");
-            yield return new(SettingsSection.Desktop, "Check for updates", "Look for a new release once a day.", Scope.Device,
-                Toggle("updates", _desktopUpdates, v => { _desktopUpdates = v; Bridge("updates", v); return Task.CompletedTask; }), "update release version");
+            yield return new(SettingsSection.Desktop, "Updates", _dVersion is { } ver ? $"This is Meridian {ver}." : null, Scope.Device,
+                UpdatePanel, "update upgrade release version check install restart download", "desktop-updates");
+            yield return new(SettingsSection.Desktop, "Automatically check daily", "Look for a new release once a day when Meridian starts.", Scope.Device,
+                Toggle("updates", _desktopUpdates, v => { _desktopUpdates = v; Bridge("updates", v); return Task.CompletedTask; }), "update release version automatic");
+            yield return new(SettingsSection.Desktop, "Update source", "Where Meridian looks for new versions.", Scope.Device,
+                UpdateSourceForm, "update source github token private repository manifest url server self-hosted", "desktop-update-source");
             yield return new(SettingsSection.Desktop, "Recent files", _desktopRecent == 0 ? "No recent files." : $"{_desktopRecent} recent file{(_desktopRecent == 1 ? "" : "s")} on the start screen.", Scope.Device,
                 ClearRecent, "history recent clear");
         }
@@ -767,21 +779,189 @@
 
     private bool _desktopAutoOpen, _desktopUpdates = true;
     private int _desktopRecent;
+    // Updates: what the desktop host reported (Program.DesktopState / update-status messages).
+    private string? _dVersion, _dLastCheck, _dMessage, _dStatus, _dAvailable, _dManifestUrl;
+    private string _dSource = "GitHub", _dDraftSource = "GitHub", _dDraftUrl = "";
+    private bool _dHasToken, _dChecksDisabled, _dChecking, _dInstalling;
+    private int? _dProgress;
+    private DotNetObjectReference<SettingsDialog>? _dotnet;
 
-    public sealed record DesktopState(bool AutoOpen, bool CheckForUpdates, int RecentFiles);
+    /// <summary>The desktop host's settings (the GitHub token is never part of it, only whether one is saved).</summary>
+    public sealed record DesktopState(bool AutoOpen, bool CheckForUpdates, int RecentFiles, string? Version = null, string? LastCheck = null,
+        string? LastMessage = null, string? LastStatus = null, string? Available = null, string? UpdateSource = null, string? ManifestUrl = null,
+        bool HasToken = false, bool ChecksDisabled = false);
 
     private async Task LoadDesktopAsync()
     {
         try
         {
+            _dotnet ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("meridianSettings.desktopListen", _dotnet);
             if (await JS.InvokeAsync<DesktopState?>("meridianSettings.desktopSettings") is { } d)
             {
-                (_desktopAutoOpen, _desktopUpdates, _desktopRecent) = (d.AutoOpen, d.CheckForUpdates, d.RecentFiles);
+                ApplyDesktopState(d);
                 StateHasChanged();
             }
         }
         catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException) { }
     }
+
+    private void ApplyDesktopState(DesktopState d)
+    {
+        (_desktopAutoOpen, _desktopUpdates, _desktopRecent) = (d.AutoOpen, d.CheckForUpdates, d.RecentFiles);
+        _dVersion = d.Version;
+        _dLastCheck = d.LastCheck;
+        _dMessage ??= d.LastMessage;
+        _dStatus ??= d.LastStatus;
+        _dAvailable = d.Available;
+        _dSource = _dDraftSource = d.UpdateSource ?? "GitHub";
+        _dManifestUrl = d.ManifestUrl;
+        _dDraftUrl = d.ManifestUrl ?? "";
+        _dHasToken = d.HasToken;
+        _dChecksDisabled = d.ChecksDisabled;
+    }
+
+    /// <summary>Messages from the desktop host: check results, download progress, errors and refreshed settings.</summary>
+    [JSInvokable]
+    public Task OnDesktopMessage(string raw)
+    {
+        System.Text.Json.Nodes.JsonObject? m;
+        try { m = System.Text.Json.Nodes.JsonNode.Parse(raw) as System.Text.Json.Nodes.JsonObject; }
+        catch (System.Text.Json.JsonException) { return Task.CompletedTask; }
+        if (m is null) return Task.CompletedTask;
+        switch ((string?)m["type"])
+        {
+            case "desktop-settings":
+                var state = System.Text.Json.JsonSerializer.Deserialize<DesktopState>(m, System.Text.Json.JsonSerializerOptions.Web);
+                if (state != null) { var (msg, st) = (_dMessage, _dStatus); ApplyDesktopState(state); (_dMessage, _dStatus) = (msg ?? state.LastMessage, st ?? state.LastStatus); }
+                break;
+            case "update-status":
+                _dStatus = (string?)m["status"];
+                _dMessage = (string?)m["message"];
+                _dChecking = _dStatus == "checking";
+                if (_dStatus is "failed" or "manual") { _dInstalling = false; _dProgress = null; }
+                if ((string?)m["lastCheck"] is { } lc) _dLastCheck = lc;
+                if (m.ContainsKey("available")) _dAvailable = (string?)m["available"];
+                break;
+            case "update":
+                _dAvailable = (string?)m["version"];
+                break;
+            case "update-progress":
+                _dInstalling = true;
+                _dProgress = (int?)m["percent"];
+                break;
+            case "update-error":
+                _dInstalling = false;
+                _dProgress = null;
+                (_dStatus, _dMessage) = ("failed", (string?)m["message"]);
+                break;
+            default:
+                return Task.CompletedTask;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void DesktopCommand(string command, object? payload = null) =>
+        _ = JS.InvokeVoidAsync("meridianSettings.desktop", command, payload).AsTask().ContinueWith(_ => { });
+
+    private void CheckNow()
+    {
+        _dChecking = true;
+        (_dStatus, _dMessage) = ("checking", "Checking for updates…");
+        DesktopCommand("checkUpdates");
+    }
+
+    private void InstallNow()
+    {
+        _dInstalling = true;
+        _dProgress = 0;
+        (_dStatus, _dMessage) = ("installing", $"Downloading Meridian {_dAvailable}…");
+        DesktopCommand("update");
+    }
+
+    private void SaveSource()
+    {
+        if (_dDraftSource == "Manifest") DesktopCommand("updateSource", new { source = "Manifest", url = _dDraftUrl.Trim() });
+        else DesktopCommand("updateSource", new { source = _dDraftSource });
+    }
+
+    /// <summary>The token goes from the input straight to the desktop host in JavaScript: it never passes through this component or the server.</summary>
+    private async Task SaveToken()
+    {
+        try
+        {
+            if (await JS.InvokeAsync<bool>("meridianSettings.desktopSaveToken", "desktop-token")) (_dStatus, _dMessage) = ("saving", "Saving the token…");
+        }
+        catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException) { }
+    }
+
+    private void RemoveToken() => DesktopCommand("updateToken", new { token = "" });
+
+    private string LastCheckText()
+    {
+        if (_dLastCheck is null || !DateTimeOffset.TryParse(_dLastCheck, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var at)) return "Never checked.";
+        var ago = DateTimeOffset.Now - at;
+        var when = ago.TotalMinutes < 1 ? "just now" : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} h ago" : at.ToLocalTime().ToString("d MMM yyyy, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        return $"Last checked {when}.";
+    }
+
+    private bool StatusOk => _dStatus is "UpToDate" or "Available" or "saved" or "checking" or "installing" or "restarting" or "saving";
+
+    private RenderFragment UpdatePanel => __builder =>
+    {
+        <div class="settings-local desktop-updates">
+            <div class="settings-hint desktop-last-check">@LastCheckText()</div>
+            @if (_dMessage != null)
+            {
+                <div class="settings-hint desktop-update-message @(StatusOk ? "ok" : "bad")" role="status">@_dMessage</div>
+            }
+            @if (_dInstalling && _dProgress is { } pct)
+            {
+                <progress class="desktop-update-progress" max="100" value="@pct" aria-label="Download progress">@pct%</progress>
+                <div class="settings-hint">Downloading… @pct%</div>
+            }
+            <div class="settings-inline">
+                <button class="settings-btn desktop-check" disabled="@(_dChecking || _dInstalling || _dChecksDisabled)" @onclick="CheckNow">Check for updates</button>
+                @if (_dAvailable != null)
+                {
+                    <button class="settings-btn primary desktop-install" disabled="@_dInstalling" @onclick="InstallNow">Install @_dAvailable and restart</button>
+                }
+            </div>
+            @if (_dChecksDisabled) { <div class="settings-hint">Update checks are turned off on this computer (MERIDIAN_NO_UPDATE_CHECK=1).</div> }
+        </div>
+    };
+
+    private RenderFragment UpdateSourceForm => __builder =>
+    {
+        <div class="settings-local desktop-source">
+            @Seg("update-source", _dDraftSource, [("GitHub", "GitHub releases"), ("GitHubToken", "GitHub with a token"), ("Manifest", "Custom URL")], v => { _dDraftSource = v; return Task.CompletedTask; })
+            @if (_dDraftSource == "GitHub")
+            {
+                <div class="settings-hint">Public releases of finepointcgi/meridian on GitHub.</div>
+            }
+            else if (_dDraftSource == "GitHubToken")
+            {
+                <div class="settings-hint">For a private repository: a fine-grained token with read access to its Contents. Stored encrypted on this computer and sent only to api.github.com.</div>
+                <div class="settings-inline">
+                    @* Not bound: the token is read by meridianSettings.desktopSaveToken and sent straight to the desktop app. *@
+                    <input id="desktop-token" class="settings-input desktop-token" type="password" autocomplete="off" aria-label="GitHub token"
+                           placeholder="@(_dHasToken ? "A token is saved (paste to replace)" : "github_pat_…")" />
+                    <button class="settings-btn primary desktop-token-save" @onclick="SaveToken">Save token</button>
+                    @if (_dHasToken) { <button class="settings-btn danger desktop-token-remove" @onclick="RemoveToken">Remove</button> }
+                </div>
+            }
+            else
+            {
+                <div class="settings-hint">An https:// address of an update manifest, for example your Meridian server's /api/desktop/latest.</div>
+                <input class="settings-input desktop-manifest-url" type="url" aria-label="Update manifest address" placeholder="https://meridian.example.com/api/desktop/latest"
+                       value="@_dDraftUrl" @oninput="e => _dDraftUrl = e.Value?.ToString() ?? string.Empty" />
+            }
+            @if (_dDraftSource != "GitHubToken" || _dSource != "GitHubToken")
+            {
+                <button class="settings-btn desktop-source-save" disabled="@(_dDraftSource == _dSource && (_dDraftSource != "Manifest" || _dDraftUrl.Trim() == (_dManifestUrl ?? "")))" @onclick="SaveSource">Use this source</button>
+            }
+        </div>
+    };
 
     private void Bridge(string command, bool enabled) =>
         _ = JS.InvokeVoidAsync("meridianSettings.desktop", command, new { enabled }).AsTask().ContinueWith(_ => { });

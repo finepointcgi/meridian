@@ -33,6 +33,11 @@ internal static class Program
     private static void Main(string[] args)
     {
         _settings = DesktopSettings.Load();
+        // A portable update leaves the staging folder and the previous version next to the install: remove them now.
+        _ = Task.Run(() =>
+        {
+            if (InstallLocation.Detect(AppContext.BaseDirectory, UpdatePlatform.CurrentOs) is { } install) PortableInstaller.CleanupLeftovers(install, Log);
+        });
         _window = new PhotinoWindow()
             .SetTitle("Meridian")
             .SetUseOsDefaultSize(false)
@@ -135,7 +140,16 @@ internal static class Program
                 break;
             // Settings ▸ Desktop in the web app.
             case "desktopSettings":
-                Post(new { type = "desktop-settings", autoOpen = _settings.AutoOpen, checkForUpdates = _settings.CheckForUpdates, recentFiles = _settings.RecentFiles.Count, lastMode = _settings.LastMode });
+                Post(DesktopState());
+                break;
+            case "checkUpdates":
+                _ = CheckForUpdatesAsync(force: true);
+                break;
+            case "updateSource":
+                SetUpdateSource(msg!);
+                break;
+            case "updateToken":
+                SetUpdateToken((string?)msg!["token"]);
                 break;
             case "autoOpen":
                 _settings.AutoOpen = (bool?)msg!["enabled"] ?? false;
@@ -337,34 +351,156 @@ internal static class Program
 
     // ------------------------------------------------------------------ updates
 
-    private static UpdateInfo? CachedUpdate() =>
-        _settings.AvailableUpdate is { } u && Updater.IsNewer(u.Version, Updater.CurrentVersion()) ? u : null;
+    private static UpdateTokenProtector? _tokens;
+    private static int _checking;
 
-    private static async Task CheckForUpdatesAsync()
+    private static bool ChecksDisabled => Environment.GetEnvironmentVariable("MERIDIAN_NO_UPDATE_CHECK") == "1";
+
+    private static UpdateTokenProtector? Tokens()
     {
-        if (!_settings.CheckForUpdates || Environment.GetEnvironmentVariable("MERIDIAN_NO_UPDATE_CHECK") == "1") return;
-        if (CachedUpdate() is { } cached) { _update = cached; Post(new { type = "update", version = cached.Version, url = cached.PageUrl }); }
-        if (!Updater.IsCheckDue(_settings.LastUpdateCheck, DateTimeOffset.Now)) return;
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        var found = await new Updater(http, Updater.CurrentVersion(), Log).CheckAsync();
-        _settings.LastUpdateCheck = DateTimeOffset.Now;
-        _settings.AvailableUpdate = found;
-        _settings.Save();
-        _update = found;
-        if (found != null)
+        try { return _tokens ??= new UpdateTokenProtector(UpdateTokenProtector.DefaultKeysFolder); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {
-            Log($"Update available: {found.Tag} ({found.Asset.Name}).");
-            Post(new { type = "update", version = found.Version, url = found.PageUrl });
+            Log("Token encryption unavailable: " + ex.Message);
+            return null;
         }
     }
 
-    /// <summary>Downloads and verifies the installer with progress, opens it, and quits so it can replace this app.</summary>
+    private static UpdateInfo? CachedUpdate() =>
+        _settings.AvailableUpdate is { } u && Updater.IsNewer(u.Version, Updater.CurrentVersion()) ? u : null;
+
+    /// <summary>Settings ▸ Desktop: version, update source and the last check (never the token itself).</summary>
+    private static object DesktopState() => new
+    {
+        type = "desktop-settings",
+        autoOpen = _settings.AutoOpen,
+        checkForUpdates = _settings.CheckForUpdates,
+        recentFiles = _settings.RecentFiles.Count,
+        lastMode = _settings.LastMode,
+        version = Updater.CurrentVersion(),
+        lastCheck = _settings.LastUpdateCheck?.ToString("O"),
+        lastMessage = _settings.LastUpdateMessage,
+        lastStatus = _settings.LastUpdateStatus?.ToString(),
+        available = CachedUpdate()?.Version,
+        updateSource = _settings.UpdateSource.ToString(),
+        manifestUrl = _settings.UpdateManifestUrl,
+        hasToken = !string.IsNullOrEmpty(_settings.ProtectedGitHubToken),
+        checksDisabled = ChecksDisabled,
+    };
+
+    private static void PostStatus(string status, string message) =>
+        Post(new { type = "update-status", status, message, lastCheck = _settings.LastUpdateCheck?.ToString("O"), available = (_update ?? CachedUpdate())?.Version });
+
+    /// <summary>Checks the configured source: once a day when automatic checks are on, or now (<paramref name="force"/>, the "Check for updates" button).</summary>
+    private static async Task CheckForUpdatesAsync(bool force = false)
+    {
+        if (ChecksDisabled)
+        {
+            if (force) PostStatus("disabled", "Update checks are turned off on this computer (MERIDIAN_NO_UPDATE_CHECK=1).");
+            return;
+        }
+        if (!force)
+        {
+            if (!_settings.CheckForUpdates) return;
+            if (CachedUpdate() is { } cached) { _update = cached; Post(new { type = "update", version = cached.Version, url = cached.PageUrl }); }
+            if (!Updater.IsCheckDue(_settings.LastUpdateCheck, DateTimeOffset.Now)) return;
+        }
+        if (Interlocked.Exchange(ref _checking, 1) == 1) return;
+        try
+        {
+            PostStatus("checking", "Checking for updates…");
+            using var http = Updater.CreateHttpClient(TimeSpan.FromSeconds(20));
+            var result = await new Updater(http, Updater.CurrentVersion(), Log, source: _settings.ResolveUpdateSource(Tokens())).CheckAsync();
+            Log($"Update check: {result.Status}: {result.Message}");
+            _settings.LastUpdateCheck = DateTimeOffset.Now;
+            _settings.LastUpdateStatus = result.Status;
+            _settings.LastUpdateMessage = result.Message;
+            // Keep a found update when the network is down; replace it with whatever a successful check says.
+            if (result.Status is not (UpdateStatus.Unreachable or UpdateStatus.Invalid)) _settings.AvailableUpdate = result.Update;
+            _settings.Save();
+            _update = result.Update ?? CachedUpdate();
+            PostStatus(result.Status.ToString(), result.Message);
+            if (result.Update is { } found)
+            {
+                Log($"Update available: {found.Tag} ({found.Asset.Name}, {found.Kind}).");
+                Post(new { type = "update", version = found.Version, url = found.PageUrl });
+            }
+        }
+        finally { Interlocked.Exchange(ref _checking, 0); }
+    }
+
+    /// <summary>Settings ▸ Desktop ▸ Update source: GitHub, GitHub with a token, or a manifest address.</summary>
+    private static void SetUpdateSource(JsonObject msg)
+    {
+        var source = (string?)msg["source"];
+        if (!Enum.TryParse<UpdateSourceKind>(source, ignoreCase: true, out var kind)) return;
+        if (kind == UpdateSourceKind.Manifest)
+        {
+            var url = (string?)msg["url"];
+            if (UpdateSource.ParseManifestUrl(url, out var uri) is { } error) { PostStatus("invalid-source", error); return; }
+            _settings.UpdateManifestUrl = uri!.AbsoluteUri;
+        }
+        if (_settings.UpdateSource != kind || kind == UpdateSourceKind.Manifest)
+        {
+            _settings.AvailableUpdate = null;
+            _settings.LastUpdateMessage = null;
+            _settings.LastUpdateStatus = null;
+            _update = null;
+        }
+        _settings.UpdateSource = kind;
+        _settings.Save();
+        Post(DesktopState());
+        PostStatus("saved", kind switch
+        {
+            UpdateSourceKind.GitHubToken when string.IsNullOrEmpty(_settings.ProtectedGitHubToken) => "Saved. Paste a GitHub token to check the private repository.",
+            UpdateSourceKind.Manifest => $"Saved. Updates come from {_settings.UpdateManifestUrl}.",
+            _ => "Saved.",
+        });
+    }
+
+    /// <summary>Saves (or clears) the GitHub token, encrypted. The token comes straight from the page's input to this process.</summary>
+    private static void SetUpdateToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            _settings.ProtectedGitHubToken = null;
+            _settings.Save();
+            Post(DesktopState());
+            PostStatus("saved", "Token removed.");
+            return;
+        }
+        if (UpdateTokenProtector.Validate(token) is { } error) { PostStatus("invalid-source", error); return; }
+        if (Tokens() is not { } tokens) { PostStatus("invalid-source", "The token could not be stored encrypted on this computer."); return; }
+        _settings.ProtectedGitHubToken = tokens.Protect(token.Trim());
+        _settings.UpdateSource = UpdateSourceKind.GitHubToken;
+        _settings.Save();
+        Post(DesktopState());
+        PostStatus("saved", "Token saved (encrypted on this computer). Checking…");
+        _ = CheckForUpdatesAsync(force: true);
+    }
+
+    /// <summary>
+    /// Downloads and verifies the package with progress. An installer is opened and the app quits; a portable archive is unpacked
+    /// next to the install and a script swaps it in after the app quits, then starts the new version. If the install folder
+    /// cannot be written, the release page opens instead.
+    /// </summary>
     private static async Task InstallUpdateAsync()
     {
         if ((_update ?? CachedUpdate()) is not { } update || Interlocked.Exchange(ref _updating, 1) == 1) return;
+        string? downloaded = null;
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+            InstallLocation? location = null;
+            if (update.Kind == PackageKind.Portable)
+            {
+                location = InstallLocation.Detect(AppContext.BaseDirectory, UpdatePlatform.CurrentOs);
+                var problem = location is null
+                    ? "This copy of Meridian was not installed from a release package (a development build?), so it can't replace itself."
+                    : PortableInstaller.CheckWritable(location, DesktopSettings.Folder);
+                if (problem != null) { OpenReleasePage(update, problem); return; }
+            }
+
+            using var http = Updater.CreateHttpClient(TimeSpan.FromMinutes(30));
             var lastPercent = -1;
             var progress = new Progress<double>(p =>
             {
@@ -373,17 +509,52 @@ internal static class Program
                 lastPercent = percent;
                 Post(new { type = "update-progress", percent });
             });
-            var path = await new Updater(http, Updater.CurrentVersion(), Log).DownloadAsync(update, progress);
-            Log($"Verified {path}; launching the installer.");
-            Updater.Launch(path);
+            var updater = new Updater(http, Updater.CurrentVersion(), Log, source: _settings.ResolveUpdateSource(Tokens()));
+            downloaded = await updater.DownloadAsync(update, progress);
+            Log($"Verified {downloaded}.");
+
+            if (location is null)
+            {
+                Log("Launching the installer.");
+                Updater.Launch(downloaded);
+                downloaded = null;   // the installer is still running from there
+            }
+            else
+            {
+                PostStatus("installing", "Unpacking the update…");
+                var newRoot = await PortableInstaller.StageAsync(downloaded, location);
+                var script = PortableInstaller.WriteScript(location, newRoot, Environment.ProcessId, Path.Combine(DesktopSettings.Folder, "desktop.log"), DesktopSettings.Folder);
+                Log($"Staged {update.Version} in {newRoot}; {Path.GetFileName(script)} swaps it in after Meridian quits.");
+                System.Diagnostics.Process.Start(PortableInstaller.ScriptStartInfo(script, UpdatePlatform.CurrentOs));
+                PostStatus("restarting", $"Restarting into Meridian {update.Version}…");
+            }
             _window.Invoke(() => _window.Close());
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or InvalidDataException or IOException
+            or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
         {
             Log("Update failed: " + ex);
             Post(new { type = "update-error", message = ex.Message });
+            PostStatus("failed", "Update failed: " + ex.Message);
         }
-        finally { Interlocked.Exchange(ref _updating, 0); }
+        finally
+        {
+            if (downloaded != null) try { Directory.Delete(Path.GetDirectoryName(downloaded)!, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            Interlocked.Exchange(ref _updating, 0);
+        }
+    }
+
+    /// <summary>The install folder can't be replaced: say why and open the release page (or the manifest's notes) to download by hand.</summary>
+    private static void OpenReleasePage(UpdateInfo update, string problem)
+    {
+        var page = update.PageUrl is { Length: > 0 } p ? p : update.Source == UpdateSourceKind.Manifest ? null : $"https://github.com/{Updater.Repository}/releases";
+        var message = page != null
+            ? $"{problem} Opening the release page so you can download {update.Version} yourself."
+            : $"{problem} Download {update.Version} from your update server and install it by hand.";
+        Log(message);
+        Post(new { type = "update-error", message });
+        PostStatus("manual", message);
+        if (page != null) OpenUrl(page);
     }
 
     // ------------------------------------------------------------------ server mode

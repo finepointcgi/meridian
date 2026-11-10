@@ -114,26 +114,121 @@ The start page lists recent files. Opening an unchanged recent file reopens its 
 
 ## Auto-update
 
-When the app starts (if **Check for updates** on the start page is on, which is the default), it checks at most once a
-day with `GET https://api.github.com/repos/finepointcgi/meridian/releases/latest`. Drafts and pre-releases are ignored.
-If the tag is a newer semantic version than the app's own (`<Version>` in the csproj, passed by `package.sh -p:Version=`),
-the start page shows a banner. Pages from the web app also get a notice through the Photino bridge: they send `hello`
-and the host answers `{type:"update"}`.
+The desktop app checks for a newer version when it starts, at most once a day, if **Automatically check daily** is on
+(Settings ▸ Desktop, or **Check for updates** on the start page). It is on by default. **Check for updates** in
+Settings ▸ Desktop checks right away. That section shows the running version, when the last check ran, and its result
+in a sentence, for example:
 
-Choosing **Install** downloads the installer for the platform to a temporary folder, with progress:
+- "You're up to date (0.5.0)."
+- "0.6.0 is available — Install and restart." (with an **Install 0.6.0 and restart** button and a progress bar)
+- "Couldn't reach GitHub: the repository is private (or has no releases yet) — set a token or another update source in Settings."
+- "No package for this computer in release 0.6.0."
 
-| Platform | File |
+Drafts and pre-releases are ignored. A release counts as newer when its tag is a higher semantic version than the
+app's own (`<Version>` in the csproj, passed by `package.sh -p:Version=`). Pages from the web app also get a notice
+through the Photino bridge: they send `hello`, and the host answers `{type:"update"}`. Set `MERIDIAN_NO_UPDATE_CHECK=1`
+to turn checks off entirely, for example for managed installs. The logic is in `src/Meridian.Desktop/Updater.cs`,
+`UpdateSource.cs` and `PortableInstaller.cs`. The tests are in `tests/Meridian.Desktop.Tests`.
+
+### Which package is installed
+
+| Platform | Preferred | Fallback |
+|---|---|---|
+| macOS (arm64 or x64) | `.zip` (Meridian.app swapped in place) when the app's folder is writable, otherwise `.dmg` | the other one |
+| Windows x64, installed by the setup | `-setup.exe` (or `.msi`) | `windows-x64.zip` |
+| Windows x64, portable zip | `windows-x64.zip` | `-setup.exe` |
+| Linux x64, from the `.tar.gz` | `linux-x64.tar.gz` | — |
+| Linux x64, running as an AppImage | `.AppImage` | — |
+
+So a release built locally with `build/package.sh` (portable archives, macOS dmg and zip, and `SHA256SUMS.txt`) updates
+every platform. Every download is checked against its SHA-256 before anything is opened or unpacked: GitHub releases use
+the release's `SHA256SUMS.txt`, and manifests carry a `sha256` for each file. A file that does not match is deleted, and
+the update stops.
+
+- **Installers.** The `.dmg` is mounted and the app quits, but you still drag Meridian to Applications yourself. The
+  Windows setup runs and replaces the per-user install, because `CloseApplications=force` closes the running copy. A new
+  AppImage is started.
+- **Portable archives (in-place swap).** The archive is unpacked into a hidden staging folder next to the install
+  (`.Meridian.meridian-update/new`, beside `Meridian/`, `meridian-0.6.0/` or `Meridian.app`), so the swap is a rename on
+  the same disk. Unpacking uses the same rules as the repository's other archive readers (`SafeZip` and
+  `SnapshotArchive`): sizes are counted on the bytes actually read, and there are caps on entries, file size and total
+  size. Absolute paths, `..`, drive letters, links and more than one top-level folder are rejected. macOS `__MACOSX/`
+  and `._*` metadata is skipped. The package must contain the executable for this OS (`Meridian.exe`, `Meridian` or
+  `Contents/MacOS/Meridian`). The app then writes `update.cmd` (Windows) or `update.sh` (macOS and Linux) into the
+  staging folder, starts it, and quits. The script:
+  1. waits for the app's process ID to exit (up to 10 minutes);
+  2. moves the old install to `.<name>.meridian-old`;
+  3. moves the new one in. If that fails, it puts the old one back;
+  4. starts Meridian again (`open Meridian.app` on macOS);
+  5. logs each step to `desktop.log` in the data folder.
+
+  The install keeps its path, so shortcuts, file associations and the `install.sh` menu entry keep working. A Linux
+  folder keeps its name, such as `meridian-0.5.0`. On Windows, a setup-made install keeps its uninstaller.
+  On the next start the app deletes the staging and `-old` folders. The data folder (`MERIDIAN_DATA`, or the
+  application-data `Meridian` folder: the database, `desktop.json` and keys) is outside the install and is never moved.
+  If it is inside the install folder, the app does not swap the folder.
+- **Install folder can't be written** (for example Program Files, `/opt` from the `.deb`, or `/Applications` without
+  admin rights): the app says so and opens the release page so you can download the update yourself. A development build
+  (`dotnet run`, which has no self-contained runtime next to it) never replaces itself.
+
+macOS: the `.zip` swap is preferred because it needs no dragging and keeps the app where it is. The bundle is replaced
+as a whole, so its signature stays intact. Files the app downloads itself carry no quarantine flag, so Gatekeeper does
+not move the app to a temporary location. The `.dmg` remains the fallback when the bundle's folder is not writable.
+
+### Update sources
+
+Settings ▸ Desktop ▸ **Update source**:
+
+| Source | What the app requests |
 |---|---|
-| macOS (arm64 or x64) | `.dmg` |
-| Windows | `-setup.exe`, or an `.msi` if one is published |
-| Linux | `.AppImage` |
+| **GitHub releases** (default) | `GET https://api.github.com/repos/finepointcgi/meridian/releases/latest` without credentials. While the repository is private, this returns 404, and the app says to set a token or another source |
+| **GitHub with a token** | The same request with `Authorization: Bearer <token>`. Assets are downloaded through the asset API (`…/releases/assets/<id>`, `Accept: application/octet-stream`). Use a fine-grained token with read-only access to the repository's **Contents** |
+| **Custom URL** | A JSON manifest at an `https://` address (see below), for example your team server's `/api/desktop/latest` |
 
-The download's SHA-256 must match its line in the release's `SHA256SUMS.txt`, or the file is deleted. The app then
-mounts the dmg, runs the setup or starts the new AppImage, and quits.
+The token is pasted into a password field that Blazor never reads. JavaScript sends it straight to the desktop host,
+so it does not pass through a team server even when the window is showing one. The token is stored in `desktop.json`
+encrypted with ASP.NET Core Data Protection, the same mechanism as the AI assistant's API key. The keys are in
+`desktop-keys/` in the data folder, and on Windows they are also protected with DPAPI. The token is only ever sent to
+`api.github.com`. GitHub answers asset requests with a redirect to `objects.githubusercontent.com`, and the updater
+follows redirects itself, without the token.
 
-- While the repository is private, the anonymous API call returns 404. The app logs this to `desktop.log` and shows no banner.
-- Set `MERIDIAN_NO_UPDATE_CHECK=1` to turn off checks entirely, for example for managed installs.
-- Logic and tests: `src/Meridian.Desktop/Updater.cs` and `tests/Meridian.Desktop.Tests`.
+All update traffic is HTTPS only, and a redirect to `http://` is refused. The only exception is a manifest address that
+is explicitly set to `http://localhost` or `http://127.0.0.1`, for testing. Its assets may then also come from loopback
+over http.
 
-Release asset names are part of the updater's contract. Keep the `Meridian-<version>-<os>-<arch>` prefix and the
-extensions listed above, and always publish `SHA256SUMS.txt`.
+### Manifest format
+
+```json
+{
+  "version": "0.6.0",
+  "notes": "https://meridian.example.com/release-notes/0.6.0",
+  "assets": [
+    { "name": "Meridian-0.6.0-windows-x64.zip", "url": "files/Meridian-0.6.0-windows-x64.zip", "sha256": "<64 hex digits>", "size": 187654321 },
+    { "name": "Meridian-0.6.0-macos-arm64.zip", "url": "https://cdn.example.com/Meridian-0.6.0-macos-arm64.zip", "sha256": "<64 hex digits>" }
+  ]
+}
+```
+
+- `version` (required): a semantic version.
+- `notes` (optional): a page to open, for example when the app cannot replace itself.
+- `assets[].url` can be relative to the manifest's address.
+- `size` is optional.
+- Asset names follow the release naming below.
+- An asset without a valid `sha256`, or with a non-https `url`, is ignored, so a manifest can never cause an unverified install.
+
+A Meridian team server can host this manifest: see [DEPLOYMENT.md](DEPLOYMENT.md#desktop-updates-from-your-server).
+
+### Release asset names
+
+Asset names are part of the updater's contract. Keep the `Meridian-<version>-<os>-<arch>` prefix and the extensions
+above. Keep the archive layouts that `package.sh` produces: `Meridian/` in the Windows zip, `meridian-<version>/` in the
+Linux tar.gz, and `Meridian.app/` in the macOS zip. Always publish `SHA256SUMS.txt`.
+
+### What only a real release can verify
+
+The unit tests cover package selection, checksums, the token rules, the manifest, safe unpacking and both scripts'
+content. On macOS and Linux, `update.sh` actually runs in a temporary folder. These still need a real release on each OS:
+
+- running `update.cmd` on Windows (including a file still locked by antivirus or the FMU host);
+- the macOS `.app` swap in `/Applications` under App Management privacy settings, and Gatekeeper on the relaunched bundle;
+- GitHub's real asset redirect with a fine-grained token.

@@ -134,6 +134,8 @@ body .mud-popover .mud-menu-item .mud-menu-item-text { color: inherit; }
 .settings-row:has(.api-tokens), .settings-row:has(.settings-keys), .settings-row:has(.settings-privacy) { grid-template-columns: 1fr; }
 .settings-row:has(.api-tokens) .settings-control, .settings-row:has(.settings-keys) .settings-control, .settings-row:has(.settings-privacy) .settings-control { justify-content: flex-start; }
 .api-tokens { width: 100%; }
+.desktop-update-message { max-width: 420px; text-align: right; }
+.desktop-update-progress { width: 280px; max-width: 100%; height: 8px; accent-color: var(--accent-strong, #2f6fec); }
 
 @media (max-width: 760px) {
   .settings-dialog { height: calc(100vh - 16px); margin: 8px !important; max-width: none !important; }

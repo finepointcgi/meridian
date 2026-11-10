@@ -229,6 +229,11 @@ build/package.sh 0.5.0 osx-arm64       # just one
 Pushing a tag such as `v0.5.0` runs the release workflow, which builds every platform and publishes a
 GitHub release.
 
+The desktop app updates itself (Settings ▸ Desktop). It checks GitHub releases, GitHub with a token for a private
+repository, or a manifest your own Meridian server hosts at `/api/desktop/latest`. It installs the installer when one
+exists and otherwise swaps in the portable `.zip` / `.tar.gz`, after verifying each file against its SHA-256. See
+[docs/RELEASING.md](docs/RELEASING.md#auto-update).
+
 ## Project layout
 
 | Path | Contents |

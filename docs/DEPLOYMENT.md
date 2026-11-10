@@ -201,6 +201,8 @@ compose `.env` file, every setting has a short variable that `docker-compose.pro
 | `Meridian__AI__Provider` | Anthropic | `Anthropic`, or `Local` for a self-hosted OpenAI-compatible model server (Ollama, LM Studio, llama.cpp, vLLM, LocalAI). Only administrators set it; users can't change the provider or the address |
 | `Meridian__AI__Local__BaseUrl` / `__Model` / `__ApiKey` | none | The model server's base URL (such as `http://ollama:11434/v1`), model name and optional key. Requests only ever go to this URL's host; private addresses are allowed |
 | `Meridian__AI__Local__ContextWindow` / `__MaxTokens` / `__Temperature` / `__ToolCalling` / `__TimeoutSeconds` | 32768 / 4096 / 0.2 / Auto / 300 | Local model tuning ([AI.md](AI.md#using-a-local-model)) |
+| `Meridian__Desktop__UpdatesPath` | none (off) | Folder of desktop release files, or a `latest.json` manifest, served to desktop apps at `/api/desktop/latest` ([below](#desktop-updates-from-your-server)) |
+| `Meridian__Desktop__NotesUrl` | none | Release notes page listed in the generated manifest |
 | `Meridian__Logging__Format` | text | `json` for one JSON object per line |
 | `Meridian__Logging__Requests` | false | Log one line per request: method, path, status and duration. Never query strings, headers, cookies or bodies |
 | `Meridian__Telemetry__OtlpEndpoint` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) | none (off) | Export traces and metrics over OTLP |
@@ -295,6 +297,32 @@ once a quarter.
   `Retain`. Scheduled files are listed and downloadable on the same page.
 - **Restore**: Admin → Backups → *Choose backup…*, pick the projects, then *Restore*. Projects are recreated with
   their history. Users can optionally be recreated, and SSO users link again on their next sign-in.
+
+## Desktop updates from your server
+
+The desktop app normally gets updates from GitHub releases. A team can host them on its own Meridian server instead.
+This is useful when the repository is private, when desktops cannot reach GitHub, or when you want to control rollout.
+
+1. Put the release files in a folder the server can read, for example a volume mounted at `/data/desktop-updates`:
+   - the files `build/package.sh` writes to `artifacts/`, such as `Meridian-0.6.0-windows-x64.zip`,
+     `Meridian-0.6.0-linux-x64.tar.gz` and `Meridian-0.6.0-macos-arm64.zip`;
+   - the release's `SHA256SUMS.txt`, if you have it.
+2. Set `Meridian__Desktop__UpdatesPath=/data/desktop-updates` and restart.
+3. In each desktop app, go to **Settings ▸ Desktop ▸ Update source ▸ Custom URL** and enter
+   `https://meridian.example.com/api/desktop/latest`.
+
+`GET /api/desktop/latest` lists the newest version in the folder with every package's name, `url`
+(`files/<name>`, relative to the manifest), `size` and `sha256`. The checksums come from the folder's `SHA256SUMS.txt`
+when it lists a file; otherwise the server computes them once and caches them. `GET /api/desktop/files/<name>` serves the
+files with range support. Only plain file names directly inside the folder are served: no paths, hidden files or links.
+If you would rather write the manifest yourself, put a `latest.json` in the folder; it is served as is. The format is in
+[RELEASING.md](RELEASING.md#manifest-format).
+
+Both endpoints are anonymous, because the desktop updater has no session. Only put files there that every user who can
+reach the server may download. Without `UpdatesPath`, they answer 404. The desktop app checks every file's SHA-256
+before installing it and only accepts https addresses, so terminate TLS in front of the server as usual. How the app
+installs the update (installer, or an in-place swap of the portable archive) is described in
+[RELEASING.md](RELEASING.md#auto-update).
 
 ## Upgrades, migrations and rollback
 

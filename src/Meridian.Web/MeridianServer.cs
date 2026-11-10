@@ -147,6 +147,7 @@ public static class MeridianServer
         app.MapStaticAssets();
         Hosting.OperationsHosting.MapMeridianHealth(app);
         ImageCache.Map(app);
+        app.MapDesktopUpdates(host);   // GET /api/desktop/latest + files when Meridian:Desktop:UpdatesPath is set (docs/RELEASING.md)
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
 

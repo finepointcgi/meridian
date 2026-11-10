@@ -189,6 +189,107 @@ public class SettingsDialogTests : TestContext
         Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.forgetTour");
     }
 
+    // ---------------------------------------------------------------- Settings ▸ Desktop (Photino bridge)
+
+    private IRenderedComponent<MudDialogProvider> OpenDesktop(SettingsDialog.DesktopState state)
+    {
+        Setup(localMode: true);
+        JSInterop.Setup<SettingsDialog.DesktopState?>("meridianSettings.desktopSettings").SetResult(state);
+        var d = Open(this, SettingsSection.Desktop, desktop: true);
+        d.WaitForAssertion(() => Assert.Contains("This is Meridian", d.Markup));
+        return d;
+    }
+
+    private List<object?[]> DesktopCommands() =>
+        JSInterop.Invocations.Where(i => i.Identifier == "meridianSettings.desktop").Select(i => i.Arguments.ToArray()).ToList();
+
+    private static void Message(IRenderedComponent<MudDialogProvider> d, string json) =>
+        d.InvokeAsync(() => d.FindComponent<SettingsDialog>().Instance.OnDesktopMessage(json)).GetAwaiter().GetResult();
+
+    [Fact]
+    public void Desktop_Shows_The_Version_Last_Check_And_Result()
+    {
+        var d = OpenDesktop(new(false, true, 2, Version: "0.5.0", LastCheck: DateTimeOffset.Now.AddMinutes(-5).ToString("O"),
+            LastMessage: "You're up to date (0.5.0).", LastStatus: "UpToDate"));
+        Assert.Contains("This is Meridian 0.5.0.", d.Find(".settings-row[data-setting='desktop-updates']").TextContent);
+        Assert.Contains("Last checked 5 min ago.", d.Find(".desktop-last-check").TextContent);
+        var message = d.Find(".desktop-update-message");
+        Assert.Equal("You're up to date (0.5.0).", message.TextContent.Trim());
+        Assert.Contains("ok", message.ClassName);
+        Assert.Empty(d.FindAll(".desktop-install"));
+        Assert.True(d.Find(".switch input[data-name='updates']").HasAttribute("checked"));
+        Assert.Contains("Automatically check daily", d.Markup);
+        // Listening for the host's messages.
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.desktopListen");
+    }
+
+    [Fact]
+    public void Desktop_Check_For_Updates_Asks_The_Host_And_Shows_Its_Answer()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.5.0"));
+        Assert.Contains("Never checked.", d.Find(".desktop-last-check").TextContent);
+        d.Find("button.desktop-check").Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "checkUpdates");
+        Assert.Equal("Checking for updates…", d.Find(".desktop-update-message").TextContent.Trim());
+        Assert.True(d.Find("button.desktop-check").HasAttribute("disabled"));
+
+        Message(d, """{"type":"update-status","status":"PrivateRepository","message":"Couldn't reach GitHub: the repository is private — set a token or another update source in Settings.","lastCheck":null,"available":null}""");
+        var message = d.Find(".desktop-update-message");
+        Assert.StartsWith("Couldn't reach GitHub: the repository is private", message.TextContent.Trim());
+        Assert.Contains("bad", message.ClassName);
+        Assert.False(d.Find("button.desktop-check").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public void Desktop_Install_And_Restart_Shows_Download_Progress()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.5.0"));
+        Message(d, """{"type":"update-status","status":"Available","message":"0.6.0 is available — Install and restart.","lastCheck":"2026-11-10T09:00:00+00:00","available":"0.6.0"}""");
+        var install = d.Find("button.desktop-install");
+        Assert.Equal("Install 0.6.0 and restart", install.TextContent.Trim());
+        install.Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "update");
+        Message(d, """{"type":"update-progress","percent":42}""");
+        Assert.Equal("42", d.Find("progress.desktop-update-progress").GetAttribute("value"));
+        Assert.Contains("Downloading… 42%", d.Markup);
+        Assert.True(d.Find("button.desktop-install").HasAttribute("disabled"));
+
+        Message(d, """{"type":"update-error","message":"Checksum mismatch for Meridian-0.6.0-macos-arm64.zip: the download was discarded."}""");
+        Assert.Empty(d.FindAll("progress.desktop-update-progress"));
+        Assert.Contains("Checksum mismatch", d.Find(".desktop-update-message").TextContent);
+        Assert.False(d.Find("button.desktop-install").HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public void Desktop_Update_Source_Switches_To_A_Custom_Manifest_Url()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.5.0", UpdateSource: "GitHub"));
+        Assert.Equal("true", d.FindAll(".seg[data-name='update-source'] button").Single(b => b.TextContent.Trim() == "GitHub releases").GetAttribute("aria-checked"));
+        Assert.True(d.Find("button.desktop-source-save").HasAttribute("disabled"));
+        Choose(d, "update-source", "Custom URL");
+        d.Find("input.desktop-manifest-url").Input("https://meridian.example.com/api/desktop/latest");
+        d.Find("button.desktop-source-save").Click();
+        var call = DesktopCommands().Last();
+        Assert.Equal("updateSource", call[0]);
+        Assert.Contains("https://meridian.example.com/api/desktop/latest", System.Text.Json.JsonSerializer.Serialize(call[1]));
+        Assert.Contains("\"Manifest\"", System.Text.Json.JsonSerializer.Serialize(call[1]));
+    }
+
+    [Fact]
+    public void Desktop_Token_Goes_From_The_Input_To_The_Host_Without_Blazor()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.5.0", UpdateSource: "GitHubToken", HasToken: true));
+        var input = d.Find("input.desktop-token");
+        Assert.Equal("password", input.GetAttribute("type"));
+        Assert.Contains("A token is saved", input.GetAttribute("placeholder"));
+        Assert.False(input.HasAttribute("value"));   // never bound: the component never sees the token
+        Assert.Contains("api.github.com", d.Markup);
+        d.Find("button.desktop-token-save").Click();
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.desktopSaveToken" && (string?)i.Arguments[0] == "desktop-token");
+        d.Find("button.desktop-token-remove").Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "updateToken");
+    }
+
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
