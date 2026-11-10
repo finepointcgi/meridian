@@ -1,0 +1,54 @@
+name: Docs
+
+# Builds the DocFX user guide (docs-site/) on every change to it or to the scripting API.
+# Publishes to GitHub Pages only when started by hand (Actions → Docs → Run workflow).
+on:
+  push:
+    branches: [main]
+    paths: ["docs-site/**", "src/Meridian.Scripting/**", ".github/workflows/docs.yml"]
+  pull_request:
+    paths: ["docs-site/**", "src/Meridian.Scripting/**", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore DocFX (pinned in docs-site/dotnet-tools.json)
+        run: dotnet tool restore
+      - name: API metadata
+        run: dotnet docfx metadata docfx.json
+      - name: Build (warnings fail the build)
+        run: dotnet docfx build docfx.json --warningsAsErrors
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          path: docs-site/_site
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

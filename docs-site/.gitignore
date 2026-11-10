@@ -1,0 +1,5 @@
+# DocFX output and generated API metadata (api/index.md is hand-written)
+_site/
+obj/
+api/*
+!api/index.md

@@ -1,0 +1,40 @@
+- name: Getting started
+  href: getting-started.md
+- name: Drawing basics
+  href: drawing.md
+- name: Diagram types
+  href: diagrams.md
+- name: Requirements and traceability
+  href: requirements.md
+- name: Tables and queries
+  href: tables-queries.md
+- name: Branches, merge and baselines
+  href: version-control.md
+- name: Reviews and comments
+  href: reviews.md
+- name: SysML v2 text
+  href: sysml-v2.md
+- name: Variants and trade studies
+  href: variants-trade-studies.md
+- name: Simulation
+  href: simulation.md
+- name: Reports and documents
+  href: document-generation.md
+- name: Import and export
+  href: import-export.md
+- name: Scripting
+  href: scripting.md
+- name: Plugins
+  href: plugins.md
+- name: Administration
+  href: administration.md
+- name: Integrations
+  href: integrations.md
+- name: Keyboard shortcuts
+  href: keyboard-shortcuts.md
+- name: Sample projects
+  href: samples.md
+- name: Coming from Cameo / EA
+  href: migration.md
+- name: FAQ
+  href: faq.md
