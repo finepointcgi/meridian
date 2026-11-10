@@ -64,7 +64,7 @@ public static class TourChapters
         new("code", "Connect your code", Icons.Material.Outlined.Difference, "Code repositories, review branches and What changed.",
         [
             new(".titlebar .project", Icons.Material.Outlined.Extension, "Connect a repository",
-                "Project menu ▸ <b>Integrations</b> ▸ <b>Code repositories</b> connects a GitHub or GitLab repository. Each push updates a <b>review branch</b>, never main."),
+                "Project menu ▸ <b>Integrations</b> ▸ <b>Code repositories</b> connects a GitHub, GitLab or Bitbucket repository (C#, TypeScript, Java or Python). Each push updates a <b>review branch</b>, never main."),
             new(".titlebar .chg-badge, [data-tour=code-group]", Icons.Material.Outlined.Difference, "What changed",
                 "When code changes wait for review, <b>Code changes (N)</b> shows in the title bar. It opens <b>What changed</b>: what each push added, changed and removed."),
             new(".diagram-host", Icons.Material.Outlined.Highlight, "Accept or reject",
@@ -112,7 +112,7 @@ public static class TourChapters
 
     public static readonly WhatsNewItem[] WhatsNew =
     [
-        new("Connect your code", "Pushes to GitHub or GitLab update a review branch. Accept or reject in What changed.", "code"),
+        new("Connect your code", "Pushes to GitHub, GitLab or Bitbucket update a review branch, and pull requests get a preview. Accept or reject in What changed.", "code"),
         new("Create diagrams from diagrams", "Use case → activity → sequence → BDD / IBD, with update from source.", "derive"),
         new("Import Mermaid", "Paste or drop Mermaid and get model elements and laid-out diagrams.", "mermaid"),
         new("More AI providers", "Run the assistant on a local model, or on Claude Code with your own login.", "ai"),
