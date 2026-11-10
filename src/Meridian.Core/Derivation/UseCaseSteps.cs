@@ -82,11 +82,11 @@ public static partial class UseCaseSteps
     /// so inserting, deleting or rewording one step changes only that step. Steps that match nothing get new keys after the
     /// highest earlier one. Numbered steps keep their numbers.
     /// </summary>
-    /// <param name="previous">The earlier unnumbered steps: key ("#3") and text, in any order.</param>
+    /// <param name="previous">The earlier unnumbered steps: key ("#3") and text, in the order they ran.</param>
     public static IReadOnlyList<UseCaseStep> MatchUnnumbered(IReadOnlyList<UseCaseStep> steps, IReadOnlyList<(string Id, string Text)> previous, double threshold = 0.5)
     {
         static int Num(string id) => int.TryParse(id.AsSpan(1), out var n) ? n : 0;
-        var old = previous.Where(p => p.Id.StartsWith('#')).OrderBy(p => Num(p.Id)).ToList();
+        var old = previous.Where(p => p.Id.StartsWith('#')).ToList();
         var fresh = steps.Select((s, i) => (s, i)).Where(t => t.s.Id.StartsWith('#')).ToList();
         if (old.Count == 0 || fresh.Count == 0) return steps;
 
