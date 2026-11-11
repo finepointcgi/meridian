@@ -43,6 +43,8 @@ public sealed class McpEndpointTests : IAsyncLifetime
         var model = SampleModels.Vehicle();
         var secret = model.Create(model.Root, ElementKind.Package, SecretPackage);
         model.Create(secret, ElementKind.Block, SecretBlock);
+        var engine = model.Create(model.Root, ElementKind.Block, "Linked Engine");
+        model.Set(engine, FieldKeys.TagPrefix + "keel.part", "P-000123");   // the cross-app id convention (docs-site/docs/mcp.md)
         _project = await _db.CreateProjectAsync("Vehicle", ProjectFile.Serialize(model), _owner.Id);
         await _db.SetMemberAsync(_project, _viewer.Id, ProjectRole.Viewer);
         await _db.SetPackagePermissionAsync(_project, secret.Id, PrincipalKind.User, _viewer.Id, PackageAccess.None, _owner.Id);
@@ -125,6 +127,11 @@ public sealed class McpEndpointTests : IAsyncLifetime
         Assert.True((await Rpc(viewer, "tools/call", Call("get_element", new JsonObject { ["project"] = "Vehicle", ["id"] = "_missing" })))["result"]!["isError"]!.GetValue<bool>());
         Assert.Equal(-32602, (await Rpc(viewer, "tools/call", Call("create_element", new JsonObject())))["error"]!["code"]!.GetValue<int>());
         Assert.Equal(-32601, (await Rpc(viewer, "resources/list"))["error"]!["code"]!.GetValue<int>());
+
+        // Elements linked to other apps are found by their tagged values.
+        var linked = Text(await Rpc(viewer, "tools/call", Call("search_elements", new JsonObject { ["project"] = "Vehicle", ["query"] = "kind:Block where tag:keel.part = P-000123" })));
+        Assert.Contains("Linked Engine", linked);
+        Assert.Contains("\"total\":1", linked);
 
         var audit = await _db.QueryAuditAsync(new AuditQuery(Action: AuditActions.McpTool, Take: 100));
         Assert.Contains(audit.Items, e => e.Target == "search_elements" && e.Actor == "victor" && e.ProjectId == _project);

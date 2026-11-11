@@ -67,3 +67,17 @@ claude mcp add --transport http meridian https://meridian.example.com/api/mcp --
 Streamable HTTP, stateless: each JSON-RPC request is a `POST` answered with one JSON response. There are no sessions and no
 server-sent events (`GET` and `DELETE` return 405). Supported protocol versions: `2025-11-25`, `2025-06-18` and `2025-03-26`.
 Methods: `initialize`, `ping`, `tools/list` and `tools/call`. Results longer than 60,000 characters are cut; narrow the query.
+
+## Linking to Workbench and Keel
+
+Meridian, Workbench and Keel PLM point at each other with ids, so an assistant can follow a question from one app to the next.
+On a Meridian element, add these tagged values:
+
+| Tagged value | Holds | Example |
+| --- | --- | --- |
+| `keel.part` | The Keel part number this block is built as | `P-000123` |
+| `keel.spec` | The Keel requirement specification this requirement comes from | `SPEC-0003` |
+| `workbench.project` | The Workbench project code that pays for this work | `1001` |
+
+Assistants find linked elements with `search_elements`, for example `kind:Block where tag:keel.part = P-000123`. Hearth's
+engineering team uses this convention.
