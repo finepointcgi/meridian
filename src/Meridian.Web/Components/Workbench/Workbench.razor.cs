@@ -84,6 +84,7 @@ public partial class Workbench
         list.AddRange(RequirementPaletteCommands());
         list.AddRange(VerificationPaletteCommands());   // Workbench.Verification.cs
         list.AddRange(RelationMapPaletteCommands());    // Workbench.RelationMap.cs
+        list.AddRange(SafetyPaletteCommands());   // Workbench.Safety.cs
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
@@ -421,6 +422,7 @@ public partial class Workbench
         m.AddRange(InstanceMenuEntries(e));      // Workbench.Instances.cs
         m.AddRange(DeploymentTreeEntries(e));    // Workbench.Deployment.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
+        m.AddRange(SafetyTreeEntries(e));        // Workbench.Safety.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
         m.AddRange(HistoryMenuEntries(e));   // element history (Workbench.History.cs)

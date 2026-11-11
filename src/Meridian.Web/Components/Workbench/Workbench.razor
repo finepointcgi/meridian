@@ -179,7 +179,7 @@
                 <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
                     <ActivatorContent><button title="More diagram types" class="rbtn"><MudIcon Icon="@Icons.Material.Outlined.MoreHoriz" /><span class="t">More</span></button></ActivatorContent>
                     <ChildContent>
-                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication })
+                        @foreach (var t in new[] { DiagramType.Parametric, DiagramType.Bpmn, DiagramType.ArchiMate, DiagramType.Database, DiagramType.Class, DiagramType.Timing, DiagramType.InteractionOverview, DiagramType.Communication, DiagramType.FaultTree })
                         {
                             var type = t;
                             <MudMenuItem Icon="@UiKinds.DiagramIcon(type)" OnClick="() => NewDiagramSmart(type)">@Metamodel.DisplayName(type)</MudMenuItem>
@@ -265,6 +265,16 @@
                 <button title="Solve parametric constraints" class="rbtn @(_dockOpen && _dock == 6 ? "on" : "")" @onclick="() => ToggleDock(6)"><MudIcon Icon="@Icons.Material.Outlined.Functions" /><span class="t">Parametrics</span></button>
                 <button title="Product variants and trade studies" class="rbtn @(_dockOpen && _dock == 11 ? "on" : "")" @onclick="() => ToggleDock(11)"><MudIcon Icon="@Icons.Material.Outlined.Balance" /><span class="t">Variants</span></button>
                 <button title="Verify requirements: evaluate their criteria with parametrics, Monte Carlo, timed simulation or co-simulation" class="rbtn @(VerificationTabActive ? "on" : "")" data-tour="verify" disabled="@Ws.Verification.Running" @onclick="VerifyRequirements"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Verify</span></button>
+            </div>
+        </div>
+        <div class="rgroup compact @RibbonGroupClass("safety")" data-tab="safety">
+            <div class="rlabel">Safety &amp; reliability</div>
+            <div class="ritems">
+                <MudTooltip Text="New failure mode on the selected block, part or function"><button class="rbtn" disabled="@Ws.ReadOnly" data-testid="ribbon-new-failure-mode" @onclick="NewFailureMode"><MudIcon Icon="@UiKinds.Icon(ElementKind.FailureMode)" Style="@($"color:{UiKinds.Accent(ElementKind.FailureMode)}")" /><span class="t">Failure mode</span></button></MudTooltip>
+                <MudTooltip Text="FMEA worksheet: failure modes with severity, occurrence, detection, RPN and action priority"><button class="rbtn @(_dockOpen && _dock == SafetyDock && SafetyTab == 0 ? "on" : "")" data-testid="ribbon-fmea" @onclick="OpenFmea"><MudIcon Icon="@Icons.Material.Outlined.TableRows" /><span class="t">FMEA</span></button></MudTooltip>
+                <MudTooltip Text="New fault tree diagram (for the selected failure mode or block)"><button class="rbtn" disabled="@Ws.ReadOnly" data-testid="ribbon-new-fault-tree" @onclick="NewFaultTree"><MudIcon Icon="@UiKinds.DiagramIcon(DiagramType.FaultTree)" /><span class="t">Fault tree</span></button></MudTooltip>
+                <MudTooltip Text="Fault tree analysis: minimal cut sets, top-event probability and importance"><button class="rbtn @(_dockOpen && _dock == SafetyDock && SafetyTab == 1 ? "on" : "")" data-testid="ribbon-analyze-fta" @onclick="() => AnalyzeFaultTree()"><MudIcon Icon="@Icons.Material.Outlined.Calculate" /><span class="t">Analyze</span></button></MudTooltip>
+                <MudTooltip Text="Export the FMEA worksheet as CSV"><button class="rbtn" @onclick="ExportFmeaCsv"><MudIcon Icon="@Icons.Material.Outlined.Download" /><span class="t">CSV</span></button></MudTooltip>
             </div>
         </div>
         <div class="rgroup compact @RibbonGroupClass("generate")" data-tab="generate">
@@ -436,6 +446,7 @@
                         <MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="dl">Verification</span>
                     </span>
                     @DockTab(FindDock, "Find", Icons.Material.Outlined.FindReplace, null, "Find and replace (⌘⇧F)")
+                    @DockTab(SafetyDock, "Safety", Icons.Material.Outlined.HealthAndSafety, null, "FMEA worksheet and fault tree analysis")
                     @DockTab(12, "SysML text", Icons.Material.Outlined.Code, null, "SysML v2 text editor")
                     @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null, "AI assistant")
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
@@ -459,6 +470,7 @@
                             case 11: <VariantsPanel />; break;
                             case 12: <SysmlTextPanel State="_sysml" />; break;
                             case FindDock: <FindReplacePanel State="_find" />; break;
+                            case SafetyDock: <SafetyPanel Tab="SafetyTab" TabChanged="t => SafetyTab = t" Top="SafetyTop" TopChanged="t => SafetyTop = t" />; break;
                             case AssistantDock: <AssistantPanel Launcher="_assistant" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }

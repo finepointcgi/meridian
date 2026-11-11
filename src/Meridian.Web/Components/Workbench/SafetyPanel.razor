@@ -1,0 +1,268 @@
+@* Safety & reliability dock (docs/SAFETY.md): the editable FMEA worksheet and fault tree analysis. *@
+@using Meridian.Core.Safety
+@inherits WorkspaceComponent
+
+<MudTabs Elevation="0" Rounded="false" PanelClass="pt-1" Class="safety-panel" ActivePanelIndex="Tab" ActivePanelIndexChanged="TabChanged">
+    <MudTabPanel Text="FMEA" Icon="@Icons.Material.Outlined.ReportProblem">
+        @Worksheet()
+    </MudTabPanel>
+    <MudTabPanel Text="Fault tree analysis" Icon="@Icons.Material.Outlined.AccountTree">
+        @Analysis()
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    [Parameter] public int Tab { get; set; }
+    [Parameter] public EventCallback<int> TabChanged { get; set; }
+    [Parameter] public Element? Top { get; set; }
+    [Parameter] public EventCallback<Element?> TopChanged { get; set; }
+
+    internal const int PageSize = 100;
+    private int _page;
+    private string _sort = "rpn";
+    private bool _desc = true;
+    private bool _highOnly;
+    private string _filter = "";
+
+    private int _rowsVersion = -1;
+    private ModelRepository? _rowsModel;
+    private IReadOnlyList<FmeaRow> _rows = [];
+
+    private IReadOnlyList<FmeaRow> AllRows()
+    {
+        if (_rowsVersion != Ws.ModelVersion || !ReferenceEquals(_rowsModel, Ws.Model))
+        {
+            _rows = Fmea.Rows(Ws.Model);
+            _rowsVersion = Ws.ModelVersion;
+            _rowsModel = Ws.Model;
+        }
+        IEnumerable<FmeaRow> rows = _rows;
+        var threshold = Fmea.RpnThreshold(Ws.Model);
+        if (_highOnly) rows = rows.Where(r => r.Rpn >= threshold || r.Priority == ActionPriority.High);
+        if (_filter.Trim() is { Length: > 0 } q)
+            rows = rows.Where(r => $"{r.Item?.Name} {r.FailureMode.Name} {r.Function} {r.Effect} {r.Cause} {r.Actions}".Contains(q, StringComparison.OrdinalIgnoreCase));
+        Func<FmeaRow, IComparable?> key = _sort switch
+        {
+            "item" => r => r.Item?.Name ?? "",
+            "name" => r => r.FailureMode.Name,
+            "s" => r => r.Severity ?? -1,
+            "o" => r => r.Occurrence ?? -1,
+            "d" => r => r.Detection ?? -1,
+            "ap" => r => r.Priority is { } p ? (int)p : -1,
+            _ => r => r.Rpn ?? -1,
+        };
+        var sorted = _desc ? rows.OrderByDescending(key).ThenByDescending(r => r.Rpn ?? -1) : rows.OrderBy(key).ThenByDescending(r => r.Rpn ?? -1);
+        return sorted.ToList();
+    }
+
+    private void SortBy(string column)
+    {
+        if (_sort == column) _desc = !_desc;
+        else { _sort = column; _desc = column is "rpn" or "s" or "o" or "d" or "ap"; }
+        _page = 0;
+    }
+
+    private RenderFragment Header(string column, string label, string? width = null, string? tip = null) => __builder =>
+    {
+        <th style="@(width != null ? $"width:{width};" : "") cursor:pointer; white-space:nowrap" title="@(tip ?? $"Sort by {label}")" @onclick="() => SortBy(column)" data-testid="@("fmea-sort-" + column)">
+            @label @(_sort == column ? (_desc ? "▼" : "▲") : "")
+        </th>
+    };
+
+    private string Summary(IReadOnlyList<FmeaRow> shown)
+    {
+        var all = _rows;
+        if (all.Count == 0) return "No failure modes yet — select a block, part or function and add one.";
+        var threshold = Fmea.RpnThreshold(Ws.Model);
+        var high = all.Count(r => r.Rpn >= threshold || r.Priority == ActionPriority.High);
+        var unmitigated = all.Count(r => (r.Rpn >= threshold || r.Priority == ActionPriority.High) && !r.MitigatingRequirements.Any());
+        var max = all.Max(r => r.Rpn ?? 0);
+        return $"{all.Count} failure modes · {high} high risk (RPN ≥ {threshold} or AP H) · {unmitigated} without a mitigating requirement · max RPN {max}"
+               + (shown.Count != all.Count ? $" · showing {shown.Count}" : "");
+    }
+
+    private RenderFragment Worksheet() => __builder =>
+    {
+        var rows = AllRows();
+        var editable = !Ws.ReadOnly;
+        <div class="d-flex align-center gap-3 px-3 py-2 flex-wrap">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2); flex:1; min-width:240px" data-testid="fmea-summary">@Summary(rows)</MudText>
+            <MudTextField T="string" @bind-Value="_filter" Placeholder="Filter…" Immediate="true" DebounceInterval="200" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:180px" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Outlined.Search" />
+            <MudSwitch T="bool" @bind-Value="_highOnly" Label="High risk only" Color="Color.Primary" Size="Size.Small" />
+            <MudTooltip Text="Failure modes at or above this RPN need a mitigating requirement (validation rule SAF-003)">
+                <MudNumericField T="int" Label="RPN threshold" Value="Fmea.RpnThreshold(Ws.Model)" ValueChanged="SetThreshold" Min="1" Max="1000" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:120px" Disabled="!editable" />
+            </MudTooltip>
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.Download" OnClick="() => Shell.ExportFmeaCsv()" data-testid="fmea-csv">CSV</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" Disabled="!editable" OnClick="() => Shell.NewFailureMode()" data-testid="fmea-new">New failure mode</MudButton>
+        </div>
+        <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Style="font-size:12.5px" Class="fmea-table">
+            <thead>
+                <tr>
+                    @Header("item", "Item", "130px", "Block, part or function the failure mode belongs to")
+                    @Header("name", "Failure mode", "170px")
+                    <th style="width:180px">Effect</th>
+                    <th style="width:180px">Cause</th>
+                    @Header("s", "S", "62px", "Severity 1-10")
+                    @Header("o", "O", "62px", "Occurrence 1-10")
+                    @Header("d", "D", "62px", "Detection 1-10")
+                    @Header("rpn", "RPN", "64px", "Risk priority number S × O × D")
+                    @Header("ap", "AP", "50px", "AIAG-VDA action priority")
+                    <th style="width:200px">Recommended actions</th>
+                    <th style="width:110px">Status</th>
+                    <th style="width:180px">Mitigated by</th>
+                    <th style="width:150px">Verified by</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Pager.Slice(rows, _page, PageSize))
+                {
+                    var row = r;
+                    var fm = r.FailureMode;
+                    var threshold = Fmea.RpnThreshold(Ws.Model);
+                    var high = r.Rpn >= threshold || r.Priority == ActionPriority.High;
+                    <tr @key="fm.Id" style="@(ReferenceEquals(Ws.Selected, fm) ? "background:var(--sel)" : "")" @onclick="() => Ws.Select(fm)" data-testid="fmea-row">
+                        <td>@if (r.Item is { } item) { <span class="link" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(item)">@item.Name</span> } else { <span style="color:var(--warn)">—</span> }</td>
+                        <td><MudTextField T="string" Value="@fm.Name" ValueChanged="v => Set(fm, FieldKeys.Name, v?.Trim())" Underline="false" Margin="Margin.Dense" Disabled="!editable" /></td>
+                        <td><MudTextField T="string" Value="@fm.Get(SafetyFields.Effect)" ValueChanged="v => Set(fm, SafetyFields.Effect, v)" Underline="false" Margin="Margin.Dense" AutoGrow="true" Lines="1" MaxLines="4" Placeholder="—" Disabled="!editable" /></td>
+                        <td><MudTextField T="string" Value="@fm.Get(SafetyFields.Cause)" ValueChanged="v => Set(fm, SafetyFields.Cause, v)" Underline="false" Margin="Margin.Dense" AutoGrow="true" Lines="1" MaxLines="4" Placeholder="—" Disabled="!editable" /></td>
+                        <td>@RatingSelect(fm, SafetyFields.Severity, editable)</td>
+                        <td>@RatingSelect(fm, SafetyFields.Occurrence, editable)</td>
+                        <td>@RatingSelect(fm, SafetyFields.Detection, editable)</td>
+                        <td data-testid="fmea-rpn"><span class="rpn-badge @SafetyInspectorSection.RpnClass(r.Rpn)">@(r.Rpn?.ToString() ?? "—")</span></td>
+                        <td><span class="ap-badge ap-@Fmea.Label(r.Priority)">@(r.Priority is null ? "—" : Fmea.Label(r.Priority))</span></td>
+                        <td><MudTextField T="string" Value="@fm.Get(SafetyFields.Actions)" ValueChanged="v => Set(fm, SafetyFields.Actions, v)" Underline="false" Margin="Margin.Dense" AutoGrow="true" Lines="1" MaxLines="4" Placeholder="—" Disabled="!editable" /></td>
+                        <td>
+                            <MudSelect T="string" Value="@fm.Get(SafetyFields.ActionStatus)" ValueChanged="v => Set(fm, SafetyFields.ActionStatus, v)" Dense="true" Margin="Margin.Dense" Underline="false" Placeholder="—" Disabled="!editable">
+                                <MudSelectItem Value="@("")">—</MudSelectItem>
+                                @foreach (var s in SafetyFields.ActionStatuses) { <MudSelectItem Value="@s">@s</MudSelectItem> }
+                            </MudSelect>
+                        </td>
+                        <td>
+                            @foreach (var m in r.Mitigations) { var x = m; <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(x)">@Fmea.Describe(x)</span> }
+                            @if (!r.MitigatingRequirements.Any() && high) { <span style="color:var(--danger)" title="High risk: add a mitigating requirement (Properties ▸ Traceability ▸ mitigatedBy)">needs mitigation</span> }
+                        </td>
+                        <td>
+                            @foreach (var t in r.VerifiedBy) { var x = t; <span class="link mr-2" @onclick:stopPropagation="true" @onclick="() => Shell.Navigate(x)">@x.Name</span> }
+                            @if (r.VerifiedBy.Count == 0 && r.Mitigations.Count > 0) { <span style="color:var(--warn)">not verified</span> }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <Pager Total="rows.Count" PageSize="PageSize" Page="_page" PageChanged="p => _page = p" />
+    };
+
+    private RenderFragment RatingSelect(Element fm, string key, bool editable) => __builder =>
+    {
+        <MudSelect T="string" Value="@fm.Get(key)" ValueChanged="v => Set(fm, key, v)" Dense="true" Margin="Margin.Dense" Underline="false" Placeholder="—" Disabled="!editable" title="@SafetyFields.Help(key)">
+            <MudSelectItem Value="@("")">—</MudSelectItem>
+            @for (var i = 1; i <= 10; i++) { var v = i.ToString(System.Globalization.CultureInfo.InvariantCulture); <MudSelectItem Value="@v">@v</MudSelectItem> }
+        </MudSelect>
+    };
+
+    private void Set(Element e, string key, string? value)
+    {
+        if (!Ws.Model.Contains(e)) return;
+        try { Ws.Model.Set(e, key, value); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void SetThreshold(int v) =>
+        Set(Ws.Model.Root, SafetyFields.RpnThreshold, v == SafetyFields.DefaultRpnThreshold ? null : v.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    // ------------------------------------------------------------------ fault tree analysis
+
+    private int _resultVersion = -1;
+    private Element? _resultTop;
+    private FaultTreeResult? _result;
+    private int _cutPage;
+
+    private Element? CurrentTop()
+    {
+        if (Top is { } t && Ws.Model.Contains(t)) return t;
+        if (Ws.Active?.Diagram is { DiagramType: DiagramType.FaultTree } d && FaultTree.TopEvents(Ws.Model, d).FirstOrDefault() is { } dt) return dt;
+        return FaultTree.TopEvents(Ws.Model).FirstOrDefault();
+    }
+
+    private FaultTreeResult? Result(Element top)
+    {
+        if (_result != null && ReferenceEquals(_resultTop, top) && _resultVersion == Ws.ModelVersion) return _result;
+        _result = FaultTree.Analyze(Ws.Model, top);
+        _resultTop = top;
+        _resultVersion = Ws.ModelVersion;
+        return _result;
+    }
+
+    private RenderFragment Analysis() => __builder =>
+    {
+        var top = CurrentTop();
+        var tops = FaultTree.TopEvents(Ws.Model);
+        var candidates = Ws.Model.OfKind(ElementKind.FaultTreeEvent).Where(e => FaultTree.Inputs(Ws.Model, e).Count > 0).OrderBy(e => tops.Contains(e) ? 0 : 1).ThenBy(e => e.Name).ToList();
+        <div class="d-flex align-center gap-3 px-3 py-2 flex-wrap">
+            <MudSelect T="Element" Label="Top event" Value="top" ValueChanged="v => TopChanged.InvokeAsync(v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:320px"
+                       ToStringFunc="@(e => e?.DisplayName ?? "")" data-testid="fta-top">
+                @foreach (var c in candidates) { <MudSelectItem Value="c">@c.DisplayName@(tops.Contains(c) ? "" : "  (intermediate)")</MudSelectItem> }
+            </MudSelect>
+            <span style="flex:1"></span>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.AccountTree" Disabled="Ws.ReadOnly" OnClick="() => Shell.NewFaultTree()">New fault tree</MudButton>
+        </div>
+        if (top == null)
+        {
+            <div class="px-3 py-2" style="color:var(--text-3)">No fault tree yet. Use Safety ▸ Fault tree to start one: a top event, gates (AND, OR, k of n) and basic events with probabilities.</div>
+            return;
+        }
+        var r = Result(top)!;
+        <div class="fta-summary px-3" data-testid="fta-summary">
+            <div class="fta-stat"><div class="v" data-testid="fta-probability">@(r.Probability is { } p ? SafetyFields.Format(p) : "—")</div><div class="l">Top-event probability (exact)</div></div>
+            <div class="fta-stat"><div class="v">@SafetyFields.Format(r.RareEvent)</div><div class="l">Rare-event approximation</div></div>
+            <div class="fta-stat"><div class="v">@SafetyFields.Format(r.MinCutUpperBound)</div><div class="l">Min-cut upper bound</div></div>
+            <div class="fta-stat"><div class="v" data-testid="fta-cutset-count">@r.CutSets.Count@(r.Truncated ? "+" : "")</div><div class="l">Minimal cut sets</div></div>
+            <div class="fta-stat"><div class="v">@(r.CutSets.Count == 0 ? "—" : r.CutSets.Min(c => c.Order).ToString())</div><div class="l">Smallest order</div></div>
+            <div class="fta-stat"><div class="v">@r.BasicEvents.Count</div><div class="l">Basic events</div></div>
+        </div>
+        @if (r.Warnings.Count > 0)
+        {
+            <div class="px-3 pb-1" style="font-size:12px; color:var(--warn)">
+                @foreach (var w in r.Warnings.Take(8)) { <div>⚠ @w</div> }
+                @if (r.Warnings.Count > 8) { <div>… and @(r.Warnings.Count - 8) more (see Validation)</div> }
+            </div>
+        }
+        <div class="d-flex gap-3 px-3 flex-wrap" style="align-items:flex-start">
+            <div style="flex:1.4; min-width:320px">
+                <div class="section-title">Minimal cut sets <span class="grow"></span></div>
+                <MudSimpleTable Dense="true" Hover="true" Style="font-size:12.5px" data-testid="fta-cutsets">
+                    <thead><tr><th style="width:44px">#</th><th style="width:56px">Order</th><th>Basic events</th><th style="width:110px">Probability</th><th style="width:80px">Share</th></tr></thead>
+                    <tbody>
+                        @{ var total = r.CutSets.Sum(c => c.Probability); var n = _cutPage * PageSize; }
+                        @foreach (var c in Pager.Slice(r.CutSets, _cutPage, PageSize))
+                        {
+                            n++;
+                            <tr>
+                                <td>@n</td><td>@c.Order</td>
+                                <td>@foreach (var ev in c.Events) { var x = ev; <span class="pill" style="cursor:pointer" @onclick="() => Shell.Navigate(x)"><span class="t">@x.DisplayName</span></span> }</td>
+                                <td>@SafetyFields.Format(c.Probability)</td>
+                                <td>@(total > 0 ? (c.Probability / total).ToString("P1") : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+                <Pager Total="r.CutSets.Count" PageSize="PageSize" Page="_cutPage" PageChanged="p => _cutPage = p" />
+            </div>
+            <div style="flex:1; min-width:280px">
+                <div class="section-title">Importance <span class="grow"></span></div>
+                <MudSimpleTable Dense="true" Hover="true" Style="font-size:12.5px" data-testid="fta-importance">
+                    <thead><tr><th>Basic event</th><th style="width:90px">P</th><th style="width:90px" title="Fussell-Vesely: share of the top-event probability from cut sets containing the event">F-V</th><th style="width:90px" title="Birnbaum: P(top | occurs) − P(top | does not occur)">Birnbaum</th></tr></thead>
+                    <tbody>
+                        @foreach (var i in r.Importance.Take(50))
+                        {
+                            var x = i.Event;
+                            <tr @onclick="() => Shell.Navigate(x)" style="cursor:pointer">
+                                <td>@x.DisplayName</td><td>@SafetyFields.Format(i.Probability)</td><td>@i.FussellVesely.ToString("P1")</td><td>@(i.Birnbaum is { } bb ? SafetyFields.Format(bb) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        </div>
+    };
+}

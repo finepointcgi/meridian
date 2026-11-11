@@ -50,6 +50,8 @@
     href: simulation.md
   - name: Variants and trade studies
     href: variants-trade-studies.md
+  - name: Safety and reliability (FMEA, fault trees)
+    href: safety.md
   - name: Reports and documents
     href: document-generation.md
   - name: Printing diagrams
@@ -72,6 +74,8 @@
     href: spreadsheet-import.md
   - name: Integrations (Jira, DOORS, Polarion, webhooks)
     href: integrations.md
+  - name: AI assistants (MCP)
+    href: mcp.md
   - name: Code sync and architecture checks
     href: code-sync.md
 - name: Extending and running Meridian

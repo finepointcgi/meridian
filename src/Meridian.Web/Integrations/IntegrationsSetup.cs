@@ -80,7 +80,7 @@ public static class IntegrationsSetup
     {
         app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<ProjectEvents>().FlushAll());
         // OSLC is for team servers; the desktop app's private local server is not reachable by other tools.
-        if (!app.Services.GetRequiredService<MeridianHostInfo>().LocalMode) OslcEndpoints.Map(app);
+        if (!app.Services.GetRequiredService<MeridianHostInfo>().LocalMode) { OslcEndpoints.Map(app); McpEndpoints.Map(app); }   // MCP for AI clients (docs-site/docs/mcp.md)
         return app;
     }
 }

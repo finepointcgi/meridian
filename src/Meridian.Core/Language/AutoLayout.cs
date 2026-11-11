@@ -12,6 +12,10 @@ public static class AutoLayout
         var result = new Dictionary<DiagramNode, Bounds>();
         if (nodes.Count == 0) return result;
 
+        // Fault trees: a tidy tree, each output centred over its inputs.
+        if (d.DiagramType == DiagramType.FaultTree && d.Edges.Any(e => e.Relationship.Kind == ElementKind.FaultTreeLink))
+            return Safety.FaultTreeLayout.Tidy(d, originX: originX, originY: originY);
+
         // Sequence diagrams: lifelines in one row, in their current left-to-right order; messages keep their timing.
         if (d.DiagramType == DiagramType.Sequence)
         {

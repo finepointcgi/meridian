@@ -22,7 +22,7 @@ public sealed class UxDecisionsTests(ServerFixture f) : E2ETest(f)
         var tabs = await p.Locator("nav.ribbon .rtab").EvaluateAllAsync<string[]>("ts => ts.map(t => t.dataset.tab)");
         Assert.DoesNotContain("review", tabs);
         Assert.DoesNotContain("extend", tabs);
-        Assert.Equal(["create", "diagram", "requirements", "trace", "views", "simulate", "generate", "ai"], tabs);
+        Assert.Equal(["create", "diagram", "requirements", "trace", "views", "simulate", "safety", "generate", "ai"], tabs);
 
         foreach (var (tab, captions) in new[] { ("trace", new[] { "Matrix", "Validate", "Request review", "Reviews" }), ("generate", new[] { "Report", "Formats", "Script", "Plugins" }) })
         {
