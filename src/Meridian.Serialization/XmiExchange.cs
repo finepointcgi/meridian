@@ -175,6 +175,8 @@ public static class XmiExchange
         ReqFields.Verdict, ReqFields.SourceFingerprint, ReqFields.TargetFingerprint,
         // Simulation-driven verification: criteria, run settings and recorded results.
         Core.Analysis.VerificationKeys.Criterion, .. Core.Analysis.VerificationKeys.RunKeys, .. Core.Analysis.VerificationKeys.ResultKeys,
+        // Instance specifications: exact slot values (units, ids) for a Meridian round trip; the standard slots carry them for other tools.
+        .. Core.Instances.InstanceFields.All,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -199,6 +201,13 @@ public static class XmiExchange
                                                || f.Key.StartsWith("db.", StringComparison.Ordinal) || e.Kind == ElementKind.Column && f.Key == FieldKeys.DefaultValue))   // data-model fields (roles, keys, groups …)
             ext.Add(new XElement(Meridian + "field", new XAttribute("ref", e.Id), new XAttribute("key", kv.Key), new XAttribute("value", kv.Value)));
 
+        if (e is Relationship { Kind: ElementKind.Link } link)
+        {
+            var lx = InstanceXmi.WriteLink(m, link);
+            if (!string.IsNullOrEmpty(link.Name)) lx.Add(new XAttribute("name", link.Name));
+            parent.Add(lx);
+            return;
+        }
         if (e is Relationship r)
         {
             // Generalizations, includes and extends are owned by their source classifier in UML; they are emitted there.
@@ -244,10 +253,12 @@ public static class XmiExchange
             ElementKind.State => ("subvertex", "State"),
             ElementKind.InitialState => ("subvertex", "Pseudostate"),
             ElementKind.FinalState => ("subvertex", "FinalState"),
+            ElementKind.InstanceSpecification => ("packagedElement", "InstanceSpecification"),
+            ElementKind.Slot => ("slot", "Slot"),
             _ => ("packagedElement", "Class"),
         };
         // Behaviors nested in classifiers are ownedBehavior; classifiers nested in classifiers are nestedClassifier.
-        if (tag == "packagedElement" && e.Owner != null && e.Owner.Kind is not (ElementKind.Model or ElementKind.Package))
+        if (tag == "packagedElement" && e.Owner != null && e.Owner.Kind is not (ElementKind.Model or ElementKind.Package) && e.Kind != ElementKind.InstanceSpecification)
             tag = Metamodel.IsBehavior(e.Kind) || e.Kind == ElementKind.TestCase ? "ownedBehavior" : "nestedClassifier";
 
         var x = new XElement(tag, Type(type), Id(e));
@@ -269,6 +280,8 @@ public static class XmiExchange
         }
         if (e.Kind == ElementKind.Port && e.Get(FieldKeys.Direction) is { Length: > 0 } dir) x.Add(new XAttribute(Meridian + "direction", dir));
         AddComments(x, e);
+        if (e.Kind == ElementKind.InstanceSpecification) InstanceXmi.WriteInstance(m, x, e);
+        if (e.Kind == ElementKind.Slot) InstanceXmi.WriteSlot(m, x, e);
 
         if (Metamodel.IsTypedFeature(e.Kind))
         {
@@ -308,10 +321,17 @@ public static class XmiExchange
             x.Add(container);
         }
         // Entry and exit points are connection points of their state (machine), not vertices of its region.
-        foreach (var c in e.OwnedElements) Emit(m, Pseudostates.IsConnectionPoint(c) ? x : container, c, st, ext);
+        foreach (var c in e.OwnedElements)
+        {
+            if (e.Kind == ElementKind.InstanceSpecification && c.Kind == ElementKind.InstanceSpecification) continue;   // written next to it (below)
+            Emit(m, Pseudostates.IsConnectionPoint(c) ? x : container, c, st, ext);
+        }
         foreach (var gr in m.Outgoing(e).Where(x => x.Kind is ElementKind.Generalization or ElementKind.Include or ElementKind.Extend))
             EmitRelationship(x, gr, st);
         parent.Add(x);
+        // UML instance specifications don't nest: nested part instances follow their whole, marked meridian:owner.
+        if (e.Kind == ElementKind.InstanceSpecification)
+            foreach (var nested in e.OwnedElements.Where(c => c.Kind == ElementKind.InstanceSpecification)) Emit(m, parent, nested, st, ext);
     }
 
     private static void EmitParameters(ModelRepository m, XElement op, Element e)
@@ -487,6 +507,18 @@ public static class XmiExchange
         var map = new Dictionary<string, Element>(StringComparer.Ordinal) { [XmiId(umlModel) ?? model.Root.Id] = model.Root };
         var pending = new List<(ElementKind kind, string? id, string? src, string? tgt, Element owner, XElement x)>();
         var typeRefs = new List<(Element feature, XElement x)>();
+        var instanceRefs = new List<(Element el, XElement x)>();   // instance specifications and slots, resolved after the walk
+        Dictionary<string, XElement>? xmlById = null;
+        string? XmlTypeOf(string xid)
+        {
+            if (xmlById == null)
+            {
+                xmlById = new Dictionary<string, XElement>(StringComparer.Ordinal);
+                foreach (var d in doc.Descendants())
+                    if (XmiId(d) is { } did) xmlById.TryAdd(did, d);
+            }
+            return xmlById.TryGetValue(xid, out var xe) ? XmiType(xe) : null;
+        }
         var count = 0;
 
         void Walk(XElement x, Element owner, int depth = 0)
@@ -533,6 +565,12 @@ public static class XmiExchange
                     continue;
                 }
                 if (type == "Association") { pending.Add((ElementKind.Association, id, null, null, owner, c)); continue; }
+                if (type == "InstanceSpecification" && InstanceXmi.IsLink(c, XmlTypeOf))
+                {
+                    var ends = InstanceXmi.LinkEnds(c);
+                    pending.Add((ElementKind.Link, id, ends.ElementAtOrDefault(0), ends.ElementAtOrDefault(1), owner, c));
+                    continue;
+                }
                 if (type is "Dependency" or "Abstraction" or "Realization" or "Usage" or "Refine" or "Trace")
                 {
                     var kind = id != null ? Stereo(id, "Satisfy", "Verify", "Refine", "Trace", "DeriveReqt", "Copy", "Allocate") : null;
@@ -554,6 +592,8 @@ public static class XmiExchange
                     continue;
                 }
                 var parentForChild = Metamodel.CanOwn(owner.Kind, ek.Value) ? owner : model.DefaultOwnerFor(owner, ek.Value);
+                // Nested part instances are written next to their whole (UML instances don't nest): put them back inside it.
+                if (c.Attribute(Meridian + "owner")?.Value is { } nestIn && map.TryGetValue(nestIn, out var whole) && Metamodel.CanOwn(whole.Kind, ek.Value)) parentForChild = whole;
                 if (!Metamodel.CanOwn(parentForChild.Kind, ek.Value)) { warnings.Add($"Could not place {ek} '{Attr(c, "name")}'"); continue; }
 
                 var el = new Element(ek.Value, id is not null && !map.ContainsKey(id) ? id : null);
@@ -600,7 +640,8 @@ public static class XmiExchange
                 model.AttachForLoad(parentForChild, el);
                 if (id != null) map[id] = el;
                 count++;
-                if (ek is not (ElementKind.Property or ElementKind.Port or ElementKind.Operation)) Walk(c, el, depth + 1);
+                if (ek is ElementKind.InstanceSpecification or ElementKind.Slot) instanceRefs.Add((el, c));
+                if (ek is not (ElementKind.Property or ElementKind.Port or ElementKind.Operation or ElementKind.Slot)) Walk(c, el, depth + 1);
                 else foreach (var cm in c.Elements().Where(z => z.Name.LocalName == "ownedComment"))
                         ModelRepository.SetFieldForLoad(el, FieldKeys.Documentation, cm.Element("body")?.Value ?? Attr(cm, "body"));
             }
@@ -616,6 +657,14 @@ public static class XmiExchange
             if (t != null && map.TryGetValue(t, out var te)) ModelRepository.SetFieldForLoad(f, FieldKeys.Type, te.Id);
             else if (href != null) ModelRepository.SetFieldForLoad(f, FieldKeys.Type, PrimitiveFromHref(href));
             else if (t != null) ModelRepository.SetFieldForLoad(f, FieldKeys.Type, t);
+        }
+
+        // Instance specifications and slots: classifiers, defining features and values.
+        Element? Resolve(string xid) => map.GetValueOrDefault(xid);
+        foreach (var (el, x) in instanceRefs)
+        {
+            if (el.Kind == ElementKind.InstanceSpecification) InstanceXmi.ReadInstance(el, x, Resolve);
+            else InstanceXmi.ReadSlot(el, x, Resolve);
         }
 
         // Relationships
@@ -674,6 +723,8 @@ public static class XmiExchange
             var guard = x.Element("guard");
             ModelRepository.SetFieldForLoad(r, FieldKeys.Guard, guard?.Element("specification")?.Element("body")?.Value ?? guard?.Element("body")?.Value);
             ModelRepository.SetFieldForLoad(r, FieldKeys.Effect, x.Element("effect")?.Element("body")?.Value);
+            if (kind == ElementKind.Link && InstanceXmi.ClassifierRefs(x).FirstOrDefault() is { } assocId && map.TryGetValue(assocId, out var assoc))
+                ModelRepository.SetFieldForLoad(r, Core.Instances.InstanceFields.Association, assoc.Id);
             if (kind == ElementKind.Message)
             {
                 ModelRepository.SetFieldForLoad(r, FieldKeys.MessageSort, Attr(x, "messageSort"));
@@ -739,6 +790,8 @@ public static class XmiExchange
             "ForkNode" or "JoinNode" => ElementKind.ForkNode,
             "State" => ElementKind.State,
             "FinalState" => ElementKind.FinalState,
+            "InstanceSpecification" => ElementKind.InstanceSpecification,
+            "Slot" => ElementKind.Slot,
             "Pseudostate" => (Attr(x, "kind") ?? "initial") == "initial" ? ElementKind.InitialState
                 : ElementKind.Pseudostate,   // an unknown kind is read as a choice (and reported)
             _ => null,

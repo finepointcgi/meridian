@@ -334,10 +334,12 @@ public static partial class Verification
         var work = m;
         VariantResolution? resolution = null;
         var inputs = ParseInputs(run?.Get(VerificationKeys.Inputs), report.Problems);
+        // An instance as the subject: its slot values replace its classifiers' defaults (Instances/InstanceAnalysis.cs).
+        var instanceSubject = run != null && SubjectOf(m, run) is { Kind: ElementKind.InstanceSpecification } inst ? inst : null;
         string? setupError = null;
-        if (config != null || inputs.Count > 0)
+        if (config != null || inputs.Count > 0 || instanceSubject != null)
         {
-            if (options.Clone is null) setupError = "Verifying a variant or with inputs needs a model copy, which is not available here";
+            if (options.Clone is null) setupError = "Verifying a variant, an instance or with inputs needs a model copy, which is not available here";
             else
             {
                 work = options.Clone(m);
@@ -348,6 +350,12 @@ public static partial class Verification
                     Variability.ApplyTo(work, resolution);
                 }
                 var subj = run != null && SubjectOf(m, run) is { } s ? work.Find(s.Id) : null;
+                if (instanceSubject != null)
+                {
+                    var instanceProblems = new List<string>();
+                    subj = work.Find(instanceSubject.Id) is { } wi ? Instances.InstanceAnalysis.ApplyTo(work, wi, instanceProblems) : null;
+                    report.Problems.AddRange(instanceProblems.Select(p => $"Instance '{instanceSubject.Name}': {p}"));
+                }
                 ApplyInputs(work, subj, inputs, report.Problems);
             }
         }
@@ -355,9 +363,11 @@ public static partial class Verification
         var settings = SettingsOf(run, options.FmuFactory);
         var defaultKind = run != null ? VerificationCriterion.ParseAnalysis(run.Get(VerificationKeys.RunAnalysis)) : null;
         var subject = run != null ? SubjectOf(m, run) : null;
+        if (instanceSubject != null) subject = Instances.InstanceModel.MainClassifier(m, instanceSubject);
         var outputs = new Dictionary<(AnalysisKind, string), AnalysisOutput>();
         var extraDeps = new List<string>();
         if (run != null) extraDeps.Add(run.Id);
+        if (instanceSubject != null) extraDeps.AddRange(Instances.InstanceAnalysis.DependencyIds(instanceSubject));
         if (config != null) extraDeps.AddRange(new[] { config.Id }.Concat(Variability.Features(m).Select(f => f.Id)));
 
         foreach (var req in reqs)

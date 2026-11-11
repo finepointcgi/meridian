@@ -392,6 +392,7 @@ public sealed class DocResolver
             case StatisticsBlock s: Statistics(s, sc); break;
             case ValidationBlock v: Validation(v, sc); break;
             case PageBreakBlock: Emit(new PageBreakNode()); break;
+            case InstancesBlock i: Instances(i, sc); break;
         }
     }
 
@@ -863,6 +864,42 @@ public sealed class DocResolver
         if (list.Count == 0) { Emit(ParagraphNode.Plain("No validation issues were found.")); return; }
         Emit(new TableNode(NewCaption("Table", Sub(Default(v.Caption, "Validation issues"), sc), Ref(v, sc)), ["Severity", "Rule", "Element", "Message"],
             list.Select(i => (IReadOnlyList<string>)[i.Severity.ToString(), i.RuleId, i.Element.QualifiedName, i.Message]).ToList(), [0.8, 1, 2, 3], Compact: true));
+    }
+
+    private void Instances(InstancesBlock b, Scope sc)
+    {
+        Element? classifier = null;
+        if (!string.IsNullOrWhiteSpace(b.Classifier))
+        {
+            var name = Sub(b.Classifier, sc);
+            classifier = _m.Find(name) ?? _m.AllElements.FirstOrDefault(e => Core.Instances.InstanceModel.CanClassify(e.Kind)
+                             && (string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase) || string.Equals(e.QualifiedName, name, StringComparison.OrdinalIgnoreCase)));
+            if (classifier == null)
+            {
+                _doc.Warnings.Add($"Instances: classifier '{name}' not found.");
+                Emit(ParagraphNode.Plain($"[Classifier '{name}' not found]", italic: true));
+                return;
+            }
+        }
+        else if (sc.Current is { } cur && Core.Instances.InstanceModel.CanClassify(cur.Kind)) classifier = cur;
+        var table = Core.Instances.InstanceTable.Build(_m, classifier, b.IncludeNested);
+        var rows = table.Rows.Where(r => InScope(r.Instance)).ToList();
+        Counted(rows.Count);
+        var title = classifier == null ? "Instances" : $"Instances of {classifier.Name}";
+        if (b.Layout == "slots")
+        {
+            if (rows.Count == 0) { Emit(ParagraphNode.Plain(Sub(b.EmptyText, sc))); return; }
+            foreach (var r in rows)
+            {
+                var cells = table.Columns.Select((c, i) => (IReadOnlyList<string>)[c.Header, r.Cells[i]]).Where(x => x[1].Length > 0).ToList();
+                Emit(new TableNode(NewCaption("Table", Sub(Default(b.Caption, "{name}"), sc.With(r.Instance, null, 1, 1)), Ref(b, sc)), ["Feature", "Value"], cells, [1, 2], Compact: true, KeyValue: true));
+            }
+            return;
+        }
+        var headers = table.Columns.Select(c => c.Header).Prepend("Instance").ToList();
+        var cap = NewCaption("Table", Sub(Default(b.Caption, title), sc, count: rows.Count), Ref(b, sc));
+        if (rows.Count == 0) { Emit(new TableNode(cap, headers, [[Sub(b.EmptyText, sc), .. Enumerable.Repeat("", headers.Count - 1)]])); return; }
+        Emit(new TableNode(cap, headers, rows.Select(r => (IReadOnlyList<string>)r.Cells.Prepend(r.Label).ToList()).ToList(), Compact: true));
     }
 
     private static string Default(string? s, string fallback) => string.IsNullOrWhiteSpace(s) ? fallback : s;

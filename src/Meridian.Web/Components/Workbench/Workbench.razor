@@ -374,7 +374,7 @@
                 @if (Ws.ActiveView is { } shownView)
                 {
                     <span class="crumb current">@shownView.Title</span>
-                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", ViewTabKind.Verification => "VERIFICATION", ViewTabKind.RelationMap => "RELATION MAP", _ => "TEMPLATE" })</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", ViewTabKind.Verification => "VERIFICATION", ViewTabKind.RelationMap => "RELATION MAP", ViewTabKind.Instances => "INSTANCES", _ => "TEMPLATE" })</span>
                 }
                 else if (Ws.Active is { } act)
                 {
@@ -512,6 +512,7 @@
         ViewTabKind.Architecture => Icons.Material.Outlined.Rule,
         ViewTabKind.Verification => Icons.Material.Outlined.Rule,
         ViewTabKind.RelationMap => Icons.Material.Outlined.Hub,
+        ViewTabKind.Instances => Icons.Material.Outlined.DataObject,
         _ => Icons.Material.Outlined.EditNote,
     };
 
@@ -539,6 +540,10 @@
         else if (v.Kind == ViewTabKind.RelationMap)
         {
             <RelationMapTab Tab="v" />
+        }
+        else if (v.Kind == ViewTabKind.Instances && v.Element is { } classifier)
+        {
+            <InstanceTableTab Classifier="classifier" />
         }
         else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
         {

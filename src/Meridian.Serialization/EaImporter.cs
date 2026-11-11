@@ -64,7 +64,7 @@ public static class EaImporter
                 remaining.Remove(p);
             }
 
-        var objects = Query("select Object_ID, Object_Type, Name, Alias, Note, Package_ID, Stereotype, ParentID, Classifier, Abstract, NType" + Opt(objectCols, "ea_guid") + " from t_object order by Object_ID");
+        var objects = Query("select Object_ID, Object_Type, Name, Alias, Note, Package_ID, Stereotype, ParentID, Classifier, Abstract, NType" + Opt(objectCols, "ea_guid") + Opt(objectCols, "RunState") + " from t_object order by Object_ID");
         var typeOfObject = objects.ToDictionary(o => I(o, "Object_ID"), o => S(o, "Object_Type"));
         // Fork / join bars (EA "Synchronization") of state machines are pseudostates; in activities they are fork nodes.
         var outgoing = Query("select Start_Object_ID from t_connector").GroupBy(r => I(r, "Start_Object_ID")).ToDictionary(g => g.Key, g => g.Count());
@@ -73,6 +73,7 @@ public static class EaImporter
         var objById = new Dictionary<int, Element>();
         var objByGuid = new Dictionary<string, Element>(StringComparer.OrdinalIgnoreCase);
         var typeRefs = new List<(Element e, int classifier)>();
+        var instances = new List<(Element e, int classifier, string runState)>();   // EA objects: classifier and run state (slot values)
         var helperContainers = new Dictionary<(Element pkg, ElementKind kind), Element>();
 
         Element ContainerFor(Element pkg, ElementKind childKind)
@@ -120,6 +121,7 @@ public static class EaImporter
                 else if (name.Length > 0) ModelRepository.SetFieldForLoad(e, FieldKeys.TagPrefix + name, value);
             }
             if (Metamodel.IsTypedFeature(kind.Value) && I(o, "Classifier") > 0) typeRefs.Add((e, I(o, "Classifier")));
+            if (kind == ElementKind.InstanceSpecification) instances.Add((e, I(o, "Classifier"), S(o, "RunState")));
             objById[I(o, "Object_ID")] = e;
             if (S(o, "ea_guid") is { Length: > 0 } guid) objByGuid[guid] = e;
             pendingParents.Add((e, I(o, "ParentID"), pkgById.GetValueOrDefault(I(o, "Package_ID")) ?? model.Root));
@@ -223,6 +225,9 @@ public static class EaImporter
             // EA draws composition from part to whole; Meridian's composition goes whole → part.
             var swapped = k is ElementKind.Composition or ElementKind.Aggregation;
             if (swapped) (s, t) = (t, s);
+            // Between two objects an association is a link (typed below by the one association between their classifiers).
+            if (s.Kind == ElementKind.InstanceSpecification && t.Kind == ElementKind.InstanceSpecification && k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation)
+                k = ElementKind.Link;
             if (Metamodel.CheckEnds(k, s.Kind, t.Kind) != null)
             {
                 if (Metamodel.CheckEnds(k, t.Kind, s.Kind) == null) (s, t) = (t, s);
@@ -263,6 +268,9 @@ public static class EaImporter
             relById[I(c, "Connector_ID")] = r;
             rels++;
         }
+
+        EaInstances.Resolve(model, instances, objById, warnings);   // after generalizations: slots may be for inherited attributes
+        EaInstances.TypeLinks(model);
 
         // Diagrams and layouts.
         var diagramObjects = Query("select Diagram_ID, Object_ID, RectTop, RectLeft, RectRight, RectBottom from t_diagramobjects order by Sequence desc")
@@ -500,7 +508,8 @@ public static class EaImporter
         "Port" => ElementKind.Port,
         "Part" or "Property" => ElementKind.Property,
         "Note" => ElementKind.Comment,
-        "Signal" or "Object" or "Artifact" => ElementKind.Class,
+        "Object" => ElementKind.InstanceSpecification,
+        "Signal" or "Artifact" => ElementKind.Class,
         "Constraint" => ElementKind.Comment,
         _ => null,
     };

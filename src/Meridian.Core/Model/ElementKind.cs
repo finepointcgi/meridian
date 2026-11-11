@@ -142,6 +142,10 @@ public enum ElementKind
     Trigger,                // trigger on its owning table: db.timing, db.events
     // Saved relation maps (appended: keep existing ordinals stable): root, depth and filters in the "relationMap" field
     RelationMap,
+    // Instance specifications (appended: keep existing ordinals stable). See Instances/InstanceModel.cs.
+    InstanceSpecification,  // an object: classified by blocks / value types / signals, owns its slots and nested part instances
+    Slot,                   // one value of an instance for a structural feature of its classifier
+    Link,                   // instance-level association / connector between two instances, typed by an association
 }
 
 public enum DiagramType
@@ -174,6 +178,8 @@ public enum DiagramType
     UafProjects,
     UafStandards,
     UafActualResources,
+    // Appended: keep existing ordinals stable
+    Object,                 // object diagram: instance specifications, their slots and links
 }
 
 public static class FieldKeys

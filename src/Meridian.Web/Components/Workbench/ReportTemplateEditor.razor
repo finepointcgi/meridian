@@ -134,7 +134,7 @@ else
         ForEachBlock => Icons.Material.Outlined.Repeat,
         IfBlock => Icons.Material.Outlined.Rule,
         FieldsBlock => Icons.Material.Outlined.ListAlt,
-        TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock => Icons.Material.Outlined.TableChart,
+        TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock or InstancesBlock => Icons.Material.Outlined.TableChart,
         TraceMatrixBlock => Icons.Material.Outlined.GridOn,
         CoverageBlock => Icons.Material.Outlined.DonutLarge,
         DiagramBlock => Icons.Material.Outlined.Schema,
@@ -528,6 +528,13 @@ else
                 @Caption(v)
                 @Chk("Include info messages", v.IncludeInfo, x => v.IncludeInfo = x)
                 @Num("Maximum rows", v.Limit, x => v.Limit = x)
+            </div>,
+        InstancesBlock ib => @<div>
+                @Caption(ib)
+                @Opt("Classifier (name, qualified name or id)", ib.Classifier, v => ib.Classifier = v, "Empty = the current loop element (e.g. inside For each kind:Block)")
+                @Pick("Layout", ib.Layout, v => ib.Layout = v, ("table", "One row per instance"), ("slots", "A slot table per instance"))
+                @Chk("Include nested part instances", ib.IncludeNested, v => ib.IncludeNested = v)
+                @Txt("When there are none", ib.EmptyText, v => ib.EmptyText = v)
             </div>,
         _ => @<MudText Typo="Typo.body2">Starts a new page.</MudText>,
     };

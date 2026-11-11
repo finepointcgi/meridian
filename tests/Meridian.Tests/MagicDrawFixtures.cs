@@ -193,7 +193,16 @@ internal static class MagicDrawFixtures
               <packagedElement xmi:type='uml:Association' xmi:id='_assoc1' memberEnd='_p_rotors _assoc1_end'>
                 <ownedEnd xmi:type='uml:Property' xmi:id='_assoc1_end' type='_drone' association='_assoc1'/>
               </packagedElement>
-              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst' name='drone1'/>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst' name='drone1' classifier='_drone'>
+                <slot xmi:type='uml:Slot' xmi:id='_inst_mass' definingFeature='_p_mass'><value xmi:type='uml:LiteralReal' xmi:id='_inst_mass_v' value='1.4'/></slot>
+                <slot xmi:type='uml:Slot' xmi:id='_inst_ctrl' definingFeature='_p_ctrl'><value xmi:type='uml:InstanceValue' xmi:id='_inst_ctrl_v' instance='_inst2'/></slot>
+              </packagedElement>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst2' name='fc1'><classifier xmi:idref='_ctrl'/></packagedElement>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst3' name='rotor1' classifier='_rotor'/>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_lnk' classifier='_assoc1'>
+                <slot xmi:type='uml:Slot' xmi:id='_lnk_s1' definingFeature='_assoc1_end'><value xmi:type='uml:InstanceValue' xmi:id='_lnk_s1_v' instance='_inst'/></slot>
+                <slot xmi:type='uml:Slot' xmi:id='_lnk_s2' definingFeature='_p_rotors'><value xmi:type='uml:InstanceValue' xmi:id='_lnk_s2_v' instance='_inst3'/></slot>
+              </packagedElement>
               <packagedElement xmi:type='uml:Frobnicator' xmi:id='_weird' name='Unknown thing'/>
               {extraBlocks}
               {D("_bdd", "Drone structure", "_pkgS", "SysML Block Definition Diagram", "Class Diagram", BddViews)}

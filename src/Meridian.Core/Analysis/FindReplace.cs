@@ -150,6 +150,9 @@ public static class FindReplace
             case FieldKeys.Stereotypes: return SearchIn.Stereotypes;
         }
         if (ValueKeys.Contains(key)) return SearchIn.Values;
+        // Instance slot values: literals and expressions only. Enum and instance values hold element ids, not text.
+        if (key == Meridian.Core.Instances.InstanceFields.Value)
+            return e.Get(Meridian.Core.Instances.InstanceFields.ValueKind) is null or "" or "literal" or "expression" ? SearchIn.Values : SearchIn.None;
         if (key.StartsWith(FieldKeys.TagPrefix, StringComparison.Ordinal) || key.StartsWith(ReqFields.CustomPrefix, StringComparison.Ordinal))
             return SearchIn.TaggedValues;
         return SearchIn.None;

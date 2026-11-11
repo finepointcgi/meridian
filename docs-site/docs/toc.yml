@@ -20,6 +20,8 @@
     href: diagrams.md
   - name: Multi-select and bulk editing
     href: multi-select.md
+  - name: Instances and object diagrams
+    href: instances.md
   - name: Creating diagrams from diagrams
     href: derivation.md
   - name: SysML v2 text

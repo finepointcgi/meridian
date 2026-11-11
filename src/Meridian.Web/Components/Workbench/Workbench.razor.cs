@@ -96,6 +96,7 @@ public partial class Workbench
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
         list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
         list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs
+        list.AddRange(InstancePaletteCommands());     // Workbench.Instances.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -128,6 +129,7 @@ public partial class Workbench
     {
         Ws.Dispatch = a => InvokeAsync(a);
         Ws.Confirm = ConfirmAsync;
+        Ws.AskLinkAssociation = AskLinkAssociationAsync;   // Workbench.Instances.cs
         Ws.Changed += OnWorkspaceChanged;
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         if (Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
@@ -414,6 +416,7 @@ public partial class Workbench
         m.Add(MenuEntry.Sep());
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
         m.AddRange(DatabaseTreeEntries(e));      // Workbench.Database.cs
+        m.AddRange(InstanceMenuEntries(e));      // Workbench.Instances.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
@@ -448,6 +451,7 @@ public partial class Workbench
             }
             if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
             m.AddRange(DatabaseCanvasEntries(c, n));   // Workbench.Database.cs
+            m.AddRange(InstanceMenuEntries(el, c, n));   // Workbench.Instances.cs
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));

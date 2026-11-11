@@ -48,6 +48,9 @@ public static class ConnectorRules
             foreach (var l in Metamodel.PaletteLinks(diagram).Where(l => l.Kind != ElementKind.Allocate))
                 Add(l.Kind, false, l.Subtype);
 
+        // Instances: a link (typed afterwards by the one matching association, or the user's pick when several fit).
+        if (source == ElementKind.InstanceSpecification && target == ElementKind.InstanceSpecification) Add(ElementKind.Link);
+
         // Packages: dependency.
         if (source == ElementKind.Package || target == ElementKind.Package) Add(ElementKind.Dependency);
 

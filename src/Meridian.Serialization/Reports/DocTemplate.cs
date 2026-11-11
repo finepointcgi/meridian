@@ -114,6 +114,7 @@ public sealed class DocSection
 [JsonDerivedType(typeof(StatisticsBlock), "statistics")]
 [JsonDerivedType(typeof(ValidationBlock), "validation")]
 [JsonDerivedType(typeof(PageBreakBlock), "pageBreak")]
+[JsonDerivedType(typeof(InstancesBlock), "instances")]
 public abstract class DocBlock
 {
     [JsonIgnore] public abstract string TypeLabel { get; }
@@ -140,6 +141,7 @@ public abstract class DocBlock
         ("statistics", "Model statistics", () => new StatisticsBlock()),
         ("validation", "Validation issues", () => new ValidationBlock()),
         ("pageBreak", "Page break", () => new PageBreakBlock()),
+        ("instances", "Instances (instance table)", () => new InstancesBlock()),
     ];
 }
 
@@ -346,6 +348,23 @@ public sealed class ValidationBlock : CaptionedBlock
     public bool IncludeInfo { get; set; }
     public int Limit { get; set; } = 500;
     public override string TypeLabel => "Validation";
+}
+
+/// <summary>
+/// The instances of a block (Cameo instance table): one row per instance, a column per feature with its slot value; or,
+/// with <see cref="Layout"/> "slots", a feature / value table per instance.
+/// </summary>
+public sealed class InstancesBlock : CaptionedBlock
+{
+    /// <summary>The classifier: name, qualified name or id (placeholders allowed). Empty = the current loop element, else every instance.</summary>
+    public string? Classifier { get; set; }
+    /// <summary>"table" (one row per instance) or "slots" (a table per instance).</summary>
+    public string Layout { get; set; } = "table";
+    /// <summary>Include instances nested in other instances (part instances).</summary>
+    public bool IncludeNested { get; set; } = true;
+    public string EmptyText { get; set; } = "No instances.";
+    public override string TypeLabel => "Instances";
+    public override string Summary => "Instances: " + (string.IsNullOrWhiteSpace(Classifier) ? "current element" : Classifier) + (Layout == "slots" ? " (slots)" : "");
 }
 
 public sealed class PageBreakBlock : DocBlock
