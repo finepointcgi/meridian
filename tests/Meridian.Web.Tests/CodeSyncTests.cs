@@ -754,7 +754,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         Assert.Contains("Code changes (2)", badge.Markup);
         badge.Find("[data-testid=code-changes-badge]").Click();
         Assert.Equal(ViewTabKind.CodeChanges, ws.ActiveView?.Kind);
-        Assert.Equal("What changed", ws.ActiveView!.Title);
+        Assert.Equal("Code changes", ws.ActiveView!.Title);
 
         var cut = RenderComponent<CodeChangesTab>();
         Assert.Contains("code-sync/acme/sat", cut.Markup);

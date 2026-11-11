@@ -128,7 +128,7 @@
                                                 <MudAutocomplete T="Element" Placeholder="Link…" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" AutoFocus="true"
                                                                  SearchFunc="(q, ct) => Candidates(row.Requirement, col, q)" ToStringFunc="Describe"
                                                                  ValueChanged="v => AddLink(row.Requirement, col, v)" ResetValueOnEmptyText="true" MaxItems="40" ShowProgressIndicator="false" />
-                                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" title="Cancel" OnClick="() => _edit = null" />
+                                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" title="Cancel" OnClick="() => _edit = null" aria-label="Cancel" />
                                             </div>
                                         }
                                         else

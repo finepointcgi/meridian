@@ -203,7 +203,7 @@ the usual way. Use the steps below instead.
 
 ## 4. Requirements tools: IBM DOORS Next and Siemens Polarion
 
-Project menu → **Integrations…** → *Requirements tools*. Project owners manage connections; editors can use
+Project menu → **Integrations…** → *DOORS & Polarion*. Project owners manage connections; editors can use
 **Sync now**. Code: `src/Meridian.Web/Integrations/Requirements/`; UI:
 `Components/Workbench/{RequirementsToolsPanel,RequirementConflictDialog}.razor`.
 

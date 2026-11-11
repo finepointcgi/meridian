@@ -247,7 +247,7 @@
         catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or Meridian.Core.Analysis.QueryParseException or System.Text.Json.JsonException)
         {
             _progressText = "";
-            Snackbar.Add($"Document generation failed: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not generate the document: {FriendlyError.Describe(ex)}. Check the template's queries, or try another format.", Severity.Error);
         }
         finally
         {
@@ -321,7 +321,7 @@
         }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or NotSupportedException)
         {
-            Snackbar.Add($"Not a report template: {ex.Message}", Severity.Error);
+            Snackbar.Add($"That file is not a report template: {FriendlyError.Describe(ex)}.", Severity.Error);
         }
     }
 

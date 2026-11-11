@@ -10,7 +10,7 @@
 @inject MeridianHostInfo HostInfo
 @inject IConfiguration Configuration
 
-@* DOORS Next and Polarion connections (Integrations dialog → Requirements tools). *@
+@* DOORS Next and Polarion connections (Integrations dialog → DOORS & Polarion). *@
 @if (_form is null)
 {
     @foreach (var r in _tools)
@@ -35,11 +35,11 @@
                     }
                 </div>
             </div>
-            <MudTooltip Text="Import changes from the tool now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy || Ws.ReadOnly" OnClick="() => SyncNow(conn)" /></MudTooltip>
+            <MudTooltip Text="Import changes from the tool now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy || Ws.ReadOnly" OnClick="() => SyncNow(conn)" aria-label="Import changes from the tool now" /></MudTooltip>
             @if (CanManage)
             {
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" aria-label="Edit" title="Edit" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" aria-label="Delete" title="Delete" />
             }
         </div>
     }
@@ -53,7 +53,7 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="New">Add connection</MudButton>
         }
         <span style="flex:1"></span>
-        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" aria-label="Refresh" title="Refresh" />
     </div>
 }
 else
@@ -257,6 +257,7 @@ else
     private async Task Delete(IntegrationConnection c)
     {
         if (!CanManage) return;
+        if (!await Confirm.AskAsync(Dialogs, $"Disconnect “{c.Name}”?", "Requirements stop syncing and the stored credentials are removed. Requirements already imported stay in the model.", "Disconnect")) return;
         await Tools.DeleteAsync(ProjectId, c.Id);
         await Reload();
     }

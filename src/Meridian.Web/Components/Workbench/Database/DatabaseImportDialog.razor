@@ -172,7 +172,7 @@
         catch (Exception ex) when (ex is FormatException or InvalidDataException or System.Xml.XmlException or IOException)
         {
             _catalog = null;
-            _error = ex.Message;
+            _error = $"Could not read the schema: {FriendlyError.Describe(ex)}.";
         }
     }
 

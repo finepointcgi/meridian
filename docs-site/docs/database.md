@@ -54,7 +54,7 @@ unique ones and `*` after mandatory columns; the type is on the right. Views hav
 crow's-foot ends — many at the referencing table, one (bar) or zero-or-one (circle, when the column is nullable) at
 the referenced table — and run from column to column when the tables sit side by side.
 
-* Ribbon **Database ▸ Groups ▸ Columns**: show all columns, **keys only**, or none.
+* Ribbon **Database ▸ Subject areas ▸ Columns**: show all columns, **keys only**, or none.
 * **New table** adds a table to the selected schema and the open diagram. The shapes panel also has views,
   materialized views and logical **entities** (a table *realizes* the entity it implements).
 * Draw a **Foreign Key** from a **column row** to another table: that column references the other table's primary
@@ -81,14 +81,14 @@ and allocate blocks or data items to them.
 ## Subject areas
 
 A subject area groups tables by topic, independently of schemas — a table can be in several. Select tables and use
-ribbon **Database ▸ Add to group**, or **Groups ▸ Subject areas…** to create, rename, colour and fill them.
+ribbon **Database ▸ Add to subject area**, or **Subject areas ▸ Subject areas…** to create, rename, colour and fill them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/database-groups-dark.png">
   <img src="../images/database-groups-light.png" alt="The Subject areas dialog with the Customers and Ordering areas, colours and the tables of Ordering">
 </picture>
 
-Areas appear as coloured frames on database diagrams. **Groups ▸ Show on this diagram** filters a diagram to one
+Areas appear as coloured frames on database diagrams. **Subject areas ▸ Show on this diagram** filters a diagram to one
 area, the model explorer has a chip per area, and DDL and the data dictionary can be generated for an area. Areas
 are packages, so **package permissions** set on an area apply to its tables.
 

@@ -232,9 +232,9 @@ for that repository in the same project, or a token that can read it.
 also skips a submodule. The connection lists the submodules of the last sync of its branch, each with its pinned commit
 and a status: **fetched** (with the number of files), **skipped** (why), **no access** or **not found**.
 
-**Bumps in What changed.** The commits a repository pins its submodules to are kept on the model root, in the field
+**Bumps in Code changes.** The commits a repository pins its submodules to are kept on the model root, in the field
 `code.submodules:<connection id>` (one `path@sha <compare link>` line each). Moving a submodule to another commit
-changes that field, and *What changed* lists it under **Submodules** as `libs/core 1a2b3c4 → 5d6e7f8`, with a
+changes that field, and *Code changes* lists it under **Submodules** as `libs/core 1a2b3c4 → 5d6e7f8`, with a
 **Compare** link on GitHub, GitLab and Bitbucket, next to the element changes the new code caused. Accepting it moves
 `main`'s pins forward; a new submodule shows as *added*, a removed one as *removed*. The pull request comment lists bumps
 as rows of kind *Submodule*. Pins are recorded for skipped and unreadable submodules too, so their bumps still show.
@@ -257,7 +257,7 @@ are ignored, and the connection's **Preview pull requests** switch turns preview
   first 10 changes (kind, name, element kind, owner) and a link to the preview. Later pushes edit that comment in place.
   If someone deleted it, a new one is posted. The comment id is kept in the connection's settings.
 - In Meridian the title-bar badge shows open previews as **PR #n**, next to *Code changes (N)* when the followed branch has
-  changes to review. *What changed* lists each preview under a **PR #n** heading. A preview is for looking only: its
+  changes to review. *Code changes* lists each preview under a **PR #n** heading. A preview is for looking only: its
   changes cannot be selected, accepted or rejected, and on `main` the diagram highlights leave previews out. Open the
   preview branch to see its highlights.
 
@@ -271,11 +271,11 @@ branch open at that moment, the branch is kept (its runs are still closed) and c
 ### The review
 
 When a code-sync branch has changes waiting, the title bar shows **Code changes (N)** next to the branch picker. It opens
-**What changed**, a tab next to the diagrams (also on ⌘K “What changed”, and in the *Code* ribbon group). The commit-status
+**Code changes**, a tab next to the diagrams (also on ⌘K “Code changes”, and in the *Code* ribbon group). The commit-status
 link a git host shows opens the project on the review branch with this tab open
 (`/?project=<id>&branch=<id>&panel=code-changes`).
 
-What changed lists, per review branch:
+Code changes lists, per review branch:
 
 - the pushes waiting for review — short sha (linked to the commit), message, author, time and summary. Ticking a push selects
   all of its changes;

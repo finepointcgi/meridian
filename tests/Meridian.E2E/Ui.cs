@@ -36,6 +36,13 @@ public static class Ui
         await p.Locator(".mud-popover-open .mud-menu-item").Filter(new() { HasTextString = item }).First.ClickAsync();
     }
 
+    /// <summary>Opens the Help menu (? in the title bar) and clicks an item (Tour…, Keyboard &amp; mouse, What's new…).</summary>
+    public static async Task HelpMenuAsync(this IPage p, string item)
+    {
+        await p.Locator("header.titlebar [data-testid=help-menu]").ClickAsync();
+        await p.Locator(".mud-popover-open .mud-menu-item").Filter(new() { HasTextString = item }).First.ClickAsync();
+    }
+
     /// <summary>Clicks a ribbon button by its caption (e.g. "Trace table"), first switching to the ribbon tab that holds it.</summary>
     public static async Task RibbonAsync(this IPage p, string caption)
     {

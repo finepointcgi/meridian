@@ -593,9 +593,9 @@ public sealed class ViewTab(ViewTabKind kind)
 
     public string Title => Element is { } e ? e.DisplayName : Kind switch
     {
-        ViewTabKind.Table => "New custom table",
+        ViewTabKind.Table => "New generic table",
         ViewTabKind.Query => "New query",
-        ViewTabKind.CodeChanges => "What changed",
+        ViewTabKind.CodeChanges => "Code changes",
         ViewTabKind.Architecture => "Architecture",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };

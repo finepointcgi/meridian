@@ -32,7 +32,7 @@
             <div class="d-flex align-center gap-1">
                 <span style="min-width:90px; font-size:12px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis" title="@n">@n</span>
                 <MudTextField @key="@(e.Id + "attr" + n)" T="string" Value="@value" ValueChanged="v => Set(e, ReqFields.CustomPrefix + n, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" />
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" Disabled="Ws.ReadOnly" OnClick="() => Set(e, ReqFields.CustomPrefix + n, null)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" Disabled="Ws.ReadOnly" OnClick="() => Set(e, ReqFields.CustomPrefix + n, null)" aria-label="Remove" title="Remove" />
             </div>
         }
         @if (!Ws.ReadOnly)
@@ -40,7 +40,7 @@
             <div class="d-flex align-center gap-1">
                 <MudTextField T="string" @bind-Value="_newAttr" Placeholder="attribute" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
                 <MudTextField T="string" @bind-Value="_newAttrValue" Placeholder="value" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newAttr)" OnClick="() => AddAttr(e)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newAttr)" OnClick="() => AddAttr(e)" aria-label="Add" title="Add" />
             </div>
         }
         @* Simulation-driven verification: the criterion and the last result (Analysis/Verification.cs). *@

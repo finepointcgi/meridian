@@ -5,9 +5,9 @@
     <MudIcon Icon="@Icons.Material.Outlined.AccountTree" Style="font-size:15px" />
     <span style="flex:1">Model explorer</span>
     <MudTooltip Text="@(ShowRelationships ? "Hide relationships" : "Show relationships")">
-        <MudIconButton Size="Size.Small" Icon="@(ShowRelationships ? Icons.Material.Outlined.Link : Icons.Material.Outlined.LinkOff)" OnClick="ToggleRelationships" />
+        <MudIconButton Size="Size.Small" Icon="@(ShowRelationships ? Icons.Material.Outlined.Link : Icons.Material.Outlined.LinkOff)" OnClick="ToggleRelationships" aria-label="@(ShowRelationships ? "Hide relationships" : "Show relationships")" />
     </MudTooltip>
-    <MudTooltip Text="Collapse all"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.UnfoldLess" OnClick="CollapseAll" /></MudTooltip>
+    <MudTooltip Text="Collapse all"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.UnfoldLess" OnClick="CollapseAll" aria-label="Collapse all" /></MudTooltip>
 </div>
 <div class="px-3 pb-2">
     <MudTextField T="string" @ref="_search" Value="_query" ValueChanged="Search" Immediate="true" DebounceInterval="SearchDebounce"

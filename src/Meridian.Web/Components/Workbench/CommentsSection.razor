@@ -1,3 +1,4 @@
+@inject IDialogService ConfirmDialogs
 @using Meridian.Data
 @inherits WorkspaceComponent
 @inject IMeridianStore Db
@@ -65,15 +66,15 @@
                 @if (!reply)
                 {
                     <MudTooltip Text="Reply">
-                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => StartReply(comment)" />
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => StartReply(comment)" aria-label="Reply" />
                     </MudTooltip>
                     <MudTooltip Text="@(comment.Resolved ? "Reopen" : "Resolve")">
-                        <MudIconButton Size="Size.Small" Icon="@(comment.Resolved ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.CheckCircle)" OnClick="() => Resolve(comment)" />
+                        <MudIconButton Size="Size.Small" Icon="@(comment.Resolved ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.CheckCircle)" OnClick="() => Resolve(comment)" aria-label="@(comment.Resolved ? "Reopen" : "Resolve")" />
                     </MudTooltip>
                 }
                 @if (comment.Author.Id == Ws.User?.Id)
                 {
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Remove(comment)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Remove(comment)" aria-label="Delete" title="Delete" />
                 }
             </div>
             <div class="body"><MentionText Text="@comment.Body" People="_people" /></div>
@@ -137,6 +138,7 @@
 
     private async Task Remove(CommentInfo c)
     {
+        if (!await Confirm.AskAsync(ConfirmDialogs, "Delete this comment?", "The comment is removed for everyone.")) return;
         await Db.DeleteCommentAsync(c.Id);
         Ws.Session?.NotifyComments();
     }

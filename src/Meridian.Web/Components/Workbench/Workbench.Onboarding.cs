@@ -36,5 +36,25 @@ public partial class Workbench
         if (Ws.Session != null && !Ws.ReadOnly)
             yield return new("Connect a code repository…", "Command", Icons.Material.Outlined.Extension, () => IntegrationsDialog.ShowCodeRepositoriesAsync(Dialogs));
         yield return new($"What's new in {TourChapters.WhatsNewVersion}", "Command", Icons.Material.Outlined.NewReleases, ShowWhatsNew);
+        yield return new("Keyboard & mouse shortcuts", "Command", Icons.Material.Outlined.Keyboard, ShowHelp);
+
+        // Cameo / MagicDraw and Enterprise Architect names, so ⌘K finds the Meridian equivalent by the name people know.
+        foreach (var (alias, icon, run) in CameoAliases())
+            yield return new(alias, "Cameo / EA", icon, run);
+    }
+
+    private IEnumerable<(string Alias, string Icon, Func<Task> Run)> CameoAliases()
+    {
+        Func<Task> Dock(int index) => () => { OpenDock(index); StateHasChanged(); return Task.CompletedTask; };
+        yield return ("Dependency matrix → Traceability matrix", Icons.Material.Outlined.GridOn, Dock(2));
+        yield return ("Relationship matrix → Traceability matrix", Icons.Material.Outlined.GridOn, Dock(2));
+        yield return ("Requirement table → Requirements table", Icons.Material.Outlined.TableRows, Dock(1));
+        yield return ("Report wizard → Generate a document", Icons.Material.Outlined.Article, ExportDocx);
+        yield return ("Use project / project usages → Used projects", Icons.Material.Outlined.LibraryBooks, ShowUsedProjects);
+        yield return ("Quick diagram layout → Arrange", Icons.Material.Outlined.AutoAwesomeMosaic, () => { Ws.Active?.Arrange(); return Task.CompletedTask; });
+        yield return ("Containment tree / Project browser → Find in model explorer", Icons.Material.Outlined.AccountTree, FocusSearch);
+        yield return ("Model search → Query", Icons.Material.Outlined.ManageSearch, () => { OpenTables(TablesPanel.Mode.Query); return Task.CompletedTask; });
+        yield return ("Macros / scripts → Script console", Icons.Material.Outlined.DataObject, Dock(10));
+        yield return ("Teamwork Cloud commit → Commit version", Icons.Material.Outlined.Commit, Save);
     }
 }

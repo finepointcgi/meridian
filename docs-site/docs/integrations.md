@@ -63,7 +63,7 @@ other 4xx are not. The latest 50 attempts are shown under *Recent deliveries*.
 
 ## DOORS Next and Polarion
 
-**Integrations… → Requirements tools** connects a project to IBM DOORS Next or Siemens Polarion. Project owners add
+**Integrations… → DOORS & Polarion** connects a project to IBM DOORS Next or Siemens Polarion. Project owners add
 connections; editors can sync.
 
 * **DOORS Next**: enter the RM application URL (`https://jazz.example.com/rm`) and sign in with Jazz form login,

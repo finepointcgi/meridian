@@ -27,7 +27,7 @@
                 {
                     <div class="d-flex gap-2 align-center mt-2">
                         <MudTextField T="string" @bind-Value="_new" Label="New subject area" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" data-testid="db-groups-new" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Add" Disabled="@string.IsNullOrWhiteSpace(_new)" OnClick="Create" data-testid="db-groups-create" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Add" Disabled="@string.IsNullOrWhiteSpace(_new)" OnClick="Create" data-testid="db-groups-create" aria-label="Add" title="Add" />
                     </div>
                 }
             </div>
@@ -53,7 +53,7 @@
                             <div class="d-flex align-center gap-1" style="font-size:13px">
                                 <MudIcon Icon="@Icons.Material.Outlined.TableChart" Style="font-size:15px; color:var(--text-3)" />
                                 <span style="flex:1">@(DbModel.SchemaOf(table) is { } s ? s.Name + "." : "")@table.Name</span>
-                                @if (editable) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => DbModel.RemoveFromGroup(Ws.Model, [table], cur)" title="Remove from the area" /> }
+                                @if (editable) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => DbModel.RemoveFromGroup(Ws.Model, [table], cur)" title="Remove from the area" aria-label="Remove from the area" /> }
                             </div>
                         }
                     </div>

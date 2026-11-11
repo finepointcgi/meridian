@@ -26,7 +26,7 @@
     {
         <MudTooltip Text="@SubmitLabel">
             <MudIconButton Class="send" Size="Size.Small" Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
-                           Disabled="@(Disabled || string.IsNullOrWhiteSpace(Value))" OnClick="Submit" />
+                           Disabled="@(Disabled || string.IsNullOrWhiteSpace(Value))" OnClick="Submit" aria-label="@SubmitLabel" />
         </MudTooltip>
     }
 </div>

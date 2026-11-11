@@ -15,6 +15,48 @@ window.meridian = (() => {
     setLast: name => { try { if (name) localStorage.setItem("meridian.lastProject", name); else localStorage.removeItem("meridian.lastProject"); } catch { } },
     rect: el => { if (!el?.getBoundingClientRect) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; },
     focus: el => el?.focus({ preventScroll: true }),
+    // Context menu: keep it inside the window, place open submenus beside their entry (flipped left at the right edge),
+    // and take the focus so Escape and the arrow keys work.
+    fitMenu: root => {
+      if (!root) return;
+      const fit = (el, left, top) => {
+        const r = el.getBoundingClientRect();
+        el.style.left = Math.max(4, Math.min(left, innerWidth - r.width - 4)) + "px";
+        el.style.top = Math.max(4, Math.min(top, innerHeight - r.height - 4)) + "px";
+      };
+      const r = root.getBoundingClientRect();
+      fit(root, r.left, r.top);
+      const place = () => root.querySelectorAll(".ctx-sub.open > .ctx-submenu").forEach(sub => {
+        const p = sub.parentElement.getBoundingClientRect();
+        sub.style.position = "fixed";
+        const w = sub.getBoundingClientRect().width;
+        fit(sub, p.right + w + 4 > innerWidth ? p.left - w - 4 : p.right + 4, p.top - 6);
+      });
+      root._menuObserver?.disconnect();
+      root._menuObserver = new MutationObserver(place);
+      root._menuObserver.observe(root, { subtree: true, attributes: true, attributeFilter: ["class"] });
+      place();
+      root.focus({ preventScroll: true });
+    },
+    // Arrow keys move between the visible entries of the menu that has the focus; Enter, Space and → open or run one.
+    menuKey: (root, key) => {
+      const active = document.activeElement;
+      const menu = active?.closest?.(".ctx-menu") || root;
+      const items = [...menu.querySelectorAll(":scope > .ctx-item, :scope > .ctx-sub > .ctx-item")];
+      const i = items.indexOf(active);
+      if (key === "ArrowDown" || key === "ArrowUp") {
+        const n = items.length;
+        if (n === 0) return;
+        const next = i < 0 ? (key === "ArrowDown" ? 0 : n - 1) : (i + (key === "ArrowDown" ? 1 : n - 1)) % n;
+        items[next].focus();
+      } else if (key === "ArrowLeft") {
+        const parent = menu.closest(".ctx-sub");
+        if (parent) { const item = parent.querySelector(":scope > .ctx-item"); item.click(); item.focus(); }
+      } else if (i >= 0 && (key !== "ArrowRight" || active.classList.contains("ctx-parent"))) {
+        active.click();
+        if (active.classList.contains("ctx-parent")) setTimeout(() => active.parentElement.querySelector(".ctx-submenu .ctx-item")?.focus(), 30);
+      }
+    },
     select: el => { el?.focus(); el?.select?.(); },
     caretEnd: el => { if (!el) return; el.focus(); const n = el.value?.length ?? 0; try { el.setSelectionRange(n, n); } catch { } },
     // Opens the inline label editor. Keys typed on the canvas before it had focus were recorded in order by installCanvas

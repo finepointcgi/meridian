@@ -29,7 +29,7 @@ the HTML report, Meridian asks whether to include the library content or only re
 ## Updates
 
 Meridian checks for newer versions, branch heads and baselines when the project opens. You can also check from ⌘K
-(*Check for library updates*) or the ribbon's **Libraries** button. Available updates show as a badge in the title bar.
+(*Check for library updates*) or the ribbon's **Model views ▸ Used projects** button. Available updates show as a badge in the title bar.
 
 **Update used project…** opens a review of what changed between your pin and the new one — added, changed and removed
 elements with their details, and the library's diagrams with the changes highlighted — and lists the elements of your project

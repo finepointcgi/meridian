@@ -2,6 +2,7 @@
    the desktop app). The connection string is stored encrypted and never shown again. On a team server only server
    administrators can add connections, and hosts on private networks need Meridian:Integrations:AllowPrivateNetworks.
    Meridian reads catalog views in read-only transactions and never runs DDL: use a read-only database account. *@
+@inject IDialogService ConfirmDialogs
 @using Meridian.Core.DataModeling
 @using Meridian.Data
 @using Meridian.Data.Databases
@@ -28,8 +29,8 @@
                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(_busy || Ws.ReadOnly)" OnClick="() => Import(conn)">@(linked != null ? "Refresh…" : "Import")</MudButton>
                 @if (_canManage)
                 {
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" aria-label="Edit" title="Edit" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" aria-label="Delete" title="Delete" />
                 }
             </div>
         }
@@ -156,6 +157,7 @@
     private async Task Delete(IntegrationConnection c)
     {
         if (Ws.Session is not { } s) return;
+        if (!await Confirm.AskAsync(ConfirmDialogs, $"Delete “{c.Name}”?", "The connection and its stored connection string are removed. Tables already imported stay in the model.")) return;
         await Connections.RefreshAdminAsync(Ws, Services);
         try { await Connections.DeleteAsync(s.ProjectId, c.Id, Ws.IsServerAdmin); }
         catch (DatabaseImportException ex) { Snackbar.Add(ex.Message, Severity.Error); }

@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-On macOS use **⌘**; on Windows and Linux use **Ctrl** wherever this page shows ⌘. **Keyboard & mouse** in the project
+On macOS use **⌘**; on Windows and Linux use **Ctrl** wherever this page shows ⌘. **Help (?) ▸ Keyboard & mouse** in the title bar
 menu shows a short version of this page inside Meridian.
 
 ## Global
@@ -11,6 +11,7 @@ menu shows a short version of this page inside Meridian.
 | ⌘S | commit a version |
 | ⌘O | projects |
 | ⌘F | find (focus the model explorer search) |
+| ⌘, | settings |
 | ⌘Z | undo |
 | ⇧⌘Z or ⌘Y | redo |
 | F7 | validate the model |

@@ -57,6 +57,8 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `LibraryTests` | a parts library is used from the Vehicle sample, a part is typed by a library block, a new library version shows the update badge and review, and the part becomes suspect |
 | `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
+| `UxTests` | every tour spotlight target is on screen, dialogs fit a 1280×800 window, the tree context menu nests long lists, fits the window and closes with Escape |
+| `UxWalkthroughTests` | opt-in (`MERIDIAN_UX_WALKTHROUGH=1`): screenshots of every entry point at four sizes in both themes plus `audit.json`, in `$TMPDIR/meridian-ux` (see `docs/UX-AUDIT-0.7.md`) |
 | `DocsScreenshotTests` | opt-in (`MERIDIAN_DOCS_SCREENSHOTS=1`): writes the user guide's screenshots to `docs-site/images` in the dark and the light theme |
 
 Tests in the `server` collection share one server and run one at a time; each creates its own project, so they do not

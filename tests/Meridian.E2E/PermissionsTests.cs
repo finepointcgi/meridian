@@ -20,7 +20,7 @@ public sealed class PermissionsTests(ServerFixture f) : E2ETest(f)
     private async Task GrantAsync(IPage a, string package, string level)
     {
         await a.Tree().GetByText(package, new() { Exact = true }).First.ClickAsync(new() { Button = MouseButton.Right });
-        await a.Locator(".ctx-menu .ctx-item").Filter(new() { HasTextString = "Permissions…" }).DispatchEventAsync("click");   // the long menu may run off the screen
+        await a.Locator(".ctx-menu .ctx-item").Filter(new() { HasTextString = "Permissions…" }).ClickAsync();   // the menu fits on the screen (long lists are submenus)
         var dlg = a.MudDialog();
         await Expect(dlg.Locator("[data-testid=perm-mine]")).ToContainTextAsync("manage");
         await SelectAsync(a, dlg, "perm-principal", F.Bob.DisplayName);

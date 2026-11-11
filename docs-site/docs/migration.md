@@ -11,7 +11,8 @@ This page maps the concepts, windows and menus of **Cameo Systems Modeler / Magi
 | Enterprise Architect 16+ | open the `.qea` / `.qeax` file directly with **Open a file as a new project** (or the desktop start screen) | Packages, elements, attributes, operations, connectors with SysML stereotypes, tagged values and diagram layouts are read straight from the repository. Data models («table» classes) keep column lengths, NOT NULL, primary keys, unique constraints, indexes and «FK» connectors as foreign keys. |
 | Database schemas | **Import ▸ Database schema (DDL / .dacpac)…** or **Connect to a database…** | PostgreSQL, SQL Server, MySQL / MariaDB, SQLite and Oracle DDL; SQL Server `.dacpac`; live PostgreSQL, MySQL and SQLite ([details](database.md)) |
 | Older EA (`.eap`, Access) | convert to `.qea` in EA, or export XMI 2.5 from EA | |
-| DOORS, Polarion, Jama, Codebeamer | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
+| DOORS Next, Polarion | **Integrations ▸ DOORS & Polarion**: a live two-way requirements sync, or ReqIF | see [Integrations](integrations.md#doors-next-and-polarion) |
+| Jama, Codebeamer, classic DOORS | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
 
 A new, empty project offers **Open a Cameo file** in the middle of the screen as well.
 
@@ -38,14 +39,15 @@ can always compare against it.
 | Requirements traceability / coverage analysis | **Traceability table** (gaps, suspect links, multi-level, orphans, per-package coverage) and **Coverage** |
 | Relation map / impact analysis | **Traceability → Impact** (transitive dependents, as a list) |
 | Suspect links | **Suspect links**, cleared in the traceability table |
-| Generic table | **Model views → Table** (saved as a *Table View* element) |
+| Generic table | **Model views → Generic table** (saved as a *Table View* element) |
 | Find / smart packages / derived queries | **Model views → Query** (saved as a *Query* element); the **command palette** (⌘K) finds anything by name |
 | Validation suites and constraints | **Validate** (built-in rules) plus **validation rules** written as model queries, and plugin rules |
 | Profiles, stereotypes, customizations | **Profiles** with stereotypes, metaclasses, colours and tag definitions; *Add UAF profile* |
 | Parametric evaluation (Cameo Simulation Toolkit) | **Parametrics** panel (solves each equation for any one unknown) |
 | Simulation Toolkit: activities and state machines | **Simulation → Step** and **Timed (discrete event)**; animation on the diagram, signals, time and change events |
 | Monte Carlo / variability analysis | **Monte Carlo** tab with distributions on value properties |
-| FMU co-simulation | **FMI import** of the FMU interface; co-simulation is not implemented |
+| FMU co-simulation | **FMI import** and **co-simulation** along IBD connectors (Simulation ▸ Co-simulation; an administrator turns running FMUs on) |
+| Simulation-based requirement verification (Cameo Simulation Toolkit requirements verification) | **Simulate ▸ Verify**: criteria such as `mass <= 1500 kg`, checked with parametrics, Monte Carlo, timed simulation or co-simulation; pass / fail on diagrams ([details](verification.md)) |
 | Product line / variability | **Variants**: feature models, presence conditions, configurations, variant export |
 | Trade-off analysis | **Trade studies** with weights, utility curves and sensitivity |
 | Report Wizard / document templates | **Generate → Formats → Word / PDF document from template**, and the HTML **Report** |
@@ -55,6 +57,9 @@ can always compare against it.
 | Teamwork Cloud: commit, update | edits are **saved live**; **Commit** records a version; collaborators see changes in real time |
 | Teamwork Cloud: branches, merge | **Branches & merge…**: branches per project, three-way merge with conflict resolution |
 | Teamwork Cloud: element locking | optional **Lock for editing** / **Lock with contents** (server) |
+| Teamwork Cloud: permissions on packages | right-click a package ▸ **Permissions…**: none, read, edit or manage per person or team ([details](permissions.md)) |
+| Containment tree context menu: Create Element ▸, Create Diagram ▸ | the same: right-click ▸ **New element ▸** and **New diagram ▸** |
+| Help ▸ Keyboard shortcuts | **Help (?) ▸ Keyboard & mouse** ([details](keyboard-shortcuts.md)) |
 | Code engineering sets (round trip with code) | **Code sync**: GitHub / GitLab pushes update a review branch you accept into `main` ([details](code-sync.md)) |
 | Environment options (look and feel, diagram defaults) | **Settings** (⌘,): theme, accent, density, grid, connector style, per user or per device ([details](settings.md)) |
 | Tags / baselines | **Baselines…** |
@@ -77,7 +82,10 @@ can always compare against it.
 | Multiple selection and bulk property edit | **Multi-select** with the bulk Inspector and **Link to…** ([details](multi-select.md)) |
 | Relationship Matrix | **Traceability matrix** |
 | Traceability window | **Traceability table** and **Impact** |
-| Model Search, Model Views | **Query** and **Table** in *Model views* |
+| Model Search, Model Views | **Query** and **Generic table** in *Model views* |
+| Security: package permissions | **Package permissions** (none / read / edit / manage per person or team) ([details](permissions.md)) |
+| Simulation-based requirement checks | **Simulate ▸ Verify** with requirement criteria ([details](verification.md)) |
+| Architecture and code conformance checks | **Code ▸ Architecture**: synced code against the model's allowed dependencies ([details](code-sync.md)) |
 | Model Validation | **Validate** and query-based **validation rules** |
 | Requirements (internal and external), Specification Manager | requirement elements with the **requirements table**; spreadsheet round trip with preview |
 | Preferences, visual styles | **Settings** (⌘,) with light / dark / system themes and accent colours ([details](settings.md)) |
@@ -113,8 +121,14 @@ can always compare against it.
 - **Everything saved is in the model.** Tables, queries, rules and scripts are model elements, so they are versioned
   and merged with the design.
 
+## Finding things by their Cameo / EA name
+
+Press **⌘K** and type the name you know: *dependency matrix*, *relationship matrix*, *requirement table*, *report
+wizard*, *use project*, *quick diagram layout*, *containment tree*, *model search*, *macros*. The palette offers the
+Meridian equivalent. **Help (?) ▸ Coming from Cameo or EA** is a short guided tour of the same mapping.
+
 ## Not available (yet)
 
-Meridian does not have instance specifications and object diagrams, timing, communication, interaction overview or
-deployment diagrams, project usages (mounted modules shared between projects), OCL, or FMU co-simulation. Components
-can be drawn on class diagrams.
+Meridian does not have instance specifications and object diagrams, deployment diagrams (nodes and artifacts), a
+relation map, a glossary, OCL constraints, or Excel import with a column mapping for elements other than
+requirements. Components can be drawn on class diagrams; queries replace most OCL validation rules.

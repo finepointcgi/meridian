@@ -57,18 +57,32 @@ public partial class Workbench
         catch (JSException) { }
     }
 
+    /// <summary>The ribbon tab that holds each tour target (<c>data-tour</c> value), so the tour can switch to it first.</summary>
+    public static readonly IReadOnlyDictionary<string, string> TourTargetTabs = new Dictionary<string, string>
+    {
+        ["create-from"] = "diagram",
+        ["auto-diagram"] = "diagram",
+        ["assistant"] = "ai",
+        ["code-group"] = "code",
+        ["verify"] = "simulate",
+        ["used-projects"] = "views",
+        ["database"] = "database",
+    };
+
+    /// <summary>The ribbon tab of the first <c>[data-tour=…]</c> in a tour step's selector, or null.</summary>
+    public static string? TourTargetTab(string selector)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(selector, @"data-tour=([\w-]+)");
+        return m.Success && TourTargetTabs.TryGetValue(m.Groups[1].Value, out var tab) ? tab : null;
+    }
+
     /// <summary>
     /// Shows the ribbon tab holding a tour target (<c>[data-tour=…]</c>) so the tour can spotlight it.
     /// </summary>
     private Task RevealForTour(string selector)
     {
-        string? tab = selector switch
-        {
-            _ when selector.Contains("data-tour=create-from") || selector.Contains("data-tour=auto-diagram") => "diagram",
-            _ when selector.Contains("data-tour=assistant") => "ai",
-            _ when selector.Contains("data-tour=code-group") && HasCodeGroup => "code",
-            _ => null,
-        };
+        var tab = TourTargetTab(selector);
+        if (tab == "code" && !HasCodeGroup || tab == "database" && !ShowDatabaseTools) tab = null;
         if (tab is not null && tab != ActiveRibbonTab)
         {
             _ribbonTab = tab;

@@ -55,9 +55,9 @@
                     <td class="num">@project.MemberCount</td>
                     <td class="muted">@AdminFormat.When(project.UpdatedAt)</td>
                     <td style="text-align:right; white-space:nowrap">
-                        <MudTooltip Text="Rename"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" /></MudTooltip>
-                        <MudTooltip Text="Transfer ownership"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.SwapHoriz" OnClick="() => { _transfer = project; _newOwner = null; }" /></MudTooltip>
-                        <MudTooltip Text="Delete"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" OnClick="() => Delete(project)" /></MudTooltip>
+                        <MudTooltip Text="Rename"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" aria-label="Rename" /></MudTooltip>
+                        <MudTooltip Text="Transfer ownership"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.SwapHoriz" OnClick="() => { _transfer = project; _newOwner = null; }" aria-label="Transfer ownership" /></MudTooltip>
+                        <MudTooltip Text="Delete"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" OnClick="() => Delete(project)" aria-label="Delete" /></MudTooltip>
                     </td>
                 </tr>
             }

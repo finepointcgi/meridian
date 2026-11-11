@@ -242,7 +242,7 @@ else
         catch (OperationCanceledException) { return; }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or QueryParseException or System.Text.Json.JsonException or FormatException)
         {
-            _previewError = "Preview failed: " + ex.Message;
+            _previewError = $"The preview could not be built: {FriendlyError.Describe(ex)}. Check the section that was changed last.";
         }
         _previewBusy = false;
         await InvokeAsync(StateHasChanged);
@@ -265,8 +265,8 @@ else
         <div class="rte">
             <div class="rte-tree">
                 <div class="rte-bar">
-                    <MudTooltip Text="Add section after the selected one"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PostAdd" OnClick="AddSection" /></MudTooltip>
-                    <MudTooltip Text="Add subsection"><MudIconButton Class="rte-add-sub" Size="Size.Small" Icon="@Icons.Material.Outlined.SubdirectoryArrowRight" OnClick="AddSubsection" Disabled="@(_selected is not DocSection)" /></MudTooltip>
+                    <MudTooltip Text="Add section after the selected one"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PostAdd" OnClick="AddSection" aria-label="Add section after the selected one" /></MudTooltip>
+                    <MudTooltip Text="Add subsection"><MudIconButton Class="rte-add-sub" Size="Size.Small" Icon="@Icons.Material.Outlined.SubdirectoryArrowRight" OnClick="AddSubsection" Disabled="@(_selected is not DocSection)" aria-label="Add subsection" /></MudTooltip>
                     <MudMenu Icon="@Icons.Material.Outlined.AddBox" Size="Size.Small" Dense="true" Label="Block" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
                         @foreach (var (type, label, create) in DocBlock.Catalog)
                         {
@@ -275,10 +275,10 @@ else
                         }
                     </MudMenu>
                     <span style="flex:1"></span>
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="() => Move(-1)" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="() => Move(1)" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="DuplicateSelected" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteSelected" Disabled="@(SelectedRow?.Container == null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="() => Move(-1)" Disabled="@(SelectedRow?.Container == null)" aria-label="Move up" title="Move up" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="() => Move(1)" Disabled="@(SelectedRow?.Container == null)" aria-label="Move down" title="Move down" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="DuplicateSelected" Disabled="@(SelectedRow?.Container == null)" aria-label="Duplicate" title="Duplicate" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteSelected" Disabled="@(SelectedRow?.Container == null)" aria-label="Delete" title="Delete" />
                 </div>
                 <div class="rte-rows">
                     <div class="rte-row @(_selected == null ? "on" : "")" @onclick="() => SelectItem(null)">
@@ -327,7 +327,7 @@ else
                     <span class="section-title" style="margin:0">Live preview</span>
                     <span style="flex:1"></span>
                     <MudCheckBox T="bool" Value="_previewDiagrams" ValueChanged="v => { _previewDiagrams = v; _ = RefreshPreview(0); }" Label="Diagrams" Dense="true" Size="Size.Small" />
-                    <MudTooltip Text="Refresh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => RefreshPreview(0)" /></MudTooltip>
+                    <MudTooltip Text="Refresh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => RefreshPreview(0)" aria-label="Refresh" /></MudTooltip>
                 </div>
                 @if (_previewError != null)
                 {

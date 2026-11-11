@@ -15,8 +15,8 @@ public sealed class TourTests(ServerFixture f) : E2ETest(f)
         var p = s.Page;
         await p.NewProjectAsync("Vehicle sample", "Tour " + Guid.NewGuid().ToString("N")[..6]);
 
-        await p.ProjectMenuAsync("Tour…");
-        await Expect(p.Locator(".tour-chapter")).ToHaveCountAsync(8);
+        await p.HelpMenuAsync("Tour…");
+        await Expect(p.Locator(".tour-chapter")).ToHaveCountAsync(Meridian.Web.Components.Workbench.TourChapters.All.Length);
         await p.Locator(".tour-chapter[data-chapter=derive]").ClickAsync();
 
         // The first step spotlights the ribbon's Create from… button and puts the card beside it.

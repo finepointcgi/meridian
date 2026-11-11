@@ -39,8 +39,15 @@ You can change the choice later from your avatar menu (**Switch workspace or ser
 
 ## Features
 
-New in **0.5**: code sync, creating diagrams from diagrams, Mermaid, more AI providers and multi-select (marked ★).
-New in 0.4: Settings and themes, Auto-diagram and one-click SDD.
+New in **0.6 and 0.7** (marked ★): database modelling with subject areas, used projects (shared libraries), package
+permissions, DOORS Next and Polarion sync, simulation-driven requirement verification and variants on diagrams,
+TypeScript / Java / Python code sync with submodules, pull request previews and architecture checks, the tabbed
+ribbon, and a guided tour for people coming from Cameo or EA.
+Earlier: code sync, creating diagrams from diagrams, Mermaid, more AI providers and multi-select (0.5); Settings and
+themes, Auto-diagram and one-click SDD (0.4).
+
+**Coming from Cameo or Enterprise Architect?** Open your `.mdzip` or `.qea` directly, then see
+[Coming from Cameo / EA](docs-site/docs/migration.md) or **Help (?) ▸ Coming from Cameo or EA** in the app.
 
 - **Drawing as easy as draw.io**
   - A searchable shapes panel: click to add, drag to place.
@@ -63,13 +70,22 @@ New in 0.4: Settings and themes, Auto-diagram and one-click SDD.
     package and class diagrams.
   - Profiles and stereotypes, including UAF.
 - **Requirements**
-  - A requirements table, traceability matrix and impact analysis.
+  - A requirements table, traceability matrix, traceability table and impact analysis.
   - Satisfy, verify, refine, derive and trace links, plus allocation.
-- **Other languages**: BPMN 2.0, ArchiMate 3, ER/database diagrams (DDL in and out for PostgreSQL, MySQL,
-  SQL Server and SQLite), C# reverse engineering, and a free-drawing whiteboard.
-- ★ **Code sync**: connect a GitHub or GitLab repository; each push updates a review branch of the model, diagrams
-  highlight what changed, and you accept or reject changes into `main` in **What changed**.
-  ([guide](docs-site/docs/code-sync.md), [reference](docs/CODE-SYNC.md))
+  - ★ **Verification**: give a requirement a criterion (`mass <= 1500 kg`) and **Simulate ▸ Verify** checks it with
+    parametrics, Monte Carlo, timed simulation or co-simulation; pass / fail shows on diagrams.
+    ([guide](docs-site/docs/verification.md), [reference](docs/VERIFICATION.md))
+  - ★ **DOORS Next and Polarion** two-way sync, plus ReqIF, CSV and Excel round trips.
+- ★ **Database modelling**: crow's-foot diagrams with tables, views, keys, indexes and colour-framed **subject areas**;
+  DDL / `.dacpac` / live-database import with refresh, DDL and migration scripts for five dialects, a data dictionary.
+  ([guide](docs-site/docs/database.md), [reference](docs/DATABASE.md))
+- **Other languages**: BPMN 2.0, ArchiMate 3, C# reverse engineering, and a free-drawing whiteboard.
+- **Code sync**: connect a GitHub, GitLab or Bitbucket repository (C#, ★ TypeScript, Java, Python, ★ submodules); each
+  push updates a review branch of the model, pull requests get a preview, diagrams highlight what changed, and you
+  accept or reject **Code changes** into `main`. ★ **Architecture checks** flag code dependencies the model does not
+  allow. ([guide](docs-site/docs/code-sync.md), [reference](docs/CODE-SYNC.md), [checks](docs/ARCHITECTURE-CHECKS.md))
+- ★ **Used projects**: reuse a package of another project, read-only and pinned to a version, branch or baseline,
+  with an update review. ([guide](docs-site/docs/libraries.md), [reference](docs/LIBRARIES.md))
 - **AI assistant**: ask about the model, review it, generate requirements and trace links, or **Diagram my model**.
   Every change is shown as a diff you apply or discard. Runs on Claude (API key), ★ a local model (Ollama, LM Studio
   or any OpenAI-compatible server) or ★ Claude Code with your own login.
@@ -88,21 +104,24 @@ New in 0.4: Settings and themes, Auto-diagram and one-click SDD.
   loops and tables, traceability matrices and vector diagrams. Templates are stored in the model or as JSON. Plus SVG export.
 - **Settings and themes**: light, dark or match system, accent colors, density and font size; settings follow your
   account. ([guide](docs-site/docs/settings.md))
-- **Getting started**: a guided tour with chapters for each feature (Help ▸ Tour), a one-time "What's new" card after
-  an upgrade, and empty projects that offer Import Mermaid, Open a Cameo file, Start from a sample and Auto-diagram.
+- **Getting started**: a guided tour with chapters for each feature, including one for Cameo and EA users
+  (**Help (?) ▸ Tour**), a one-time "What's new" card after an upgrade, ⌘K that also understands Cameo / EA names
+  ("dependency matrix", "report wizard"), and empty projects that offer Paste Mermaid, Open a Cameo file, Start from a
+  sample and Auto-diagram.
 - **Collaboration** (server)
-  - Accounts and project roles (owner, editor, viewer).
-  - Live co-editing with presence.
-  - Version history with diff and restore, and comments.
+  - Accounts and project roles (owner, editor, viewer), and ★ **package permissions** (none, read, edit, manage per
+    person or team). ([guide](docs-site/docs/permissions.md))
+  - Live co-editing with presence, branches and merge, baselines, reviews and comments.
+  - Version history with diff and restore.
 
 <table>
   <tr>
     <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs-site/images/code-changes-dark.png">
-        <img src="docs-site/images/code-changes-light.png" alt="What changed: code changes from a push, waiting for review">
+        <img src="docs-site/images/code-changes-light.png" alt="Code changes from a push, waiting for review">
       </picture>
-      <br><sub>Code sync: What changed</sub>
+      <br><sub>Code sync: Code changes</sub>
     </td>
     <td width="50%">
       <picture>

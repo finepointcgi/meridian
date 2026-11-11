@@ -155,7 +155,7 @@
         }
         catch (Exception ex) when (ex is Meridian.Data.Databases.DatabaseImportException or FormatException or System.Text.Json.JsonException)
         {
-            _error = ex.Message;
+            _error = $"Could not read that baseline: {FriendlyError.Describe(ex)}.";
             _baseline = null;
         }
         finally { _busy = false; }

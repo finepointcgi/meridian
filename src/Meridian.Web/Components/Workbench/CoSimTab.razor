@@ -306,7 +306,7 @@ else
         }
         catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException or InvalidOperationException)
         {
-            Ws.SetStatus($"Could not attach {e.File.Name}: {ex.Message}");
+            Ws.SetStatus($"Could not attach {e.File.Name}: {FriendlyError.Describe(ex)}. Choose the .fmu this block was imported from.");
         }
     }
 

@@ -17,8 +17,11 @@ public static class TourChapters
 
     public const string Basics = "basics";
 
+    /// <summary>The chapter for people who know Cameo / MagicDraw or Enterprise Architect (Help ▸ Coming from Cameo or EA).</summary>
+    public const string ComingFrom = "coming-from";
+
     /// <summary>The release the "What's new" card describes; <c>UserPreferences.WhatsNewSeen</c> stores the last one shown.</summary>
-    public const string WhatsNewVersion = "0.5";
+    public const string WhatsNewVersion = "0.7";
 
     public static readonly Chapter[] All =
     [
@@ -33,13 +36,30 @@ public static class TourChapters
             new("aside.stack .card:first-child", Icons.Material.Outlined.Tune, "Inspector",
                 "Everything about the selected element: name, type, properties, documentation, stereotypes, relationships and comments."),
             new("aside.stack .card:nth-child(2)", Icons.Material.Outlined.Assignment, "Requirements & traceability",
-                "Requirements with their satisfy / verify coverage. The Traceability group in the toolbar opens the matrix, impact analysis and validation."),
+                "Requirements with their satisfy / verify coverage. The <b>Traceability</b> tab of the ribbon opens the matrix, the traceability table, impact analysis and validation."),
             new(".titlebar .cmdk", Icons.Material.Outlined.Search, "Command palette ⌘K",
                 "Press <b>⌘K</b> (Ctrl+K) to run any command, open a diagram or jump to an element by name."),
             new(".titlebar .btn-primary", Icons.Material.Outlined.Commit, "Commit versions",
                 "Edits save continuously and sync live with collaborators. <b>Commit</b> (⌘S) records a named version you can compare and restore."),
             new("", Icons.Material.Outlined.RocketLaunch, "You're ready",
-                "Start from a template with <b>New project</b>, or open a diagram and start drawing. More chapters are in the project menu: <b>Help ▸ Tour</b>."),
+                "Start from a template with <b>New project</b>, or open a diagram and start drawing. More chapters are in the <b>Help</b> menu (<b>?</b> in the title bar) ▸ <b>Tour</b>."),
+        ]),
+        new(ComingFrom, "Coming from Cameo or EA", Icons.Material.Outlined.SwapHoriz, "Where the containment tree, specification window and menus went.",
+        [
+            new("nav.ribbon .rtabs", Icons.Material.Outlined.ViewWeek, "Menus are ribbon tabs",
+                "The toolbars and menus you know are the ribbon tabs: <b>Create</b>, <b>Diagram</b>, <b>Requirements</b>, <b>Traceability</b>, <b>Simulate</b>, <b>Generate</b>… " +
+                "Click the <b>project name</b> for open, import (<b>.mdzip</b>, <b>.qea</b>, XMI), versions, sharing, integrations and export."),
+            new("main.workbench > section.card:first-child", Icons.Material.Outlined.AccountTree, "Containment tree = Model explorer",
+                "Right-click an element for <b>New element ▸</b>, <b>New diagram ▸</b>, Rename, Delete and <b>Permissions…</b>. Drag elements onto a diagram to show them there."),
+            new("aside.stack .card:first-child", Icons.Material.Outlined.Tune, "Specification window = Inspector",
+                "Name, type, properties, stereotypes, tagged values, traceability and documentation of the selection, always open on the right."),
+            new(".canvas .toolbox", Icons.Material.Outlined.Category, "Palette = Shapes panel",
+                "Click or drag a shape in. The blue <b>hover arrows</b> on a shape work like EA's Quick Linker and Cameo's smart manipulator."),
+            new(".titlebar .cmdk", Icons.Material.Outlined.Search, "Can't find a command?",
+                "Press <b>⌘K</b> (Ctrl+K) and type what you want: “generic table”, “dependency matrix”, “used projects”, “report”…"),
+            new("", Icons.Material.Outlined.Commit, "Saving works differently",
+                "Edits save as you go and sync live. <b>Commit</b> is a Teamwork Cloud commit: a named version to compare or restore. " +
+                "<b>Backspace</b> removes a shape from the diagram; <b>Delete</b> removes the element from the model. The user guide's <b>Coming from Cameo / EA</b> page maps every window and menu."),
         ]),
         new("generate", "Generate diagrams", Icons.Material.Outlined.Dashboard, "Auto-diagram and Diagram my model.",
         [
@@ -61,14 +81,17 @@ public static class TourChapters
                 "The Inspector shows the <b>Derivation chain</b> with a <b>Create next…</b> button. When a source changes, the diagram shows <b>Source changed</b>; " +
                 "<b>Update from source…</b> keeps your own edits."),
         ]),
-        new("code", "Connect your code", Icons.Material.Outlined.Difference, "Code repositories, review branches and What changed.",
+        new("code", "Connect your code", Icons.Material.Outlined.Difference, "Code repositories, review branches, code changes and architecture checks.",
         [
             new(".titlebar .project", Icons.Material.Outlined.Extension, "Connect a repository",
-                "Project menu ▸ <b>Integrations</b> ▸ <b>Code repositories</b> connects a GitHub, GitLab or Bitbucket repository (C#, TypeScript, Java or Python). Each push updates a <b>review branch</b>, never main."),
-            new(".titlebar .chg-badge, [data-tour=code-group]", Icons.Material.Outlined.Difference, "What changed",
-                "When code changes wait for review, <b>Code changes (N)</b> shows in the title bar. It opens <b>What changed</b>: what each push added, changed and removed."),
+                "Project menu ▸ <b>Integrations</b> ▸ <b>Code repositories</b> connects a GitHub, GitLab or Bitbucket repository (C#, TypeScript, Java or Python, submodules included). " +
+                "Each push updates a <b>review branch</b>, never main, and pull requests get a preview."),
+            new(".titlebar .chg-badge, [data-tour=code-group]", Icons.Material.Outlined.Difference, "Code changes",
+                "When code changes wait for review, <b>Code changes (N)</b> shows in the title bar and a <b>Code</b> tab joins the ribbon. It lists what each push added, changed and removed."),
             new(".diagram-host", Icons.Material.Outlined.Highlight, "Accept or reject",
                 "Diagrams outline added elements in green, changed ones in amber and removed ones as dashed ghosts. Tick changes, then <b>Accept selected</b> to merge them into main, or <b>Reject selected</b>."),
+            new("[data-tour=code-group]", Icons.Material.Outlined.Rule, "Architecture checks",
+                "<b>Code ▸ Architecture</b> compares the synced code with the model: a dependency the model does not allow is listed with a link to the line, and drawn in red on the diagram."),
         ]),
         new("mermaid", "Import Mermaid", Icons.Material.Outlined.Schema, "Paste or drop Mermaid and get real model elements.",
         [
@@ -99,6 +122,43 @@ public static class TourChapters
                 "Right-click the selection ▸ <b>Link to…</b> or <b>Trace to requirement…</b> makes one relationship per element. " +
                 "Lines you draw pick their type for you (satisfy, verify, composition…); click the chip on a new line to switch."),
         ]),
+        new("database", "Database modelling", Icons.Material.Outlined.Storage, "Tables, keys, subject areas, DDL and migration scripts.",
+        [
+            new(".titlebar .project", Icons.Material.Outlined.Storage, "Bring in a schema",
+                "Project menu ▸ <b>Database schema (DDL / .dacpac)…</b> reads PostgreSQL, SQL Server, MySQL, SQLite or Oracle DDL. <b>Connect to a database…</b> reads a live schema you can refresh later. " +
+                "Or add a <b>Database diagram</b> from Diagram ▸ More and draw tables."),
+            new("[data-tour=database]", Icons.Material.Outlined.TableChart, "The Database tab",
+                "Once the project has a data model, the ribbon gets a <b>Database</b> tab: New table, Subject areas, <b>DDL…</b>, <b>Migration…</b> (ALTER scripts from a version, branch or baseline), <b>Refresh…</b> and <b>Data dictionary</b>."),
+            new("", Icons.Material.Outlined.Workspaces, "Subject areas",
+                "Group tables across schemas into colour-framed <b>subject areas</b>, filter a diagram to one, and give them permissions. <b>Data dictionary</b> exports every table and column to Excel or a document."),
+        ]),
+        new("libraries", "Used projects (shared libraries)", Icons.Material.Outlined.LibraryBooks, "Reuse packages of other projects, pinned and reviewed.",
+        [
+            new(".titlebar .project", Icons.Material.Outlined.LibraryBooks, "Use a project",
+                "Project menu ▸ <b>Used projects…</b> adds a package of another project, read-only and pinned to a version, branch or baseline, like Cameo's used projects."),
+            new("[data-tour=used-projects]", Icons.Material.Outlined.Sync, "Updates",
+                "<b>Model views ▸ Used projects</b> checks for new versions. A badge in the title bar says when one is ready; you review the differences before updating, and links to changed elements become suspect."),
+            new("main.workbench > section.card:first-child", Icons.Material.Outlined.OpenInNew, "In the model explorer",
+                "Used elements carry a library badge. Type parts by them or link to them like any element; right-click ▸ <b>Open in source project</b> to change them there."),
+        ]),
+        new("verify", "Verify requirements", Icons.Material.Outlined.Rule, "Criteria, simulation-driven verification and variants.",
+        [
+            new("aside.stack .card:nth-child(2)", Icons.Material.Outlined.Assignment, "Give a requirement a criterion",
+                "In the Requirements table or the Inspector, write a criterion such as <code>mass &lt;= 1500 kg</code> or <code>mc: p95(accelTime) &lt; 8 s</code>."),
+            new("[data-tour=verify]", Icons.Material.Outlined.Rule, "Simulate ▸ Verify",
+                "Evaluates every criterion with parametrics, Monte Carlo, timed simulation or co-simulation. The <b>Verification</b> tab lists pass, fail and stale results, and diagrams colour each requirement."),
+            new("", Icons.Material.Outlined.Balance, "Variants",
+                "<b>Simulate ▸ Variants</b> holds the feature model, configurations and trade studies. Show one variant on the diagrams (greyed out or hidden) from the Variants tab or ⌘K."),
+        ]),
+        new("team", "Permissions & requirements tools", Icons.Material.Outlined.Lock, "Package permissions, DOORS Next, Polarion, branches and reviews.",
+        [
+            new("main.workbench > section.card:first-child", Icons.Material.Outlined.Lock, "Package permissions",
+                "Right-click a package ▸ <b>Permissions…</b> makes it read-only or hidden for chosen people, like Teamwork Cloud permissions. Project roles are in <b>Share &amp; members</b>."),
+            new(".titlebar .project", Icons.Material.Outlined.SyncAlt, "DOORS Next and Polarion",
+                "Project menu ▸ <b>Integrations</b> ▸ <b>DOORS &amp; Polarion</b> syncs requirements both ways and can publish satisfy, verify and trace links back. Jira and Azure DevOps issues are under <b>Issue trackers</b>."),
+            new(".titlebar .project", Icons.Material.Outlined.CallSplit, "Branches, baselines and reviews",
+                "<b>Branches &amp; merge…</b> and <b>Baselines…</b> are in the project menu; <b>Review ▸ Request</b> asks colleagues to approve the selection."),
+        ]),
         new("settings", "Settings & themes", Icons.Material.Outlined.Palette, "Light and dark, accent colour, density and more.",
         [
             new(".titlebar .tb-settings", Icons.Material.Outlined.Settings, "Settings",
@@ -112,11 +172,12 @@ public static class TourChapters
 
     public static readonly WhatsNewItem[] WhatsNew =
     [
-        new("Connect your code", "Pushes to GitHub, GitLab or Bitbucket update a review branch, and pull requests get a preview. Accept or reject in What changed.", "code"),
-        new("Create diagrams from diagrams", "Use case → activity → sequence → BDD / IBD, with update from source.", "derive"),
-        new("Import Mermaid", "Paste or drop Mermaid and get model elements and laid-out diagrams.", "mermaid"),
-        new("More AI providers", "Run the assistant on a local model, or on Claude Code with your own login.", "ai"),
-        new("Select many & link", "Edit many shapes at once, link them in one go, and lines pick their own type.", "multi"),
+        new("Database modelling", "Tables, keys and subject areas on crow's-foot diagrams; import DDL, .dacpac or a live database; generate DDL and migration scripts.", "database"),
+        new("Used projects", "Reuse a package of another project, read-only and pinned to a version, with an update review.", "libraries"),
+        new("Verify requirements", "Give requirements a criterion and verify them with parametrics or simulation; see pass and fail on diagrams.", "verify"),
+        new("Permissions, DOORS & Polarion", "Make packages read-only or hidden per person, and sync requirements with DOORS Next or Polarion.", "team"),
+        new("Code: more languages", "TypeScript, Java and Python, submodules, pull request previews and architecture checks.", "code"),
+        new("Coming from Cameo or EA?", "A short chapter on where the containment tree, specification window and menus went.", ComingFrom),
     ];
 
     public static Chapter? Find(string id) => All.FirstOrDefault(c => c.Id == id);

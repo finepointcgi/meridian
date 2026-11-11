@@ -76,7 +76,6 @@ public partial class Workbench
             CA("New diagram from template…", Icons.Material.Outlined.AddChart, NewDiagramFromTemplate),
             CA("Export diagram as PNG…", Icons.Material.Outlined.Image, ExportImage),
             CA("Copy diagram as image", Icons.Material.Outlined.ContentCopy, CopyDiagramImage),
-            CA("Take the guided tour", Icons.Material.Outlined.Tour, StartTour),
             CA("Import into this project (BPMN, ArchiMate, SQL, C#, Mermaid, MagicDraw re-import)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
             CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
@@ -380,19 +379,22 @@ public partial class Workbench
             ("New data model", [ElementKind.Table, ElementKind.Column]),
             ("New behavior", [ElementKind.Actor, ElementKind.UseCase, ElementKind.Activity, ElementKind.StateMachine, ElementKind.Interaction, ElementKind.Lifeline, ElementKind.Partition, ElementKind.Action, ElementKind.State, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.InitialState, ElementKind.FinalState]),
         };
+        // Short lists stay inline; long ones become "New element ▸" / "New diagram ▸" submenus (as in Cameo and EA), so
+        // the rest of the menu (Rename, Delete, Permissions…) stays on screen.
+        var create = new List<MenuEntry>();
         foreach (var (title, kinds) in groups)
         {
             var allowed = kinds.Where(k => Metamodel.CanOwn(e.Kind, k)).ToList();
             if (allowed.Count == 0) continue;
-            m.Add(MenuEntry.Title(title));
-            foreach (var k in allowed) m.Add(MenuEntry.Do(Metamodel.DisplayName(k), () => CreateElement(e, k)));
+            create.Add(MenuEntry.Title(title));
+            foreach (var k in allowed) create.Add(MenuEntry.Do(Metamodel.DisplayName(k), () => CreateElement(e, k)));
         }
-        var diagrams = Enum.GetValues<DiagramType>().Where(t => Metamodel.IsValidDiagramContext(t, e.Kind)).ToList();
-        if (diagrams.Count > 0)
-        {
-            m.Add(MenuEntry.Title("New diagram"));
-            foreach (var t in diagrams) m.Add(MenuEntry.Do(Metamodel.DisplayName(t), () => CreateDiagram(e, t)));
-        }
+        if (create.Count(x => !x.Header) > 6) m.Add(MenuEntry.Sub("New element", create));
+        else m.AddRange(create);
+        var diagrams = Enum.GetValues<DiagramType>().Where(t => Metamodel.IsValidDiagramContext(t, e.Kind))
+            .Select(t => MenuEntry.Do(Metamodel.DisplayName(t), () => CreateDiagram(e, t))).ToList();
+        if (diagrams.Count > 4) m.Add(MenuEntry.Sub("New diagram", diagrams));
+        else if (diagrams.Count > 0) { m.Add(MenuEntry.Title("New diagram")); m.AddRange(diagrams); }
         m.Add(MenuEntry.Sep());
         if (e is Diagram d) m.Add(MenuEntry.Do("Open diagram", () => Ws.Open(d)));
         if (Ws.Active is { } active && e is not Diagram && e.Kind != ElementKind.Model)
@@ -652,15 +654,14 @@ public partial class Workbench
         Ws.Bump();
     }
 
-    private Task ShowHelp() => Dialogs.ShowMessageBox("Keyboard & mouse", (MarkupString)(
-        "<b>Create:</b> pick a palette tool, click the canvas. Relationship tools: drag from source shape to target shape. Hold Shift to keep the tool.<br/><br/>" +
-        "<b>Tree:</b> drag items onto a diagram to show them, onto another tree item to move them. Right-click for New / Rename / Delete.<br/><br/>" +
-        "<b>Canvas:</b> double-click a shape to rename · double-click a path to add a bend point · Delete removes from model · Backspace removes from diagram · arrows nudge · ⌘/Ctrl+wheel zoom · wheel or middle-drag pans.<br/><br/>" +
-        "<b>Pictures, links, layers:</b> drop or paste images onto the canvas (Shift frees their aspect ratio when resizing) · Ctrl/⌘-click a linked shape or its link icon to follow it · the layers button hides, locks and reorders layers.<br/><br/>" +
-        "<b>Global:</b> ⌘S save · ⌘O open · ⌘Z / ⇧⌘Z undo/redo · ⌘F find · F7 validate."));
+    /// <summary>Help ▸ Keyboard &amp; mouse (the same list as the user guide's keyboard shortcuts page).</summary>
+    private Task ShowHelp() => Dialogs.ShowAsync<KeyboardHelpDialog>("Keyboard & mouse",
+        new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
 
     private Task ShowAbout() => Dialogs.ShowMessageBox("About Meridian",
-        "Meridian 0.1 — a model-based systems engineering workbench: UML 2.5 / SysML 1.6 modeling, SysML v2 textual exchange, XMI 2.5.1 interchange with Cameo, Enterprise Architect and Papyrus, requirements traceability, validation, reports and code generation.");
+        $"Meridian {TourChapters.WhatsNewVersion} — a model-based systems engineering workbench: UML 2.5 / SysML 1.6 modeling, SysML v2 textual exchange, " +
+        "XMI 2.5.1 interchange with Cameo, Enterprise Architect and Papyrus, requirements traceability and verification, database modelling, " +
+        "simulation, reports and code sync.");
 
     private async Task<string?> Prompt(string title, string label, string? value, bool multiline = false)
     {
@@ -790,7 +791,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            Snackbar.Add($"Could not open {file.Name}: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip and Mermaid files.", Severity.Error);
         }
     }
 
@@ -867,7 +868,7 @@ public partial class Workbench
             }
             catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
             {
-                Snackbar.Add($"Could not import {file.Name}: {ex.Message}", Severity.Error);
+                Snackbar.Add($"Could not import {file.Name}: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
             }
         }
         if (csharp.Count > 0)
@@ -949,7 +950,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
         {
-            Snackbar.Add($"ReqIF import failed: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not import the ReqIF file: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
         }
     }
 
@@ -971,7 +972,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException)
         {
-            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Could not import the file: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
         }
     }
 
