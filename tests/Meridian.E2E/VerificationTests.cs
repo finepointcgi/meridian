@@ -102,7 +102,7 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
         await Expect(p.Node("Acceleration")).ToHaveCountAsync(1);
 
         await p.RibbonAsync("Verify");
-        var dock = p.DockBody();
+        var dock = p.ViewTab();   // the results open as a tab next to the diagrams
         var table = dock.Locator("[data-testid=verify-results]");
         var accel = table.Locator("tr.row").Filter(new() { HasTextString = "REQ-002" });
         await Expect(accel.Locator(".verdict.pass")).ToHaveCountAsync(1, new() { Timeout = 20_000 });
@@ -128,6 +128,7 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
         await Expect(dock.Locator("[data-testid=verify-summary]")).ToContainTextAsync("2 fail");
 
         // The diagram colours it by the aggregate.
+        await p.Tabs().Filter(new() { HasTextString = "Vehicle Requirements" }).First.ClickAsync();
         var svg = p.Locator(".diagram-host svg.main");
         await Expect(svg.Locator("g.vfy-mark.fail")).ToHaveCountAsync(2);
         await Expect(svg.Locator("g.vfy-mark.pass")).ToHaveCountAsync(1);
