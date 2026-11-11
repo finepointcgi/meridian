@@ -58,6 +58,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `LibraryGapsTests` | accepting a library update keeps both open diagram tabs and the active one; *Open in source project* shows the pinned version read-only with *Go to latest*; on a 390×844 phone the model list shows the library (read-only, pin badge) and the update review is a full-screen sheet without horizontal scrolling |
 | `CameoImportTests` | a Cameo `.mdzip` whose sequence diagram has an alt fragment with two operands opens as a new project with the separator where Cameo drew it and both guards |
 | `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
+| `RelationMapTests` | ⌘K "Relation map of REQ-002": the requirement's traceability map, depth 1 → 3, the All and Traceability presets, ⇧-click three nodes and create a requirement diagram from them (`MERIDIAN_DOCS_SCREENSHOTS=1` also writes the guide's picture) |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
 | `UxTests` | every tour spotlight target is on screen, dialogs fit a 1280×800 window, the tree context menu nests long lists, fits the window and closes with Escape |
 | `UxWalkthroughTests` | opt-in (`MERIDIAN_UX_WALKTHROUGH=1`): screenshots of every entry point at four sizes in both themes plus `audit.json`, in `$TMPDIR/meridian-ux` (see `docs/UX-AUDIT-0.7.md`) |

@@ -109,6 +109,7 @@ public sealed class DocSection
 [JsonDerivedType(typeof(TraceMatrixBlock), "traceMatrix")]
 [JsonDerivedType(typeof(CoverageBlock), "coverage")]
 [JsonDerivedType(typeof(DiagramBlock), "diagram")]
+[JsonDerivedType(typeof(RelationMapBlock), "relationMap")]
 [JsonDerivedType(typeof(ElementListBlock), "list")]
 [JsonDerivedType(typeof(StatisticsBlock), "statistics")]
 [JsonDerivedType(typeof(ValidationBlock), "validation")]
@@ -134,6 +135,7 @@ public abstract class DocBlock
         ("traceMatrix", "Traceability matrix", () => new TraceMatrixBlock()),
         ("coverage", "Coverage summary", () => new CoverageBlock()),
         ("diagram", "Diagram(s)", () => new DiagramBlock()),
+        ("relationMap", "Relation map", () => new RelationMapBlock()),
         ("list", "Element list", () => new ElementListBlock()),
         ("statistics", "Model statistics", () => new StatisticsBlock()),
         ("validation", "Validation issues", () => new ValidationBlock()),
@@ -287,6 +289,39 @@ public sealed class DiagramBlock : CaptionedBlock
     public double MaxHeight { get; set; } = 0.75;
     public override string TypeLabel => "Diagram";
     public override string Summary => "Diagram: " + (Diagram ?? Query ?? "current element") + (DiagramTypes.Count > 0 ? " [" + string.Join(", ", DiagramTypes) + "]" : "");
+}
+
+/// <summary>
+/// A relation map as a figure: a saved relation map by name, or everything connected to a root element up to a depth,
+/// filtered by relationship kinds (or a preset) and direction.
+/// </summary>
+public sealed class RelationMapBlock : CaptionedBlock
+{
+    /// <summary>A saved relation map (name, qualified name or id); its root and filters are used and the fields below ignored.</summary>
+    public string? Map { get; set; }
+    /// <summary>The root element (name, qualified name, requirement id or element id; placeholders allowed). Empty = the current loop element.</summary>
+    public string? Root { get; set; }
+    public int Depth { get; set; } = 2;
+    /// <summary>"Traceability", "Structure", "Allocation" or "All"; used when <see cref="RelationshipKinds"/> is empty.</summary>
+    public string? Preset { get; set; }
+    public List<ElementKind> RelationshipKinds { get; set; } = new();
+    public RelationDirection Direction { get; set; } = RelationDirection.Both;
+    public RelationMapLayout Layout { get; set; } = RelationMapLayout.TreeRight;
+    public bool IncludeOwned { get; set; }
+    public bool IncludeOwner { get; set; }
+    /// <summary>Most elements on the figure ("+N more" stubs stand for the rest).</summary>
+    public int MaxNodes { get; set; } = 120;
+    public double MaxHeight { get; set; } = 0.75;
+    public override string TypeLabel => "Relation map";
+    public override string Summary => "Relation map: " + (Map ?? (string.IsNullOrWhiteSpace(Root) ? "current element" : Root)) + (Map == null ? $", depth {Depth}" + (Preset is { Length: > 0 } p ? ", " + p : "") : "");
+
+    /// <summary>The map settings for a root (when no saved map is named).</summary>
+    public RelationMapSettings Settings(Element root) => new RelationMapSettings
+    {
+        RootId = root.Id, RootName = root.DisplayName, Depth = Depth, Direction = Direction, Layout = Layout,
+        RelationshipKinds = RelationshipKinds.Count > 0 ? RelationshipKinds.ToList() : RelationMapPresets.Kinds(Preset ?? "All").ToList(),
+        IncludeOwned = IncludeOwned, IncludeOwner = IncludeOwner, MaxNodes = MaxNodes,
+    }.Normalized();
 }
 
 /// <summary>A bullet list of matching elements.</summary>

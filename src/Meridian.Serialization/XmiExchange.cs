@@ -182,7 +182,7 @@ public static class XmiExchange
         or ElementKind.ArchiElement or ElementKind.Table or ElementKind.Column or ElementKind.TagDefinition
         or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.ForeignKey or ElementKind.Binding
         or ElementKind.Shape or ElementKind.Line
-        or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule
+        or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule or ElementKind.RelationMap
         or ElementKind.Feature or ElementKind.Configuration or ElementKind.TradeStudy
         or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes
         or ElementKind.TimingLifeline or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.InteractionUse

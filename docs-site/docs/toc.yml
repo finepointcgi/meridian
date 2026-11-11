@@ -36,6 +36,8 @@
     href: requirements.md
   - name: Verifying requirements
     href: verification.md
+  - name: Relation map
+    href: relation-map.md
   - name: Tables and queries
     href: tables-queries.md
   - name: Simulation

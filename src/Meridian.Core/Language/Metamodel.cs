@@ -67,7 +67,7 @@ public static class Metamodel
     private static readonly HashSet<ElementKind> PackageMembers = new()
     {
         ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
-        ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule,
+        ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule, ElementKind.RelationMap,
         ElementKind.Feature, ElementKind.Configuration, ElementKind.TradeStudy,
         ElementKind.Sequence, ElementKind.Routine,
     };
@@ -330,6 +330,7 @@ public static class Metamodel
         ElementKind.TableView => "Table View",
         ElementKind.QueryView => "Query",
         ElementKind.ValidationRule => "Validation Rule",
+        ElementKind.RelationMap => "Relation Map",
         ElementKind.TradeStudy => "Trade Study",
         ElementKind.FeatureDecomposition => "Feature Decomposition",
         ElementKind.TimingLifeline => "Timing Lifeline",

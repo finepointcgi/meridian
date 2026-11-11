@@ -42,7 +42,8 @@ can always compare against it.
 | Requirement table | **Requirements → Table** |
 | Dependency matrix | **Traceability → Matrix** (rows, columns and relationship kind; click a cell to create a link) |
 | Requirements traceability / coverage analysis | **Traceability table** (gaps, suspect links, multi-level, orphans, per-package coverage) and **Coverage** |
-| Relation map / impact analysis | **Traceability → Impact** (transitive dependents, as a list) |
+| Relation map (relation map diagram / element) | **Relation map** tab (right-click ▸ Relation map, ⌘K "Relation map of …", Traceability → Relation map): radial or tree, depth 1–6, relationship presets (traceability, structure, allocation), element kinds, direction, containment, expand / collapse per node, "+N more" beyond 500 elements, create a diagram from the selection, SVG / PNG, a report block; saved as a *Relation Map* element ([details](relation-map.md)) |
+| Impact analysis | **Traceability → Impact** (transitive dependents, as a list) |
 | Suspect links | **Suspect links**, cleared in the traceability table |
 | Generic table | **Model views → Generic table** (saved as a *Table View* element) |
 | Find / smart packages / derived queries | **Model views → Query** (saved as a *Query* element); the **command palette** (⌘K) finds anything by name |

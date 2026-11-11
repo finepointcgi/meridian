@@ -102,6 +102,7 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | Session: op apply + relay to 24 tabs, p95 | 0.06 ms | 0.34 ms |
 | Session: rebase of a pending edit under a relayed one, p95 | 0.004 ms | – |
 | Model tree first render / reveal deepest element | 55 / 14 ms | – |
+| Relation map, depth 6, 500-element cap (build + layout / SVG) | 2–12 / 4–10 ms | – |
 
 ## Reports
 
