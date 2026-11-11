@@ -93,6 +93,47 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
     }
 
     [E2EFact]
+    public async Task Adding_a_second_criterion_gives_each_its_own_result_and_the_requirement_the_aggregate()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        await p.NewProjectAsync("Vehicle sample", "Criteria " + Guid.NewGuid().ToString("N")[..6]);
+        await p.Tree().GetByText("Vehicle Requirements", new() { Exact = true }).First.DblClickAsync();
+        await Expect(p.Node("Acceleration")).ToHaveCountAsync(1);
+
+        await p.RibbonAsync("Verify");
+        var dock = p.DockBody();
+        var table = dock.Locator("[data-testid=verify-results]");
+        var accel = table.Locator("tr.row").Filter(new() { HasTextString = "REQ-002" });
+        await Expect(accel.Locator(".verdict.pass")).ToHaveCountAsync(1, new() { Timeout = 20_000 });
+
+        // A second criterion for the acceleration requirement: the vehicle's 1450 kg breaks it.
+        await accel.Locator("[data-testid=criterion-add]").ClickAsync();
+        var add = table.Locator("input.vfy-crit-new");
+        await add.FillAsync("mass <= 1400 kg");
+        await add.PressAsync("Tab");
+        await Expect(accel.Locator("[data-testid=criteria-toggle]")).ToContainTextAsync("2 criteria");
+        var crits = table.Locator("tr.crit-row:not(.new)");
+        await Expect(crits).ToHaveCountAsync(2);
+        await Expect(crits.Nth(1).Locator(".verdict.none")).ToHaveCountAsync(1);          // not run yet
+        await Expect(accel.Locator(".verdict.stale")).ToHaveCountAsync(1);
+
+        // Verify again: each criterion has its own result, the requirement fails because one does.
+        await dock.Locator("[data-testid=verify-run]").ClickAsync();
+        await Expect(crits.Nth(1).Locator(".verdict.fail")).ToHaveCountAsync(1, new() { Timeout = 20_000 });
+        await Expect(crits.Nth(0).Locator(".verdict.pass")).ToHaveCountAsync(1);
+        await Expect(crits.Nth(1)).ToContainTextAsync("1450 kg");
+        await Expect(accel.Locator(".verdict.fail")).ToHaveCountAsync(1);
+        await Expect(accel.Locator(".verdict.stale")).ToHaveCountAsync(0);
+        await Expect(dock.Locator("[data-testid=verify-summary]")).ToContainTextAsync("2 fail");
+
+        // The diagram colours it by the aggregate.
+        var svg = p.Locator(".diagram-host svg.main");
+        await Expect(svg.Locator("g.vfy-mark.fail")).ToHaveCountAsync(2);
+        await Expect(svg.Locator("g.vfy-mark.pass")).ToHaveCountAsync(1);
+    }
+
+    [E2EFact]
     public async Task Switching_the_variant_greys_out_what_it_leaves_out()
     {
         var s = await OpenAsync(F.Alice);

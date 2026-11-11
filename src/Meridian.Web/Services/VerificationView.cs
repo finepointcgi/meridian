@@ -119,7 +119,12 @@ public sealed class VerificationView(Workspace ws)
             var dash = r.Stale ? $" stroke-dasharray=\"{F(6 * zi)},{F(4 * zi)}\"" : "";
             var tag = r.Status switch { "pass" => "✓ pass", "fail" => "✗ fail", _ => "? inconclusive" } + (r.Stale ? " · stale" : "");
             var tw = (tag.Length * 6.2 + 12) * zi;
-            var tip = System.Net.WebUtility.HtmlEncode($"{r.Label}: {r.Value} (bound {r.Bound}, margin {r.Margin}) — {r.Variant}, {r.At}");
+            // Several criteria: the colour is the aggregate (fail if any fails); the tooltip lists each one.
+            var tip = System.Net.WebUtility.HtmlEncode(r.Checks.Count > 1
+                ? $"{r.Label}: {r.Checks.Count(c => c.Status == "pass")} of {r.Checks.Count} criteria pass — {r.Variant}, {r.At}\n"
+                  + string.Join("\n", r.Checks.Select(c => $"{c.Index + 1}. {c.Criterion}: {c.Label}{(c.Value.Length > 0 ? $" ({c.Value})" : "")}"))
+                : $"{r.Label}: {r.Value} (bound {r.Bound}, margin {r.Margin}) — {r.Variant}, {r.At}");
+            if (r.Checks.Count > 1) tag += $" · {r.Checks.Count} criteria";
             sb.Append($"<g class=\"vfy-mark {r.Status}{(r.Stale ? " stale" : "")}\" data-req=\"{System.Net.WebUtility.HtmlEncode(n.Element.Id)}\" pointer-events=\"none\"><title>{tip}</title>")
               .Append($"<rect x=\"{F(b.X - 4 * zi)}\" y=\"{F(b.Y - 4 * zi)}\" width=\"{F(b.Width + 8 * zi)}\" height=\"{F(b.Height + 8 * zi)}\" rx=\"{F(6 * zi)}\" fill=\"{c}\" fill-opacity=\"0.07\" stroke=\"{c}\" stroke-width=\"{F(2.5 * zi)}\"{dash}/>")
               .Append($"<rect x=\"{F(b.X + b.Width - tw)}\" y=\"{F(b.Y - 20 * zi)}\" width=\"{F(tw)}\" height=\"{F(16 * zi)}\" rx=\"{F(4 * zi)}\" fill=\"{c}\"/>")

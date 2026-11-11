@@ -130,6 +130,103 @@ public class VerificationPanelTests : TestContext
     }
 
     private static int CountOf(string s, string what) => (s.Length - s.Replace(what, "").Length) / what.Length;
+
+    // ================================================================== several criteria per requirement
+
+    private static AngleSharp.Dom.IElement Row(IRenderedComponent<VerificationPanel> cut, string id) =>
+        cut.FindAll("tr.row").First(r => r.TextContent.Contains(id));
+
+    [Fact]
+    public void A_Second_Criterion_Is_Added_In_An_Expanded_Row_And_Each_Gets_Its_Own_Result()
+    {
+        var ws = Ws(SampleModels.Vehicle());
+        var req = Req(ws.Model, "REQ-002");
+        var cut = RenderComponent<VerificationPanel>();
+        Row(cut, "REQ-002").QuerySelector("[data-testid=criterion-add]")!.Click();
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll("tr.crit-row:not(.new)")));
+        cut.Find("input.vfy-crit-new").Change("mass <= 1400 kg");
+        Assert.Equal(["accelTime < 8 s", "mass <= 1400 kg"], Verification.Criteria(req));
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("tr.crit-row:not(.new)").Count));
+        Assert.Contains("2 criteria", Row(cut, "REQ-002").QuerySelector("[data-testid=criteria-toggle]")!.TextContent);
+        Assert.Equal(2, cut.FindAll("tr.crit-row .verdict.none").Count);         // not run yet
+
+        cut.Find("[data-testid=verify-run]").Click();
+        cut.WaitForAssertion(() =>
+        {
+            Assert.False(ws.Verification.Running);
+            var crit = cut.FindAll("tr.crit-row:not(.new)");
+            Assert.NotNull(crit[0].QuerySelector(".verdict.pass"));
+            Assert.NotNull(crit[1].QuerySelector(".verdict.fail"));
+            Assert.Contains("1450 kg", crit[1].TextContent);
+        }, TimeSpan.FromSeconds(10));
+        Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.fail"));
+        Assert.Contains("2 fail", cut.Find("[data-testid=verify-summary]").TextContent);
+        Assert.Equal(2, Row(cut, "REQ-002").QuerySelectorAll("[data-testid=criteria-toggle] .dot").Length);
+
+        // The drill-down lists each criterion's message.
+        if (cut.FindAll("tr.detail").Count == 0) Row(cut, "REQ-002").Click();   // (bUnit may already have bubbled the "+" click to the row)
+        Assert.Contains("1 of 2 criteria pass", cut.Find("tr.detail").TextContent);
+        Assert.Contains("mass <= 1400 kg", cut.Find("tr.detail").TextContent);
+
+        // Editing the second criterion: it has no result until the next run, the first keeps its own.
+        cut.Find("tr.crit-row[data-index='1'] input.vfy-crit-item").Change("mass <= 1500 kg");
+        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("tr.crit-row[data-index='1'] .verdict.none")));
+        Assert.NotNull(cut.Find("tr.crit-row[data-index='0'] .verdict.pass"));
+        Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.stale"));
+
+        // Removing it, then collapsing, brings back the single editable criterion.
+        cut.Find("tr.crit-row[data-index='1'] [data-testid=criterion-remove]").Click();
+        Assert.Equal(["accelTime < 8 s"], Verification.Criteria(req));
+        Row(cut, "REQ-002").QuerySelector("[data-testid=criteria-toggle]")!.Click();
+        cut.WaitForAssertion(() => Assert.NotNull(Row(cut, "REQ-002").QuerySelector("input.vfy-crit")));
+        Assert.Empty(cut.FindAll("tr.crit-row"));
+    }
+
+    [Fact]
+    public void The_Inspector_Adds_And_Removes_Criteria_And_Shows_Each_Result()
+    {
+        var ws = Ws(SampleModels.Vehicle());
+        var req = Req(ws.Model, "REQ-002");
+        var cut = RenderComponent<RequirementInspectorSection>(p => p.Add(x => x.E, req));
+        Assert.Single(cut.FindAll("[data-testid=inspector-criterion]"));
+        cut.Find("[data-testid=inspector-add-criterion]").Click();
+        cut.FindAll("input").Last().Change("mass <= 1400 kg");
+        Assert.Equal(2, Verification.Criteria(req).Count);
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("[data-testid=inspector-criterion]").Count));
+
+        Verification.RunAll(ws.Model, new VerificationOptions { Clone = VerificationView.Copy });
+        ws.Bump();
+        cut.Render();
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("[data-testid=inspector-criterion-result]").Count));
+        var results = cut.FindAll("[data-testid=inspector-criterion-result]");
+        Assert.NotNull(results[0].QuerySelector(".verdict.pass"));
+        Assert.NotNull(results[1].QuerySelector(".verdict.fail"));
+        Assert.Contains("all 2 criteria", cut.Find("[data-testid=inspector-verify-result]").TextContent);
+        Assert.NotNull(cut.Find("[data-testid=inspector-verify-result] .verdict.fail"));
+
+        cut.FindAll("[data-testid=inspector-criterion]")[0].QuerySelector("button")!.Click();
+        Assert.Equal(["mass <= 1400 kg"], Verification.Criteria(req));
+    }
+
+    [Fact]
+    public void Tables_And_Diagrams_Show_The_Aggregate_Of_Several_Criteria()
+    {
+        var ws = Ws(SampleModels.Vehicle());
+        var req = Req(ws.Model, "REQ-002");
+        Verification.AddCriterion(ws.Model, req, "mass <= 1400 kg");
+        Verification.RunAll(ws.Model, new VerificationOptions { Clone = VerificationView.Copy });
+
+        var table = RenderComponent<RequirementsPanel>();
+        Assert.Contains("2 criteria", table.Find("[data-testid=req-criteria]").TextContent);
+        Assert.Equal(2, table.FindAll("[data-testid=req-result] .verdict.fail").Count);
+
+        var d = ws.Model.Diagrams.Single(x => x.Name == "Vehicle Requirements");
+        var svg = ws.Verification.Overlay(d, n => n.Bounds, 1);
+        Assert.Equal(1, CountOf(svg, "vfy-mark pass"));                         // REQ-005
+        Assert.Equal(2, CountOf(svg, "vfy-mark fail"));                         // REQ-003 and REQ-002 (one of its two criteria fails)
+        Assert.Contains("2 criteria", svg);
+        Assert.Contains("2. mass &lt;= 1400 kg: fail", svg);
+    }
 }
 
 public class VariantEditorTests : TestContext

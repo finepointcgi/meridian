@@ -31,6 +31,7 @@
   <ItemGroup>
     <!-- C sources of the test FMUs and the vendored FMI headers (BSD-2-Clause, Modelica Association): compiled at test time. -->
     <None Include="Fmi\native\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fmi\reference\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="SysMLv2Corpus\*.sysml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

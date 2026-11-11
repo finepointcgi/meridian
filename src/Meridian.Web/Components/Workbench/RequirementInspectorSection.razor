@@ -43,17 +43,49 @@
                 <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newAttr)" OnClick="() => AddAttr(e)" aria-label="Add" title="Add" />
             </div>
         }
-        @* Simulation-driven verification: the criterion and the last result (Analysis/Verification.cs). *@
-        var crit = e.Get(VerificationKeys.Criterion);
-        var critError = crit.Length > 0 ? VerificationCriterion.Check(crit) : null;
-        <div class="section-title">Verification criterion <span class="grow"></span></div>
-        <MudTextField @key="@(e.Id + VerificationKeys.Criterion)" T="string" Label="Criterion" Value="@crit" ValueChanged="v => Set(e, VerificationKeys.Criterion, string.IsNullOrWhiteSpace(v) ? null : v.Trim())"
-                      Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" Class="vfy-crit" Error="@(critError != null)" ErrorText="@critError"
-                      HelperText="e.g. mass <= 1500 kg · mc: p95(accelTime) < 8 s · timed: final(speed) >= 25 m/s" />
-        @if (Ws.Verification.ResultOf(e) is { } vr)
+        @* Simulation-driven verification: the criteria, each with its last result, and the aggregate (Analysis/Verification.cs). *@
+        var criteria = Verification.Criteria(e);
+        var vr = Ws.Verification.ResultOf(e);
+        var checks = vr?.Checks ?? Verification.StoredChecks(Ws.Model, e);
+        <div class="section-title">Verification criteria <span class="grow"></span>
+            @if (!Ws.ReadOnly && criteria.Count > 0)
+            {
+                <span class="link" style="text-transform:none; letter-spacing:0; font-weight:500" data-testid="inspector-add-criterion" @onclick="() => _addingCriterion = true">Add criterion</span>
+            }
+        </div>
+        @for (var k = 0; k < criteria.Count; k++)
+        {
+            var i = k;
+            var crit = criteria[i];
+            var critError = VerificationCriterion.Check(crit);
+            var check = checks.FirstOrDefault(c => c.Index == i);
+            <div class="d-flex align-start gap-1" data-testid="inspector-criterion" data-index="@i">
+                <MudTextField @key="@($"{e.Id}{VerificationKeys.Criterion}{i}:{crit}")" T="string" Label="@(criteria.Count == 1 ? "Criterion" : $"Criterion {i + 1}")" Value="@crit"
+                              ValueChanged="v => SetCriterionAt(e, i, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" Class="vfy-crit"
+                              Error="@(critError != null)" ErrorText="@critError" />
+                @if (!Ws.ReadOnly)
+                {
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => RemoveCriterion(e, i)" aria-label="Remove criterion" title="Remove this criterion"
+                                   Style="margin-top:6px" data-testid="inspector-remove-criterion" />
+                }
+            </div>
+            @if (criteria.Count > 1 && check is { NotRun: false })
+            {
+                <div style="font-size:11.5px; margin:-2px 0 4px 2px" data-testid="inspector-criterion-result">
+                    @VerificationPanel.CheckBadge(check) <b>@check.Value</b>@(check.Bound.Length > 0 ? $" vs {check.Bound}" : "")@(check.Margin.Length > 0 ? $" · margin {check.Margin}" : "")
+                </div>
+            }
+        }
+        @if (criteria.Count == 0 || _addingCriterion)
+        {
+            <MudTextField @key="@($"{e.Id}-new-criterion-{criteria.Count}")" T="string" Label="@(criteria.Count == 0 ? "Criterion" : "New criterion")" Value="@("")"
+                          ValueChanged="v => AddCriterion(e, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="Ws.ReadOnly" Class="vfy-crit"
+                          HelperText="e.g. mass <= 1500 kg · mc: p95(accelTime) < 8 s · timed: final(speed) >= 25 m/s" data-testid="inspector-new-criterion" />
+        }
+        @if (vr is not null)
         {
             <div style="font-size:12px; margin-top:4px" data-testid="inspector-verify-result">
-                @VerificationPanel.Badge(vr) <b>@vr.Value</b> vs @vr.Bound · margin @vr.Margin
+                @VerificationPanel.Badge(vr) @(criteria.Count > 1 ? $"all {criteria.Count} criteria · " : "")<b>@vr.Value</b>@(criteria.Count > 1 ? "" : $" vs {vr.Bound} · margin {vr.Margin}")
                 <div style="color:var(--text-3)">@vr.Variant · @vr.At · @vr.Analysis</div>
             </div>
         }
@@ -105,6 +137,26 @@
 
     private string? _newAttr;
     private string? _newAttrValue;
+    private bool _addingCriterion;
+
+    private void SetCriterionAt(Element e, int index, string? value)
+    {
+        try { Verification.SetCriterionAt(Ws.Model, e, index, value); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void RemoveCriterion(Element e, int index)
+    {
+        try { Verification.RemoveCriterion(Ws.Model, e, index); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void AddCriterion(Element e, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        try { Verification.AddCriterion(Ws.Model, e, value); _addingCriterion = false; }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
 
     private void Set(Element e, string key, string? value)
     {

@@ -38,8 +38,10 @@ public sealed class CoSimPart
     public override string ToString() => $"{Name} : {Type.Name}";
 }
 
-public sealed record CoSimConnection(CoSimPart FromPart, CoSimPort From, CoSimPart ToPart, CoSimPort To, Relationship Connector)
+/// <summary>A connection from an output to an input; values are converted with <c>value * Scale + Offset</c> when the ports' units differ but convert.</summary>
+public sealed record CoSimConnection(CoSimPart FromPart, CoSimPort From, CoSimPart ToPart, CoSimPort To, Relationship Connector, double Scale = 1, double Offset = 0)
 {
+    public bool Converts => Scale != 1 || Offset != 0;
     public override string ToString() => $"{FromPart.Name}.{From.Name} → {ToPart.Name}.{To.Name}";
 }
 
@@ -51,6 +53,10 @@ public sealed class CoSimPlan
     public List<CoSimConnection> Connections { get; } = new();
     public List<CoSimProblem> Problems { get; } = new();
     public bool HasErrors => Problems.Any(p => p.Severity == CoSimSeverity.Error);
+    /// <summary>The smallest default step size of the FMU parts (their DefaultExperiment), if any declares one.</summary>
+    public double? SuggestedStep { get; set; }
+    /// <summary>The largest default stop time of the FMU parts, if any declares one.</summary>
+    public double? SuggestedStop { get; set; }
     public bool CanRun => !HasErrors && Parts.Count > 0;
 
     /// <summary>Recorded signals: every output of every part, keyed "part.port".</summary>
@@ -210,6 +216,11 @@ public static class CoSimulation
             foreach (var port in type.OwnedElements.Where(x => x.Kind == ElementKind.Port))
             {
                 var causality = port.Get(FieldKeys.TagPrefix + "fmi.causality");
+                if (fmu && port.Get(FieldKeys.TagPrefix + "fmi.type") is "Binary" or "Clock")
+                {
+                    plan.Problems.Add(new(CoSimSeverity.Info, $"{p.Name}.{port.Name}: {port.Get(FieldKeys.TagPrefix + "fmi.type")} variables are not exchanged in co-simulation", port.Id));
+                    continue;
+                }
                 var dir = fmu && causality is "input" or "output" ? (causality == "input" ? "in" : "out") : port.Get(FieldKeys.Direction);
                 if (dir is not ("in" or "out"))
                 {
@@ -270,7 +281,16 @@ public static class CoSimulation
             if (from.Type == "String" || to.Type == "String")
                 plan.Problems.Add(new(CoSimSeverity.Error, $"{conn}: string signals cannot be exchanged", r.Id));
             if (from.Unit != null && to.Unit != null && !SameUnit(from.Unit, to.Unit))
-                plan.Problems.Add(new(CoSimSeverity.Error, $"{conn}: unit mismatch, {from.Unit} → {to.Unit}", r.Id));
+            {
+                // Compatible units (km to m, degF to degC) are converted; different dimensions are an error.
+                if (Units.Convert(0, from.Unit, to.Unit) is { } off && Units.Convert(1, from.Unit, to.Unit) is { } one && double.IsFinite(off) && double.IsFinite(one))
+                {
+                    conn = conn with { Scale = one - off, Offset = off };
+                    if (conn.Converts)
+                        plan.Problems.Add(new(CoSimSeverity.Info, $"{conn}: converted from {from.Unit} to {to.Unit} (× {G(one - off)}{(off != 0 ? $" + {G(off)}" : "")})", r.Id));
+                }
+                else plan.Problems.Add(new(CoSimSeverity.Error, $"{conn}: unit mismatch, {from.Unit} → {to.Unit}", r.Id));
+            }
             else if ((from.Unit == null) != (to.Unit == null))
                 plan.Problems.Add(new(CoSimSeverity.Warning, $"{conn}: only one end has a unit ({from.Unit ?? to.Unit}); the value is passed unchanged", r.Id));
             if (plan.Connections.Any(c => ReferenceEquals(c.ToPart, tp) && ReferenceEquals(c.To, to)))
@@ -286,6 +306,13 @@ public static class CoSimulation
                 part.Parameters.Add(new CoSimParameter($"{part.Name}.{i.Name}", i.Name, i.Port, start, i.Unit, true));
             }
 
+        // Step size and end time the FMUs suggest (DefaultExperiment).
+        foreach (var part in plan.Parts.Where(p => p.Kind == CoSimPartKind.Fmu))
+        {
+            if (Num(part.Type.Get(FieldKeys.TagPrefix + "fmi.defaultStepSize")) is { } st && st > 0) plan.SuggestedStep = Math.Min(plan.SuggestedStep ?? st, st);
+            if (Num(part.Type.Get(FieldKeys.TagPrefix + "fmi.defaultStopTime")) is { } sp && sp > 0) plan.SuggestedStop = Math.Max(plan.SuggestedStop ?? sp, sp);
+        }
+
         if (AlgebraicOrder(plan) == null)
             plan.Problems.Add(new(CoSimSeverity.Error, "Algebraic loop: parts typed by ordinary blocks feed each other without an FMU in between"));
         if (plan.Parts.Count == 0)
@@ -294,6 +321,8 @@ public static class CoSimulation
             plan.Problems.Add(new(CoSimSeverity.Info, "No FMU parts: only algebraic blocks are evaluated over time"));
         return plan;
     }
+
+    private static string G(double v) => v.ToString("G6", CultureInfo.InvariantCulture);
 
     /// <summary>Unit symbols compare as written, ignoring white space and a leading "1" for dimensionless quantities.</summary>
     public static bool SameUnit(string a, string b)
@@ -383,14 +412,28 @@ public static class CoSimulation
         }
         var steps = (long)Math.Ceiling((o.Stop - o.Start) / o.Step - 1e-9);
         if (steps > CoSimOptions.MaxSteps) { result.Error = $"{steps:N0} steps is too many (at most {CoSimOptions.MaxSteps:N0}); use a larger step size"; return result; }
+        // FMUs that cannot change their communication step cannot take a shortened last step.
+        var lastStep = o.Stop - (o.Start + (steps - 1) * o.Step);
+        foreach (var part in plan.Parts.Where(p => p.Kind == CoSimPartKind.Fmu))
+        {
+            if (part.Type.Get(FieldKeys.TagPrefix + "fmi.variableStepSize") == "false" && Math.Abs(lastStep - o.Step) > 1e-9 * Math.Max(1, o.Step))
+            {
+                result.Error = $"{part.Name}: the FMU cannot change its communication step size, so the end time must be a whole number of steps after the start (for example {G(o.Start + steps * o.Step)} s)";
+                return result;
+            }
+            if (Num(part.Type.Get(FieldKeys.TagPrefix + "fmi.fixedInternalStepSize")) is { } fixedStep && fixedStep > o.Step * (1 + 1e-9))
+                result.Problems.Add(new(CoSimSeverity.Info,
+                    $"{part.Name}: the FMU has a fixed internal step of {G(fixedStep)} s, longer than the communication step ({G(o.Step)} s); its outputs change only every {G(fixedStep)} s", part.Part.Id));
+        }
         var every = Math.Max(1, (long)Math.Ceiling(steps / (double)Math.Max(2, o.MaxRecordedPoints - 1)));
 
         var parts = plan.Parts;
         var index = parts.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => x.i);
         var units = new ICoSimUnit?[parts.Count];
         var outs = parts.Select(p => p.Outputs.Select(x => Num(x.Port.Get(FieldKeys.TagPrefix + "fmi.start")) ?? 0).ToArray()).ToArray();
-        // Each input: (source part, source output) or a constant.
-        var sources = parts.Select(p => p.Inputs.Select(i => plan.Driver(p, i) is { } c ? (index[c.FromPart], c.FromPart.Outputs.IndexOf(c.From)) : (-1, -1)).ToArray()).ToArray();
+        // Each input: (source part, source output, unit conversion) or a constant.
+        var sources = parts.Select(p => p.Inputs.Select(i => plan.Driver(p, i) is { } c
+            ? (index[c.FromPart], c.FromPart.Outputs.IndexOf(c.From), c.Scale, c.Offset) : (-1, -1, 1.0, 0.0)).ToArray()).ToArray();
         var constants = parts.Select(p => p.Inputs.Select(i => p.Parameters.FirstOrDefault(x => x.IsInput && ReferenceEquals(x.Element, i.Port)) is { } par
             ? o.Parameters.TryGetValue(par.Key, out var v) ? v : par.Default : 0).ToArray()).ToArray();
         var algebraic = AlgebraicOrder(plan)!.Select(p => index[p]).ToList();
@@ -408,7 +451,7 @@ public static class CoSimulation
         {
             var src = sources[p];
             var v = new double[src.Length];
-            for (var i = 0; i < src.Length; i++) v[i] = src[i].Item1 >= 0 ? outs[src[i].Item1][src[i].Item2] : constants[p][i];
+            for (var i = 0; i < src.Length; i++) v[i] = src[i].Item1 >= 0 ? outs[src[i].Item1][src[i].Item2] * src[i].Item3 + src[i].Item4 : constants[p][i];
             return v;
         }
         void Algebraic(double t) { foreach (var p in algebraic) outs[p] = Checked(p, units[p]!.Evaluate(t, Inputs(p))); }
