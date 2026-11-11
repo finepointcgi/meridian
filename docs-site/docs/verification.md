@@ -24,14 +24,29 @@ timed(Start Vehicle): endTime <= 10 s
 - `(Target)` names the block or behaviour to analyse. Without it, Meridian analyses the element that **satisfies**
   the requirement.
 
+### Several criteria
+
+A requirement can have more than one criterion, for example `accelTime < 8 s` and `mass <= 1500 kg`, each with its own
+analysis. Add one with **Add criterion** in the Inspector, or with **+** on the requirement's row in the Verification
+tab. Each criterion gets its own result, and the requirement shows the combination:
+
+- **fail** if any criterion fails;
+- **inconclusive** if none fails but at least one is inconclusive;
+- **pass** if all pass.
+
+A criterion you add or edit shows *not run* until you verify again. The others keep their results.
+
 ## 2. Verify
 
 **Simulate ▸ Verify** (or ⌘K *Verify requirements*) runs the analyses in the background and opens the
 **Verification** tab: a summary (pass, fail, inconclusive, stale, not run; click a number to filter) and a row per
-requirement with its criterion, result, value, bound and margin. Click a row for the details.
+requirement with its criterion, result, value, bound and margin. Click a row for the details. A requirement with
+several criteria shows *N criteria* with a dot per result. Click it to open a row per criterion, where you can edit,
+remove or add criteria and see each one's result, value, bound and margin.
 
-On diagrams, requirements are outlined green (pass), red (fail) or amber (inconclusive), dashed when stale. The legend
-chip on the diagram, or ⌘K *Hide verification results on diagrams*, turns this off.
+On diagrams, requirements are outlined green (pass), red (fail) or amber (inconclusive), dashed when stale. With
+several criteria the colour is the combined result, and the tooltip lists each criterion. The legend chip on the
+diagram, or ⌘K *Hide verification results on diagrams*, turns this off.
 
 ## Verification runs
 
@@ -43,10 +58,12 @@ case.
 
 ## Where results show
 
-- **Requirements table**: *Criterion* and *Result* columns.
-- **Inspector**: the criterion with a syntax check, and the last result.
+- **Requirements table**: *Criterion* and *Result* columns. Several criteria show as *N criteria*; edit them in the
+  Inspector or the Verification tab.
+- **Inspector**: each criterion with a syntax check and its last result, and the combined result.
 - **Diagrams**: coloured outlines, as above.
-- **Reports**: the **VCRM** template (*Generate ▸ Report*) has *Analysis result*, *Computed* and *Margin* columns.
+- **Reports**: the **VCRM** template (*Generate ▸ Report*) has *Analysis result*, *Criteria* (each criterion with its
+  result), *Computed* and *Margin* columns.
 
 ## Try it
 

@@ -40,6 +40,27 @@ timed: final(rpm) == 800
 cosim(Rig): max(plant.temp) <= 90 degC
 ```
 
+### Several criteria per requirement
+
+A requirement can carry a list of criteria. Each one is parsed, analysed and evaluated on its own (with its own
+analysis kind and target), and the requirement gets the **aggregate**:
+
+| Criteria results                         | Requirement |
+|------------------------------------------|-------------|
+| any fails                                | fail        |
+| none fails, at least one is inconclusive | inconclusive |
+| all pass                                 | pass        |
+| no criteria                              | inconclusive ("No verification criterion") |
+
+The aggregate's value and bound list every criterion's (`7.192 s; 1450 kg`), its margin is the tightest one (the
+smallest relative margin, negative for a failing criterion), and its message says how many criteria pass and why the
+deciding one failed.
+
+Add, edit and remove criteria in the Inspector (*Add criterion*, ✕) or in the Verification tab (**+** on a row, then
+one sub-row per criterion). The Requirements table shows *N criteria* for a list and edits a single criterion in place.
+In code: `Verification.Criteria`, `AddCriterion`, `SetCriterionAt` (a blank text removes it), `RemoveCriterion`,
+`SetCriteria`; each is one undo step.
+
 ### Which element is analysed
 
 1. the `(target)` written in the criterion, else
@@ -94,11 +115,16 @@ The model itself is never changed by the analysis: a variant or inputs are appli
 - The analyses run on a snapshot in the background; the results are then recorded in **one undo step per run**.
 - The tab shows the pass / fail / inconclusive / stale / not-run summary (click a number to filter), and a row per
   requirement with its editable criterion, result, value, bound, margin, variant and time. Click a row for the
-  drill-down (message and notes, analysis, model version, run).
+  drill-down (message and notes, each criterion's message, analysis, model version, run). A requirement with several
+  criteria shows *N criteria* and a dot per criterion result; clicking it expands one sub-row per criterion (edit,
+  remove, its own result, value, bound, margin and analysis) plus a row to add one.
 
 ## How results are stored
 
-On each requirement (by the last run that checked it):
+The criteria are `verify.criterion`, **one per line**. A requirement saved with a single criterion (every file written
+before criteria lists) is simply a list of one, so old files load and verify unchanged and nothing needs converting.
+
+On each requirement (by the last run that checked it; with several criteria these are the aggregate):
 
 | Field | Example |
 |---|---|
@@ -110,29 +136,43 @@ On each requirement (by the last run that checked it):
 | `verify.modelVersion` | `main #3fa2c1d0` (branch and a content hash of the model, results excluded) |
 | `verify.variant` | configuration name, or `150% model` |
 | `verify.run`, `verify.analysisUsed` | run id (empty for ad hoc), `Parametric (Vehicle)` |
-| `verify.fingerprint`, `verify.deps` | staleness: a hash of the criterion and of the elements the analysis read |
+| `verify.fingerprint`, `verify.deps` | staleness: a hash of the criteria and of the elements the analysis read |
+| `verify.criteria` | only with several criteria: JSON, one entry per criterion with its text, status, value, bound, margin, message, analysis, fingerprint and dependencies |
 
-On the run: `verify.lastRun`, `verify.summary`, `verify.results` (JSON, its own result per requirement) and the
-standard test-case `verdict` (fail if any failed, else inconclusive if any was, else pass), so the run shows in the VCRM
-and traceability views like any test case.
+A requirement with one criterion writes no `verify.criteria`: the fields above are that criterion's result, as before.
+Reading a requirement (`Verification.LastResult(...).Checks`, `Verification.StoredChecks`) gives one entry per current
+criterion, matched to the recorded results **by criterion text**. A result recorded for a single criterion, also by
+an older version, belongs to the criterion whose fingerprint it matches (else to the first one, then stale), so adding
+a second criterion to an old requirement keeps the first one's result. A criterion added or edited since the last run
+has no result (*not run*).
+
+On the run: `verify.lastRun`, `verify.summary`, `verify.results` (JSON history of that run: per requirement its
+aggregate, plus a `Criteria` list with each criterion's own result when it has several) and the standard test-case
+`verdict` (fail if any failed, else inconclusive if any was, else pass), so the run shows in the VCRM and traceability
+views like any test case.
 
 ### Staleness
 
 A result is **stale** when its fingerprint no longer matches: the criterion changed, or anything in the elements the
 analysis read (the analysed blocks with their contents, the constraint blocks they use, relationships touching them,
-the run's settings, the configuration and the feature model) changed. Documentation edits, layout, review bookkeeping
+the run's settings, the configuration and the feature model) changed. Each criterion has its own fingerprint, so a
+change that only one criterion's analysis read makes only that criterion stale. The requirement's aggregate is stale
+when any criterion's is, and when a criterion is added, edited or removed. Documentation edits, layout, review bookkeeping
 and verification results themselves do not count. Stale results show dashed on diagrams, with a *stale* badge in the
 tables, and as `pass (stale)` in reports.
 
 ## Where results show
 
-- **Requirements table**: *Criterion* and *Result* columns.
-- **Inspector**: criterion with syntax check and the last result.
-- **Diagrams**: requirements are outlined green / red / amber by their last result (dashed when stale), with a legend
-  chip to hide them (⌘K *Hide verification results on diagrams*).
-- **VCRM report** (*Generate → Report → VCRM*): *Analysis result*, *Computed* and *Margin* columns. Any table or query
-  can use the computed key `verificationResult` and the raw fields (`field:verify.value`, …).
-- XMI export / import carries the criterion, run settings and results.
+- **Requirements table**: *Criterion* and *Result* columns (*N criteria* for a list).
+- **Inspector**: each criterion with syntax check, add / remove, its own last result, and the aggregate.
+- **Diagrams**: requirements are outlined green / red / amber by their last (aggregate) result (dashed when stale),
+  with each criterion's result in the tooltip and a legend chip to hide them (⌘K *Hide verification results on
+  diagrams*).
+- **VCRM report** (*Generate → Report → VCRM*): *Analysis result*, *Criteria*, *Computed* and *Margin* columns. Any
+  table or query can use the computed keys `verificationResult` (aggregate with staleness) and `verificationCriteria`
+  (`accelTime < 8 s: pass; mass <= 1400 kg: fail`) and the raw fields (`field:verify.value`, …).
+- XMI export / import carries the criteria (line breaks escaped in the attribute), run settings, results and
+  `verify.criteria`.
 
 ## The Vehicle sample
 
@@ -143,6 +183,6 @@ REQ-003 `capacity * 10 km/L >= 600 km` (fail, 550 km) and REQ-005 `maxPower >= 1
 
 - Inputs and variants need a model copy; the web app always has one (core callers pass `VerificationOptions.Clone`).
 - Timed simulation variables have the unit of the context block's property of the same name, otherwise none.
-- One criterion per requirement (combine with `min()` / `max()` or split the requirement).
-- Results record the last run per requirement; per-run history lives in each run's `verify.results` and in the model's
-  version history.
+- A criterion is a single line; criteria are combined only by the fixed aggregate rule (no "any of").
+- Results record the last run per requirement and per criterion; per-run history lives in each run's `verify.results`
+  and in the model's version history.
