@@ -6,6 +6,10 @@ elements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrat
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
+Server URLs for issue trackers, code repositories and requirements tools may be `http://` or `https://`, so servers on
+an internal network without TLS work. Over plain `http://` the token or password is sent unencrypted, so use it only on
+a network you trust.
+
 ## 1. Issue trackers
 
 Open the project menu → **Integrations (issue trackers, webhooks, code)…** → *Issue trackers* (project owners only).
@@ -19,7 +23,7 @@ Open the project menu → **Integrations (issue trackers, webhooks, code)…** �
 | GitLab Issues (REST v4) | `https://gitlab.com` or `https://gitlab.example.com` (the `/api/v4` suffix is optional) | `group/subgroup/project` or numeric project id | project, group or personal access token with `api` (`PRIVATE-TOKEN`), or an OAuth access token (Bearer, tick the option) |
 
 Optionally set the issue / work item type for new issues (default `Task`). **Test connection** checks the
-credentials and that the project/repository is reachable. Base URLs must be `https://`.
+credentials and that the project/repository is reachable. Base URLs may be `http://` or `https://`.
 
 **GitLab Issues** (gitlab.com and self-managed, `GitLabTracker` in `IssueTrackers.cs`):
 

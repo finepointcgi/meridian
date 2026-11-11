@@ -89,6 +89,9 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
     protected abstract void Authorize(HttpRequestMessage request);
     protected abstract string ArchiveUrl(string commit);
 
+    /// <summary>Accept values for the archive download. GitHub answers 415 to <c>application/x-gzip</c> and wants its API type.</summary>
+    protected virtual string[] ArchiveAccept => ["application/octet-stream", "application/x-gzip"];
+
     public abstract Task<string> TestConnectionAsync(CancellationToken ct = default);
     public abstract Task<GitCommitInfo> ResolveBranchHeadAsync(string branch, CancellationToken ct = default);
     public abstract Task PostCommitStatusAsync(string commit, CommitState state, string description, string? targetUrl, CancellationToken ct = default);
@@ -179,8 +182,8 @@ public abstract class GitHostBase(HttpClient http, SnapshotLimits limits) : IGit
     public async Task<CodeSnapshot> FetchSnapshotAsync(string commit, IReadOnlyList<string> paths, Func<string, bool> include, SnapshotBudget budget, CancellationToken ct = default)
     {
         if (!IsSha(commit)) throw new GitHostException("Not a commit id.");
-        using var request = Request(HttpMethod.Get, ArchiveUrl(commit), "application/octet-stream");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-gzip"));
+        using var request = Request(HttpMethod.Get, ArchiveUrl(commit), ArchiveAccept[0]);
+        foreach (var extra in ArchiveAccept.Skip(1)) request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(extra));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(DownloadTimeout);
         using var response = await Send(request, timeout.Token, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -239,6 +242,9 @@ public sealed partial class GitHubHost(CodeRepoConfig config, string token, Http
     // Answers with a redirect to a short-lived codeload URL; the client follows it (through the outbound guard) and drops
     // the Authorization header on the way.
     protected override string ArchiveUrl(string commit) => $"{Repo}/tarball/{commit}";
+
+    // GitHub rejects application/x-gzip on /tarball with 415 Unsupported Media Type.
+    protected override string[] ArchiveAccept => ["application/vnd.github+json"];
 
     public override async Task<string> TestConnectionAsync(CancellationToken ct = default)
     {

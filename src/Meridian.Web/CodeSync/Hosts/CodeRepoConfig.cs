@@ -199,8 +199,8 @@ public sealed partial class CodeRepoConfig
     /// <summary>Validates the settings; returns an error message or null.</summary>
     public string? Validate()
     {
-        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback)))
-            return "The server URL must be an absolute https:// URL.";
+        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp) || u.Host.Length == 0)
+            return "The server URL must be an absolute http:// or https:// URL.";
         if (!string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment)) return "The server URL must not have a query or fragment.";
         if (Host == GitHostKind.Bitbucket)
         {
