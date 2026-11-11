@@ -1,6 +1,7 @@
 using Meridian.Core.Analysis;
 using Meridian.Core.Model;
 using Meridian.Serialization;
+using Meridian.Serialization.Spreadsheets;
 using Microsoft.AspNetCore.Components.Forms;
 using MudBlazor;
 
@@ -11,8 +12,6 @@ public partial class Workbench
 {
     /// <summary>Bottom-dock index of the traceability table.</summary>
     private const int TraceabilityDock = 7;
-
-    private Element _sheetTarget = default!;
 
     private IEnumerable<CommandPalette.Command> RequirementPaletteCommands()
     {
@@ -34,48 +33,13 @@ public partial class Workbench
 
     public Task ExportRequirementsXlsx() => Download(BaseName + " requirements.xlsx", XlsxMime, RequirementsSheet.ExportXlsx(Ws.Model));
 
+    /// <summary>Requirements Excel / CSV re-import: the spreadsheet import dialog with the Requirements preset.</summary>
     public Task ImportRequirementsSheet()
     {
-        _sheetTarget = Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model)
-                       ?? Ws.Model.Root.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Package && p.Name.Contains("Requirement", StringComparison.OrdinalIgnoreCase))
-                       ?? Ws.Model.Root;
-        return PickFile("file-req-sheet");
-    }
-
-    private async Task OnRequirementsSheetFile(InputFileChangeEventArgs e)
-    {
-        var file = e.File;
-        try
-        {
-            List<List<string>> rows;
-            await using (var s = file.OpenReadStream(MaxUpload))
-            {
-                using var ms = new MemoryStream();
-                await s.CopyToAsync(ms);
-                ms.Position = 0;
-                rows = RequirementsSheet.ReadRows(file.Name, ms);
-            }
-            var diff = RequirementsSheet.Diff(Ws.Model, rows);
-            var target = _sheetTarget is { } t && Ws.Model.Contains(t) ? t : Ws.Model.Root;
-            var parameters = new DialogParameters<SheetImportDialog>
-            {
-                { x => x.Diff, diff }, { x => x.FileName, file.Name }, { x => x.TargetName, target.QualifiedName },
-            };
-            var dialog = await Dialogs.ShowAsync<SheetImportDialog>("Import requirements", parameters,
-                new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true });
-            var result = await dialog.Result;
-            if (result is null || result.Canceled) return;
-            var (added, changed, removed) = RequirementsSheet.Apply(Ws.Model, target, diff.Rows);
-            Ws.Log($"Requirements import from {file.Name}: {added} added, {changed} changed, {removed} deleted.");
-            Snackbar.Add($"{added} added, {changed} changed, {removed} deleted — undo with ⌘Z", Severity.Success);
-            OpenDock(1);
-            Ws.Bump();
-        }
-        catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException or ArgumentException
-                                       or System.IO.InvalidDataException or DocumentFormat.OpenXml.Packaging.OpenXmlPackageException)
-        {
-            ErrorWithGuide($"Could not import the file: {Meridian.Web.Services.FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
-        }
+        var target = Ws.Selected?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model)
+                     ?? Ws.Model.Root.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Package && p.Name.Contains("Requirement", StringComparison.OrdinalIgnoreCase))
+                     ?? Ws.Model.Root;
+        return ImportSpreadsheet(SheetPresets.Requirements().Name, scope: target);
     }
 
     public async Task RenumberRequirements()

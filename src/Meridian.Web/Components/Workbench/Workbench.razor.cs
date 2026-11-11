@@ -93,6 +93,7 @@ public partial class Workbench
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
+        list.AddRange(SpreadsheetPaletteCommands());   // Workbench.Spreadsheet.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
         list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
         list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs

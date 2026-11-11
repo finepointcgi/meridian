@@ -47,6 +47,7 @@ can always compare against it.
 | Suspect links | **Suspect links**, cleared in the traceability table |
 | Generic table | **Model views → Generic table** (saved as a *Table View* element) |
 | Instance specifications, slots, instance table, "Create instance" | **Instances**: right-click a block ▸ **Create instance of…** builds the whole part tree; the **instance table** edits slots with units and exports CSV / XLSX; **object diagrams**; links typed by associations; a run's subject can be an instance ([details](instances.md)) |
+| Excel/CSV Import (and Excel/CSV Sync): map columns to elements, properties and tagged values | **Import ▸ Spreadsheet (Excel / CSV)…**: any element kind, column mapping with presets, hierarchy, relationships, a reviewed re-import and export with the same mapping ([details](spreadsheet-import.md)) |
 | Find / smart packages / derived queries | **Model views → Query** (saved as a *Query* element); the **command palette** (⌘K) finds anything by name |
 | Validation suites and constraints | **Validate** (built-in rules) plus **validation rules** written as model queries, and plugin rules |
 | Profiles, stereotypes, customizations | **Profiles** with stereotypes, metaclasses, colours and tag definitions; *Add UAF profile* |
@@ -98,6 +99,7 @@ can always compare against it.
 | Architecture and code conformance checks | **Code ▸ Architecture**: synced code against the model's allowed dependencies ([details](code-sync.md)) |
 | Model Validation | **Validate** and query-based **validation rules** |
 | Requirements (internal and external), Specification Manager | requirement elements with the **requirements table**; spreadsheet round trip with preview |
+| CSV Import / Export specifications (Publish ▸ CSV), preserve hierarchy | **Import ▸ Spreadsheet (Excel / CSV)…**: mapping presets saved per project and exportable as JSON, any element kind, `.xlsx` as well as CSV, parent / level / indent hierarchy, reviewed sync ([details](spreadsheet-import.md)) |
 | Preferences, visual styles | **Settings** (⌘,) with light / dark / system themes and accent colours ([details](settings.md)) |
 | MDG Technologies, UML profiles | **profiles and stereotypes**, and **plugins** for behaviour |
 | Document generation (RTF / DOCX templates) | **Word / PDF from template** with section presets |
@@ -142,5 +144,4 @@ Meridian equivalent. **Help (?) ▸ Coming from Cameo or EA** is a short guided 
 ## Not available (yet)
 
 Meridian does not have instance specifications and object diagrams, deployment diagrams (nodes and artifacts), a
-relation map, a glossary, OCL constraints, or Excel import with a column mapping for elements other than
-requirements. Components can be drawn on class diagrams; queries replace most OCL validation rules.
+relation map, a glossary, or OCL constraints. Components can be drawn on class diagrams; queries replace most OCL validation rules.
