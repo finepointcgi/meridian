@@ -199,6 +199,32 @@ public static class CameoScenarios
             Line("Session: persist", await Ms(session.PersistAsync));
             GC.Collect();
             Line($"Session: managed heap with {clients} tabs", 0, $"({GC.GetTotalMemory(true) / 1024 / 1024:N0} MB)");
+            // Unlocked conflicting edits (docs/COLLABORATION.md): tab 1 writes the same field as tab 0 right after it, so tab 0's
+            // relayed edit reaches tab 1 while tab 1's own edit is unconfirmed — tab 1 rewinds, applies and re-applies (a rebase).
+            var inbox = new Queue<Action>();
+            tabs[1].Dispatch = a => { inbox.Enqueue(a); return Task.CompletedTask; };
+            var hot = tabs[0].Model.OfKind(Meridian.Core.Model.ElementKind.Block).Take(500).Select(b => b.Id).ToList();
+            var rebase = new List<double>();
+            var local = new List<double>();
+            var all = Stopwatch.StartNew();
+            for (var i = 0; i < hot.Count; i++)
+            {
+                tabs[0].Model.Set(tabs[0].Model.Find(hot[i])!, Meridian.Core.Model.FieldKeys.Documentation, $"tab 0 #{i}");
+                var l = Stopwatch.GetTimestamp();
+                tabs[1].Model.Set(tabs[1].Model.Find(hot[i])!, Meridian.Core.Model.FieldKeys.Documentation, $"tab 1 #{i}");
+                local.Add(Stopwatch.GetElapsedTime(l).TotalMilliseconds);
+                var r = Stopwatch.GetTimestamp();
+                while (inbox.TryDequeue(out var a)) a();
+                rebase.Add(Stopwatch.GetElapsedTime(r).TotalMilliseconds);
+            }
+            local.Sort();
+            rebase.Sort();
+            if (Meridian.Serialization.ProjectFile.Serialize(tabs[1].Model) != session.Snapshot()) throw new InvalidOperationException("tab 1 diverged");
+            Line("Session: conflicting edit, local + submit", all.Elapsed.TotalMilliseconds,
+                 $"({hot.Count} edits; p50 {local[local.Count / 2]:0.000} ms, p95 {local[local.Count * 95 / 100]:0.000} ms)");
+            Line("Session: rebase under a relayed edit", rebase.Sum(),
+                 $"(p50 {rebase[rebase.Count / 2]:0.000} ms, p95 {rebase[rebase.Count * 95 / 100]:0.000} ms, max {rebase[^1]:0.0} ms; {tabs[1].Rebases} rebases)");
+            tabs[1].Dispatch = a => { a(); return Task.CompletedTask; };
             foreach (var ws in tabs) ws.Dispose();
         }
         finally { cleanup(); }

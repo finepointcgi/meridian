@@ -14,8 +14,6 @@ namespace Meridian.Web.Services;
 public sealed partial class Workspace : IDisposable, ISessionClient
 {
     private readonly List<DiagramController> _open = new();
-    private readonly List<ModelOp> _buffered = new();
-    private bool _joining;
 
     public Workspace()
     {
@@ -70,118 +68,6 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 
     public IReadOnlyList<Presence> Others =>
         Session?.Participants.Where(p => p.ParticipantId != ParticipantId).ToList() ?? (IReadOnlyList<Presence>)[];
-
-    public async Task<bool> JoinAsync(CollaborationHub hub, Guid projectId, ProjectRole role, Guid? branchId = null)
-    {
-        if (User is null) return false;
-        LeaveSession();
-        Pinned = null;
-        _joining = true;
-        _buffered.Clear();
-        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
-        if (session is null) { _joining = false; return false; }
-        var replica = ProjectFile.Deserialize(session.SnapshotFor(ParticipantId));   // filtered when packages are hidden from me
-        Session = session;
-        Role = role;
-        Install(replica);
-        // Operations that arrived between registration and snapshot install, in order.
-        foreach (var op in _buffered) Model.ApplyRemote(op);
-        _buffered.Clear();
-        _joining = false;
-        OpenDefaultDiagrams();
-        Bump();
-        return true;
-    }
-
-    /// <summary>Uses a model without a collaboration session (tests, offline previews).</summary>
-    public void UseLocalModel(ModelRepository model)
-    {
-        LeaveSession();
-        Install(model);
-        Bump();
-    }
-
-    private void Install(ModelRepository replica)
-    {
-        Model.Changed -= OnModelChanged;
-        Model.History.Changed -= OnHistoryChanged;
-        Model.History.ActionCompleted -= FlushLocalOps;
-        Model.OpEmitted -= OnLocalOp;
-        _pendingOps.Clear();
-        Model = replica;
-        Model.History.ReadOnly = ReadOnly;
-        Model.Changed += OnModelChanged;
-        Model.History.Changed += OnHistoryChanged;
-        Model.OpEmitted += OnLocalOp;
-        Model.History.ActionCompleted += FlushLocalOps;
-        ModelVersion++;
-        TreeVersion++;
-        _open.Clear();
-        _views.Clear();
-        ActiveView = null;
-        _back.Clear();
-        _forward.Clear();
-        Active = null;
-        Selected = null;
-    }
-
-    private readonly List<ModelOp> _pendingOps = new();
-
-    /// <summary>
-    /// My operations go to the session one user action at a time (a delete with its cascades, an import, a script batch…), so
-    /// the server accepts or refuses the action as a whole (package permissions, locks) rather than part of it.
-    /// </summary>
-    private void OnLocalOp(ModelOp op)
-    {
-        if (Session is null) return;
-        if (Model.History.InAction) { _pendingOps.Add(op); return; }
-        Session.Submit(ParticipantId, User?.Id ?? Guid.Empty, op);
-    }
-
-    private void FlushLocalOps()
-    {
-        if (_pendingOps.Count == 0) return;
-        var ops = _pendingOps.ToList();
-        _pendingOps.Clear();
-        Session?.SubmitAll(ParticipantId, User?.Id ?? Guid.Empty, ops);
-    }
-
-    public void LeaveSession()
-    {
-        Session?.Leave(ParticipantId);
-        Session = null;
-    }
-
-    void ISessionClient.RemoteOp(ModelOp op) => _ = Dispatch(() =>
-    {
-        if (Pinned != null) return;   // a historical view (Workspace.Libraries.cs) doesn't follow the live head
-        if (_joining) { _buffered.Add(op); return; }
-        Model.ApplyRemote(op);
-    });
-
-    void ISessionClient.PresenceChanged() => _ = Dispatch(Bump);
-
-    void ISessionClient.Reset(string modelJson) => _ = Dispatch(() =>
-    {
-        if (Pinned != null) return;   // a historical view (Workspace.Libraries.cs) doesn't follow the live head
-        var tabs = CaptureTabs();
-        Install(ProjectFile.Deserialize(modelJson));
-        RestoreTabs(tabs);
-        SetStatus("The model was restored to an earlier version");
-    });
-
-    void ISessionClient.CommentsChanged() => _ = Dispatch(() => { CommentsVersion++; Bump(); });
-
-    void ISessionClient.Replaced(string modelJson, string message) => _ = Dispatch(() =>
-    {
-        if (Pinned != null) return;   // a historical view (Workspace.Libraries.cs) doesn't follow the live head
-        var tabs = CaptureTabs();
-        Install(ProjectFile.Deserialize(modelJson));
-        Session?.Resynced(ParticipantId);
-        RestoreTabs(tabs);   // the code-change review stays open across a merge (accepting code changes replaces main's model)
-        Log(message);
-        SetStatus(message);
-    });
 
     // ---------------------------------------------------------------- tabs across a rebuilt model
 
@@ -486,13 +372,14 @@ public sealed partial class Workspace : IDisposable, ISessionClient
         if (change.Kind is ChangeKind.Added or ChangeKind.Removed or ChangeKind.Moved or ChangeKind.Reset
             || change is { Kind: ChangeKind.Updated, Field: FieldKeys.Name or FieldKeys.RequirementId })
             TreeVersion++;
-        if (change.Kind == ChangeKind.Removed)
+        // While my unconfirmed edits are rewound and re-applied (a rebase), removals are transient: tabs and selection are
+        // checked once it is over (Workspace.Collaboration.cs).
+        if (Model.IsRebasing)
         {
-            if (Selected != null && !Model.Contains(Selected)) Selected = null;
-            foreach (var c in _open.Where(c => !Model.Contains(c.Diagram)).ToList()) Close(c);
-            foreach (var v in _views.Where(v => v.Element != null && !Model.Contains(v.Element)).ToList()) CloseView(v);
-            foreach (var c in _open) c.ClearInvalidSelection();
+            _cleanupDue = true;
+            return;
         }
+        if (change.Kind == ChangeKind.Removed) CleanUpRemoved();
         if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open) c.ClearInvalidSelection();
         if (change is { Kind: ChangeKind.Added, Element: Diagram created } && !Model.IsApplyingRemote) QueueCreatedDiagram(created);
         Bump();

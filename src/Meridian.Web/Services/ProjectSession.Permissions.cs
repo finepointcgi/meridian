@@ -55,6 +55,15 @@ public sealed partial class ProjectSession
         lock (_gate) return SnapshotLocked(participantId);
     }
 
+    /// <summary>
+    /// <see cref="SnapshotFor"/> with the sequence number it reflects: a joining tab skips relayed operations up to it (they
+    /// were queued for it before the snapshot was taken, and are already in it).
+    /// </summary>
+    public (string Json, long Sequence) SnapshotWithSequence(string participantId)
+    {
+        lock (_gate) return (SnapshotLocked(participantId), Sequence);
+    }
+
     /// <param name="fullJson">The authoritative model, already serialized (when the caller has it).</param>
     private string SnapshotLocked(string participantId, string? fullJson = null)
     {
@@ -115,13 +124,13 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>Sends an applied operation to one participant: as is, not at all, or as a refresh of their filtered model.</summary>
-    private void Relay(string id, ISessionClient client, ModelOp op, Dictionary<string, (AccessView View, RelayProbe Probe)>? probes)
+    private void Relay(string id, ISessionClient client, ModelOp op, long sequence, Dictionary<string, (AccessView View, RelayProbe Probe)>? probes)
     {
         if (_stale.Contains(id)) return;   // a fresh filtered model is on its way; it includes this operation
-        if (probes is null || !probes.TryGetValue(id, out var f)) { client.RemoteOp(op); return; }
+        if (probes is null || !probes.TryGetValue(id, out var f)) { client.RemoteOp(op, sequence); return; }
         switch (PermissionCheck.Decide(_master, f.View, op, f.Probe))
         {
-            case RelayDecision.Relay: client.RemoteOp(op); break;
+            case RelayDecision.Relay: client.RemoteOp(op, sequence); break;
             case RelayDecision.Resync: MarkStale(id); break;
         }
     }
