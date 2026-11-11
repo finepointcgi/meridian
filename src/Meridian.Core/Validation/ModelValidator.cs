@@ -28,7 +28,9 @@ public sealed partial class ModelValidator
         // Operations are told apart by their parameter types (UML overloading): same-named operations with different
         // parameter lists are fine; only an identical parameter list is a duplicate.
         new Rule("MER-002", "Sibling names must be unique per kind (operations: per parameter list)", m =>
-            m.AllElements.Where(e => e.OwnedElements.Count > 1).SelectMany(owner =>
+            // Inside activities and interactions (and their partitions and fragments) names are labels, not identities:
+            // two "return Fail()" final nodes or two "Charge()" actions are normal, so they are not checked.
+            m.AllElements.Where(e => e.OwnedElements.Count > 1 && !NamesAreLabels(e.Kind)).SelectMany(owner =>
                 owner.OwnedElements.Where(c => !string.IsNullOrEmpty(c.Name) && !c.IsRelationship)
                     .GroupBy(c => (c.Kind, c.Name, Overload: c.Kind == ElementKind.Operation ? OverloadKey(c) : ""))
                     .Where(g => g.Count() > 1)
@@ -100,6 +102,10 @@ public sealed partial class ModelValidator
              .ToList();
 
     private static ValidationIssue Issue(Severity s, string id, string msg, Element e) => new(s, id, msg, e);
+
+    /// <summary>Owners whose children's names are labels rather than identities (MER-002 skips them).</summary>
+    private static bool NamesAreLabels(ElementKind owner) =>
+        owner is ElementKind.Activity or ElementKind.Interaction or ElementKind.Partition or ElementKind.CombinedFragment or ElementKind.InteractionOperand;
 
     /// <summary>
     /// What tells an operation apart from its overloads (MER-002): the directions and types of its parameters, in order,

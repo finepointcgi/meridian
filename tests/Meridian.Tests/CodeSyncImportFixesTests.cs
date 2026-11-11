@@ -102,6 +102,23 @@ public class CodeSyncImportFixesTests
         Assert.Equal(2, new ModelValidator().Validate(m).Count(i => i.RuleId == "MER-002"));
     }
 
+    [Fact]
+    public void Repeated_Labels_Inside_Activities_And_Interactions_Are_Not_Duplicates()
+    {
+        var m = new ModelRepository("M");
+        var act = m.Create(m.Root, ElementKind.Activity, "Run");
+        m.Create(act, ElementKind.ActivityFinalNode, "return Fail()");
+        m.Create(act, ElementKind.ActivityFinalNode, "return Fail()");
+        m.Create(act, ElementKind.Action, "Charge()");
+        m.Create(act, ElementKind.Action, "Charge()");
+        var seq = m.Create(m.Root, ElementKind.Interaction, "Flow");
+        var frag = m.Create(seq, ElementKind.CombinedFragment, "alt");
+        m.Create(frag, ElementKind.InteractionOperand, "");
+        m.Create(seq, ElementKind.Lifeline, "b : Battery");
+        m.Create(seq, ElementKind.Lifeline, "b : Battery");
+        Assert.DoesNotContain(new ModelValidator().Validate(m), i => i.RuleId == "MER-002");
+    }
+
     [Theory]
     [InlineData("", "()")]
     [InlineData("()", "()")]
