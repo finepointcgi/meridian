@@ -147,8 +147,11 @@ public class VerificationPanelTests : TestContext
         cut.Find("input.vfy-crit-new").Change("mass <= 1400 kg");
         Assert.Equal(["accelTime < 8 s", "mass <= 1400 kg"], Verification.Criteria(req));
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("tr.crit-row:not(.new)").Count));
-        Assert.Contains("2 criteria", Row(cut, "REQ-002").QuerySelector("[data-testid=criteria-toggle]")!.TextContent);
-        Assert.Equal(2, cut.FindAll("tr.crit-row .verdict.none").Count);         // not run yet
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("2 criteria", Row(cut, "REQ-002").QuerySelector("[data-testid=criteria-toggle]")!.TextContent);
+            Assert.Equal(2, cut.FindAll("tr.crit-row .verdict.none").Count);     // not run yet
+        });
 
         cut.Find("[data-testid=verify-run]").Click();
         cut.WaitForAssertion(() =>
@@ -159,20 +162,29 @@ public class VerificationPanelTests : TestContext
             Assert.NotNull(crit[1].QuerySelector(".verdict.fail"));
             Assert.Contains("1450 kg", crit[1].TextContent);
         }, TimeSpan.FromSeconds(10));
-        Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.fail"));
-        Assert.Contains("2 fail", cut.Find("[data-testid=verify-summary]").TextContent);
-        Assert.Equal(2, Row(cut, "REQ-002").QuerySelectorAll("[data-testid=criteria-toggle] .dot").Length);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.fail"));
+            Assert.Contains("2 fail", cut.Find("[data-testid=verify-summary]").TextContent);
+            Assert.Equal(2, Row(cut, "REQ-002").QuerySelectorAll("[data-testid=criteria-toggle] .dot").Length);
+        });
 
         // The drill-down lists each criterion's message.
         if (cut.FindAll("tr.detail").Count == 0) Row(cut, "REQ-002").Click();   // (bUnit may already have bubbled the "+" click to the row)
-        Assert.Contains("1 of 2 criteria pass", cut.Find("tr.detail").TextContent);
-        Assert.Contains("mass <= 1400 kg", cut.Find("tr.detail").TextContent);
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("1 of 2 criteria pass", cut.Find("tr.detail").TextContent);
+            Assert.Contains("mass <= 1400 kg", cut.Find("tr.detail").TextContent);
+        });
 
         // Editing the second criterion: it has no result until the next run, the first keeps its own.
         cut.Find("tr.crit-row[data-index='1'] input.vfy-crit-item").Change("mass <= 1500 kg");
-        cut.WaitForAssertion(() => Assert.NotNull(cut.Find("tr.crit-row[data-index='1'] .verdict.none")));
-        Assert.NotNull(cut.Find("tr.crit-row[data-index='0'] .verdict.pass"));
-        Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.stale"));
+        cut.WaitForAssertion(() =>
+        {
+            Assert.NotNull(cut.Find("tr.crit-row[data-index='1'] .verdict.none"));
+            Assert.NotNull(cut.Find("tr.crit-row[data-index='0'] .verdict.pass"));
+            Assert.NotNull(Row(cut, "REQ-002").QuerySelector(".verdict.stale"));
+        });
 
         // Removing it, then collapsing, brings back the single editable criterion.
         cut.Find("tr.crit-row[data-index='1'] [data-testid=criterion-remove]").Click();
