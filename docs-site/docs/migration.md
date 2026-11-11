@@ -143,5 +143,4 @@ Meridian equivalent. **Help (?) ▸ Coming from Cameo or EA** is a short guided 
 
 ## Not available (yet)
 
-Meridian does not have instance specifications and object diagrams, deployment diagrams (nodes and artifacts), a
-relation map, a glossary, or OCL constraints. Components can be drawn on class diagrams; queries replace most OCL validation rules.
+Meridian does not have a glossary or OCL constraints yet. Queries replace most OCL validation rules.
