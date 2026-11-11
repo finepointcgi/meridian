@@ -27,7 +27,7 @@ configuration source.
 | --- | --- |
 | `ConnectionStrings:Meridian` | PostgreSQL connection string |
 | `Meridian:Storage=sqlite`, `Meridian:DataPath` | run on a single SQLite file instead of PostgreSQL |
-| `Meridian:KeysPath` | where ASP.NET Core Data Protection keys are kept (mount a volume in containers; integration secrets depend on it) |
+| `Meridian:KeysPath` | a folder for the ASP.NET Core Data Protection keys; by default they are kept in the Meridian database, so stored secrets travel with it. A database backup then holds what decrypts the stored tokens: treat it as a secret, or set `Meridian:KeyEncryptionCertificate` or `MERIDIAN_KEY_ENCRYPTION_KEY` |
 | `Meridian:PublicUrl` | public address used in links (issue deep links, OSLC) behind a proxy |
 | `Meridian:Admins` | usernames that are always administrators |
 | `Meridian:Scripting:Enabled`, `:TimeoutSeconds`, `:Unrestricted` | the [script console](scripting.md) (off by default on servers) |

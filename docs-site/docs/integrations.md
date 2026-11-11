@@ -20,7 +20,8 @@ the project is reachable. Base URLs must be `https://`.
 
 Tokens and secrets are encrypted before they are stored, are only decrypted to call the tracker, are never logged and
 never sent back to the browser (the dialog shows "••• set"; leave the field empty to keep the stored value). They are
-encrypted with the server's Data Protection keys, so keep `Meridian:KeysPath` on persistent storage.
+encrypted with the server's Data Protection keys, which are kept in the Meridian database (or in `Meridian:KeysPath`),
+so they survive moving or upgrading the server.
 
 ### Linked issues
 

@@ -203,7 +203,11 @@ compose `.env` file, every setting has a short variable that `docker-compose.pro
 | `ConnectionStrings__Meridian` | none | Npgsql connection string. Required unless `Meridian__Storage=sqlite`. Add `SSL Mode=Require` for remote databases |
 | `Meridian__Storage` | postgres | `sqlite` for a single-file database in `DataPath` (trials only) |
 | `Meridian__DataPath` | `/data` in the image | Base folder (SQLite file, defaults for local mode) |
-| `Meridian__KeysPath` | `/data/keys` in the image | Data Protection key ring folder. Must be persistent, and shared between replicas |
+| `Meridian__KeysPath` | none: the key ring is kept in the database. Compose and Helm set `/data/keys` | Data Protection key ring folder instead of the database. Must be persistent, and shared between replicas ([Keys and secrets](#keys-and-secrets)) |
+| `Meridian__KeyEncryptionCertificate` / `__KeyEncryptionCertificatePassword` | none | A `.pfx` that encrypts the stored key ring ([Keys and secrets](#keys-and-secrets)) |
+| `MERIDIAN_KEY_ENCRYPTION_KEY` (or `Meridian__KeyEncryptionKey`) | none | 32 random bytes in base64 that encrypt the stored key ring, when no certificate is set |
+| `Meridian__LegacyKeysPath` | the per-user ASP.NET folder | Where an older version kept its keys, copied into the database on start |
+| `Meridian__LegacyApplicationNames` | the content root | Older install folders (`;`-separated), for secrets saved by a version up to 0.8.0 from an install that has since moved |
 | `Meridian__PublicUrl` | from the request | External base URL, such as `https://meridian.example.com`, used in OSLC and integration links |
 | `Meridian__Security__TrustForwardedHeaders` | false | Honour `X-Forwarded-For/-Proto/-Host`. Set it to **true** behind Caddy or an ingress, and make sure nothing else can reach port 8080 |
 | `Meridian__Security__AllowRegistration` | true | Self sign-up from the login page. Set it to **false** on the internet |
@@ -328,6 +332,44 @@ mounting the CA certificate and setting `SSL_CERT_FILE`.
 
 Provider-specific notes and the issue-tracker and API integrations are in [INTEGRATIONS.md](INTEGRATIONS.md).
 
+## Keys and secrets
+
+Integration tokens and passwords (issue trackers, webhooks, code repositories, DOORS Next and Polarion, database
+connections), the desktop app's AI keys, sign-in cookies and antiforgery tokens are encrypted with ASP.NET Core Data
+Protection. Its key ring has the stable application name `Meridian`, so the install folder no longer matters. Before
+this change the name was the install folder's path, so moving the install, unpacking a new version elsewhere or
+running another build made every stored secret unreadable ("…can no longer be decrypted — enter it again").
+
+**Where the keys live**
+
+| Mode | Key ring |
+| --- | --- |
+| `Meridian__KeysPath` set (compose and Helm set `/data/keys`) | That folder |
+| Server with PostgreSQL | Table `data_protection_keys` in the Meridian database, shared by every replica |
+| Server with SQLite (`Meridian__Storage=sqlite`) | Table `data_protection_keys` in `meridian.db` |
+| Desktop app | Table `data_protection_keys` in the desktop's `meridian.db` (the data folder) |
+
+With the database, everything needed to read the stored secrets travels with the database: move or upgrade the app or
+run several instances and the secrets keep working. To move a compose or Helm install from the folder to the database,
+remove `Meridian__KeysPath`; the keys in `/data/keys` (`DataPath/keys`) are copied into the table on the next start.
+
+**Upgrading from an earlier version.** On start Meridian copies older file-based keys into the table: `DataPath/keys`,
+and on a server the per-user ASP.NET folder (`~/.aspnet/DataProtection-Keys`, `%LOCALAPPDATA%\ASP.NET\DataProtection-Keys`),
+or `Meridian__LegacyKeysPath` instead. Files are copied, never moved or deleted. Secrets saved by the earlier version
+are read with its old name (the install folder) and re-encrypted under `Meridian` straight away: all integration
+secrets once at start, and any secret again when it is first used. If the install moved before the upgrade, list the old
+folder in `Meridian__LegacyApplicationNames`. A secret that no key can decrypt still asks to be entered again.
+
+**One-time sign-out.** Sign-in cookies can't be migrated: everyone signs in once more after the first upgrade (the
+desktop app signs itself in).
+
+**Backups are secrets.** Without key encryption, a database backup (or a copy of the `KeysPath` folder) contains what is
+needed to decrypt every stored token. Treat backups accordingly, or encrypt the stored keys with a certificate
+(`Meridian__KeyEncryptionCertificate`, a `.pfx`, with `Meridian__KeyEncryptionCertificatePassword`) or a master key
+(`MERIDIAN_KEY_ENCRYPTION_KEY`, from `openssl rand -base64 32`) kept outside the database, for example in a Kubernetes
+Secret. Keys written before encryption was turned on stay readable. Without the certificate or master key, keys
+written with it can't be read, so back it up separately. The startup log names the key location.
+
 ## Backups and restore
 
 Use both kinds of backup. They protect against different failures.
@@ -443,10 +485,11 @@ constraints when you run more than one replica:
    (`nginx.ingress.kubernetes.io/affinity: cookie`, `affinity-mode: persistent`). For Traefik use
    `traefik.ingress.kubernetes.io/service.sticky.cookie: "true"`. Cloud load balancers need their own
    session-affinity setting. Use `service.sessionAffinity: ClientIP` only when there is no ingress.
-2. **A shared Data Protection key store is required.** Sign-in cookies and antiforgery tokens are encrypted with
-   the key ring in `Meridian__KeysPath`. All replicas must read the same keys. Use a `ReadWriteMany` volume (NFS,
-   EFS, Azure Files, CephFS) or an `existingClaim` on shared storage. The chart refuses to render more than one
-   replica with a `ReadWriteOnce` key volume.
+2. **A shared Data Protection key store is required.** Sign-in cookies, antiforgery tokens and stored secrets are
+   encrypted with the key ring. All replicas must read the same keys. Without `Meridian__KeysPath` they share the
+   database table ([Keys and secrets](#keys-and-secrets)). With it, use a `ReadWriteMany` volume (NFS, EFS, Azure
+   Files, CephFS) or an `existingClaim` on shared storage. The chart refuses to render more than one replica with a
+   `ReadWriteOnce` key volume.
 3. **Live collaboration is per process.** Each project's live session is held by the replica that opened it. Two
    people on different replicas editing the same project at the same time do not see each other's changes, and
    the later save wins. Sticky sessions keep a *user* on one replica, not a *project*. Until Meridian has

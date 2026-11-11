@@ -28,7 +28,7 @@ public sealed class AssistantSettings
 {
     private readonly IConfiguration _config;
     private readonly MeridianHostInfo _host;
-    private readonly IDataProtector _protector;
+    private readonly Hosting.SecretProtector _protector;
     private readonly string _path;
     private readonly object _gate = new();
     private Stored _stored;
@@ -62,13 +62,34 @@ public sealed class AssistantSettings
         public string? Model { get; set; }
     }
 
-    public AssistantSettings(IConfiguration config, MeridianHostInfo host, IDataProtectionProvider protection)
+    public AssistantSettings(IConfiguration config, MeridianHostInfo host, IDataProtectionProvider protection, Hosting.LegacySecretKeys? legacyKeys = null)
     {
         _config = config;
         _host = host;
-        _protector = protection.CreateProtector("Meridian.Assistant.ApiKey.v1");
+        _protector = new Hosting.SecretProtector(protection, "Meridian.Assistant.ApiKey.v1", legacyKeys);
         _path = Path.Combine(host.DataPath, "assistant.json");
         _stored = Load();
+        MigratedSecrets = MigrateLegacyKeys();
+    }
+
+    /// <summary>How many saved keys written by an older version were re-protected under the stable key name when loading.</summary>
+    public int MigratedSecrets { get; }
+
+    private int MigrateLegacyKeys()
+    {
+        lock (_gate)
+        {
+            var n = 0;
+            _protector.Unprotect(_stored.ProtectedKey, out var key);
+            if (key is not null) { _stored.ProtectedKey = key; n++; }
+            if (_stored.Local is { } local)
+            {
+                _protector.Unprotect(local.ProtectedApiKey, out var localKey);
+                if (localKey is not null) { local.ProtectedApiKey = localKey; n++; }
+            }
+            if (n > 0) Save();
+            return n;
+        }
     }
 
     public bool LocalMode => _host.LocalMode;
@@ -104,8 +125,7 @@ public sealed class AssistantSettings
         lock (_gate)
         {
             if (_stored.ProtectedKey is not { Length: > 0 } p) return null;
-            try { return _protector.Unprotect(p); }
-            catch (CryptographicException) { return null; }   // keys rotated or file copied from another machine
+            return _protector.Unprotect(p);   // null: keys lost or file copied from another machine
         }
     }
 
@@ -233,10 +253,7 @@ public sealed class AssistantSettings
         if (_host.LocalMode)
             lock (_gate)
                 if (_stored.Local?.ProtectedApiKey is { Length: > 0 } p)
-                {
-                    try { return _protector.Unprotect(p); }
-                    catch (CryptographicException) { }
-                }
+                    if (_protector.Unprotect(p) is { } key) return key;
         return _config["Meridian:AI:Local:ApiKey"] is { Length: > 0 } k ? k : null;
     }
 

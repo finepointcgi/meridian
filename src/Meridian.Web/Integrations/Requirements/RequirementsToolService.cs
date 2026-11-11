@@ -32,7 +32,7 @@ public sealed class RequirementsToolService(IMeridianStore db, IntegrationServic
     public IRequirementsSource Source(IntegrationConnection c)
     {
         if (c.Kind != RequirementsToolKinds.RequirementsTool) throw new RequirementsToolException("Not a requirements tool connection.");
-        var secret = integrations.Unprotect(c.ProtectedSecret)
+        var secret = integrations.Unprotect(c.ProtectedSecret, c.Id)
                      ?? throw new RequirementsToolException($"The password or token for “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations.");
         return Source(RequirementsToolConfig.Parse(c.ConfigJson), secret);
     }
@@ -46,7 +46,7 @@ public sealed class RequirementsToolService(IMeridianStore db, IntegrationServic
     {
         var secret = newSecret;
         if (string.IsNullOrEmpty(secret) && existingId is { } id && await db.FindIntegrationAsync(id) is { } c && c.ProjectId == projectId && c.Kind == RequirementsToolKinds.RequirementsTool)
-            secret = integrations.Unprotect(c.ProtectedSecret);
+            secret = integrations.Unprotect(c.ProtectedSecret, c.Id);
         if (string.IsNullOrEmpty(secret)) throw new RequirementsToolException("Enter the password or token.");
         return secret.Trim();
     }

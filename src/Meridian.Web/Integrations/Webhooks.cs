@@ -283,7 +283,7 @@ public sealed class WebhookDispatcher(ProjectEvents events, IMeridianStore db, I
             request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Meridian-Webhooks", "1.0"));
             request.Headers.TryAddWithoutValidation("X-Meridian-Event", evt);
             request.Headers.TryAddWithoutValidation("X-Meridian-Delivery", deliveryId);
-            if (integrations.Unprotect(hook.ProtectedSecret) is { Length: > 0 } secret)
+            if (integrations.Unprotect(hook.ProtectedSecret, hook.Id) is { Length: > 0 } secret)
                 request.Headers.TryAddWithoutValidation(WebhookSignature.Header, WebhookSignature.Sign(secret, body));
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(options.Timeout);

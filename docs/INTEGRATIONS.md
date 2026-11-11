@@ -45,8 +45,9 @@ credentials and that the project/repository is reachable. Base URLs may be `http
 Tokens and webhook secrets are encrypted with ASP.NET Core Data Protection (purpose
 `Meridian.Integrations.Secrets.v1`) before they are stored, are decrypted only to call the remote service, are
 never logged (HTTP client header logging is redacted) and are never sent back to the browser — the dialog shows
-"••• set"; leave the field empty to keep the stored value. Persist the key ring (`Meridian:KeysPath`, a mounted
-volume in containers); if the keys are lost the secrets must be re-entered.
+"••• set"; leave the field empty to keep the stored value. The key ring is kept in the Meridian database unless
+`Meridian:KeysPath` names a folder, so the secrets survive moving or upgrading the app; if the keys are lost the
+secrets must be re-entered ([DEPLOYMENT.md, Keys and secrets](DEPLOYMENT.md#keys-and-secrets)).
 
 ### Which addresses the server will call
 

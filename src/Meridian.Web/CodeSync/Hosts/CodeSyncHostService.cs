@@ -120,7 +120,7 @@ public sealed class CodeSyncHostService(
         if (config.Validate() is { } err) throw new GitHostException(err);
         var token = newToken;
         if (string.IsNullOrWhiteSpace(token) && existingId is { } id && await db.FindIntegrationAsync(id) is { } c && c.ProjectId == projectId && c.Kind == CodeRepoKinds.CodeRepo)
-            token = integrations.Unprotect(c.ProtectedSecret);
+            token = integrations.Unprotect(c.ProtectedSecret, c.Id);
         if (string.IsNullOrWhiteSpace(token)) throw new GitHostException("Enter the access token.");
         return await Host(config, token.Trim()).TestConnectionAsync(ct);
     }
@@ -134,7 +134,7 @@ public sealed class CodeSyncHostService(
 
     public IGitHost Host(IntegrationConnection c)
     {
-        var token = integrations.Unprotect(c.ProtectedSecret)
+        var token = integrations.Unprotect(c.ProtectedSecret, c.Id)
             ?? throw new GitHostException($"The access token for “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations.");
         return Host(CodeRepoConfig.Parse(c.ConfigJson), token);
     }
@@ -180,7 +180,7 @@ public sealed class CodeSyncHostService(
         var c = await db.FindIntegrationAsync(connectionId);
         if (c is null || c.Kind != CodeRepoKinds.CodeRepo) return new(404, "Unknown repository connection.");
         var config = CodeRepoConfig.Parse(c.ConfigJson);
-        var secret = integrations.Unprotect(config.ProtectedWebhookSecret);
+        var secret = integrations.Unprotect(config.ProtectedWebhookSecret, c.Id);
         if (string.IsNullOrEmpty(secret)) return new(401, "This connection has no webhook secret; generate one in Meridian.");
 
         WebhookEventKind kind;
@@ -311,7 +311,7 @@ public sealed class CodeSyncHostService(
             var reader = sp.GetServices<ICodeReader>().LastOrDefault(r => r.Language == config.Language);
             Func<string, bool> include = reader is null ? DefaultInclude(config.Language) : reader.Handles;
             // The archive, then its git submodules (archives leave their code out), all within one set of limits.
-            var fetched = await new SubmoduleFetcher(Host, log).FetchAsync(host, config, integrations.Unprotect(c.ProtectedSecret) ?? "", job.Commit, include,
+            var fetched = await new SubmoduleFetcher(Host, log).FetchAsync(host, config, integrations.Unprotect(c.ProtectedSecret, c.Id) ?? "", job.Commit, include,
                 await OtherCredentialsAsync(c), new SnapshotBudget(Limits), ct);
             var snapshot = fetched.Snapshot;
             if (job.PullRequest is null && (fetched.Submodules.Count > 0 || config.Submodules.Count > 0)) await UpdateConfigAsync(c.Id, cfg => cfg.Submodules = [.. fetched.Submodules]);
@@ -349,7 +349,7 @@ public sealed class CodeSyncHostService(
         foreach (var other in await integrations.ListAsync(c.ProjectId, CodeRepoKinds.CodeRepo))
         {
             if (other.Id == c.Id || other.ProjectId != c.ProjectId) continue;
-            if (integrations.Unprotect(other.ProtectedSecret) is not { Length: > 0 } token) continue;
+            if (integrations.Unprotect(other.ProtectedSecret, other.Id) is not { Length: > 0 } token) continue;
             var cfg = CodeRepoConfig.Parse(other.ConfigJson);
             cfg.Normalize();
             if (cfg.Validate() is null) list.Add(new SubmoduleCredential(other.Name, cfg, token.Trim()));

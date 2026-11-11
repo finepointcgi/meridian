@@ -96,7 +96,7 @@ public sealed class DatabaseConnectionService(IntegrationService integrations, I
     public async Task<DbCatalog> ReadAsync(IntegrationConnection c, CancellationToken ct)
     {
         var cfg = DatabaseConnectionConfig.Parse(c.ConfigJson);
-        var cs = integrations.Unprotect(c.ProtectedSecret) ?? throw new DatabaseImportException($"The connection string of “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations ▸ Databases.");
+        var cs = integrations.Unprotect(c.ProtectedSecret, c.Id) ?? throw new DatabaseImportException($"The connection string of “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations ▸ Databases.");
         return await ReadAsync(cfg, cs, ct);
     }
 
@@ -105,7 +105,7 @@ public sealed class DatabaseConnectionService(IntegrationService integrations, I
     {
         if (!CanManage(isServerAdmin)) throw new DatabaseImportException("Only server administrators can test database connections on a team server.");
         var cs = connectionString;
-        if (string.IsNullOrWhiteSpace(cs) && id is { } i && await FindAsync(projectId, i) is { } saved) cs = integrations.Unprotect(saved.ProtectedSecret);
+        if (string.IsNullOrWhiteSpace(cs) && id is { } i && await FindAsync(projectId, i) is { } saved) cs = integrations.Unprotect(saved.ProtectedSecret, saved.Id);
         if (string.IsNullOrWhiteSpace(cs)) throw new DatabaseImportException("Enter the connection string.");
         var catalog = await ReadAsync(WithTimeout(cfg, 15), cs, ct);
         return $"Connected: {catalog.Schemas.Count} schema{(catalog.Schemas.Count == 1 ? "" : "s")}, {catalog.AllTables.Count()} tables and views.";

@@ -20,6 +20,10 @@ git tag v0.8.0
 git push origin v0.8.0
 ```
 
+Release notes for a version that changes how keys or secrets are stored must say so. The first release after 0.8.0 (stable key name, key ring in
+the database) signs everyone out once after the upgrade and re-encrypts stored secrets on first start; see
+[DEPLOYMENT.md, Keys and secrets](DEPLOYMENT.md#keys-and-secrets).
+
 You can also start the workflow by hand (**Actions → Release → Run workflow**) to build and download the packages as
 workflow artifacts. A manual run never publishes a release.
 
@@ -267,7 +271,9 @@ the update stops.
   folder keeps its name, such as `meridian-0.8.0`. On Windows, a setup-made install keeps its uninstaller.
   On the next start the app deletes the staging and `-old` folders. The data folder (`MERIDIAN_DATA`, or the
   application-data `Meridian` folder: the database, `desktop.json` and keys) is outside the install and is never moved.
-  If it is inside the install folder, the app does not swap the folder.
+  If it is inside the install folder, the app does not swap the folder. Stored secrets survive the swap: the Data
+  Protection key ring has the stable name `Meridian` and lives in the data folder's database, not the install
+  ([DEPLOYMENT.md, Keys and secrets](DEPLOYMENT.md#keys-and-secrets)).
 - **Install folder can't be written** (for example Program Files, `/opt` from the `.deb`, or `/Applications` without
   admin rights): the app says so and opens the release page so you can download the update yourself. A development build
   (`dotnet run`, which has no self-contained runtime next to it) never replaces itself.

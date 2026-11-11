@@ -51,10 +51,11 @@ public static class MeridianServer
         builder.Services.AddMudServices();
         var host = MeridianHostInfo.From(builder.Configuration);
         builder.Services.AddSingleton(host);
-        builder.Services.AddSingleton<IMeridianStore>(host.LocalMode || builder.Configuration["Meridian:Storage"] == "sqlite"
+        IMeridianStore store = host.LocalMode || builder.Configuration["Meridian:Storage"] == "sqlite"
             ? new SqliteStore(Path.Combine(host.DataPath, "meridian.db"))
             : new PostgresStore(builder.Configuration.GetConnectionString("Meridian")
-                ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database.")));
+                ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database."));
+        builder.Services.AddSingleton(store);
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddSingleton<ImageCache>();
         builder.Services.AddSingleton(sp => new ReportJobService(sp.GetRequiredService<ILogger<ReportJobService>>(),
@@ -73,10 +74,9 @@ public static class MeridianServer
         CodeSync.CodeSyncSetup.AddMeridianCodeSync(builder.Services);   // code-sync review branches: runner + accept/reject (docs/CODE-SYNC.md)
         CodeSync.Conformance.ArchitectureSetup.AddMeridianArchitectureChecks(builder.Services);   // model-to-code checks (docs/ARCHITECTURE-CHECKS.md)
 
-        // Persist cookie-encryption keys (containers): set Meridian:KeysPath to a mounted volume.
-        if ((builder.Configuration["Meridian:KeysPath"] is { Length: > 0 } kp ? kp : host.LocalMode ? Path.Combine(host.DataPath, "keys") : null) is { } keysPath)
-            Microsoft.AspNetCore.DataProtection.DataProtectionBuilderExtensions.PersistKeysToFileSystem(
-                Microsoft.Extensions.DependencyInjection.DataProtectionServiceCollectionExtensions.AddDataProtection(builder.Services), new DirectoryInfo(keysPath));
+        // The Data Protection key ring (stored secrets, sign-in cookies): a stable application name, kept in the database unless
+        // Meridian:KeysPath names a folder; older file-based keys are copied in and older secrets re-protected (Hosting/KeyRing.cs).
+        var keyRing = Hosting.KeyRing.Configure(builder, host, store);
 
         builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(o =>
@@ -99,6 +99,9 @@ public static class MeridianServer
 
         var meridianDb = app.Services.GetRequiredService<IMeridianStore>();
         await meridianDb.MigrateAsync();
+        Hosting.KeyRing.ImportFileKeys(keyRing, app.Logger);
+        app.Logger.LogInformation("Data Protection keys are kept in {Location}{Encryption}", keyRing.Location,
+            keyRing.Encryption is { } enc ? $", encrypted with a {enc}" : "");
         Meridian.Data.History.ElementHistoryIndexer.For(meridianDb).OnError = (project, ex) =>   // element history index (built in the background)
             app.Logger.LogWarning(ex, "Indexing element history of project {Project} failed; it is retried on the next request", project);
         var localUser = host.LocalMode ? await EnsureLocalUser(meridianDb) : null;

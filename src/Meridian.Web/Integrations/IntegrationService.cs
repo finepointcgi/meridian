@@ -16,18 +16,84 @@ public sealed record IssueBatchResult(int Done, int Skipped, IReadOnlyList<strin
 /// with ASP.NET Data Protection before they reach the store, decrypted only to call the remote service, never logged
 /// and never handed back to the UI.
 /// </summary>
-public sealed class IntegrationService(IMeridianStore db, IDataProtectionProvider protection, IHttpClientFactory httpFactory)
+public sealed class IntegrationService(IMeridianStore db, IDataProtectionProvider protection, IHttpClientFactory httpFactory,
+    Hosting.LegacySecretKeys? legacyKeys = null, ILogger<IntegrationService>? log = null)
 {
     public const string HttpClientName = "meridian-integrations";
-    private readonly IDataProtector _protector = protection.CreateProtector("Meridian.Integrations.Secrets.v1");
+    private readonly Hosting.SecretProtector _secrets = new(protection, "Meridian.Integrations.Secrets.v1", legacyKeys);
+    private readonly SemaphoreSlim _migrationGate = new(1, 1);
+    private readonly object _migrationQueueLock = new();
 
-    internal string Protect(string secret) => _protector.Protect(secret);
+    internal string Protect(string secret) => _secrets.Protect(secret);
 
-    internal string? Unprotect(string? protectedSecret)
+    /// <summary>Null when empty or when no key can decrypt it (the key ring was lost): the secret must then be re-entered.</summary>
+    internal string? Unprotect(string? protectedSecret) => _secrets.Unprotect(protectedSecret);
+
+    /// <summary>
+    /// Like <see cref="Unprotect(string?)"/> for a secret stored in connection <paramref name="owner"/> (its secret or a
+    /// "protected…" field of its settings). A secret written by an older version is re-protected and saved straight away.
+    /// </summary>
+    internal string? Unprotect(string? protectedSecret, Guid owner)
     {
-        if (string.IsNullOrEmpty(protectedSecret)) return null;
-        try { return _protector.Unprotect(protectedSecret); }
-        catch (System.Security.Cryptography.CryptographicException) { return null; }   // key ring lost: the secret must be re-entered
+        var plain = _secrets.Unprotect(protectedSecret, out var migrated);
+        if (migrated is not null)
+            lock (_migrationQueueLock) PendingMigration = PendingMigration.ContinueWith(_ => MigrateConnectionAsync(owner), TaskScheduler.Default).Unwrap();
+        return plain;
+    }
+
+    /// <summary>The latest on-read migration queued by <see cref="Unprotect(string?, Guid)"/> (tests wait for it).</summary>
+    internal Task PendingMigration { get; private set; } = Task.CompletedTask;
+
+    /// <summary>
+    /// Re-protects, under the stable key name, the secrets of connection <paramref name="id"/> that an older version wrote:
+    /// its secret and every "protected…" string of its settings JSON. True when something was saved.
+    /// </summary>
+    public async Task<bool> MigrateConnectionAsync(Guid id)
+    {
+        await _migrationGate.WaitAsync();
+        try
+        {
+            if (await db.FindIntegrationAsync(id) is not { } c) return false;
+            var changed = false;
+            var secret = c.ProtectedSecret;
+            _secrets.Unprotect(secret, out var migrated);
+            if (migrated is not null) { secret = migrated; changed = true; }
+            var json = c.ConfigJson;
+            if (!string.IsNullOrWhiteSpace(json) && System.Text.Json.Nodes.JsonNode.Parse(json) is System.Text.Json.Nodes.JsonObject o)
+            {
+                var jsonChanged = false;
+                foreach (var (name, value) in o.ToList())
+                    if (name.StartsWith("protected", StringComparison.OrdinalIgnoreCase) && value is System.Text.Json.Nodes.JsonValue v
+                        && v.TryGetValue<string>(out var s))
+                    {
+                        _secrets.Unprotect(s, out var m);
+                        if (m is not null) { o[name] = m; jsonChanged = true; }
+                    }
+                if (jsonChanged) { json = o.ToJsonString(IntegrationJson.Options); changed = true; }
+            }
+            if (changed) await db.SaveIntegrationAsync(c with { ProtectedSecret = secret, ConfigJson = json });
+            return changed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log?.LogWarning(ex, "Re-protecting the secrets of integration {Connection} failed; they are still readable", id);
+            return false;
+        }
+        finally { _migrationGate.Release(); }
+    }
+
+    /// <summary>Runs <see cref="MigrateConnectionAsync"/> over every connection of every project. Returns how many were saved.</summary>
+    public async Task<int> MigrateLegacySecretsAsync(CancellationToken ct = default)
+    {
+        if (legacyKeys is null) return 0;
+        var n = 0;
+        foreach (var p in await db.ListAllProjectsAsync())
+            foreach (var c in await db.ListIntegrationsAsync(p.Id))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (await MigrateConnectionAsync(c.Id)) n++;
+            }
+        return n;
     }
 
     private HttpClient Http() => httpFactory.CreateClient(HttpClientName);
@@ -68,7 +134,7 @@ public sealed class IntegrationService(IMeridianStore db, IDataProtectionProvide
     public IIssueTracker Tracker(IntegrationConnection c)
     {
         if (c.Kind != IntegrationKinds.IssueTracker) throw new IssueTrackerException("Not an issue tracker connection.");
-        var secret = Unprotect(c.ProtectedSecret) ?? throw new IssueTrackerException($"The token for “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations.");
+        var secret = Unprotect(c.ProtectedSecret, c.Id) ?? throw new IssueTrackerException($"The token for “{c.Name}” is missing or can no longer be decrypted — enter it again in Integrations.");
         return Tracker(IssueTrackerConfig.Parse(c.ConfigJson), secret);
     }
 
@@ -78,7 +144,7 @@ public sealed class IntegrationService(IMeridianStore db, IDataProtectionProvide
         if (config.Validate() is { } err) throw new IssueTrackerException(err);
         var secret = newSecret;
         if (string.IsNullOrEmpty(secret) && existingId is { } id && await db.FindIntegrationAsync(id) is { } c && c.ProjectId == projectId)
-            secret = Unprotect(c.ProtectedSecret);
+            secret = Unprotect(c.ProtectedSecret, c.Id);
         if (string.IsNullOrEmpty(secret)) throw new IssueTrackerException("Enter the API token.");
         return await Tracker(config, secret.Trim()).TestAsync();
     }
