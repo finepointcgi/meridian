@@ -18,11 +18,14 @@ public static class UiKinds
         ElementKind.Activity or ElementKind.Action or ElementKind.StateMachine or ElementKind.State or ElementKind.Interaction or ElementKind.Lifeline or ElementKind.Message => "#2a7fbf",
         ElementKind.Package or ElementKind.Model => "#5b6577",
         ElementKind.Diagram => "#0b8a6a",
-        ElementKind.TableView or ElementKind.QueryView => "#2d9cdb",
+        ElementKind.TableView or ElementKind.QueryView or ElementKind.RelationMap => "#2d9cdb",
         ElementKind.ValidationRule => "#d9822b",
         ElementKind.Operation => "#8a5a00",
         ElementKind.Feature or ElementKind.Configuration or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes => "#8e44ad",
         ElementKind.TradeStudy => "#d35400",
+        ElementKind.InstanceSpecification or ElementKind.Slot or ElementKind.Link => "#16a085",
+        ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment or ElementKind.CommunicationPath => "#3b6fb6",
+        ElementKind.Artifact or ElementKind.DeploymentSpecification or ElementKind.Deployment or ElementKind.Manifestation => "#1d8a8a",
         ElementKind.FailureMode or ElementKind.Mitigate or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate or ElementKind.FaultTreeLink => "#c0392b",
         _ => "#6b7586",
     };
@@ -38,6 +41,8 @@ public static class UiKinds
         ElementKind.Comment => "”", ElementKind.InitialNode or ElementKind.InitialState => "●", ElementKind.ActivityFinalNode or ElementKind.FinalState => "◉",
         ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬", ElementKind.Pseudostate => "◇", ElementKind.InteractionOperand => "┄",
         ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
+        ElementKind.InstanceSpecification => "i", ElementKind.Slot => "=",
+        ElementKind.Node => "N", ElementKind.Device => "Dv", ElementKind.ExecutionEnvironment => "EE", ElementKind.Artifact => "Ar", ElementKind.DeploymentSpecification => "DS",
         ElementKind.FailureMode => "FM", ElementKind.FaultTreeEvent => "Ev", ElementKind.FaultTreeGate => "G",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
@@ -52,6 +57,8 @@ public static class UiKinds
             return $"{name}«{kw}» {r.Source.DisplayName} → {r.Target.DisplayName}";
         }
         if (e.Kind == ElementKind.Requirement) return $"{e.Get(FieldKeys.RequirementId)} {e.DisplayName}".Trim();
+        if (e.Kind == ElementKind.InstanceSpecification) return Meridian.Core.Instances.InstanceModel.Label(m, e);
+        if (e.Kind == ElementKind.Slot) return Meridian.Core.Instances.InstanceModel.SlotLine(m, e);
         if (Metamodel.IsTypedFeature(e.Kind))
         {
             var t = m.TypeDisplayName(e);
@@ -126,6 +133,7 @@ public static class UiKinds
         ElementKind.Diagram => MudBlazor.Icons.Material.Outlined.Schema,
         ElementKind.TableView => MudBlazor.Icons.Material.Outlined.TableChart,
         ElementKind.QueryView => MudBlazor.Icons.Material.Outlined.ManageSearch,
+        ElementKind.RelationMap => MudBlazor.Icons.Material.Outlined.Hub,
         ElementKind.ValidationRule => MudBlazor.Icons.Material.Outlined.Rule,
         ElementKind.Satisfy => MudBlazor.Icons.Material.Outlined.TaskAlt,
         ElementKind.Verify => MudBlazor.Icons.Material.Outlined.Verified,
@@ -150,6 +158,17 @@ public static class UiKinds
         ElementKind.InlineInteraction => MudBlazor.Icons.Material.Outlined.SwapVert,
         ElementKind.CommunicationLifeline => MudBlazor.Icons.Material.Outlined.CropSquare,
         ElementKind.CommunicationLink => MudBlazor.Icons.Material.Outlined.HorizontalRule,
+        ElementKind.InstanceSpecification => MudBlazor.Icons.Material.Outlined.DataObject,
+        ElementKind.Slot => MudBlazor.Icons.Material.Outlined.DragHandle,
+        ElementKind.Link => MudBlazor.Icons.Material.Outlined.Link,
+        ElementKind.Node => MudBlazor.Icons.Material.Outlined.Dns,
+        ElementKind.Device => MudBlazor.Icons.Material.Outlined.Memory,
+        ElementKind.ExecutionEnvironment => MudBlazor.Icons.Material.Outlined.WebAsset,
+        ElementKind.Artifact => MudBlazor.Icons.Material.Outlined.Description,
+        ElementKind.DeploymentSpecification => MudBlazor.Icons.Material.Outlined.Article,
+        ElementKind.Deployment => MudBlazor.Icons.Material.Outlined.Publish,
+        ElementKind.Manifestation => MudBlazor.Icons.Material.Outlined.Code,
+        ElementKind.CommunicationPath => MudBlazor.Icons.Material.Outlined.SettingsEthernet,
         ElementKind.FailureMode => MudBlazor.Icons.Material.Outlined.ReportProblem,
         ElementKind.FaultTreeEvent => MudBlazor.Icons.Material.Outlined.CropLandscape,
         ElementKind.FaultTreeGate => MudBlazor.Icons.Material.Outlined.Merge,
@@ -231,6 +250,8 @@ public static class UiKinds
         DiagramType.Timing => MudBlazor.Icons.Material.Outlined.Timeline,
         DiagramType.InteractionOverview => MudBlazor.Icons.Material.Outlined.Schema,
         DiagramType.Communication => MudBlazor.Icons.Material.Outlined.Hub,
+        DiagramType.Object => MudBlazor.Icons.Material.Outlined.DataObject,
+        DiagramType.Deployment => MudBlazor.Icons.Material.Outlined.Dns,
         DiagramType.FaultTree => MudBlazor.Icons.Material.Outlined.AccountTree,
         _ when UafViewpoints.IsUaf(t) => MudBlazor.Icons.Material.Outlined.Widgets,
         _ => MudBlazor.Icons.Material.Outlined.Class,

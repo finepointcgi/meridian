@@ -67,7 +67,7 @@
         }
         catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException)
         {
-            _error = $"Could not read {e.File.Name}: {ex.Message}";
+            _error = $"Could not read {e.File.Name}: {FriendlyError.Describe(ex)}. Choose an .fmu file or its modelDescription.xml.";
         }
     }
 
@@ -82,6 +82,6 @@
             Ws.Select(block);
             Ws.SetStatus($"Imported FMU '{_md.ModelName}' as block {block.Name}" + (hash != null ? " (FMU stored for co-simulation)" : " (interface only)"));
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { _error = ex.Message; }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { _error = $"Could not import the FMU: {FriendlyError.Describe(ex)}."; }
     }
 }

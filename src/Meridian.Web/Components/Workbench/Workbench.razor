@@ -14,9 +14,9 @@
             Meridian
         </div>
         <TabletDrawers />
-        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true" PopoverClass="menu-fit" ListClass="project-menu kbd-menu">
             <ActivatorContent>
-                <div class="project">
+                <div class="project" title="Project menu: open, import, versions, sharing, integrations and export">
                     <MudIcon Icon="@Icons.Material.Outlined.FolderSpecial" Style="font-size:17px; color:var(--accent-2)" />
                     <span style="font-weight:600">@(Ws.Session?.Name ?? "No project")</span>
                     @if (Ws.ReadOnly) { <span class="ro-badge">View only</span> }
@@ -34,6 +34,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip, Mermaid .mmd / Markdown">Open a file as a new project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, Mermaid (.mmd, Markdown), or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="@(() => PasteMermaid())" Disabled="Ws.ReadOnly" title="Flowcharts, class, state, sequence, requirement, ER and C4 diagrams written in Mermaid (for example by an AI assistant)">Paste Mermaid…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="@(() => ImportSpreadsheet())" Disabled="Ws.ReadOnly" data-testid="menu-import-spreadsheet" title="Any element kind from Excel (.xlsx) or CSV with a column mapping; re-importing updates and offers removals for review">Spreadsheet (Excel / CSV)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Storage" OnClick="ImportDatabaseSchema" Disabled="Ws.ReadOnly" data-testid="menu-import-database" title="PostgreSQL, SQL Server, MySQL / MariaDB, SQLite or Oracle DDL, a SQL Server .dacpac or a Mermaid erDiagram">Database schema (DDL / .dacpac)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Cable" OnClick="ConnectToDatabase" Disabled="Ws.Session == null" title="Integrations ▸ Databases: import a live PostgreSQL, MySQL / MariaDB or SQLite schema and refresh it later">Connect to a database…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Badge" OnClick="AddUafProfile" Disabled="Ws.ReadOnly">Add UAF profile</MudMenuItem>
@@ -48,24 +49,23 @@
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
                 }
-                <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => Dialogs.ShowAsync<IntegrationsDialog>("Integrations", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }))" Disabled="Ws.Session == null">Integrations (issue trackers, webhooks, code)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => Dialogs.ShowAsync<IntegrationsDialog>("Integrations", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }))" Disabled="Ws.Session == null"
+                             title="Issue trackers (Jira, Azure DevOps, GitHub, GitLab), webhooks, DOORS Next and Polarion, code repositories and live databases">Integrations… <span class="menu-hint">Jira, DOORS, Polarion, Git, databases</span></MudMenuItem>
                 <MudDivider />
-                <MudMenuItem Disabled="true" Class="menu-heading">Export</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="DownloadProject">Download .meridian file</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.FileDownload" OnClick="ExportXmi">Export XMI 2.5.1</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Code" OnClick="ExportSysML">Export SysML v2 text</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Image" OnClick="ExportSvg" Disabled="Ws.Active == null">Export diagram as SVG</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="ExportMermaid" Disabled="!CanExportMermaid" title="Activity, state machine, sequence, block definition and requirement diagrams">Export diagram as Mermaid (.mmd)</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyMermaid" Disabled="!CanExportMermaid">Copy diagram as Mermaid</MudMenuItem>
-                <MudDivider />
-                <MudMenuItem Disabled="true" Class="menu-heading">Help</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()">Settings… <Key>⌘,</Key></MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="ShowTour" data-testid="help-tour">Tour…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.NewReleases" OnClick="ShowWhatsNew">What's new in @TourChapters.WhatsNewVersion</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
+                @* Export ▸ (a submenu since 0.7.1; MudBlazor's nested menu: hover, click or → opens it, ← and Escape close it). *@
+                <MudMenu Label="Export" StartIcon="@Icons.Material.Outlined.IosShare" Dense="true" PopoverClass="menu-fit" ListClass="export-menu kbd-menu kbd-submenu" data-testid="menu-export">
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="DownloadProject">Download .meridian file</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.FileDownload" OnClick="ExportXmi">Export XMI 2.5.1</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Code" OnClick="ExportSysML">Export SysML v2 text</MudMenuItem>
+                    <MudDivider />
+                    <MudMenuItem Disabled="true" Class="menu-heading">Active diagram</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Image" OnClick="ExportSvg" Disabled="Ws.Active == null">Export diagram as SVG</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Print" OnClick="PrintDiagram" Disabled="Ws.Active == null">Print / PDF…</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="ExportMermaid" Disabled="!CanExportMermaid" title="Activity, state machine, sequence, block definition and requirement diagrams">Export diagram as Mermaid (.mmd)</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyMermaid" Disabled="!CanExportMermaid">Copy diagram as Mermaid</MudMenuItem>
+                </MudMenu>
             </ChildContent>
         </MudMenu>
         <BranchPicker />
@@ -87,6 +87,21 @@
                 </MudTooltip>
             }
         </div>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true" Class="tb-help" PopoverClass="menu-fit" AriaLabel="Help">
+            <ActivatorContent>
+                <MudTooltip Text="Help: tour, keyboard shortcuts, user guide, what's new"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.HelpOutline" aria-label="Help" data-testid="help-menu" /></MudTooltip>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="ShowTour" data-testid="help-tour">Tour…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.SwapHoriz" OnClick="() => StartTourChapter(TourChapters.ComingFrom)">Coming from Cameo or EA</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Keyboard" OnClick="ShowHelp">Keyboard &amp; mouse</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.MenuBook" OnClick="() => OpenGuide()" data-testid="help-guide" title="The user guide, served by this Meridian (works offline)">User guide</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Search" OnClick="() => _palette!.Show()">All commands… <Key>⌘K</Key></MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.NewReleases" OnClick="ShowWhatsNew">What's new in @TourChapters.WhatsNewVersion</MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
         @if (!Host.LocalMode)
         {
             <NotificationBell />
@@ -95,12 +110,12 @@
         {
             <MudTooltip Text="Share & members"><button class="rbtn" style="height:30px" @onclick="ShareProject"><MudIcon Icon="@Icons.Material.Outlined.Group" /><span class="t">Share</span></button></MudTooltip>
         }
-        <MudTooltip Text="Version history"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory" /></MudTooltip>
+        <MudTooltip Text="Version history"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.History" OnClick="ShowHistory" aria-label="Version history" /></MudTooltip>
         <div class="tb-actions">
-            <MudTooltip Text="Undo (⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Undo" Disabled="!Ws.Model.History.CanUndo" OnClick="Undo" /></MudTooltip>
-            <MudTooltip Text="Redo (⇧⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Redo" Disabled="!Ws.Model.History.CanRedo" OnClick="Redo" /></MudTooltip>
+            <MudTooltip Text="Undo (⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Undo" Disabled="!Ws.Model.History.CanUndo" OnClick="Undo" aria-label="Undo (⌘Z)" /></MudTooltip>
+            <MudTooltip Text="Redo (⇧⌘Z)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Redo" Disabled="!Ws.Model.History.CanRedo" OnClick="Redo" aria-label="Redo (⇧⌘Z)" /></MudTooltip>
             <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
-                <MudIconButton Class="tb-theme" Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" />
+                <MudIconButton Class="tb-theme" Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="ToggleTheme" aria-label="@(Ws.DarkMode ? "Light mode" : "Dark mode")" />
             </MudTooltip>
             <MudTooltip Text="Settings (⌘,)"><MudIconButton Class="tb-settings" Size="Size.Small" Icon="@Icons.Material.Outlined.Settings" OnClick="() => OpenSettings()" aria-label="Settings" /></MudTooltip>
             <button class="btn-primary" @onclick="Save" disabled="@Ws.ReadOnly" title="Save a named version you can compare or restore later. Your work is already saved automatically as you go."><MudIcon Icon="@Icons.Material.Outlined.Commit" Style="font-size:16px" /> Commit</button>
@@ -204,7 +219,7 @@
                         <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="ExportCsv">Export CSV</MudMenuItem>
                         <MudDivider />
                         <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="ExportRequirementsXlsx">Export Excel (.xlsx)</MudMenuItem>
-                        <MudMenuItem Icon="@Icons.Material.Outlined.Difference" OnClick="ImportRequirementsSheet" Disabled="Ws.ReadOnly">Re-import Excel / CSV with preview…</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Difference" OnClick="ImportRequirementsSheet" Disabled="Ws.ReadOnly">Import / re-import Excel / CSV (with mapping and preview)…</MudMenuItem>
                         <MudMenuItem Icon="@Icons.Material.Outlined.FormatListNumbered" OnClick="RenumberRequirements" Disabled="Ws.ReadOnly">Renumber requirements…</MudMenuItem>
                     </ChildContent>
                 </MudMenu>
@@ -216,15 +231,13 @@
                 <button title="Traceability matrix: requirements against design elements" class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
                 <MudTooltip Text="Traceability table: links, gaps and suspect links per requirement"><button class="rbtn @(_dockOpen && _dock == 7 ? "on" : "")" @onclick="() => ToggleDock(7)"><MudIcon Icon="@Icons.Material.Outlined.Link" /><span class="t">Trace table</span></button></MudTooltip>
                 <button title="Impact analysis: what depends on the selected element" class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
+                <MudTooltip Text="Relation map: everything connected to the selected element, up to 6 levels (⌘K “Relation map of …”)"><button class="rbtn @(RelationMapTabActive ? "on" : "")" data-testid="ribbon-relation-map" disabled="@(Ws.Selected == null)" @onclick="RelationMapOfSelection"><MudIcon Icon="@Icons.Material.Outlined.Hub" /><span class="t">Relation map</span></button></MudTooltip>
                 <button title="Requirements coverage: how many are satisfied and verified" class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
                 <button title="Check the model for errors and warnings (F7)" class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
-            </div>
-        </div>
-        <div class="rgroup compact @RibbonGroupClass("review")" data-tab="review">
-            <div class="rlabel">Review</div>
-            <div class="ritems">
+                @* Review (its own tab before 0.7.1): asking for and working through approvals of what the trace shows. *@
+                <span class="rsep" role="separator" aria-label="Review" title="Review"></span>
                 <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request a review of the selection")">
-                    <button class="rbtn" disabled="@(Ws.Session == null)" @onclick="() => RequestReview()"><MudIcon Icon="@Icons.Material.Outlined.RateReview" /><span class="t">Request</span></button>
+                    <button class="rbtn" data-testid="ribbon-request-review" disabled="@(Ws.Session == null)" @onclick="() => RequestReview()"><MudIcon Icon="@Icons.Material.Outlined.RateReview" /><span class="t">Request review</span></button>
                 </MudTooltip>
                 <button title="Open reviews and approvals" class="rbtn @(_dockOpen && _dock == ReviewsDock ? "on" : "")" @onclick="() => ToggleDock(ReviewsDock)"><MudIcon Icon="@Icons.Material.Outlined.Checklist" /><span class="t">Reviews</span></button>
             </div>
@@ -233,12 +246,13 @@
         <div class="rgroup compact @RibbonGroupClass("views")" data-tab="views">
             <div class="rlabel">Model views</div>
             <div class="ritems">
-                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Custom table</span></button></MudTooltip>
+                <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Generic table</span></button></MudTooltip>
                 <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
-                <MudTooltip Text="@(LibState.Updates.Count > 0 ? $"{LibState.Updates.Count} library update(s) available — review" : "Used projects (shared libraries): check for updates")">
-                    <button class="rbtn lib-rbtn" disabled="@(Ws.Session == null)" data-testid="ribbon-libraries"
+                <MudTooltip Text="Find and replace across the model (⌘⇧F)"><button class="rbtn @(_dockOpen && _dock == FindDock ? "on" : "")" data-testid="ribbon-find-replace" @onclick="() => ToggleDock(FindDock)"><MudIcon Icon="@Icons.Material.Outlined.FindReplace" /><span class="t">Find &amp; replace</span></button></MudTooltip>
+                <MudTooltip Text="@(LibState.Updates.Count > 0 ? $"{Plural.Of(LibState.Updates.Count, "used project update")} available — review" : "Used projects (shared libraries): check for updates")">
+                    <button class="rbtn lib-rbtn" disabled="@(Ws.Session == null)" data-testid="ribbon-libraries" data-tour="used-projects"
                             @onclick="@(() => LibState.Updates.Count > 0 ? UpdateUsedProject() : CheckLibraryUpdates())">
-                        <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" /><span class="t">Libraries</span>
+                        <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" /><span class="t">Used projects</span>
                         @if (LibState.Updates.Count > 0) { <span class="lib-count">@LibState.Updates.Count</span> }
                     </button>
                 </MudTooltip>
@@ -250,7 +264,7 @@
                 <button title="Step through activities and state machines, timed or Monte Carlo" class="rbtn @(_dockOpen && _dock == 5 ? "on" : "")" @onclick="() => ToggleDock(5)"><MudIcon Icon="@Icons.Material.Outlined.PlayCircle" /><span class="t">Simulate</span></button>
                 <button title="Solve parametric constraints" class="rbtn @(_dockOpen && _dock == 6 ? "on" : "")" @onclick="() => ToggleDock(6)"><MudIcon Icon="@Icons.Material.Outlined.Functions" /><span class="t">Parametrics</span></button>
                 <button title="Product variants and trade studies" class="rbtn @(_dockOpen && _dock == 11 ? "on" : "")" @onclick="() => ToggleDock(11)"><MudIcon Icon="@Icons.Material.Outlined.Balance" /><span class="t">Variants</span></button>
-                <button title="Verify requirements: evaluate their criteria with parametrics, Monte Carlo, timed simulation or co-simulation" class="rbtn @(_dockOpen && _dock == VerificationDock ? "on" : "")" disabled="@Ws.Verification.Running" @onclick="VerifyRequirements"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Verify</span></button>
+                <button title="Verify requirements: evaluate their criteria with parametrics, Monte Carlo, timed simulation or co-simulation" class="rbtn @(VerificationTabActive ? "on" : "")" data-tour="verify" disabled="@Ws.Verification.Running" @onclick="VerifyRequirements"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Verify</span></button>
             </div>
         </div>
         <div class="rgroup compact @RibbonGroupClass("safety")" data-tab="safety">
@@ -289,13 +303,20 @@
                         }
                     </ChildContent>
                 </MudMenu>
+                @* Extend (its own tab before 0.7.1): the script console and plugin commands, exporters and importers. *@
+                <span class="rsep" role="separator" aria-label="Extend" title="Extend"></span>
+                <PluginsMenu @ref="_plugins" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
             </div>
         </div>
-        <PluginsMenu @ref="_plugins" Active="@(ActiveRibbonTab == "extend")" ScriptOpen="@(_dockOpen && _dock == 10)" OnScript="() => ToggleDock(10)" />
         <div class="rgroup compact @RibbonGroupClass("ai")" data-tab="ai">
             <div class="rlabel">AI</div>
             <div class="ritems">
-                <MudTooltip Text="Ask the assistant (Claude) about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" data-tour="assistant" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
+                <MudTooltip Text="Ask the assistant about this model — ⌘K “Ask the assistant”"><button class="rbtn @(_dockOpen && _dock == AssistantDock ? "on" : "")" data-tour="assistant" @onclick="ToggleAssistant"><MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" /><span class="t">Assistant</span></button></MudTooltip>
+                <MudTooltip Text="The assistant picks and names the diagrams that tell the model's story; you accept or reject each one"><button class="rbtn" data-testid="ribbon-ai-diagram" @onclick="() => RunAssistant(Meridian.Web.Services.QuickAction.DiagramModel)"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span class="t">Diagram my model</span></button></MudTooltip>
+                <MudTooltip Text="Describe a system or process in words and get a diagram"><button class="rbtn" @onclick="() => RunAssistant(Meridian.Web.Services.QuickAction.DiagramFromDescription)"><MudIcon Icon="@Icons.Material.Outlined.Schema" /><span class="t">Diagram from text</span></button></MudTooltip>
+                <MudTooltip Text="Paste a specification and get requirements to review"><button class="rbtn" @onclick="() => RunAssistant(Meridian.Web.Services.QuickAction.GenerateRequirements)"><MudIcon Icon="@Icons.Material.Outlined.PlaylistAdd" /><span class="t">Requirements from text</span></button></MudTooltip>
+                <MudTooltip Text="Suggest satisfy and verify links for requirements without them"><button class="rbtn" @onclick="() => RunAssistant(Meridian.Web.Services.QuickAction.SuggestTraceLinks)"><MudIcon Icon="@Icons.Material.Outlined.Link" /><span class="t">Suggest links</span></button></MudTooltip>
+                <MudTooltip Text="Review the model for gaps, inconsistencies and naming problems"><button class="rbtn" @onclick="() => RunAssistant(Meridian.Web.Services.QuickAction.ReviewModel)"><MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="t">Review model</span></button></MudTooltip>
             </div>
         </div>
         @if (Ws.CodeChanges is not null || HasArchitecture)
@@ -305,7 +326,7 @@
                 <div class="ritems">
                     @if (Ws.CodeChanges is not null)
                     {
-                    <MudTooltip Text="What changed: code changes from connected repositories to accept or reject"><button class="rbtn @(Ws.ActiveView?.Kind == ViewTabKind.CodeChanges ? "on" : "")" @onclick="OpenCodeChanges"><MudIcon Icon="@Icons.Material.Outlined.Difference" /><span class="t">Changes</span></button></MudTooltip>
+                    <MudTooltip Text="Code changes from connected repositories to accept or reject"><button class="rbtn @(Ws.ActiveView?.Kind == ViewTabKind.CodeChanges ? "on" : "")" @onclick="OpenCodeChanges"><MudIcon Icon="@Icons.Material.Outlined.Difference" /><span class="t">Code changes</span></button></MudTooltip>
                     <MudTooltip Text="Highlight code changes on diagrams (⌘K “Highlight code changes”)"><button class="rbtn @(Ws.HighlightCodeChanges ? "on" : "")" @onclick="ToggleCodeHighlights"><MudIcon Icon="@Icons.Material.Outlined.Highlight" /><span class="t">Highlight</span></button></MudTooltip>
                     }
                     @if (HasArchitecture)
@@ -319,7 +340,7 @@
 
     @* ================================================================ workspace *@
     <main class="workbench">
-        <section class="card"><ModelTree @ref="_tree" /></section>
+        <section class="card" data-sheet-drop="file-sheet-import"><ModelTree @ref="_tree" /></section>
         <div class="splitter" @ref="_leftSplitter"></div>
 
         <section class="card center">
@@ -327,7 +348,8 @@
                 @foreach (var c in Ws.OpenDiagrams)
                 {
                     var ctl = c;
-                    <div class="tab @(Ws.ActiveView == null && ReferenceEquals(Ws.Active, ctl) ? "active" : "")" @onclick="() => Ws.Activate(ctl)" title="@ctl.Diagram.QualifiedName">
+                    <div class="tab @(Ws.ActiveView == null && ReferenceEquals(Ws.Active, ctl) ? "active" : "")" @onclick="() => Ws.Activate(ctl)" title="@ctl.Diagram.QualifiedName"
+                         @oncontextmenu="e => ShowDiagramTabMenu(ctl, e)" @oncontextmenu:preventDefault="true">
                         <MudIcon Icon="@UiKinds.DiagramIcon(ctl.Diagram.DiagramType)" Style="color:var(--accent-2)" />
                         <span>@ctl.Diagram.Name</span>
                         @if (IsStale(ctl.Diagram)) { <span class="derive-dot" title="Its source changed: update from source" data-testid="derive-dot"></span> }
@@ -344,7 +366,7 @@
                     </div>
                 }
                 <MudMenu Class="newtab" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
-                    <ActivatorContent><MudTooltip Text="New diagram"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" /></MudTooltip></ActivatorContent>
+                    <ActivatorContent><MudTooltip Text="New diagram"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" aria-label="New diagram" /></MudTooltip></ActivatorContent>
                     <ChildContent>
                         @foreach (var t in Enum.GetValues<DiagramType>())
                         {
@@ -358,12 +380,12 @@
             </div>
 
             <div class="crumbs">
-                <MudTooltip Text="Back"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowBack" Disabled="!Ws.CanGoBack" OnClick="Ws.GoBack" /></MudTooltip>
-                <MudTooltip Text="Forward"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowForward" Disabled="!Ws.CanGoForward" OnClick="Ws.GoForward" /></MudTooltip>
+                <MudTooltip Text="Back"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowBack" Disabled="!Ws.CanGoBack" OnClick="Ws.GoBack" aria-label="Back" /></MudTooltip>
+                <MudTooltip Text="Forward"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowForward" Disabled="!Ws.CanGoForward" OnClick="Ws.GoForward" aria-label="Forward" /></MudTooltip>
                 @if (Ws.ActiveView is { } shownView)
                 {
                     <span class="crumb current">@shownView.Title</span>
-                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", _ => "TEMPLATE" })</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", ViewTabKind.Verification => "VERIFICATION", ViewTabKind.RelationMap => "RELATION MAP", ViewTabKind.Instances => "INSTANCES", _ => "TEMPLATE" })</span>
                 }
                 else if (Ws.Active is { } act)
                 {
@@ -377,10 +399,10 @@
                     <span class="dtype">@Metamodel.DiagramAbbreviation(act.Diagram.DiagramType).ToUpperInvariant()</span>
                     <DerivedSourceBadge Diagram="act.Diagram" OnUpdate="UpdateFromSource" />
                     <span class="spacer"></span>
-                    <MudTooltip Text="Zoom out"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Remove" OnClick="() => act.SetZoom(act.Zoom / 1.2)" /></MudTooltip>
+                    <MudTooltip Text="Zoom out"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Remove" OnClick="() => act.SetZoom(act.Zoom / 1.2)" aria-label="Zoom out" /></MudTooltip>
                     <span class="zoom">@act.Zoom.ToString("P0", System.Globalization.CultureInfo.InvariantCulture)</span>
-                    <MudTooltip Text="Zoom in"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Add" OnClick="() => act.SetZoom(act.Zoom * 1.2)" /></MudTooltip>
-                    <MudTooltip Text="Fit"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.FitScreen" OnClick="act.ZoomToFit" /></MudTooltip>
+                    <MudTooltip Text="Zoom in"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Add" OnClick="() => act.SetZoom(act.Zoom * 1.2)" aria-label="Zoom in" /></MudTooltip>
+                    <MudTooltip Text="Fit"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.FitScreen" OnClick="act.ZoomToFit" aria-label="Fit" /></MudTooltip>
                 }
                 else
                 {
@@ -389,6 +411,7 @@
             </div>
 
             <div class="diagram-host">
+                <PinnedViewBanner />
                 @* A view tab lies over the canvas: the diagram stays mounted (no teardown, zoom and scroll kept). *@
                 @if (Ws.ActiveView is { } openView)
                 {
@@ -418,13 +441,17 @@
                     @DockTab(ReviewsDock, "Reviews", Icons.Material.Outlined.Checklist, null)
                     @DockTab(10, "Script", Icons.Material.Outlined.DataObject, null, "C# script console")
                     @DockTab(11, "Variants", Icons.Material.Outlined.Balance, null, "Variants & trade studies")
-                    @DockTab(VerificationDock, "Verification", Icons.Material.Outlined.Rule, null, "Simulation-driven requirement verification")
+                    @* Verification results are a centre tab (since 0.7.1); this dock tab is a shortcut that opens it. *@
+                    <span class="dock-tab dock-tab-link @(VerificationTabActive ? "on" : "")" data-testid="dock-verification" @onclick="OpenVerification" title="Simulation-driven requirement verification (opens as a tab next to the diagrams)">
+                        <MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="dl">Verification</span>
+                    </span>
+                    @DockTab(FindDock, "Find", Icons.Material.Outlined.FindReplace, null, "Find and replace (⌘⇧F)")
                     @DockTab(SafetyDock, "Safety", Icons.Material.Outlined.HealthAndSafety, null, "FMEA worksheet and fault tree analysis")
                     @DockTab(12, "SysML text", Icons.Material.Outlined.Code, null, "SysML v2 text editor")
                     @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null, "AI assistant")
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
                     <span style="flex:1"></span>
-                    <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" />
+                    <MudIconButton Size="Size.Small" Icon="@(_dockOpen ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowUp)" OnClick="() => _dockOpen = !_dockOpen" aria-label="@(_dockOpen ? "Hide the panel" : "Show the panel")" title="@(_dockOpen ? "Hide the panel" : "Show the panel")" />
                 </div>
                 @if (_dockOpen)
                 {
@@ -441,9 +468,9 @@
                             case ReviewsDock: <ReviewsPanel Focus="_reviewFocus" />; break;
                             case 10: <ScriptPanel />; break;
                             case 11: <VariantsPanel />; break;
-                            case VerificationDock: <VerificationPanel />; break;
-                            case SafetyDock: <SafetyPanel Tab="SafetyTab" TabChanged="t => SafetyTab = t" Top="SafetyTop" TopChanged="t => SafetyTop = t" />; break;
                             case 12: <SysmlTextPanel State="_sysml" />; break;
+                            case FindDock: <FindReplacePanel State="_find" />; break;
+                            case SafetyDock: <SafetyPanel Tab="SafetyTab" TabChanged="t => SafetyTab = t" Top="SafetyTop" TopChanged="t => SafetyTop = t" />; break;
                             case AssistantDock: <AssistantPanel Launcher="_assistant" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }
@@ -464,9 +491,10 @@
         @{ var health = Ws.Health; var color = health.Errors > 0 ? "var(--danger)" : health.Warnings > 0 ? "var(--warn)" : "var(--ok)"; }
         <span class="item" style="cursor:pointer" @onclick="Validate" title="Model health — click to validate">
             <span class="health" style="background:@color; box-shadow:0 0 0 3px @(health.Errors > 0 ? "rgba(255,107,107,.18)" : health.Warnings > 0 ? "rgba(240,180,41,.18)" : "rgba(63,191,127,.18)")"></span>
-            @(health.Errors == 0 && health.Warnings == 0 ? "Model healthy" : $"{health.Errors} errors · {health.Warnings} warnings")
+            @(health.Errors == 0 && health.Warnings == 0 ? "Model healthy" : $"{Plural.Of(health.Errors, "error")} · {Plural.Of(health.Warnings, "warning")}")
         </span>
         <span class="msg">@Ws.Status</span>
+        <ReportJobsStatus />
         <span class="item">@Counts()</span>
         <span class="item"><MudIcon Icon="@Icons.Material.Outlined.CloudDone" Style="font-size:14px" /> @SavedText()</span>
     </footer>
@@ -483,7 +511,7 @@
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
         <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.dacpac,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
-        <InputFile id="file-req-sheet" accept=".xlsx,.csv" OnChange="OnRequirementsSheetFile" />
+        <InputFile id="file-sheet-import" accept=".xlsx,.xlsm,.csv,.tsv" OnChange="OnSpreadsheetFile" />
     </div>
 </div>
 </CascadingValue>
@@ -495,10 +523,13 @@
         ViewTabKind.Query => Icons.Material.Outlined.ManageSearch,
         ViewTabKind.CodeChanges => Icons.Material.Outlined.Difference,
         ViewTabKind.Architecture => Icons.Material.Outlined.Rule,
+        ViewTabKind.Verification => Icons.Material.Outlined.Rule,
+        ViewTabKind.RelationMap => Icons.Material.Outlined.Hub,
+        ViewTabKind.Instances => Icons.Material.Outlined.DataObject,
         _ => Icons.Material.Outlined.EditNote,
     };
 
-    /// <summary>The content of a view tab: a table or query (TablesPanel), or the report template editor.</summary>
+    /// <summary>The content of a view tab: a table or query (TablesPanel), code changes, architecture, verification results, or the report template editor.</summary>
     private RenderFragment ViewTabContent(ViewTab v) => __builder =>
     {
         if (v.Kind is ViewTabKind.Table or ViewTabKind.Query)
@@ -514,6 +545,18 @@
         else if (v.Kind == ViewTabKind.Architecture)
         {
             <ArchitectureTab />
+        }
+        else if (v.Kind == ViewTabKind.Verification)
+        {
+            <div class="vfy-tab" data-testid="verify-tab"><VerificationPanel /></div>
+        }
+        else if (v.Kind == ViewTabKind.RelationMap)
+        {
+            <RelationMapTab Tab="v" />
+        }
+        else if (v.Kind == ViewTabKind.Instances && v.Element is { } classifier)
+        {
+            <InstanceTableTab Classifier="classifier" />
         }
         else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
         {

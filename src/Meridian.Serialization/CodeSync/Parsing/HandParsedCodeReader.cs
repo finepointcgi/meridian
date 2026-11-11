@@ -21,6 +21,9 @@ public abstract class HandParsedCodeReader : ICodeReader
     /// <summary>Stop reading files once their total length exceeds this (characters); a warning says so.</summary>
     public long MaxTotalLength { get; init; } = 200_000_000;
 
+    /// <summary>Uses recorded per (type, target) in <see cref="CodeType.DependencyLocations"/>; the rest are only counted.</summary>
+    public int MaxDependencyUsesPerTarget { get; init; } = CodeDependencyUses.DefaultMaxPerTarget;
+
     public abstract string Language { get; }
 
     public abstract bool Handles(string path);
@@ -78,10 +81,13 @@ public abstract class HandParsedCodeReader : ICodeReader
                     if (existing.Kind == t.Kind)
                     {
                         // TypeScript declaration merging, or the same name declared twice: one type with all members.
+                        // Uses in the other declaration keep pointing at its file.
+                        var other = t.File == existing.File ? null : t.File;
+                        foreach (var m in t.Members) m.File ??= other;
                         existing.Members.AddRange(t.Members);
                         existing.Extends.AddRange(t.Extends);
                         existing.Implements.AddRange(t.Implements);
-                        existing.BodyRefs.AddRange(t.BodyRefs);
+                        existing.BodyRefs.AddRange(other is null ? t.BodyRefs : t.BodyRefs.Select(r => r with { File = r.File ?? other }));
                         existing.Doc ??= t.Doc;
                     }
                     else warnings.Add($"Type {t.Symbol} is declared more than once ({existing.File}:{existing.Line} and {t.File}:{t.Line}); the first declaration was used.");
@@ -141,8 +147,18 @@ public abstract class HandParsedCodeReader : ICodeReader
             }
         }
 
+        // Where each scanned type is used: file, line and kind (capped per target below).
+        var uses = new List<CodeDependencyUse>();
+        void Note(string? target, string? file, int line, CodeDependencyKind how)
+        {
+            if (target is null || target == t.Symbol) return;
+            uses.Add(new CodeDependencyUse(target, file ?? t.File, line > 0 ? line : t.Line, how));
+        }
+
         var bases = new List<string>();
         var interfaces = new List<string>();
+        foreach (var e in t.Extends.Concat(t.Implements))
+            Note(Resolve(e.Name), null, e.Line, CodeDependencyKind.Inherit);
         foreach (var e in t.Extends)
             if (Resolve(e.Name) is { } s && s != t.Symbol)
             {
@@ -171,7 +187,12 @@ public abstract class HandParsedCodeReader : ICodeReader
                 continue;
             }
             var info = TypeExprs.Element(m.Type, vocab, Resolve);
-            if (m.Type != null) used.AddRange(m.Type.Names());
+            if (m.Type != null)
+            {
+                used.AddRange(m.Type.Names());
+                var how = m.Kind == CodeMemberKind.Method ? CodeDependencyKind.Return : CodeDependencyKind.Field;
+                foreach (var (name, line) in m.Type.NamesAt(m.Line)) Note(Resolve(name), m.File, line, how);
+            }
             var member = new CodeMember(m.Name, m.Kind, m.TypeText, info.Symbol, info.Many, m.Visibility)
             {
                 IsAbstract = m.IsAbstract, IsStatic = m.IsStatic, IsOptional = m.IsOptional || info.Optional, Doc = m.Doc, Line = m.Line,
@@ -182,7 +203,11 @@ public abstract class HandParsedCodeReader : ICodeReader
                 foreach (var p in m.Params)
                 {
                     var pi = TypeExprs.Element(p.Type, vocab, Resolve);
-                    if (p.Type != null) used.AddRange(p.Type.Names());
+                    if (p.Type != null)
+                    {
+                        used.AddRange(p.Type.Names());
+                        foreach (var (name, line) in p.Type.NamesAt(m.Line)) Note(Resolve(name), m.File, line, CodeDependencyKind.Param);
+                    }
                     pars.Add(new CodeParameter(p.Name, p.TypeText, pi.Symbol, pi.Many, p.Direction));
                 }
                 member = member with { Parameters = pars };
@@ -199,15 +224,31 @@ public abstract class HandParsedCodeReader : ICodeReader
         {
             foreach (var name in used)
                 if (Resolve(name) is { } s && !excluded.Contains(s)) deps.Add(s);
-            foreach (var chain in t.BodyRefs)
-                if (ResolveChain(chain) is { } s && !excluded.Contains(s)) deps.Add(s);
+            foreach (var r in t.BodyRefs)
+            {
+                if (ResolveChain(r.Name) is not { } s) continue;
+                if (!excluded.Contains(s)) deps.Add(s);
+                // Calling the type itself (Python "Battery()") creates it; "Battery.create()" calls it.
+                var how = r.Kind == CodeDependencyKind.Call && Resolve(r.Name) == s ? CodeDependencyKind.New : r.Kind;
+                Note(s, r.File, r.Line, how);
+            }
         }
+        if (uses.Count > 0)
+        {
+            // The imports that bring used types into the file.
+            var targets = uses.Select(u => u.Symbol).ToHashSet(StringComparer.Ordinal);
+            foreach (var (name, line) in session.Imports(t))
+                if (Resolve(name) is { } s && targets.Contains(s)) Note(s, null, line, CodeDependencyKind.Import);
+        }
+        var (locations, omitted) = CodeDependencyUses.Cap(uses, MaxDependencyUsesPerTarget);
 
         return new CodeType(t.Symbol, t.DisplayName ?? t.Name, t.Namespace, t.Kind, t.File, t.Line, t.Doc,
             bases.Distinct().ToList(), interfaces.Distinct().ToList(), members, deps.ToList())
         {
             IsAbstract = t.IsAbstract && t.Kind is CodeTypeKind.Class or CodeTypeKind.Record,
             IsStatic = t.IsStatic,
+            DependencyLocations = locations,
+            OmittedDependencyLocations = omitted,
         };
     }
 }
@@ -241,6 +282,9 @@ internal abstract class ParseSession
 
     /// <summary>Called once the index is complete (a language may refine kinds that depend on other types).</summary>
     public virtual void Finish() { }
+
+    /// <summary>The names the file of <paramref name="from"/> imports (as bound in the file) and the line of each import.</summary>
+    public virtual IEnumerable<(string Name, int Line)> Imports(RawType from) => [];
 
     /// <summary>The scanned type that lexically contains <paramref name="t"/>, if any.</summary>
     public RawType? Outer(RawType t)
@@ -282,8 +326,8 @@ internal sealed class RawType
     /// <summary>Implemented interfaces as written.</summary>
     public List<TypeExpr> Implements { get; } = [];
     public List<RawMember> Members { get; } = [];
-    /// <summary>Dotted names used in bodies and initializers (usage dependencies).</summary>
-    public List<string> BodyRefs { get; } = [];
+    /// <summary>Dotted names used in bodies and initializers (usage dependencies), with their lines.</summary>
+    public List<NameRef> BodyRefs { get; } = [];
     public HashSet<string> TypeParams { get; } = new(StringComparer.Ordinal);
     /// <summary>Language-specific resolution context (imports, module …).</summary>
     public object? Scope { get; init; }
@@ -302,6 +346,8 @@ internal sealed class RawMember
     public bool IsOptional { get; init; }
     public string? Doc { get; init; }
     public int Line { get; init; }
+    /// <summary>The file it is declared in when that is not the owning type's (declaration merging across files).</summary>
+    public string? File { get; set; }
 }
 
 internal sealed record RawParam(string Name, TypeExpr? Type, string TypeText, CodeParameterDirection Direction = CodeParameterDirection.In);

@@ -1,0 +1,204 @@
+@using Meridian.Core.Instances
+@inherits WorkspaceComponent
+
+@* Inspector section for instance specifications, slots, links, and the instances of a block (Instances/InstanceModel.cs). *@
+@if (E is { } e && Ws.Model.Contains(e))
+{
+    var editable = !Ws.ReadOnly && Ws.CanEdit(e);
+    if (e.Kind == ElementKind.InstanceSpecification)
+    {
+        var classifiers = InstanceModel.Classifiers(Ws.Model, e);
+        <div class="section-title">Classifiers <span class="grow"></span></div>
+        <div class="trace-group" data-testid="instance-classifiers">
+            @foreach (var c in classifiers)
+            {
+                var cls = c;
+                <span class="pill" title="@cls.QualifiedName" @onclick="() => Shell.Navigate(cls)">
+                    @KindIcon.For(cls)<span class="t">@cls.DisplayName</span>
+                    @if (editable)
+                    {
+                        <span class="rm" title="Remove classifier" @onclick="() => SetClassifiers(e, classifiers.Where(x => !ReferenceEquals(x, cls)))" @onclick:stopPropagation="true"><MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" /></span>
+                    }
+                </span>
+            }
+        </div>
+        @if (editable)
+        {
+            <MudSelect @key="@(e.Id + "addcls")" T="string" Label="Add classifier" Value="@("")" ValueChanged="id => AddClassifier(e, id)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" MaxHeight="360">
+                <MudSelectItem Value="@("")">(choose)</MudSelectItem>
+                @foreach (var c in ClassifierCandidates().Where(c => !classifiers.Contains(c)))
+                {
+                    <MudSelectItem Value="@c.Id">@c.DisplayName  ·  @Metamodel.DisplayName(c.Kind)</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <div class="section-title">Slots <span class="grow"></span></div>
+        foreach (var f in InstanceModel.InstanceFeatures(Ws.Model, e))
+        {
+            var feature = f;
+            var slot = InstanceModel.SlotFor(e, feature);
+            var unit = InstanceModel.UnitOf(Ws.Model, feature);
+            var label = feature.Name + (unit != null ? $" [{unit}]" : "");
+            if (InstanceModel.IsEnumValued(Ws.Model, feature))
+            {
+                <MudSelect @key="@(e.Id + feature.Id)" T="string" Label="@label" Value="@(slot == null ? "" : InstanceModel.DisplayValue(Ws.Model, slot))" ValueChanged="v => Commit(e, feature, v)"
+                           Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable">
+                    <MudSelectItem Value="@("")">(no value@(feature.Get(FieldKeys.DefaultValue) is { Length: > 0 } dv ? $"; default {dv}" : ""))</MudSelectItem>
+                    @foreach (var lit in Ws.Model.ResolveType(feature)!.OwnedElements.Where(l => l.Kind == ElementKind.EnumerationLiteral))
+                    {
+                        <MudSelectItem Value="@lit.Name">@lit.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            else
+            {
+                var current = slot == null ? "" : InstanceModel.DisplayValue(Ws.Model, slot);
+                <MudTextField @key="@(e.Id + feature.Id + "\u0001" + current)" T="string" Label="@label" Value="@current" ValueChanged="v => Commit(e, feature, v)"
+                              Placeholder="@feature.Get(FieldKeys.DefaultValue)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="!editable"
+                              HelperText="@(InstanceModel.IsInstanceValued(Ws.Model, feature) ? $"Instances of {Ws.Model.TypeDisplayName(feature)} by name" : null)" />
+            }
+        }
+        foreach (var s in InstanceModel.Slots(e).Where(s => InstanceModel.IsStale(Ws.Model, s)).ToList())
+        {
+            @StaleSlot(s, editable)
+        }
+        if (_error != null) { <div style="color:var(--danger); font-size:12px; margin:4px 2px" data-testid="slot-error">@_error</div> }
+
+        <div class="d-flex gap-1 flex-wrap mt-2">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Schema" OnClick="() => Shell.ShowOnObjectDiagram(e)">Object diagram</MudButton>
+            @if (InstanceModel.MainClassifier(Ws.Model, e) is { } main)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.TableChart" OnClick="() => Shell.OpenInstanceTable(main)">Instance table</MudButton>
+            }
+        </div>
+    }
+    else if (e.Kind == ElementKind.Slot)
+    {
+        <div class="section-title">Slot <span class="grow"></span></div>
+        if (InstanceModel.IsStale(Ws.Model, e)) { @StaleSlot(e, editable) }
+        else if (e.Owner is { } inst && InstanceModel.FeatureOf(Ws.Model, e) is { } feature)
+        {
+            var current = InstanceModel.DisplayValue(Ws.Model, e);
+            <MudTextField @key="@(e.Id + "\u0001" + current)" T="string" Label="@($"{feature.Name} ({Ws.Model.TypeDisplayName(feature)})")" Value="@current"
+                          ValueChanged="v => Commit(inst, feature, v)" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="!editable" />
+            if (InstanceRules.Mismatch(Ws.Model, e, feature) is { } why) { <div style="color:var(--warn); font-size:12px; margin:4px 2px">@why</div> }
+            if (_error != null) { <div style="color:var(--danger); font-size:12px; margin:4px 2px" data-testid="slot-error">@_error</div> }
+            <div style="font-size:12px; margin:4px 2px">Feature <span class="link" @onclick="() => Shell.Navigate(feature)">@feature.QualifiedName</span> · of <span class="link" @onclick="() => Shell.Navigate(inst)">@InstanceModel.Label(Ws.Model, inst)</span></div>
+        }
+    }
+    else if (e is Relationship { Kind: ElementKind.Link } link)
+    {
+        var options = InstanceModel.MatchingAssociations(Ws.Model, link.Source, link.Target);
+        var current = InstanceModel.AssociationOf(Ws.Model, link);
+        <div class="section-title">Link <span class="grow"></span></div>
+        <MudSelect @key="@(link.Id + "assoc")" T="string" Label="Instance of association" Value="@(current?.Id ?? "")" ValueChanged="id => SetAssociation(link, id)"
+                   Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable" data-testid="link-association">
+            <MudSelectItem Value="@("")">(untyped)</MudSelectItem>
+            @foreach (var a in options.Concat(current != null && !options.Contains(current) ? [current] : []))
+            {
+                <MudSelectItem Value="@a.Id">@Workbench.AssociationLabel(a)</MudSelectItem>
+            }
+        </MudSelect>
+        if (options.Count == 0) { <div style="color:var(--text-3); font-size:12px; margin:4px 2px">No association connects the classifiers of these instances.</div> }
+    }
+    else if (InstanceModel.CanClassify(e.Kind) && e.Kind is not ElementKind.Enumeration)
+    {
+        var instances = InstanceModel.InstancesOf(Ws.Model, e).ToList();
+        <div class="section-title">Instances <span class="grow"></span><span style="color:var(--text-3); font-weight:400">@instances.Count</span></div>
+        foreach (var i in instances.Where(i => i.Owner?.Kind != ElementKind.InstanceSpecification).Take(8))
+        {
+            var inst = i;
+            <div class="feature-row" @onclick="() => Shell.Navigate(inst)">
+                <MudIcon Icon="@UiKinds.Icon(ElementKind.InstanceSpecification)" Style="@($"font-size:15px; color:{UiKinds.Accent(ElementKind.InstanceSpecification)}")" />
+                <span>@InstanceModel.Label(Ws.Model, inst)</span><span></span>
+            </div>
+        }
+        <div class="d-flex gap-1 flex-wrap mt-1">
+            @if (editable)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Shell.CreateInstanceOf(e)" data-testid="create-instance">Create instance</MudButton>
+            }
+            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.TableChart" OnClick="() => Shell.OpenInstanceTable(e)" data-testid="open-instance-table">Instance table</MudButton>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    private string? _error;
+    private string? _errorFor;
+
+    protected override void OnParametersSet()
+    {
+        if (E?.Id != _errorFor) _error = null;
+    }
+
+    private IEnumerable<Element> ClassifierCandidates() =>
+        Ws.Model.AllElements.Where(x => InstanceModel.CanClassify(x.Kind)).OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void Commit(Element instance, Element feature, string? text)
+    {
+        _errorFor = E?.Id;
+        try
+        {
+            InstanceModel.SetValue(Ws.Model, instance, feature, text);
+            _error = null;
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; Ws.SetStatus(ex.Message); }
+    }
+
+    private void SetClassifiers(Element instance, IEnumerable<Element> classifiers)
+    {
+        try { InstanceModel.SetClassifiers(Ws.Model, instance, classifiers.ToList()); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void AddClassifier(Element instance, string? id)
+    {
+        if (Ws.Model.Find(id) is not { } c) return;
+        SetClassifiers(instance, InstanceModel.Classifiers(Ws.Model, instance).Append(c));
+    }
+
+    private void SetAssociation(Relationship link, string? id)
+    {
+        try { Ws.Model.Set(link, InstanceFields.Association, string.IsNullOrEmpty(id) ? null : id); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Remap(Element slot, string? featureId)
+    {
+        if (Ws.Model.Find(featureId) is not { } f) return;
+        try { InstanceModel.Remap(Ws.Model, slot, f); Ws.SetStatus($"Slot remapped to {f.Name}"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void DeleteSlot(Element slot)
+    {
+        try { Ws.Model.Delete(slot); Ws.SetStatus("Slot deleted"); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    /// <summary>A slot whose feature is gone or no longer on the instance's classifiers: delete it or remap it (INST-001).</summary>
+    private RenderFragment StaleSlot(Element slot, bool editable) => __builder =>
+    {
+        var feature = InstanceModel.FeatureOf(Ws.Model, slot);
+        var candidates = InstanceModel.RemapCandidates(Ws.Model, slot);
+        <div class="lib-suspect" data-testid="stale-slot" style="flex-wrap:wrap">
+            <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:14px" />
+            <span>@(feature == null ? "A slot's feature no longer exists" : $"'{feature.Name}' is no longer a feature of this instance's classifiers") (value @InstanceModel.DisplayValue(Ws.Model, slot))</span>
+            @if (editable)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="() => DeleteSlot(slot)" data-testid="stale-slot-delete">Delete</MudButton>
+                @if (candidates.Count > 0)
+                {
+                    <MudSelect T="string" Label="Remap to" Value="@("")" ValueChanged="id => Remap(slot, id)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:140px" data-testid="stale-slot-remap">
+                        <MudSelectItem Value="@("")">(feature)</MudSelectItem>
+                        @foreach (var c in candidates) { <MudSelectItem Value="@c.Id">@c.Name</MudSelectItem> }
+                    </MudSelect>
+                }
+            }
+        </div>
+    };
+}

@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-On macOS use **⌘**; on Windows and Linux use **Ctrl** wherever this page shows ⌘. **Keyboard & mouse** in the project
+On macOS use **⌘**; on Windows and Linux use **Ctrl** wherever this page shows ⌘. **Help (?) ▸ Keyboard & mouse** in the title bar
 menu shows a short version of this page inside Meridian.
 
 ## Global
@@ -11,6 +11,9 @@ menu shows a short version of this page inside Meridian.
 | ⌘S | commit a version |
 | ⌘O | projects |
 | ⌘F | find (focus the model explorer search) |
+| ⇧⌘F | find and replace across the model ([Find and replace](find-replace.md)) |
+| ⌘P | print / PDF of the active diagram ([page setup and preview](printing.md)) |
+| ⌘, | settings |
 | ⌘Z | undo |
 | ⇧⌘Z or ⌘Y | redo |
 | F7 | validate the model |
@@ -52,6 +55,7 @@ In text fields, ⌘Z and ⇧⌘Z undo and redo the typing instead of the model.
 | Middle-button drag, Space + drag or Alt + drag | pan |
 | Shift while resizing | keep the aspect ratio (pictures: free the aspect ratio) |
 | Right-click | context menu |
+| Right-click a diagram tab | Export ▸, close, close others |
 
 ## Model explorer
 
@@ -61,6 +65,17 @@ In text fields, ⌘Z and ⇧⌘Z undo and redo the typing instead of the model.
 | Drag onto another item | move the element into it |
 | Double-click a diagram | open it |
 | Right-click | New, Rename, Delete, locks (server) and more |
+
+## Menus
+
+The project menu (click the project name) and the right-click menus work from the keyboard.
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓ | move between menu items |
+| → or Enter on an item with ▸ | open its submenu (Export ▸, New element ▸) |
+| ← | back from a submenu |
+| Escape | close the submenu, then the menu |
 
 ## SysML v2 text editor
 

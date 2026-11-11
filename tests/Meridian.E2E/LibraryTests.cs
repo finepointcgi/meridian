@@ -89,7 +89,7 @@ public sealed class LibraryTests(ServerFixture f) : E2ETest(f)
 
         // The library gets a new version: "Check for library updates" shows the badge, and the review the change.
         await CommitV2Async(library, wheelId);
-        await p.RibbonAsync("Libraries");
+        await p.RibbonAsync("Used projects");
         await Expect(p.Locator("[data-testid=lib-updates-badge]")).ToContainTextAsync("Library update (1)");
         await p.Locator("[data-testid=lib-updates-badge]").ClickAsync();
         var review = p.MudDialog();

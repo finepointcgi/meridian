@@ -53,6 +53,8 @@ public sealed class PythonCodeReader : HandParsedCodeReader
         /// <summary>Local name → qualified target ("Battery" → "sat.power.battery.Battery", "np" → "numpy").</summary>
         public Dictionary<string, string> Imports { get; } = new(StringComparer.Ordinal);
         public List<string> Stars { get; } = [];
+        /// <summary>Line of each import, by local name.</summary>
+        public Dictionary<string, int> ImportLines { get; } = new(StringComparer.Ordinal);
     }
 
     private sealed record PyLine(int Indent, List<Tok> Toks)
@@ -110,6 +112,9 @@ public sealed class PythonCodeReader : HandParsedCodeReader
             new Parser(file.Path, scope, lines, types, issues, ct).Module();
         }
 
+        public override IEnumerable<(string Name, int Line)> Imports(RawType from) =>
+            from.Scope is Scope scope ? scope.ImportLines.Select(kv => (kv.Key, kv.Value)) : [];
+
         public override string? Resolve(RawType from, string name)
         {
             if (from.Scope is not Scope scope) return null;
@@ -166,7 +171,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                     var dotted = TypeExprs.NamesIn(toks, a, b).FirstOrDefault();
                     if (dotted == null) continue;
                     var asAt = Enumerable.Range(a, b - a).FirstOrDefault(k => toks[k].Is("as"), -1);
-                    if (asAt >= 0 && asAt + 1 < b) scope.Imports[toks[asAt + 1].Text] = dotted;
+                    if (asAt >= 0 && asAt + 1 < b) { scope.Imports[toks[asAt + 1].Text] = dotted; scope.ImportLines[toks[asAt + 1].Text] = toks[a].Line; }
                     else { var first = dotted.Split('.')[0]; scope.Imports.TryAdd(first, first); }
                 }
                 return;
@@ -208,6 +213,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                 var name = toks[a].Text;
                 var alias = a + 2 < b && toks[a + 1].Is("as") ? toks[a + 2].Text : name;
                 scope.Imports[alias] = baseName.Length == 0 ? name : baseName + "." + name;
+                scope.ImportLines[alias] = toks[a].Line;
             }
         }
 
@@ -319,7 +325,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                 // name: Type [= value]
                 var name = toks[0].Text;
                 var eq = TypeExprs.NextAtDepth(toks, 2, toks.Count, "=");
-                if (eq < toks.Count) t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, eq + 1, toks.Count));
+                if (eq < toks.Count) t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, eq + 1, toks.Count));
                 if (t.Kind == CodeTypeKind.Enum || IsDunder(name)) return;
                 var p = 2;
                 var type = TypeExprs.Parse(toks, ref p, eq, python: true);
@@ -335,7 +341,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
             {
                 // name = value
                 var name = toks[0].Text;
-                t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, 2, toks.Count));
+                t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, 2, toks.Count));
                 if (IsDunder(name) || t.Members.Any(m => m.Name == name)) return;
                 if (t.Kind == CodeTypeKind.Enum)
                 {
@@ -349,7 +355,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                 });
                 return;
             }
-            t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, 0, toks.Count));
+            t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, 0, toks.Count));
         }
 
         /// <summary>The type of an assigned value: a parameter's annotation, a class call "Battery(…)", or a literal's type.</summary>
@@ -426,7 +432,7 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                     text = TypeExprs.Text(toks, p + 1, eq);
                     if (star > 0) type.Array++;
                 }
-                if (eq < b) t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, eq + 1, b));
+                if (eq < b) t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, eq + 1, b));
                 pars.Add(new RawParam(star == 1 ? "*" + pname : star == 2 ? "**" + pname : pname, type, text));
             }
             TypeExpr? ret = null;
@@ -443,9 +449,9 @@ public sealed class PythonCodeReader : HandParsedCodeReader
             string? doc = null;
             if (bodyStart < bodyEnd && DocLine(lines[bodyStart]) is { } d) { doc = d; bodyStart++; }
             // Single-line body after the colon ("def f(self): return Battery()").
-            if (colon + 1 < toks.Count) t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, colon + 1, toks.Count));
+            if (colon + 1 < toks.Count) t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, colon + 1, toks.Count));
             for (var b = bodyStart; b < bodyEnd; b++)
-                t.BodyRefs.AddRange(TypeExprs.NamesIn(lines[b].Toks, 0, lines[b].Toks.Count));
+                t.BodyRefs.AddRange(TypeExprs.RefsIn(lines[b].Toks, 0, lines[b].Toks.Count));
 
             if (name is "__init__" or "__post_init__")
             {

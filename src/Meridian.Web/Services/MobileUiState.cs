@@ -15,7 +15,8 @@ public sealed class MobileUiState
     /// <summary>From <see cref="PhoneMaxWidth"/> up to this width the desktop layout keeps its canvas but side panels become drawers.</summary>
     public const int TabletMaxWidth = 1280;
 
-    public enum View { Model, Diagram, Requirements, Reviews, Comments }
+    /// <summary>The phone views. Verification and CodeChanges are read-only lists opened from the account menu (no bottom tab).</summary>
+    public enum View { Model, Diagram, Requirements, Reviews, Comments, Verification, CodeChanges }
 
     public enum Layout { Desktop, Tablet, Phone }
 

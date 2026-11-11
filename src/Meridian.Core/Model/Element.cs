@@ -9,14 +9,42 @@ namespace Meridian.Core.Model;
 /// </summary>
 public class Element
 {
-    private readonly Dictionary<string, string> _fields = new(StringComparer.Ordinal);
-    internal readonly List<Element> Children = new();
+    // Copy-on-write: a replica made by ModelRepository.CreateReplica shares this dictionary with the element it was copied
+    // from (both are flagged), and whichever side writes first takes its own copy. A shared dictionary is never mutated, so
+    // replicas on other threads may read it while the original is being edited.
+    private Dictionary<string, string> _fields;
+    private bool _fieldsShared;
+    // Most elements are leaves (94 % at Cameo scale), so the child list only exists once there is a child.
+    private List<Element>? _children;
+
+    /// <summary>The owned elements (read-only view; change them through <see cref="ChildList"/>).</summary>
+    internal ChildView Children => new(_children);
+
+    /// <summary>The owned elements, for changing them (created on first use).</summary>
+    internal List<Element> ChildList => _children ??= new List<Element>();
 
     public Element(ElementKind kind, string? id = null)
     {
         Kind = kind;
         Id = string.IsNullOrWhiteSpace(id) ? NewId() : id;
+        _fields = new(StringComparer.Ordinal);
     }
+
+    /// <summary>A copy of <paramref name="source"/>'s identity and fields (shared copy-on-write), without owner or children.</summary>
+    private protected Element(Element source)
+    {
+        Kind = source.Kind;
+        Id = source.Id;
+        source._fieldsShared = true;
+        _fields = source._fields;
+        _fieldsShared = true;
+    }
+
+    /// <summary>A shallow replica of this element (see <see cref="ModelRepository.CreateReplica"/>).</summary>
+    internal virtual Element CopyForReplica() => new(this);
+
+    /// <summary>Sets the owner while building a replica (no name-cache invalidation: the copy has no cached names yet).</summary>
+    internal void SetOwnerForReplica(Element owner) => _owner = owner;
 
     public static string NewId() => "_" + Guid.NewGuid().ToString("N");
 
@@ -33,7 +61,7 @@ public class Element
         }
     }
     private Element? _owner;
-    public IReadOnlyList<Element> OwnedElements => Children;
+    public IReadOnlyList<Element> OwnedElements => (IReadOnlyList<Element>?)_children ?? Array.Empty<Element>();
     public IReadOnlyDictionary<string, string> Fields => _fields;
 
     public string Name => Get(FieldKeys.Name);
@@ -54,6 +82,12 @@ public class Element
     /// <summary>Raw write without undo; used by commands and loaders.</summary>
     internal void SetRaw(string key, string? value)
     {
+        if (_fieldsShared)
+        {
+            if (string.IsNullOrEmpty(value) ? !_fields.ContainsKey(key) : _fields.TryGetValue(key, out var same) && same == value) return;
+            _fields = new Dictionary<string, string>(_fields, StringComparer.Ordinal);
+            _fieldsShared = false;
+        }
         if (string.IsNullOrEmpty(value)) _fields.Remove(key);
         else _fields[key] = value;
         if (key == FieldKeys.Name) InvalidateNames();
@@ -125,8 +159,30 @@ public sealed class Relationship : Element
         Target = target;
     }
 
+    private Relationship(Relationship source) : base(source)
+    {
+        Source = source.Source;   // re-pointed at the replica's elements by ModelRepository.CreateReplica
+        Target = source.Target;
+    }
+
+    internal override Element CopyForReplica() => new Relationship(this);
+
     public Element Source { get; internal set; }
     public Element Target { get; internal set; }
 
     public bool Touches(Element e) => ReferenceEquals(Source, e) || ReferenceEquals(Target, e);
+}
+
+/// <summary>A read-only, allocation-free view of an element's children (see <see cref="Element.ChildList"/> to change them).</summary>
+internal readonly struct ChildView(List<Element>? list) : IReadOnlyList<Element>
+{
+    private static readonly List<Element> None = new(0);
+
+    public int Count => list?.Count ?? 0;
+    public Element this[int index] => (list ?? None)[index];
+    public int IndexOf(Element e) => list?.IndexOf(e) ?? -1;
+    public bool Contains(Element e) => list?.Contains(e) ?? false;
+    public List<Element>.Enumerator GetEnumerator() => (list ?? None).GetEnumerator();
+    IEnumerator<Element> IEnumerable<Element>.GetEnumerator() => GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }

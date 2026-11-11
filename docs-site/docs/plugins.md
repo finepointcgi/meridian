@@ -3,7 +3,7 @@
 A plugin is a .NET 10 class library that references `Meridian.Scripting` and contains a public class implementing
 <xref:Meridian.Scripting.IMeridianPlugin>. A plugin can add:
 
-- **commands**, shown in the command palette (**⌘K**) and under **Extend ▸ Plugins** on the ribbon;
+- **commands**, shown in the command palette (**⌘K**) and under **Generate ▸ Plugins** on the ribbon;
 - **validation rules**, run by Validate and by the model-health indicator;
 - **exporters**, which turn the model into the bytes of a file;
 - **importers**, which read a file and edit the model.
@@ -110,7 +110,7 @@ dependencies and `deps.json`; preferred) or as `plugins/MyPlugin.dll`.
 Set `Meridian:Plugins:Enabled=false` to turn plugin loading off. Plugins load once, when Meridian starts; restart it
 after adding or updating one.
 
-**Extend ▸ Plugins ▸ Loaded plugins…** lists each plugin with its version, status, any error and what it contributes.
+**Generate ▸ Plugins ▸ Loaded plugins…** lists each plugin with its version, status, any error and what it contributes.
 
 ## Loading and isolation
 

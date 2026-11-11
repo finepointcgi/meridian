@@ -92,6 +92,8 @@ suspect state, because the baseline is recorded in the same undo step.
 
 ## Impact analysis and coverage
 
+To see a requirement's satisfy / verify / derive / refine graph as a picture, open its [relation map](relation-map.md).
+
 - **Traceability → Impact** shows everything that depends on the selected element, transitively: everything that
   points at it through any relationship, plus what contains it.
 - **Traceability → Coverage** writes the satisfied and verified ratios and the list of unsatisfied and unverified

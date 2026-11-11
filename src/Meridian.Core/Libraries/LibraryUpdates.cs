@@ -66,16 +66,18 @@ public static class LibraryUpdates
     /// Marks the project's references to changed library elements as suspect (one undo step; trace links show in the suspect
     /// link lists, other elements in validation TRC-001 and the inspector). <paramref name="model"/> already has the new pin
     /// mounted. Returns the fields it set, for undoing the update.
+    /// <para>
+    /// The mark holds only ids and the kind of change (<see cref="LibraryChangeMark"/>): the library element, changed or
+    /// removed, the source project and the pins (<see cref="LibraryChangeMark.Pin"/>). Names are rendered when it is shown,
+    /// through the viewer's own model, so nobody reads the name of a library element hidden from them.
+    /// </para>
     /// </summary>
-    public static IReadOnlyList<LibraryMark> MarkSuspects(ModelRepository model, string libraryName, string fromLabel, string toLabel,
-                                                          IReadOnlySet<string> changed, IReadOnlySet<string> removed, IReadOnlyDictionary<string, string> names)
+    public static IReadOnlyList<LibraryMark> MarkSuspects(ModelRepository model, Guid sourceProjectId, string fromPin, string toPin,
+                                                          IReadOnlySet<string> changed, IReadOnlySet<string> removed)
     {
         var marks = new List<LibraryMark>();
         if (changed.Count == 0) return marks;
-        string Name(string id) => names.TryGetValue(id, out var n) ? n : model.Find(id)?.DisplayName ?? id;
-        string Why(string id) => removed.Contains(id)
-            ? $"{Name(id)} was removed from {libraryName} ({fromLabel} → {toLabel})"
-            : $"{Name(id)} changed in {libraryName} ({fromLabel} → {toLabel})";
+        string Why(string id) => new LibraryChangeMark(id, removed.Contains(id), sourceProjectId, fromPin, toPin).Encode();
 
         var targets = new List<(Element Referrer, string TargetId)>();
         foreach (var e in model.OwnElements)
@@ -93,7 +95,7 @@ public static class LibraryUpdates
             {
                 var before = referrer.Fields.GetValueOrDefault(ReqFields.LibraryChange);
                 var why = Why(id);
-                SuspectLinks.MarkLibraryChange(model, referrer, why);
+                model.Set(referrer, ReqFields.LibraryChange, why);
                 marks.Add(new LibraryMark(referrer.Id, before, why));
             }
         return marks;

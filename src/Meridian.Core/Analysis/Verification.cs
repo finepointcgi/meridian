@@ -10,10 +10,16 @@ namespace Meridian.Core.Analysis;
 /// <summary>Field keys for simulation-driven verification (criteria on requirements, verification runs, recorded results).</summary>
 public static class VerificationKeys
 {
-    /// <summary>Requirements: the machine-checkable criterion (see <see cref="VerificationCriterion"/>).</summary>
+    /// <summary>
+    /// Requirements: the machine-checkable criteria (see <see cref="VerificationCriterion"/>), one per line. A requirement
+    /// saved with a single criterion is simply a list of one.
+    /// </summary>
     public const string Criterion = "verify.criterion";
 
-    // Results recorded on each requirement by the last run that checked it.
+    /// <summary>Requirements with several criteria: JSON, each criterion's own last result and fingerprint (see <see cref="Verification.CheckEntry"/>).</summary>
+    public const string CriteriaResults = "verify.criteria";
+
+    // Results recorded on each requirement by the last run that checked it (with several criteria: the aggregate).
     public const string Status = "verify.status";            // pass / fail / inconclusive
     public const string Value = "verify.value";              // computed value with unit
     public const string Bound = "verify.bound";              // the bound it was compared with
@@ -43,17 +49,30 @@ public static class VerificationKeys
     public const string Results = "verify.results";             // JSON: this run's result per requirement
 
     public static readonly IReadOnlyList<string> ResultKeys =
-        [Status, Value, Bound, Margin, Message, At, ModelVersion, Variant, Run, Analysis, Fingerprint, Dependencies, LastRun, Summary, Results];
+        [Status, Value, Bound, Margin, Message, At, ModelVersion, Variant, Run, Analysis, Fingerprint, Dependencies, LastRun, Summary, Results, CriteriaResults];
 
     public static readonly IReadOnlyList<string> RunKeys = [RunAnalysis, Subject, Requirements, Configuration, Inputs, Samples, Seed, StopTime, Step];
 }
 
-/// <summary>The result of checking one requirement.</summary>
+/// <summary>The result of checking one criterion of a requirement.</summary>
+public sealed record CriterionCheck(
+    int Index, string Criterion, Verdict Verdict, string Value, string Bound, string Margin, double? RelativeMargin,
+    string Message, string Analysis, IReadOnlyList<string> Notes, IReadOnlyList<string> Dependencies, string Fingerprint)
+{
+    public string Status => Verification.StatusText(Verdict);
+}
+
+/// <summary>
+/// The result of checking one requirement: with one criterion, that criterion's result; with several, the aggregate (fail
+/// if any criterion fails, else inconclusive if any is, else pass), and each criterion's own result in <see cref="Checks"/>.
+/// </summary>
 public sealed record VerificationResult(
     Element Requirement, Verdict Verdict, string Criterion, string Value, string Bound, string Margin, double? RelativeMargin,
     string Message, string Analysis, IReadOnlyList<string> Notes, IReadOnlyList<string> Dependencies, string Fingerprint)
 {
     public string Status => Verification.StatusText(Verdict);
+    /// <summary>One entry per criterion (empty when the requirement has none).</summary>
+    public IReadOnlyList<CriterionCheck> Checks { get; init; } = [];
 }
 
 /// <summary>What a verification run produced.</summary>
@@ -86,12 +105,25 @@ public sealed class VerificationOptions
     public CancellationToken Cancellation { get; init; }
 }
 
-/// <summary>The last recorded result of a requirement, as stored in its fields.</summary>
+/// <summary>The last recorded result of a requirement, as stored in its fields (the aggregate when it has several criteria).</summary>
 public sealed record StoredResult(string Status, string Value, string Bound, string Margin, string Message, string At, string ModelVersion,
     string Variant, string RunId, string Analysis, bool Stale)
 {
     /// <summary>"pass", "fail", "inconclusive", with " (stale)" appended when the model changed since.</summary>
     public string Label => Stale ? $"{Status} (stale)" : Status;
+    /// <summary>The last result of each current criterion, in order.</summary>
+    public IReadOnlyList<StoredCheck> Checks { get; init; } = [];
+}
+
+/// <summary>
+/// The last result of one criterion. <see cref="Status"/> is empty when the criterion has not been checked yet (it was
+/// added or edited since the last run).
+/// </summary>
+public sealed record StoredCheck(int Index, string Criterion, string Status, string Value, string Bound, string Margin, string Message,
+    string Analysis, bool Stale)
+{
+    public bool NotRun => Status.Length == 0;
+    public string Label => NotRun ? "not run" : Stale ? $"{Status} (stale)" : Status;
 }
 
 /// <summary>
@@ -112,8 +144,56 @@ public static partial class Verification
 
     public static string StatusText(Verdict v) => v switch { Verdict.Pass => "pass", Verdict.Fail => "fail", _ => "inconclusive" };
 
+    /// <summary>The stored criterion text: every criterion, one per line.</summary>
     public static string Criterion(Element requirement) => requirement.Get(VerificationKeys.Criterion);
     public static bool HasCriterion(Element requirement) => Criterion(requirement).Trim().Length > 0;
+
+    /// <summary>The requirement's criteria, in order (a requirement saved with one criterion has a list of one).</summary>
+    public static IReadOnlyList<string> Criteria(Element requirement) => SplitCriteria(Criterion(requirement));
+
+    public static IReadOnlyList<string> SplitCriteria(string? text) =>
+        (text ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>The criterion text after normalising (trimmed, one per line, no blank lines): what fingerprints cover.</summary>
+    private static string CriterionText(Element requirement) => string.Join("\n", Criteria(requirement));
+
+    /// <summary>Replaces the requirement's criteria (one undo step); blank ones are dropped.</summary>
+    public static void SetCriteria(ModelRepository m, Element requirement, IEnumerable<string?> criteria)
+    {
+        var text = string.Join("\n", criteria.Select(c => (c ?? "").Replace('\n', ' ').Replace("\r", "").Trim()).Where(c => c.Length > 0));
+        if (requirement.Get(VerificationKeys.Criterion) == text) return;
+        m.Set(requirement, VerificationKeys.Criterion, text.Length == 0 ? null : text);
+    }
+
+    /// <summary>Adds a criterion at the end (one undo step).</summary>
+    public static void AddCriterion(ModelRepository m, Element requirement, string criterion) =>
+        SetCriteria(m, requirement, Criteria(requirement).Append(criterion));
+
+    /// <summary>Replaces criterion <paramref name="index"/> (a blank text removes it; an index past the end adds one).</summary>
+    public static void SetCriterionAt(ModelRepository m, Element requirement, int index, string? criterion)
+    {
+        var list = Criteria(requirement).ToList();
+        if (index >= 0 && index < list.Count) list[index] = criterion ?? "";
+        else list.Add(criterion ?? "");
+        SetCriteria(m, requirement, list);
+    }
+
+    public static void RemoveCriterion(ModelRepository m, Element requirement, int index)
+    {
+        var list = Criteria(requirement).ToList();
+        if (index < 0 || index >= list.Count) return;
+        list.RemoveAt(index);
+        SetCriteria(m, requirement, list);
+    }
+
+    /// <summary>Fail if any fails; else inconclusive if any is (or there are none); else pass.</summary>
+    public static Verdict Aggregate(IEnumerable<Verdict> verdicts)
+    {
+        var list = verdicts.ToList();
+        return list.Count == 0 ? Verdict.Inconclusive
+            : list.Contains(Verdict.Fail) ? Verdict.Fail
+            : list.Contains(Verdict.Inconclusive) ? Verdict.Inconclusive : Verdict.Pass;
+    }
 
     // ================================================================== runs
 
@@ -254,10 +334,12 @@ public static partial class Verification
         var work = m;
         VariantResolution? resolution = null;
         var inputs = ParseInputs(run?.Get(VerificationKeys.Inputs), report.Problems);
+        // An instance as the subject: its slot values replace its classifiers' defaults (Instances/InstanceAnalysis.cs).
+        var instanceSubject = run != null && SubjectOf(m, run) is { Kind: ElementKind.InstanceSpecification } inst ? inst : null;
         string? setupError = null;
-        if (config != null || inputs.Count > 0)
+        if (config != null || inputs.Count > 0 || instanceSubject != null)
         {
-            if (options.Clone is null) setupError = "Verifying a variant or with inputs needs a model copy, which is not available here";
+            if (options.Clone is null) setupError = "Verifying a variant, an instance or with inputs needs a model copy, which is not available here";
             else
             {
                 work = options.Clone(m);
@@ -268,6 +350,12 @@ public static partial class Verification
                     Variability.ApplyTo(work, resolution);
                 }
                 var subj = run != null && SubjectOf(m, run) is { } s ? work.Find(s.Id) : null;
+                if (instanceSubject != null)
+                {
+                    var instanceProblems = new List<string>();
+                    subj = work.Find(instanceSubject.Id) is { } wi ? Instances.InstanceAnalysis.ApplyTo(work, wi, instanceProblems) : null;
+                    report.Problems.AddRange(instanceProblems.Select(p => $"Instance '{instanceSubject.Name}': {p}"));
+                }
                 ApplyInputs(work, subj, inputs, report.Problems);
             }
         }
@@ -275,46 +363,80 @@ public static partial class Verification
         var settings = SettingsOf(run, options.FmuFactory);
         var defaultKind = run != null ? VerificationCriterion.ParseAnalysis(run.Get(VerificationKeys.RunAnalysis)) : null;
         var subject = run != null ? SubjectOf(m, run) : null;
+        if (instanceSubject != null) subject = Instances.InstanceModel.MainClassifier(m, instanceSubject);
         var outputs = new Dictionary<(AnalysisKind, string), AnalysisOutput>();
         var extraDeps = new List<string>();
         if (run != null) extraDeps.Add(run.Id);
+        if (instanceSubject != null) extraDeps.AddRange(Instances.InstanceAnalysis.DependencyIds(instanceSubject));
         if (config != null) extraDeps.AddRange(new[] { config.Id }.Concat(Variability.Features(m).Select(f => f.Id)));
 
         foreach (var req in reqs)
         {
             options.Cancellation.ThrowIfCancellationRequested();
-            var text = Criterion(req).Trim();
-            VerificationResult Done(CriterionResult cr, string analysis, IEnumerable<string> deps)
+            var criteria = Criteria(req);
+            CriterionCheck Check(int index, string text)
             {
-                var d = deps.Concat(extraDeps).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
-                return new VerificationResult(req, cr.Verdict, text, cr.Value, cr.Bound, cr.Margin, cr.RelativeMargin, cr.Message, analysis, cr.Notes, d, Fingerprint(m, d, text));
-            }
-            if (text.Length == 0) { report.Results.Add(Done(CriterionResult.Inconclusive("No verification criterion"), "", [])); continue; }
-            if (setupError != null) { report.Results.Add(Done(CriterionResult.Inconclusive(setupError), "", [])); continue; }
-            if (!VerificationCriterion.TryParse(text, out var crit, out var err)) { report.Results.Add(Done(CriterionResult.Inconclusive($"Criterion: {err}"), "", [])); continue; }
-            if (resolution != null && !resolution.IsIncluded(req))
-            {
-                report.Results.Add(Done(CriterionResult.Inconclusive($"Not part of variant '{config!.Name}'"), "", [])); continue;
-            }
-            var kind = crit!.Analysis ?? defaultKind ?? AnalysisKind.Parametric;
-            var target = ResolveTarget(work, m, crit, subject, req, kind, out var why);
-            if (target is null) { report.Results.Add(Done(CriterionResult.Inconclusive(why), VerificationCriterion.Label(kind), [])); continue; }
-            if (!outputs.TryGetValue((kind, target.Id), out var output))
-            {
-                try { output = options.Analyzer.Analyze(work, kind, target, settings, options.Cancellation); }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                CriterionCheck Done(CriterionResult cr, string analysis, IEnumerable<string> deps)
                 {
-                    output = AnalysisOutput.Failed(VerificationCriterion.Label(kind), ex.Message);
+                    var d = deps.Concat(extraDeps).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    return new CriterionCheck(index, text, cr.Verdict, cr.Value, cr.Bound, cr.Margin, cr.RelativeMargin, cr.Message, analysis, cr.Notes, d, Fingerprint(m, d, text));
                 }
-                output.Dependencies.Add(target.Id);
-                outputs[(kind, target.Id)] = output;
+                if (setupError != null) return Done(CriterionResult.Inconclusive(setupError), "", []);
+                if (!VerificationCriterion.TryParse(text, out var crit, out var err)) return Done(CriterionResult.Inconclusive($"Criterion: {err}"), "", []);
+                if (resolution != null && !resolution.IsIncluded(req)) return Done(CriterionResult.Inconclusive($"Not part of variant '{config!.Name}'"), "", []);
+                var kind = crit!.Analysis ?? defaultKind ?? AnalysisKind.Parametric;
+                var target = ResolveTarget(work, m, crit, subject, req, kind, out var why);
+                if (target is null) return Done(CriterionResult.Inconclusive(why), VerificationCriterion.Label(kind), []);
+                if (!outputs.TryGetValue((kind, target.Id), out var output))
+                {
+                    try { output = options.Analyzer.Analyze(work, kind, target, settings, options.Cancellation); }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        output = AnalysisOutput.Failed(VerificationCriterion.Label(kind), ex.Message);
+                    }
+                    output.Dependencies.Add(target.Id);
+                    outputs[(kind, target.Id)] = output;
+                }
+                if (output.Error != null) return Done(CriterionResult.Inconclusive(output.Error), output.Description, output.Dependencies);
+                var result = crit.Evaluate(output);
+                if (output.Problems.Count > 0) result = result with { Notes = result.Notes.Concat(output.Problems.Take(3)).ToList() };
+                return Done(result, output.Description, output.Dependencies);
             }
-            if (output.Error != null) { report.Results.Add(Done(CriterionResult.Inconclusive(output.Error), output.Description, output.Dependencies)); continue; }
-            var result = crit.Evaluate(output);
-            if (output.Problems.Count > 0) result = result with { Notes = result.Notes.Concat(output.Problems.Take(3)).ToList() };
-            report.Results.Add(Done(result, output.Description, output.Dependencies));
+            var checks = criteria.Select((c, i) => Check(i, c)).ToList();
+            report.Results.Add(Combine(m, req, checks, extraDeps));
         }
         return report;
+    }
+
+    /// <summary>A requirement's result from its criteria's: the single check as it is, or the aggregate of several.</summary>
+    private static VerificationResult Combine(ModelRepository m, Element req, IReadOnlyList<CriterionCheck> checks, IReadOnlyList<string> extraDeps)
+    {
+        var text = string.Join("\n", checks.Select(c => c.Criterion));
+        if (checks.Count == 0)
+        {
+            var d0 = extraDeps.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            return new VerificationResult(req, Verdict.Inconclusive, "", "", "", "", null, "No verification criterion", "", [], d0, Fingerprint(m, d0, ""));
+        }
+        if (checks.Count == 1)
+        {
+            var c = checks[0];
+            return new VerificationResult(req, c.Verdict, c.Criterion, c.Value, c.Bound, c.Margin, c.RelativeMargin, c.Message, c.Analysis, c.Notes, c.Dependencies, c.Fingerprint)
+            { Checks = checks };
+        }
+        var verdict = Aggregate(checks.Select(c => c.Verdict));
+        var deps = checks.SelectMany(c => c.Dependencies).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        // The margin shown is the tightest one (smallest relative margin; a failing criterion has a negative one).
+        var tightest = checks.Where(c => c.RelativeMargin != null).OrderBy(c => c.RelativeMargin).FirstOrDefault();
+        var deciding = checks.FirstOrDefault(c => c.Verdict == verdict) ?? checks[0];
+        var counts = $"{checks.Count(c => c.Verdict == Verdict.Pass)} of {checks.Count} criteria pass";
+        var message = verdict == Verdict.Pass ? counts : $"{counts}; criterion {deciding.Index + 1} ({deciding.Criterion}): {deciding.Message}";
+        return new VerificationResult(req, verdict, text,
+            string.Join("; ", checks.Select(c => c.Value.Length > 0 ? c.Value : "—")),
+            string.Join("; ", checks.Select(c => c.Bound.Length > 0 ? c.Bound : "—")),
+            tightest?.Margin ?? "", tightest?.RelativeMargin, message,
+            string.Join("; ", checks.Select(c => c.Analysis).Where(a => a.Length > 0).Distinct()),
+            checks.SelectMany(c => c.Notes).Distinct().ToList(), deps, Fingerprint(m, deps, text))
+        { Checks = checks };
     }
 
     /// <summary>The element a criterion is evaluated on: its (target), the run's subject, else what satisfies the requirement.</summary>
@@ -374,6 +496,13 @@ public static partial class Verification
                 S(VerificationKeys.Analysis, r.Analysis);
                 S(VerificationKeys.Fingerprint, r.Fingerprint);
                 S(VerificationKeys.Dependencies, string.Join(",", r.Dependencies));
+                // Several criteria: each one's own result and fingerprint (one criterion: the fields above are its result).
+                S(VerificationKeys.CriteriaResults, r.Checks.Count > 1 ? JsonSerializer.Serialize(r.Checks.Select(c => new CheckEntry
+                {
+                    Index = c.Index, Criterion = c.Criterion, Status = c.Status, Value = c.Value, Bound = c.Bound, Margin = c.Margin,
+                    Message = c.Notes.Count > 0 ? $"{c.Message} — {string.Join("; ", c.Notes)}" : c.Message, Analysis = c.Analysis,
+                    Fingerprint = c.Fingerprint, Dependencies = string.Join(",", c.Dependencies),
+                }).ToList(), JsonOptions) : null);
                 n++;
             }
             if (report.Run is { } run && m.Contains(run))
@@ -383,14 +512,19 @@ public static partial class Verification
                 m.Set(run, VerificationKeys.Results, JsonSerializer.Serialize(report.Results.Select(x => new RunEntry
                 {
                     Requirement = x.Requirement.Id, Status = x.Status, Value = x.Value, Bound = x.Bound, Margin = x.Margin, Message = x.Message,
-                }).ToList()));
+                    Criteria = x.Checks.Count > 1
+                        ? x.Checks.Select(c => new CheckEntry { Index = c.Index, Criterion = c.Criterion, Status = c.Status, Value = c.Value, Bound = c.Bound, Margin = c.Margin, Message = c.Message }).ToList()
+                        : null,
+                }).ToList(), JsonOptions));
                 m.Set(run, ReqFields.Verdict, StatusText(report.Overall));
             }
         }
         return n;
     }
 
-    /// <summary>One row of a run's stored results.</summary>
+    private static readonly JsonSerializerOptions JsonOptions = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+    /// <summary>One row of a run's stored results (the requirement's aggregate, plus each criterion when it has several).</summary>
     public sealed class RunEntry
     {
         public string Requirement { get; set; } = "";
@@ -399,6 +533,22 @@ public static partial class Verification
         public string Bound { get; set; } = "";
         public string Margin { get; set; } = "";
         public string Message { get; set; } = "";
+        public List<CheckEntry>? Criteria { get; set; }
+    }
+
+    /// <summary>One criterion's stored result (in <see cref="VerificationKeys.CriteriaResults"/> and in a run's results).</summary>
+    public sealed class CheckEntry
+    {
+        public int Index { get; set; }
+        public string Criterion { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string Value { get; set; } = "";
+        public string Bound { get; set; } = "";
+        public string Margin { get; set; } = "";
+        public string Message { get; set; } = "";
+        public string? Analysis { get; set; }
+        public string? Fingerprint { get; set; }
+        public string? Dependencies { get; set; }
     }
 
     public static IReadOnlyList<RunEntry> RunResults(Element run)
@@ -471,16 +621,66 @@ public static partial class Verification
         if (status.Length == 0) return null;
         return new StoredResult(status, requirement.Get(VerificationKeys.Value), requirement.Get(VerificationKeys.Bound), requirement.Get(VerificationKeys.Margin),
             requirement.Get(VerificationKeys.Message), requirement.Get(VerificationKeys.At), requirement.Get(VerificationKeys.ModelVersion),
-            requirement.Get(VerificationKeys.Variant), requirement.Get(VerificationKeys.Run), requirement.Get(VerificationKeys.Analysis), IsStale(m, requirement));
+            requirement.Get(VerificationKeys.Variant), requirement.Get(VerificationKeys.Run), requirement.Get(VerificationKeys.Analysis), IsStale(m, requirement))
+        { Checks = StoredChecks(m, requirement) };
     }
 
-    /// <summary>True when something the last result depended on (the criterion, the analysed elements, the run, the variant) changed since.</summary>
+    /// <summary>
+    /// The last result of each current criterion. Requirements recorded with several criteria keep each one's result in
+    /// <see cref="VerificationKeys.CriteriaResults"/>; a result recorded for a single criterion (also by older versions)
+    /// belongs to the criterion it was computed for, found by its fingerprint, else to the first one (then stale).
+    /// Criteria added or edited since have no result yet.
+    /// </summary>
+    public static IReadOnlyList<StoredCheck> StoredChecks(ModelRepository m, Element requirement)
+    {
+        var criteria = Criteria(requirement);
+        var entries = ReadChecks(requirement.Get(VerificationKeys.CriteriaResults));
+        if (entries.Count == 0 && requirement.Get(VerificationKeys.Status) is { Length: > 0 } status)
+        {
+            // A single recorded result (one criterion, or a file from before criteria lists).
+            var deps = requirement.Get(VerificationKeys.Dependencies);
+            var fp = requirement.Get(VerificationKeys.Fingerprint);
+            var owner = criteria.Count == 1 ? 0 : criteria.ToList().FindIndex(c => fp.Length > 0 && Fingerprint(m, Deps(deps), c) == fp);
+            if (owner < 0 && criteria.Count > 0) owner = 0;
+            entries = owner < 0 ? [] :
+            [
+                new CheckEntry
+                {
+                    Index = owner, Criterion = criteria[owner], Status = status, Value = requirement.Get(VerificationKeys.Value), Bound = requirement.Get(VerificationKeys.Bound),
+                    Margin = requirement.Get(VerificationKeys.Margin), Message = requirement.Get(VerificationKeys.Message), Analysis = requirement.Get(VerificationKeys.Analysis),
+                    Fingerprint = fp, Dependencies = deps,
+                },
+            ];
+        }
+        var result = new List<StoredCheck>();
+        for (var i = 0; i < criteria.Count; i++)
+        {
+            var c = criteria[i];
+            // The entry recorded for this criterion's text (at the same position if the text appears twice). An edited criterion has none.
+            var e = entries.FirstOrDefault(x => x.Index == i && x.Criterion == c) ?? entries.FirstOrDefault(x => x.Criterion == c);
+            if (e is null) { result.Add(new StoredCheck(i, c, "", "", "", "", "", "", false)); continue; }
+            var stale = e.Fingerprint is not { Length: > 0 } fp2 || Fingerprint(m, Deps(e.Dependencies), c) != fp2;
+            result.Add(new StoredCheck(i, c, e.Status, e.Value, e.Bound, e.Margin, e.Message, e.Analysis ?? "", stale));
+        }
+        return result;
+
+        static string[] Deps(string? s) => (s ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static List<CheckEntry> ReadChecks(string json)
+    {
+        if (json.Length == 0) return [];
+        try { return JsonSerializer.Deserialize<List<CheckEntry>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    /// <summary>True when something the last result depended on (the criteria, the analysed elements, the run, the variant) changed since.</summary>
     public static bool IsStale(ModelRepository m, Element requirement)
     {
         var stored = requirement.Get(VerificationKeys.Fingerprint);
         if (stored.Length == 0) return requirement.Get(VerificationKeys.Status).Length > 0;
         var deps = requirement.Get(VerificationKeys.Dependencies).Split(',', StringSplitOptions.RemoveEmptyEntries);
-        return Fingerprint(m, deps, Criterion(requirement).Trim()) != stored;
+        return Fingerprint(m, deps, CriterionText(requirement)) != stored;
     }
 
     /// <summary>Clears recorded results (one undo step).</summary>

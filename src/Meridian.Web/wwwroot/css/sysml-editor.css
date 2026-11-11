@@ -65,7 +65,7 @@
 .sx-hl .c { color: var(--text-3); font-style: italic; } .sx-hl .doc { color: #7fb98a; font-style: normal; }
 .sx-hl .id { color: var(--text-3); opacity: .45; } .sx-hl .s { color: #c3e88d; } .sx-hl .num { color: #f78c6c; } .sx-hl .p { color: #89ddff; }
 .app.light .sx-hl .k { color: #8b3fd1; } .app.light .sx-hl .n { color: #2459d6; } .app.light .sx-hl .doc { color: #2f7d47; }
-.app.light .sx-hl .s { color: #4b8a0f; } .app.light .sx-hl .num { color: #c25418; } .app.light .sx-hl .p { color: #0b7fa8; }
+.app.light .sx-hl .s { color: #3d750a; } .app.light .sx-hl .num { color: #c25418; } .app.light .sx-hl .p { color: #0b7fa8; }
 
 /* problems list */
 .sx-problems { flex: none; max-height: 96px; overflow: auto; border-top: 1px solid var(--border); font-size: 12px; background: var(--panel-solid); }

@@ -21,7 +21,7 @@
         <span class="crumb-title"><MudIcon Icon="@Icons.Material.Outlined.AdminPanelSettings" Style="font-size:17px; color:var(--accent-2)" /> Administration</span>
         <span style="flex:1"></span>
         <MudTooltip Text="@(Ws.DarkMode ? "Light mode" : "Dark mode")">
-            <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="Theme.ToggleDarkAsync" />
+            <MudIconButton Size="Size.Small" Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="Theme.ToggleDarkAsync" aria-label="@(Ws.DarkMode ? "Light mode" : "Dark mode")" title="@(Ws.DarkMode ? "Light mode" : "Dark mode")" />
         </MudTooltip>
         <a class="rbtn" href="/" style="text-decoration:none"><MudIcon Icon="@Icons.Material.Outlined.ArrowBack" /><span class="t">Back to workbench</span></a>
         @if (_me is { } me)

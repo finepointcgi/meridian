@@ -1,0 +1,13 @@
+@* A "Learn more" link to a page of the bundled user guide (/guide, Hosting/UserGuide.cs). meridian.js opens data-guide
+   links in a new tab, or in the system browser from the desktop app. *@
+<a class="guide-link" href="@Meridian.Web.Hosting.UserGuide.Page(Page, Anchor)" data-guide target="_blank" rel="noopener"
+   data-testid="guide-link" title="Opens the user guide">@if (ChildContent != null) { @ChildContent } else { <text>Learn more</text> }</a>
+
+@code {
+    /// <summary>The guide page (see <see cref="Meridian.Web.Hosting.UserGuide.Pages"/>); null for the guide's home page.</summary>
+    [Parameter] public string? Page { get; set; }
+
+    [Parameter] public string? Anchor { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

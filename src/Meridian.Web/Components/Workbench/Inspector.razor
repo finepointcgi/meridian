@@ -5,9 +5,15 @@
     <span style="flex:1">Properties</span>
     @if (E is { } sel && sel.Kind != ElementKind.Model)
     {
+        @if (sel is not Relationship && sel is not Diagram)
+        {
+            <MudTooltip Text="@(sel.Kind == ElementKind.RelationMap ? "Open this relation map" : "Relation map: everything connected to this element")">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Hub" data-testid="inspector-relation-map" OnClick="() => Shell.OpenRelationMap(sel)" aria-label="Relation map" />
+            </MudTooltip>
+        }
         <MudTooltip Text="Favorite">
             <MudIconButton Size="Size.Small" Icon="@(Ws.Favorites.Contains(sel.Id) ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
-                           Style="@(Ws.Favorites.Contains(sel.Id) ? "color:#f0b429" : "")" OnClick="() => Ws.ToggleFavorite(sel)" />
+                           Style="@(Ws.Favorites.Contains(sel.Id) ? "color:#f0b429" : "")" OnClick="() => Ws.ToggleFavorite(sel)" aria-label="Favorite" />
         </MudTooltip>
     }
 </div>
@@ -42,7 +48,7 @@
                 <span class="link" @onclick="() => Shell.OpenInSourceProject(e)" data-testid="open-in-source">Open in source project</span>
             </div>
         }
-        else if (Meridian.Core.Analysis.SuspectLinks.LibraryChangeOf(e) is { } why)
+        else if (Meridian.Core.Analysis.SuspectLinks.LibraryChangeOf(e, Ws.Model) is { } why)
         {
             <div class="lib-suspect" data-testid="inspector-library-suspect">
                 <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:14px" /> Suspect: @why
@@ -145,6 +151,8 @@
         }
 
         <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
+        <InstanceInspectorSection E="e" />
+        <DeploymentInspectorSection E="e" />
         <SafetyInspectorSection E="e" />
         <div class="section-title">Specification <span class="grow"></span></div>
         foreach (var key in Fields(e))
@@ -247,7 +255,8 @@
                     break;
                 default:
                     var multi = key is FieldKeys.Documentation or FieldKeys.Text or FieldKeys.Body or Meridian.Core.Analysis.ViewFields.Query or Meridian.Core.Analysis.ViewFields.Message or InteractionNotation.Sequence or InteractionNotation.Messages;
-                    <MudTextField @key="@(e.Id + key)" T="string" Label="@Label(key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
+                    @* Keyed by the value too: a change that arrives while the field has focus (a collaborator's, or a rebase) would otherwise leave MudBlazor showing the old text. *@
+                    <MudTextField @key="@(e.Id + key + "\u0001" + e.Get(key))" T="string" Label="@Label(key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
                                   Lines="@(multi ? 3 : 1)" AutoGrow="multi" MaxLines="12" Variant="Variant.Outlined" Margin="Margin.Dense" HelperText="@Help(key)" />
                     break;
             }
@@ -271,13 +280,13 @@
                 <div class="d-flex align-center gap-1">
                     <span style="min-width:90px; font-size:12px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis">@k</span>
                     <MudTextField @key="@(e.Id + "tag" + k)" T="string" Value="@v" ValueChanged="nv => Set(e, FieldKeys.TagPrefix + k, nv)" Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Set(e, FieldKeys.TagPrefix + k, null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Set(e, FieldKeys.TagPrefix + k, null)" aria-label="Remove" title="Remove" />
                 </div>
             }
             <div class="d-flex align-center gap-1">
                 <MudTextField T="string" @bind-Value="_newTag" Placeholder="tag" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
                 <MudTextField T="string" @bind-Value="_newTagValue" Placeholder="value" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newTag)" OnClick="() => AddTag(e)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" Disabled="string.IsNullOrWhiteSpace(_newTag)" OnClick="() => AddTag(e)" aria-label="Add" title="Add" />
             </div>
         }
 
@@ -315,6 +324,7 @@
         }
         <LinkedIssuesSection Element="e" />
         <CommentsSection ElementId="@e.Id" />
+        <ElementHistorySection Element="e" />
         <div class="section-title">Identity <span class="grow"></span></div>
         <div style="font:11px Menlo,Consolas,monospace; color:var(--text-3); word-break:break-all">@e.Id</div>
     }
@@ -533,7 +543,7 @@
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
         FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message",
-        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? Meridian.Core.DataModeling.DbFields.Label(key) ?? key,
+        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? Meridian.Core.DataModeling.DbFields.Label(key) ?? DeploymentFields.Label(key) ?? key,
     };
 
     private static string? Help(string key) => key switch
@@ -543,6 +553,6 @@
         FieldKeys.Stereotypes => "Comma separated",
         Meridian.Core.Analysis.ViewFields.Query => "e.g. kind:Block in:Structure where mass > 50 and not has:satisfy",
         Meridian.Core.Analysis.ViewFields.Message => "Placeholders: {name}, {owner}, {mass} …",
-        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key) ?? Meridian.Core.DataModeling.DbFields.Help(key),
+        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key) ?? Meridian.Core.DataModeling.DbFields.Help(key) ?? DeploymentFields.Help(key),
     };
 }

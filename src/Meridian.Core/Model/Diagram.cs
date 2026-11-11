@@ -68,6 +68,14 @@ public sealed class Diagram : Element
         DiagramType = type;
     }
 
+    private Diagram(Diagram source) : base(source)
+    {
+        DiagramType = source.DiagramType;
+    }
+
+    /// <summary>Nodes and edges are copied by <see cref="ModelRepository.CreateReplica"/> once every element exists.</summary>
+    internal override Element CopyForReplica() => new Diagram(this);
+
     public DiagramType DiagramType { get; }
     public IReadOnlyList<DiagramNode> Nodes => NodeList;
     public IReadOnlyList<DiagramEdge> Edges => EdgeList;

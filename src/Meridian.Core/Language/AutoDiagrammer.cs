@@ -97,8 +97,16 @@ public static class AutoDiagrammer
     public static readonly IReadOnlyList<DiagramType> SupportedTypes =
     [
         DiagramType.Package, DiagramType.BlockDefinition, DiagramType.Class, DiagramType.InternalBlock, DiagramType.Requirement,
-        DiagramType.Activity, DiagramType.StateMachine, DiagramType.UseCase, DiagramType.Database,
+        DiagramType.Activity, DiagramType.StateMachine, DiagramType.UseCase, DiagramType.Database, DiagramType.Deployment,
     ];
+
+    /// <summary>A deployment overview's shapes: every node, device and environment, and the artifacts and databases deployed on them.</summary>
+    private static List<Element> DeploymentContent(ModelRepository m, IEnumerable<Element> content)
+    {
+        var nodes = content.Where(e => Deployment.DeploymentModel.IsNode(e.Kind)).ToList();
+        var deployed = nodes.SelectMany(n => Deployment.DeploymentModel.DeployedOn(m, n)).Where(e => !Excluded(e)).Distinct();
+        return nodes.Concat(deployed).Distinct().ToList();
+    }
 
     private static readonly ElementKind[] BddKinds = [ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Enumeration];
 
@@ -187,6 +195,13 @@ public static class AutoDiagrammer
             if (members.Count == 0) continue;
             ctx.PlanGroup(plan, DiagramType.Database, area, $"{area.Name} – subject area", $"The tables of the subject area {area.DisplayName}.", members, whole: true);
         }
+
+        // Deployment overview: the nodes (with their nested devices and environments) and what is deployed on them, nested inside.
+        var deployment = DeploymentContent(m, content);
+        if (deployment.Any(e => Deployment.DeploymentModel.IsNode(e.Kind)))
+            ctx.PlanGroup(plan, DiagramType.Deployment, scope, scope.Kind == ElementKind.Model ? "Deployment overview" : $"{scope.Name} – deployment",
+                "Where the system runs: the nodes, devices and execution environments, the artifacts deployed on them and the communication paths between them.",
+                deployment, whole: true, isPrimary: e => Deployment.DeploymentModel.IsNode(e.Kind));
 
         foreach (var p in plan.Diagrams) p.NodeCount = Count(Collect(m, p.Type, p.Owner, p.Elements));
         if (!plan.Diagrams.Any(d => d.Type == DiagramType.Package)) plan.Dependencies.Clear();
@@ -411,6 +426,7 @@ public static class AutoDiagrammer
             DiagramType.Activity or DiagramType.StateMachine => BehaviorNodes(owner).ToList(),
             DiagramType.UseCase => owner.Descendants().Where(e => e.Kind is ElementKind.Actor or ElementKind.UseCase && Mine(e)).ToList() is var uc ? uc.Concat(UseCaseContext(m, uc)).ToList() : [],
             DiagramType.Database => DataModeling.DbModel.TablesIn(m, owner).ToList(),
+            DiagramType.Deployment => DeploymentContent(m, owner.Descendants().Where(e => e is not Relationship && e is not Diagram && !Excluded(e))),
             _ => [],
         };
     }
@@ -432,6 +448,8 @@ public static class AutoDiagrammer
                 : $"A package diagram shows packages (and classifiers), not a {Metamodel.DisplayName(e.Kind)}.",
             DiagramType.Database => e.Kind is ElementKind.Table or ElementKind.Class or ElementKind.Block or ElementKind.Requirement ? null
                 : $"A database diagram shows tables (and entities, blocks, requirements), not a {Metamodel.DisplayName(e.Kind)}.",
+            DiagramType.Deployment => Deployment.DeploymentModel.IsNode(e.Kind) || Deployment.DeploymentModel.IsDeployable(e.Kind) || e.Kind == ElementKind.Component ? null
+                : $"A deployment diagram shows nodes, artifacts, components and databases, not a {Metamodel.DisplayName(e.Kind)}.",
             _ when SupportedTypes.Contains(type) => Metamodel.IsClassifier(e.Kind) || e.Kind is ElementKind.Package or ElementKind.Requirement or ElementKind.TestCase ? null
                 : $"A {Metamodel.DisplayName(type)} does not show a {Metamodel.DisplayName(e.Kind)}.",
             _ => $"{Metamodel.DisplayName(type)} is not laid out automatically; supported: {string.Join(", ", SupportedTypes)}.",
@@ -562,6 +580,11 @@ public static class AutoDiagrammer
                     parent = e.AncestorsAndSelf().Skip(1).FirstOrDefault(a => set.Contains(a) && a.Kind is ElementKind.Package or ElementKind.Profile);
                 else if (type == DiagramType.StateMachine)
                     parent = e.AncestorsAndSelf().Skip(1).FirstOrDefault(a => set.Contains(a) && a.Kind == ElementKind.State);
+                else if (type == DiagramType.Deployment)
+                    // Nested nodes inside their node; an artifact (database) inside the node it is deployed to: «deploy» by nesting.
+                    parent = Deployment.DeploymentModel.IsNode(e.Kind)
+                        ? e.AncestorsAndSelf().Skip(1).FirstOrDefault(a => set.Contains(a) && Deployment.DeploymentModel.IsNode(a.Kind))
+                        : Deployment.DeploymentModel.DeployedTo(m, e).FirstOrDefault(set.Contains);
                 if (parent == null)
                 {
                     if (Notation.IsBorderShape(e)) continue;   // a pin without its action

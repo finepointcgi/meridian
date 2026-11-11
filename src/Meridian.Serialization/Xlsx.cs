@@ -4,7 +4,10 @@ using DocumentFormat.OpenXml.Spreadsheet;
 
 namespace Meridian.Serialization;
 
-/// <summary>Minimal .xlsx writer and reader (string cells, bold frozen header row, sized columns) on DocumentFormat.OpenXml.</summary>
+/// <summary>
+/// Minimal .xlsx writer (string cells, bold frozen header row, sized columns) on DocumentFormat.OpenXml; reading goes
+/// through the bounded <see cref="Spreadsheets.SheetReader"/>.
+/// </summary>
 public static class Xlsx
 {
     public sealed record Sheet(string Name, IReadOnlyList<string> Header, IReadOnlyList<IReadOnlyList<string>> Rows);
@@ -86,50 +89,14 @@ public static class Xlsx
         return name;
     }
 
-    private static int ColumnIndex(string cellRef)
-    {
-        var n = 0;
-        foreach (var c in cellRef.TakeWhile(char.IsLetter)) n = n * 26 + (char.ToUpperInvariant(c) - 'A' + 1);
-        return n - 1;
-    }
-
-    /// <summary>Reads the first worksheet as rows of strings (shared, inline, numeric and boolean cells).</summary>
+    /// <summary>
+    /// Reads the first worksheet as rows of strings (shared, inline, numeric and boolean cells), through the bounded
+    /// spreadsheet reader (<see cref="Spreadsheets.SheetReader"/>: SafeZip part limits, no DTDs, formulas never evaluated).
+    /// </summary>
     public static List<List<string>> Read(Stream stream)
     {
-        // Bound each part: a small .xlsx can inflate to gigabytes of XML.
-        using var doc = SpreadsheetDocument.Open(stream, false, new OpenSettings { MaxCharactersInPart = 64L * 1024 * 1024 });
-        var wb = doc.WorkbookPart ?? throw new FormatException("Not an Excel workbook");
-        var first = wb.Workbook.Sheets?.Elements<DocumentFormat.OpenXml.Spreadsheet.Sheet>().FirstOrDefault()
-                    ?? throw new FormatException("The workbook has no sheets");
-        var ws = (WorksheetPart)wb.GetPartById(first.Id!.Value!);
-        var shared = wb.SharedStringTablePart?.SharedStringTable?.Elements<SharedStringItem>().Select(i => i.InnerText).ToList() ?? [];
-        var result = new List<List<string>>();
-        foreach (var row in ws.Worksheet.Descendants<Row>())
-        {
-            var values = new List<string>();
-            var next = 0;
-            foreach (var cell in row.Elements<Cell>())
-            {
-                var col = cell.CellReference?.Value is { } r ? ColumnIndex(r) : next;
-                while (values.Count < col) values.Add("");
-                values.Add(CellText(cell, shared));
-                next = col + 1;
-            }
-            // Keep row positions stable: missing rows become empty rows.
-            var index = (int)(row.RowIndex?.Value ?? (uint)(result.Count + 1));
-            while (result.Count < index - 1) result.Add([]);
-            result.Add(values);
-        }
-        return result;
-    }
-
-    private static string CellText(Cell cell, List<string> shared)
-    {
-        var type = cell.DataType?.Value;
-        if (type == CellValues.InlineString) return cell.InlineString?.InnerText ?? "";
-        var raw = cell.CellValue?.InnerText ?? "";
-        if (type == CellValues.SharedString) return int.TryParse(raw, out var i) && i >= 0 && i < shared.Count ? shared[i] : "";
-        if (type == CellValues.Boolean) return raw == "1" ? "TRUE" : "FALSE";
-        return raw;
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return Spreadsheets.SheetReader.ReadXlsx(ms.ToArray()).Sheets[0].Rows;
     }
 }

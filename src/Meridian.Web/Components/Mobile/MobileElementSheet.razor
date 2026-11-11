@@ -22,6 +22,18 @@
             <button class="m-action" @onclick="() => MobileActions.ShowInTree(Ws, Ui, e)"><MudIcon Icon="@Icons.Material.Outlined.AccountTree" /><span>Show in tree</span></button>
         </div>
         <div class="m-sheet-body">
+            @if (Ws.LibraryOf(e) is { } lib)
+            {
+                @* Used project (docs/LIBRARIES.md): read-only here; changed in its own project. *@
+                <div class="m-lib-hint" data-testid="m-sheet-library">
+                    <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" />
+                    <span>From @lib.SourceProjectName · @lib.PinLabel — read-only here.</span>
+                    @if (Shell != null)
+                    {
+                        <button class="m-pill-btn" style="margin-left:auto; padding:0 12px; flex:none" @onclick="() => OpenSource(e)" data-testid="m-open-in-source">Open source</button>
+                    }
+                </div>
+            }
             @if (e.Kind == ElementKind.Requirement && e.Get(FieldKeys.Text) is { Length: > 0 } text)
             {
                 <div class="m-sec-title">Text</div>
@@ -81,7 +93,7 @@
     public sealed record TraceRow(bool Outgoing, string Label, Element Other);
 
     private static readonly HashSet<string> Hidden =
-        [FieldKeys.Name, FieldKeys.Documentation, FieldKeys.Text, FieldKeys.RequirementId, FieldKeys.Stereotypes];
+        [FieldKeys.Name, FieldKeys.Documentation, FieldKeys.Text, FieldKeys.RequirementId, FieldKeys.Stereotypes, ReqFields.LibraryChange];
 
     private static string Title(Element e) =>
         e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } id ? $"{id} {e.Name}" : e.DisplayName;
@@ -114,6 +126,12 @@
         }
         foreach (var r in Ws.Model.Outgoing(e)) yield return new(true, Metamodel.DisplayName(r.Kind), r.Target);
         foreach (var r in Ws.Model.Incoming(e)) yield return new(false, Metamodel.DisplayName(r.Kind), r.Source);
+    }
+
+    private async Task OpenSource(Element e)
+    {
+        Ui.CloseSheet();
+        if (Shell != null) await Shell.OpenInSourceProject(e);
     }
 
     private void Follow(Element other)

@@ -78,7 +78,16 @@ public static class SysMLv2Sync
 
     /// <summary><c>#tag</c> words with a meaning of their own (not stereotype applications).</summary>
     internal static readonly HashSet<string> SpecialTags = new(StringComparer.Ordinal)
-        { "actor", "derivation", "refinement", "trace", "extend", "derive", "refine", "reply", "async" };
+        { "actor", "derivation", "refinement", "trace", "extend", "derive", "refine", "reply", "async", "link",
+          "node", "device", "executionEnvironment", "artifact", "deploymentSpec", "deploy", "manifest", "communicationPath" };
+
+    /// <summary>The deployment kind a #tag on a part definition stands for (see <see cref="SysMLv2Text.DeploymentTag"/>).</summary>
+    private static ElementKind? DeploymentKindOf(IEnumerable<string> tags) =>
+        tags.Select(t => t switch
+        {
+            "node" => ElementKind.Node, "device" => ElementKind.Device, "executionEnvironment" => ElementKind.ExecutionEnvironment,
+            "artifact" => ElementKind.Artifact, "deploymentSpec" => ElementKind.DeploymentSpecification, _ => (ElementKind?)null,
+        }).FirstOrDefault(k => k != null);
 
     // ====================================================================================================
 
@@ -120,18 +129,26 @@ public static class SysMLv2Sync
             ElementKind.State => "state",
             ElementKind.DecisionNode => "decision",
             ElementKind.ForkNode => "fork",
+            ElementKind.InstanceSpecification => "instance",
+            ElementKind.Slot => "slot",
+            _ when SysMLv2Text.DeploymentTag(e.Kind) is { } tag => tag,   // node, device, executionEnvironment, artifact, deploymentSpec
             _ => null,
         };
 
         /// <summary>The family a declaration maps to inside an owner of the given kind, or null if Meridian has no equivalent.</summary>
         private static string? DeclFamily(SysmlDecl d, ElementKind owner)
         {
+            // Instances: "individual part vehicle1 : Vehicle { … }"; inside one, ":>> mass = 1500 [kg];" is a slot.
+            if (!d.IsDef && !d.OpaqueHeader && d.Name != null && d.Modifiers.Contains("individual") && d.Keyword is "part" or "item" or "attribute" or "occurrence"
+                && owner is ElementKind.Package or ElementKind.Model or ElementKind.InstanceSpecification) return "instance";
+            if (owner == ElementKind.InstanceSpecification)
+                return !d.IsDef && d.Name == null && d.Redefines.Count == 1 && !d.HasBody && d.Types.Count == 0 ? "slot" : null;
             if (d.OpaqueHeader || d.Types.Count > 1 || d.EffectiveName == null) return null;
             var kw = d.Keyword;
             if (d.IsDef)
                 return kw switch
                 {
-                    "part" => d.Tags.Contains("actor") ? "actor" : "block",
+                    "part" => d.Tags.Contains("actor") ? "actor" : DeploymentKindOf(d.Tags) is { } dk ? SysMLv2Text.DeploymentTag(dk) : "block",
                     "item" or "connection" or "allocation" or "flow" => "block",
                     "port" or "interface" => "portdef",
                     "attribute" => "valuetype",
@@ -186,6 +203,13 @@ public static class SysMLv2Sync
             "state" => ElementKind.State,
             "decision" => ElementKind.DecisionNode,
             "fork" => ElementKind.ForkNode,
+            "instance" => ElementKind.InstanceSpecification,
+            "slot" => ElementKind.Slot,
+            "node" => ElementKind.Node,
+            "device" => ElementKind.Device,
+            "executionEnvironment" => ElementKind.ExecutionEnvironment,
+            "artifact" => ElementKind.Artifact,
+            "deploymentSpec" => ElementKind.DeploymentSpecification,
             _ => throw new InvalidOperationException(family),
         };
 
@@ -226,7 +250,8 @@ public static class SysMLv2Sync
 
         private static string? FamilyIgnoringOwner(SysmlDecl d) =>
             DeclFamily(d, ElementKind.Package) ?? DeclFamily(d, ElementKind.Block) ?? DeclFamily(d, ElementKind.Activity)
-            ?? DeclFamily(d, ElementKind.StateMachine) ?? DeclFamily(d, ElementKind.Enumeration) ?? DeclFamily(d, ElementKind.Interaction);
+            ?? DeclFamily(d, ElementKind.StateMachine) ?? DeclFamily(d, ElementKind.Enumeration) ?? DeclFamily(d, ElementKind.Interaction)
+            ?? DeclFamily(d, ElementKind.InstanceSpecification);
 
         private void Bind(SysmlDecl d, Element e)
         {
@@ -261,7 +286,7 @@ public static class SysMLv2Sync
                 {
                     if (Map.ContainsKey(d) || DeclFamily(d, owner.Kind) is not { } fam) continue;
                     var name = Name(d);
-                    var hit = free.FirstOrDefault(c => ElementFamily(c) == fam && SysmlNameIndex.ExportName(c) == name);
+                    var hit = free.FirstOrDefault(c => ElementFamily(c) == fam && MatchName(c) == name);
                     if (hit != null) { Bind(d, hit); free.Remove(hit); }
                     else pending.Add((d, fam));
                 }
@@ -285,6 +310,9 @@ public static class SysMLv2Sync
             foreach (var d in decls)
                 MatchBody(d.Body, Map.GetValueOrDefault(d));
         }
+
+        /// <summary>The name a declaration matches an element by: a slot by its feature's name.</summary>
+        private string MatchName(Element c) => c.Kind == ElementKind.Slot ? Core.Instances.InstanceModel.FeatureName(m, c) : SysmlNameIndex.ExportName(c);
 
         // -------------------------------------------------------------- apply
 
@@ -339,7 +367,7 @@ public static class SysMLv2Sync
                         Diag(SysmlSeverity.Info, $"'{Name(d)}' was placed in {target.DisplayName}: a {Metamodel.DisplayName(owner.Kind)} cannot contain a {Metamodel.DisplayName(kind)}", d.NameSpan);
                     }
                     var index = previous != null && ReferenceEquals(previous.Owner, target) ? target.OwnedElements.ToList().IndexOf(previous) + 1 : -1;
-                    var name = fam is "decision" or "fork" || d.Name == null && d.SyntheticName != null && fam == "action" ? d.Name : Name(d);
+                    var name = fam is "decision" or "fork" or "slot" || d.Name == null && d.SyntheticName != null && fam == "action" ? d.Name : Name(d);
                     e = m.Create(target, kind, string.IsNullOrEmpty(name) ? null : name, index);
                     if (fam == "action" && d.Name == null && d.SyntheticName != null && e.Name.Length > 0) m.Set(e, FieldKeys.Name, null);
                     Bind(d, e);
@@ -366,6 +394,7 @@ public static class SysMLv2Sync
             {
                 if (d.Name != null && d.Name != SysmlNameIndex.ExportName(e)) Rename(e, d.Name);
             }
+            else if (e.Kind == ElementKind.Slot) { /* named after its feature */ }
             else if (e.Kind == ElementKind.Action && SysMLv2Parser.ActionBodyKeywords.Contains(d.Keyword) && d.Name == null)
             {
                 if (e.Name.Length > 0) Rename(e, "");
@@ -399,7 +428,7 @@ public static class SysMLv2Sync
                 Set(e, FieldKeys.Multiplicity, string.IsNullOrEmpty(d.Multiplicity) ? "1" : d.Multiplicity);
             else Set(e, SysMLv2Text.MultiplicityField, d.Multiplicity);
             if (e.Kind == ElementKind.Property) Set(e, FieldKeys.DefaultValue, d.Value);
-            else Set(e, SysMLv2Text.ValueField, d.Value);
+            else if (e.Kind != ElementKind.Slot) Set(e, SysMLv2Text.ValueField, d.Value);   // a slot's value is read with its feature (Typing)
             Set(e, SysMLv2Text.ValueOpField, d.Value != null && d.ValueOp != "=" ? d.ValueOp : null);
             if (e.Kind is ElementKind.Port or ElementKind.Property) Set(e, FieldKeys.Direction, d.Direction);
             if (e.Kind == ElementKind.ConstraintBlock)
@@ -420,15 +449,16 @@ public static class SysMLv2Sync
             if (e.Kind == ElementKind.Action) Set(e, SysMLv2Text.RawField, d.Raw);
 
             // header details Meridian doesn't model, kept for the exporter
-            var prefix = d.Modifiers.Where(x => x is not ("public" or "private" or "protected") && !(x == "abstract" && Metamodel.IsClassifier(e.Kind))).ToList();
+            var prefix = d.Modifiers.Where(x => x is not ("public" or "private" or "protected") && !(x == "abstract" && Metamodel.IsClassifier(e.Kind))
+                                                && !(x == "individual" && e.Kind == ElementKind.InstanceSpecification)).ToList();
             Set(e, SysMLv2Text.PrefixField, prefix.Count == 0 ? null : string.Join(" ", prefix));
             var vis = d.Visibility;
             if (vis != null) Set(e, FieldKeys.Visibility, vis);
             else if (e.Get(FieldKeys.Visibility) is "private" or "protected") Set(e, FieldKeys.Visibility, null);
             if (e.Kind != ElementKind.Requirement) Set(e, SysMLv2Text.ShortNameField, d.ShortName);
             Set(e, SysMLv2Text.FlagsField, d.Flags.Count == 0 ? null : string.Join(" ", d.Flags));
-            Set(e, SysMLv2Text.RedefinesField, d.Redefines.Count == 0 ? null : string.Join(", ", d.Redefines.Select(RefText)));
-            Set(e, SysMLv2Text.UnnamedField, d.Name == null && d.Redefines.Count > 0 ? "true" : null);
+            Set(e, SysMLv2Text.RedefinesField, d.Redefines.Count == 0 || e.Kind == ElementKind.Slot ? null : string.Join(", ", d.Redefines.Select(RefText)));   // a slot's is its feature (Typing)
+            Set(e, SysMLv2Text.UnnamedField, d.Name == null && d.Redefines.Count > 0 && e.Kind != ElementKind.Slot ? "true" : null);
             Set(e, SysMLv2Text.ReferencesField, d.References.Count == 0 ? null : string.Join(", ", d.References.Select(RefText)));
             Set(e, SysMLv2Text.ConjugatedField, d.Types.Count > 0 && d.Types[0].Conjugated ? "true" : null);
 
@@ -498,9 +528,12 @@ public static class SysMLv2Sync
 
         private void Typing()
         {
+            // Instances first: slot values name instances of the parts' types.
+            foreach (var (d, e) in Map.Where(kv => kv.Value.Kind == ElementKind.InstanceSpecification && m.Contains(kv.Value)).ToList()) TypeInstance(d, e);
             foreach (var (d, e) in Map.ToList())
             {
                 if (!m.Contains(e)) continue;
+                if (e.Kind is ElementKind.InstanceSpecification or ElementKind.Slot) { if (e.Kind == ElementKind.Slot) TypeInstance(d, e); continue; }
                 var context = e.Owner ?? m.Root;
                 string? typeText = null;
                 if (Metamodel.IsTypedFeature(e.Kind))
@@ -585,6 +618,54 @@ public static class SysMLv2Sync
             }
         }
 
+        /// <summary>An instance's classifiers, or a slot's feature and value, from its declaration.</summary>
+        private void TypeInstance(SysmlDecl d, Element e)
+        {
+            var context = e.Owner ?? m.Root;
+            if (e.Kind == ElementKind.InstanceSpecification)
+            {
+                var ids = new List<string>();
+                foreach (var t in d.Types)
+                {
+                    if (L(t, context, x => Core.Instances.InstanceModel.CanClassify(x.Kind)) is { } c) ids.Add(c.Id);
+                    else if (!Known(t, context)) Diag(SysmlSeverity.Warning, $"Unknown classifier '{t.Text}'", t.Span);
+                }
+                var value = ids.Count == 0 ? null : string.Join(",", ids.Distinct());
+                if (e.Get(Core.Instances.InstanceFields.Classifier) != (value ?? ""))
+                {
+                    m.Set(e, Core.Instances.InstanceFields.Classifier, value);
+                    Change(SysmlChangeKind.Update, $"Classify {e.DisplayName}");
+                }
+                return;
+            }
+            var featureName = d.Redefines[0].Simple;
+            var feature = Core.Instances.InstanceModel.InstanceFeatures(m, context).FirstOrDefault(f => f.Name == featureName);
+            if (feature == null)
+            {
+                Diag(SysmlSeverity.Warning, $"'{featureName}' is not a feature of {context.DisplayName}'s classifiers", d.Redefines[0].Span);
+                return;
+            }
+            Set(e, Core.Instances.InstanceFields.Feature, feature.Id);
+            var (kind, text) = SlotValue(d.Value, feature, context);
+            Set(e, Core.Instances.InstanceFields.ValueKind, Core.Instances.InstanceModel.KindCode(kind));
+            Set(e, Core.Instances.InstanceFields.Value, text);
+        }
+
+        /// <summary>Reads a slot value: "text" literal, number [unit], true / false, Enum::Literal, instance names, else an expression.</summary>
+        private (Core.Instances.SlotValueKind, string?) SlotValue(string? value, Element feature, Element instance)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return (Core.Instances.SlotValueKind.Literal, null);
+            var v = value.Trim();
+            if (v.Length >= 2 && v[0] == '"' && v[^1] == '"') return (Core.Instances.SlotValueKind.Literal, v[1..^1].Replace("\\\"", "\"").Replace("\\\\", "\\"));
+            var text = v;
+            if (Core.Instances.InstanceModel.IsInstanceValued(m, feature)) text = v.Trim('(', ')');
+            else if (Core.Instances.InstanceModel.IsEnumValued(m, feature)) text = v.Contains("::") ? v[(v.LastIndexOf("::", StringComparison.Ordinal) + 2)..] : v;
+            else text = System.Text.RegularExpressions.Regex.Replace(v, @"\[\s*([^\]]*?)\s*\]", "$1");
+            text = string.Join(", ", text.Split(',').Select(p => p.Trim().Trim('\'')));
+            try { return Core.Instances.InstanceModel.Parse(m, feature, text, instance); }
+            catch (InvalidOperationException) { return (Core.Instances.SlotValueKind.Expression, v); }
+        }
+
         private static IEnumerable<string?> Aliases(IEnumerable<SysmlMember> body)
         {
             foreach (var x in body)
@@ -626,7 +707,8 @@ public static class SysMLv2Sync
         private static readonly ElementKind[] OwnedKinds =
         [
             ElementKind.Satisfy, ElementKind.Allocate, ElementKind.Dependency, ElementKind.DeriveReqt, ElementKind.Refine, ElementKind.Trace,
-            ElementKind.Message, ElementKind.Connector, ElementKind.Binding,
+            ElementKind.Message, ElementKind.Connector, ElementKind.Binding, ElementKind.Link,
+            ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath,
         ];
 
         /// <summary>Relationships the exporter writes for the elements in this scope (and which the text therefore owns).</summary>
@@ -880,9 +962,13 @@ public static class SysMLv2Sync
                 "derivation" => ElementKind.DeriveReqt,
                 "refinement" => ElementKind.Refine,
                 "trace" => ElementKind.Trace,
+                "deploy" => ElementKind.Deployment,
+                "manifest" => ElementKind.Manifestation,
+                "communicationPath" => ElementKind.CommunicationPath,
                 "include" => ElementKind.Include,
                 "extend" => ElementKind.Extend,
                 "message" => ElementKind.Message,
+                "link" => ElementKind.Link,
                 _ => (ElementKind?)null,
             };
             if (kind == null) return;

@@ -10,7 +10,7 @@ namespace Meridian.Tests;
 /// </summary>
 internal static class MagicDrawFixtures
 {
-    private const string Header = """
+    internal const string Header = """
         <?xml version='1.0' encoding='UTF-8'?>
         <xmi:XMI xmlns:uml='http://www.omg.org/spec/UML/20131001' xmlns:xmi='http://www.omg.org/spec/XMI/20131001'
                  xmlns:sysml='http://www.omg.org/spec/SysML/20181001/SysML'
@@ -22,7 +22,7 @@ internal static class MagicDrawFixtures
         """;
 
     /// <summary>An ownedDiagram extension. With <paramref name="inline"/> the symbols are embedded; otherwise a binaryObject points at zip entry <paramref name="binaryId"/>.</summary>
-    private static string Diagram(string id, string name, string owner, string type, string umlType, string binaryId, string? inline)
+    internal static string Diagram(string id, string name, string owner, string type, string umlType, string binaryId, string? inline)
     {
         var contents = inline != null
             ? $"<diagramContents contentHash='h' exporterName='MagicDraw UML' exporterVersion='2021x' xmi:id='{id}_c'>{inline}</diagramContents>"
@@ -47,18 +47,18 @@ internal static class MagicDrawFixtures
             """;
     }
 
-    private static string Shape(string id, string cls, string element, string geometry, string nested = "") =>
+    internal static string Shape(string id, string cls, string element, string geometry, string nested = "") =>
         $"<mdElement elementClass='{cls}' xmi:id='{id}'><elementID xmi:idref='{element}'/><geometry>{geometry}</geometry>" +
         (nested.Length > 0 ? $"<mdOwnedViews>{nested}</mdOwnedViews>" : "") + "</mdElement>";
 
-    private static string Path(string id, string cls, string element, string first, string second, string geometry) =>
+    internal static string Path(string id, string cls, string element, string first, string second, string geometry) =>
         $"<mdElement elementClass='{cls}' xmi:id='{id}'><elementID xmi:idref='{element}'/><linkFirstEndID xmi:idref='{first}'/><linkSecondEndID xmi:idref='{second}'/><geometry>{geometry}</geometry></mdElement>";
 
-    private static string Contents(string diagramId, string frameElement, string views) =>
+    internal static string Contents(string diagramId, string frameElement, string views) =>
         $"<mdElement elementClass='DiagramPresentationElement' xmi:id='{diagramId}_dpe'><elementID xmi:idref='{diagramId}'/><zoomFactor>1.0</zoomFactor><mdOwnedViews>" +
         Shape(diagramId + "_frame", "DiagramFrame", frameElement, "0, 0, 1200, 900", views) + "</mdOwnedViews></mdElement>";
 
-    private static string BinaryEntry(string body) =>
+    internal static string BinaryEntry(string body) =>
         "<?xml version='1.0' encoding='UTF-8'?><diagram:DiagramContents xmlns:xmi='http://www.omg.org/XMI' xmlns:diagram='http://www.nomagic.com/ns/magicdraw/core/diagram/1.0'>" + body + "</diagram:DiagramContents>";
 
     // ------------------------------------------------------------------ diagram symbol sets
@@ -193,7 +193,16 @@ internal static class MagicDrawFixtures
               <packagedElement xmi:type='uml:Association' xmi:id='_assoc1' memberEnd='_p_rotors _assoc1_end'>
                 <ownedEnd xmi:type='uml:Property' xmi:id='_assoc1_end' type='_drone' association='_assoc1'/>
               </packagedElement>
-              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst' name='drone1'/>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst' name='drone1' classifier='_drone'>
+                <slot xmi:type='uml:Slot' xmi:id='_inst_mass' definingFeature='_p_mass'><value xmi:type='uml:LiteralReal' xmi:id='_inst_mass_v' value='1.4'/></slot>
+                <slot xmi:type='uml:Slot' xmi:id='_inst_ctrl' definingFeature='_p_ctrl'><value xmi:type='uml:InstanceValue' xmi:id='_inst_ctrl_v' instance='_inst2'/></slot>
+              </packagedElement>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst2' name='fc1'><classifier xmi:idref='_ctrl'/></packagedElement>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_inst3' name='rotor1' classifier='_rotor'/>
+              <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_lnk' classifier='_assoc1'>
+                <slot xmi:type='uml:Slot' xmi:id='_lnk_s1' definingFeature='_assoc1_end'><value xmi:type='uml:InstanceValue' xmi:id='_lnk_s1_v' instance='_inst'/></slot>
+                <slot xmi:type='uml:Slot' xmi:id='_lnk_s2' definingFeature='_p_rotors'><value xmi:type='uml:InstanceValue' xmi:id='_lnk_s2_v' instance='_inst3'/></slot>
+              </packagedElement>
               <packagedElement xmi:type='uml:Frobnicator' xmi:id='_weird' name='Unknown thing'/>
               {extraBlocks}
               {D("_bdd", "Drone structure", "_pkgS", "SysML Block Definition Diagram", "Class Diagram", BddViews)}

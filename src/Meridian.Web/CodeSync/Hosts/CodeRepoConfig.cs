@@ -107,6 +107,9 @@ public sealed partial class CodeRepoConfig
     public bool CommentOnPullRequests { get; set; } = true;
     /// <summary>Create diagrams for new packages and blocks. The model root's <c>codeSync.autoDiagrams</c> field overrides it when set.</summary>
     public bool AutoDiagrams { get; set; } = true;
+    /// <summary>Keep deployment artifacts that «manifest» the synced code (one for the repository, or one per top-level
+    /// package), so the code can be deployed to nodes. Off by default.</summary>
+    public Meridian.Core.CodeSync.CodeArtifactMode DeploymentArtifacts { get; set; } = Meridian.Core.CodeSync.CodeArtifactMode.None;
     /// <summary>Also read the code of git submodules (archives leave it out): each is fetched at the commit the
     /// repository pins it to and merged in under its path (docs/CODE-SYNC.md, "Submodules").</summary>
     public bool IncludeSubmodules { get; set; } = true;
@@ -199,8 +202,8 @@ public sealed partial class CodeRepoConfig
     /// <summary>Validates the settings; returns an error message or null.</summary>
     public string? Validate()
     {
-        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback)))
-            return "The server URL must be an absolute https:// URL.";
+        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp) || u.Host.Length == 0)
+            return "The server URL must be an absolute http:// or https:// URL.";
         if (!string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment)) return "The server URL must not have a query or fragment.";
         if (Host == GitHostKind.Bitbucket)
         {

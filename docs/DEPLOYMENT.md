@@ -225,6 +225,7 @@ compose `.env` file, every setting has a short variable that `docker-compose.pro
 | `Meridian__AI__Local__ContextWindow` / `__MaxTokens` / `__Temperature` / `__ToolCalling` / `__TimeoutSeconds` | 32768 / 4096 / 0.2 / Auto / 300 | Local model tuning ([AI.md](AI.md#using-a-local-model)) |
 | `Meridian__Desktop__UpdatesPath` | none (off) | Folder of desktop release files, or a `latest.json` manifest, served to desktop apps at `/api/desktop/latest` ([below](#desktop-updates-from-your-server)) |
 | `Meridian__Desktop__NotesUrl` | none | Release notes page listed in the generated manifest |
+| `Meridian__GuidePath` | `guide/` next to the app | Folder of the built user guide, served at `/guide` without signing in (the sign-in page links to it). The image and release packages include it; see [below](#user-guide) |
 | `Meridian__Logging__Format` | text | `json` for one JSON object per line |
 | `Meridian__Logging__Requests` | false | Log one line per request: method, path, status and duration. Never query strings, headers, cookies or bodies |
 | `Meridian__Telemetry__OtlpEndpoint` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) | none (off) | Export traces and metrics over OTLP |
@@ -370,6 +371,15 @@ once a quarter.
   `Retain`. Scheduled files are listed and downloadable on the same page.
 - **Restore**: Admin → Backups → *Choose backup…*, pick the projects, then *Restore*. Projects are recreated with
   their history. Users can optionally be recreated, and SSO users link again on their next sign-in.
+
+## User guide
+
+The user guide (`docs-site`, built with DocFX) ships inside the image (`/app/guide`), the server zip and the desktop apps,
+and Meridian serves it at `/guide`: **Help (?) ▸ User guide** and the "Learn more" links in the app open it, offline, with
+no public hosting. It is public documentation, so `/guide` needs no sign-in; the sign-in page links to it so people can
+read it before they have an account. It is a separate branch of the request pipeline and never reaches the app, its
+APIs or project data. Build the image with `--build-arg SKIP_GUIDE=1` to leave it out (then `/guide` explains how to
+build it), or point `Meridian__GuidePath` at another folder.
 
 ## Desktop updates from your server
 

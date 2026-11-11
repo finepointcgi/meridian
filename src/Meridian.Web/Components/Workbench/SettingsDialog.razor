@@ -211,6 +211,9 @@
         // ---------------------------------------------------------------- editor
         yield return new(SettingsSection.Editor, "Confirm before deleting from the model", "Ask before Delete removes elements from the model (Backspace only removes them from the diagram).", Scope.User,
             Toggle("confirm-delete", P.ConfirmDeleteFromModel, v => Set(p => p.ConfirmDeleteFromModel = v)), "delete warning undo");
+        if (!Host.LocalMode)
+            yield return new(SettingsSection.Editor, "Library changed upstream", "Notify me when a used project's source commits a change to the package a project I edit uses.", Scope.User,
+                Toggle("lib-upstream", P.LibraryUpstreamNotices, v => Set(p => p.LibraryUpstreamNotices = v)), "used projects library update notification");
         yield return new(SettingsSection.Editor, "Guided tour", P.TourSeen ? "You have seen the tour." : "The tour shows on your next visit.", Scope.User, TourButton, "onboarding help introduction");
         yield return new(SettingsSection.Editor, "Keyboard shortcuts", null, Scope.User, ShortcutTable, "keys hotkeys keyboard reference");
 

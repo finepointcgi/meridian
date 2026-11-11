@@ -4,7 +4,7 @@
 <div class="card-header">
     <MudIcon Icon="@Icons.Material.Outlined.Assignment" Style="font-size:15px" />
     <span style="flex:1">Requirements</span>
-    <MudTooltip Text="New requirement"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" OnClick="Add" /></MudTooltip>
+    <MudTooltip Text="New requirement"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" OnClick="Add" aria-label="New requirement" /></MudTooltip>
 </div>
 @{ var cov = Traceability.Coverage(Ws.Model); }
 <div class="px-3 pb-2" style="display:grid; grid-template-columns:1fr 1fr; gap:10px">

@@ -598,7 +598,7 @@ public static partial class SysMLv2Parser
                     var sources = ReadRefList("a client element");
                     Expect("to", "in 'dependency … to …'");
                     var targets = ReadRefList("a supplier element");
-                    var tag = tags.FirstOrDefault(t => t is "derivation" or "refinement" or "trace" or "extend" or "derive" or "refine");
+                    var tag = tags.FirstOrDefault(t => t is "derivation" or "refinement" or "trace" or "extend" or "derive" or "refine" or "link" or "deploy" or "manifest" or "communicationPath");
                     var keyword = tag switch { "derive" => "derivation", "refine" => "refinement", null => "dependency", _ => tag };
                     var complex = Is("{") || tags.Count > (tag == null ? 0 : 1) || sources.Count * targets.Count > 1;
                     var first = true;

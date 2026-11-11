@@ -113,7 +113,7 @@
         }
         catch (Exception ex) when (ex is JSException or TaskCanceledException or InvalidOperationException or FormatException)
         {
-            _error = "Export failed: " + ex.Message;
+            _error = $"Could not export the image: {FriendlyError.Describe(ex)}. Try a smaller scale, or SVG.";
         }
         finally { _busy = null; }
     }
@@ -130,7 +130,7 @@
             if (problem != null) _error = problem;
             else { Ws.SetStatus($"Copied {d.Name} to the clipboard as a picture"); MudDialog.Close(DialogResult.Ok(true)); }
         }
-        catch (Exception ex) when (ex is JSException or TaskCanceledException) { _error = "Copy failed: " + ex.Message; }
+        catch (Exception ex) when (ex is JSException or TaskCanceledException) { _error = $"Could not copy the image: {FriendlyError.Describe(ex)}. Download it instead."; }
         finally { _busy = null; }
     }
 }

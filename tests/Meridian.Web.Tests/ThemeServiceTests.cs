@@ -313,3 +313,57 @@ public sealed class ThemeContrastTests
         Assert.True(ColorMath.Contrast(ColorMath.EnsureContrast("#4f8cff", "#ffffff"), "#ffffff") >= 4.5);
     }
 }
+
+/// <summary>
+/// The feature stylesheets added in 0.5–0.7 (database, libraries, permissions, verification, multi-select, the SysML
+/// editor, the tour and empty states) must not hard-code a text colour that is unreadable in one of the themes: a fixed
+/// <c>color: #…</c> in a rule that does not set its own background must reach WCAG AA (4.5:1) on the panel of every
+/// theme it applies to (rules under <c>.app.light</c> / <c>.app.dark</c> only count for that theme).
+/// </summary>
+public sealed class FeatureCssContrastTests
+{
+    private static string WwwRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, "src", "Meridian.Web", "wwwroot");
+            if (Directory.Exists(path)) return path;
+        }
+        throw new DirectoryNotFoundException("wwwroot not found above " + AppContext.BaseDirectory);
+    }
+
+    [Fact]
+    public void Hard_Coded_Text_Colours_Are_Readable_In_Both_Themes()
+    {
+        var root = WwwRoot();
+        var files = Directory.GetFiles(Path.Combine(root, "css"), "*.css").Append(Path.Combine(root, "extras.css")).ToList();
+        Assert.Contains(files, f => f.EndsWith("verification.css", StringComparison.Ordinal));
+        var failures = new List<string>();
+        var checkedRules = 0;
+        foreach (var file in files)
+        {
+            var css = Regex.Replace(File.ReadAllText(file), @"/\*.*?\*/", "", RegexOptions.Singleline);
+            foreach (Match rule in Regex.Matches(css, @"([^{}]+)\{([^{}]*)\}"))
+            {
+                var selector = rule.Groups[1].Value.Trim();
+                var body = rule.Groups[2].Value;
+                if (Regex.IsMatch(body, @"(^|[;\s])background(-color)?\s*:")) continue;   // its own background: judged with it, not here
+                var color = Regex.Match(body, @"(?:^|[;\s])color\s*:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3})\b");
+                if (!color.Success) continue;
+                if (color.Groups[1].Value.ToLowerInvariant() is "#fff" or "#ffffff") continue;   // white is only used on a coloured chip set in the markup
+                checkedRules++;
+                var themes = selector.Contains(".light", StringComparison.Ordinal) ? new[] { false }
+                    : selector.Contains(".dark", StringComparison.Ordinal) ? new[] { true } : new[] { false, true };
+                foreach (var dark in themes)
+                {
+                    // A rule with a .app.light twin only applies to the dark theme.
+                    if (!dark && themes.Length == 2 && css.Contains(".app.light " + selector, StringComparison.Ordinal)) continue;
+                    var ratio = ColorMath.Contrast(color.Groups[1].Value, dark ? ThemeService.DarkPanel : ThemeService.LightPanel);
+                    if (ratio < 4.5) failures.Add($"{Path.GetFileName(file)}: {selector} {color.Groups[1].Value} on the {(dark ? "dark" : "light")} panel = {ratio:0.00}");
+                }
+            }
+        }
+        Assert.True(checkedRules > 0);
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+    }
+}

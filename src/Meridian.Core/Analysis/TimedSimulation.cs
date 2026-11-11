@@ -255,9 +255,35 @@ public sealed class DiscreteEventSimulation
         private readonly HashSet<Element> _running = new(ReferenceEqualityComparer.Instance);
         private readonly List<Element> _waiting = new();
         private readonly Dictionary<Element, HashSet<Relationship>> _join = new(ReferenceEqualityComparer.Instance);
+        private readonly Dictionary<Element, int> _held = new(ReferenceEqualityComparer.Instance);   // central buffers / data stores
+        private readonly Dictionary<Element, int> _next = new(ReferenceEqualityComparer.Instance);   // central buffer round robin
         private int _inFlight;   // scheduled arrivals / completions not yet processed
 
-        public override IEnumerable<Element> Active => _running.Concat(_waiting);
+        public override IEnumerable<Element> Active => _running.Concat(_waiting).Concat(_held.Where(h => h.Value > 0).Select(h => h.Key));
+
+        private static bool IsBuffer(Element e) => e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) == Subtypes.CentralBuffer;
+        private static bool IsStore(Element e) => e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) == Subtypes.DataStore;
+        private bool Enabled(Relationship f) => string.IsNullOrEmpty(f.Get(FieldKeys.Guard)) || Sim.Guard(f, Lane);
+
+        /// <summary>A central buffer passes each held token to ONE enabled outgoing flow, taking the flows in turn.</summary>
+        private void ReleaseBuffer(Element buffer)
+        {
+            var outgoing = Outgoing(buffer).ToList();
+            while (_held.GetValueOrDefault(buffer) > 0 && outgoing.Count > 0)
+            {
+                var start = _next.GetValueOrDefault(buffer);
+                Relationship? chosen = null;
+                for (var k = 0; k < outgoing.Count && chosen is null; k++)
+                {
+                    var i = (start + k) % outgoing.Count;
+                    if (Enabled(outgoing[i])) { chosen = outgoing[i]; _next[buffer] = (i + 1) % outgoing.Count; }
+                }
+                if (chosen is null) return;
+                _held[buffer]--;
+                Sim.Log(buffer, Lane, TraceKind.Info, $"  ▣ {Label(buffer)} passes a token to {Label(chosen.Target)} ({_held[buffer]} left)");
+                Arrive(chosen.Target, chosen);
+            }
+        }
 
         private string Row(Element node) => $"{Lane} · {Label(node)}";
 
@@ -319,6 +345,16 @@ public sealed class DiscreteEventSimulation
                     }
                     Begin(node);
                     return;
+                case ElementKind.ObjectNode when IsBuffer(node):
+                    _held[node] = _held.GetValueOrDefault(node) + 1;
+                    Sim.Log(node, Lane, TraceKind.Info, $"▣ {Label(node)} buffers a token ({_held[node]} held)");
+                    ReleaseBuffer(node);
+                    return;
+                case ElementKind.ObjectNode when IsStore(node):
+                    _held[node] = 1;
+                    Sim.Log(node, Lane, TraceKind.Info, $"⛁ {Label(node)} stores the data");
+                    foreach (var f in Outgoing(node).Where(Enabled).ToList()) Arrive(f.Target, f);
+                    return;
                 default:
                     Continue(node);
                     return;
@@ -367,9 +403,14 @@ public sealed class DiscreteEventSimulation
 
         public override void AfterEvent()
         {
-            if (!Done && _inFlight == 0 && _running.Count == 0 && _waiting.Count == 0)
+            if (Done) return;
+            // Buffered tokens are offered again (a guard may have become true).
+            foreach (var b in _held.Where(h => h.Value > 0 && IsBuffer(h.Key)).Select(h => h.Key).ToList()) ReleaseBuffer(b);
+            if (_inFlight == 0 && _running.Count == 0 && _waiting.Count == 0)
             {
                 Sim.Log(Behavior, Lane, TraceKind.Complete, $"■ activity '{Label(Behavior)}' has no more tokens");
+                foreach (var (node, n) in _held.Where(h => h.Value > 0))
+                    Sim.Log(node, Lane, TraceKind.Info, IsStore(node) ? $"  (data store {Label(node)} keeps its data)" : $"  (central buffer {Label(node)} still holds {n} token{(n == 1 ? "" : "s")})");
                 Stop();
             }
         }
@@ -383,53 +424,53 @@ public sealed class DiscreteEventSimulation
         }
     }
 
-    private sealed class MachineExec(DiscreteEventSimulation sim, Element machine, string lane) : Execution(sim, machine, lane)
+    /// <summary>
+    /// A state machine on the shared clock, run by <see cref="StateMachineEngine"/> (orthogonal regions, pseudostates, history).
+    /// Each orthogonal region gets its own timeline row.
+    /// </summary>
+    private sealed class MachineExec : Execution, IStateMachineHost
     {
-        private Element? _current;
+        private readonly StateMachineEngine _engine;
         private readonly Dictionary<Element, long> _entered = new(ReferenceEqualityComparer.Instance);
         private long _stamp;
 
-        public override IEnumerable<Element> Active =>
-            _current is null || Done ? [] : _current.AncestorsAndSelf().TakeWhile(a => !ReferenceEquals(a, Behavior));
+        public MachineExec(DiscreteEventSimulation sim, Element machine, string lane) : base(sim, machine, lane) =>
+            _engine = new StateMachineEngine(sim.Model, machine, this);
 
-        private IEnumerable<Relationship> TransitionsFrom(Element vertex) =>
-            vertex.AncestorsAndSelf().TakeWhile(a => !ReferenceEquals(a, Behavior)).SelectMany(v => Sim.Model.Outgoing(v, ElementKind.Transition));
+        public StateMachineEngine Engine => _engine;
+
+        public override IEnumerable<Element> Active => Done ? [] : _engine.Active;
+
+        private void Sync() => Done = _engine.Finished;
 
         public override void Start()
         {
             Sim.Log(Behavior, Lane, TraceKind.Start, $"▶ state machine '{Label(Behavior)}' started");
-            var initial = Behavior.OwnedElements.FirstOrDefault(e => e.Kind == ElementKind.InitialState);
-            var first = initial is null ? null : Sim.Model.Outgoing(initial, ElementKind.Transition).FirstOrDefault();
-            if (first is null) { Sim.Log(Behavior, Lane, TraceKind.Warning, "  ⚠ no initial pseudostate with a transition"); Done = true; return; }
-            Sim.Schedule(Sim.Clock, () =>
-            {
-                Sim.Exec(first.Get(FieldKeys.Effect), Lane, "effect");
-                Enter(first.Target);
-            });
+            Sim.Schedule(Sim.Clock, () => { _engine.Start(); Sync(); });
         }
 
-        private void Enter(Element state)
+        /// <summary>The timeline row of a state: one per orthogonal region of the innermost composite with several regions.</summary>
+        private string Row(Element state)
         {
-            if (state.Kind == ElementKind.FinalState)
+            for (var x = state; x.Owner is { } o; x = o)
             {
-                if (state.Owner is { Kind: ElementKind.State } composite && !ReferenceEquals(composite, Behavior))
+                var regions = _engine.Regions(o);
+                if (regions.Count > 1)
                 {
-                    // Region completed: the composite state stays active and its completion transitions may now fire.
-                    _current = composite;
-                    Sim.Log(state, Lane, TraceKind.Enter, $"  {Label(composite)} completed");
-                    return;
+                    var i = regions.FirstOrDefault(r => r.Members.Contains(x))?.Index ?? 0;
+                    return ReferenceEquals(o, Behavior) ? $"{Lane} [{i + 1}]" : $"{Lane} · {Label(o)} [{i + 1}]";
                 }
-                _current = state;
-                Sim.Log(state, Lane, TraceKind.Complete, $"■ state machine '{Label(Behavior)}' reached its final state");
-                Done = true;
-                return;
+                if (ReferenceEquals(o, Behavior)) break;
             }
-            _current = state;
+            return Lane;
+        }
+
+        void IStateMachineHost.Entered(Element state)
+        {
+            if (state.Kind != ElementKind.State) return;
             _entered[state] = ++_stamp;
-            Sim.Open(state, Lane, Lane, "state");
-            Sim.Log(state, Lane, TraceKind.Enter, $"→ {Label(state)}");
-            Sim.Exec(state.Get(FieldKeys.Entry), Lane, "entry");
-            Sim.Exec(state.Get(FieldKeys.DoActivity), Lane, "do");
+            if (state.Owner is { Kind: ElementKind.State } parent) Sim.Close(parent, Lane);   // the composite's bar gives way to its substates' bars
+            Sim.Open(state, Lane, Row(state), "state");
             // Time events of every transition leaving the newly entered state.
             foreach (var t in Sim.Model.Outgoing(state, ElementKind.Transition))
             {
@@ -442,58 +483,60 @@ public sealed class DiscreteEventSimulation
                 Sim.Schedule(Sim.Clock + d.Value, () =>
                 {
                     if (Done || !_entered.TryGetValue(state, out var s) || s != stamp) return;   // left the state meanwhile
-                    if (Sim.Guard(transition, Lane)) Fire(transition, $"after({arg})");
+                    _engine.TryFire(transition, $"after({arg})");
+                    Sync();
                 });
-            }
-            var initial = state.OwnedElements.FirstOrDefault(e => e.Kind == ElementKind.InitialState);
-            if (initial != null && Sim.Model.Outgoing(initial, ElementKind.Transition).FirstOrDefault() is { } it)
-            {
-                Sim.Close(state, Lane);   // the composite's bar gives way to its substates' bars
-                Sim.Exec(it.Get(FieldKeys.Effect), Lane, "effect");
-                Enter(it.Target);
             }
         }
 
-        private void Fire(Relationship t, string why)
+        void IStateMachineHost.Exited(Element state)
         {
-            for (var s = _current; s != null && !ReferenceEquals(s, t.Source.Owner) && !ReferenceEquals(s, Behavior); s = s.Owner)
+            Sim.Close(state, Lane);
+            _entered.Remove(state);
+        }
+
+        void IStateMachineHost.Exec(string? statements, string what) => Sim.Exec(statements, Lane, what);
+
+        bool IStateMachineHost.Guard(Relationship transition) => Sim.Guard(transition, Lane);
+
+        void IStateMachineHost.Log(MachineEventKind kind, Element? element, string text)
+        {
+            if (kind == MachineEventKind.Complete && text.StartsWith("■ Final state", StringComparison.Ordinal))
+                text = $"■ state machine '{Label(Behavior)}' reached its final state";
+            Sim.Log(element ?? Behavior, Lane, kind switch
             {
-                Sim.Exec(s.Get(FieldKeys.Exit), Lane, $"exit {Label(s)}");
-                Sim.Close(s, Lane);
-                _entered.Remove(s);
-            }
-            Sim.Log(t, Lane, TraceKind.Transition, $"  ⇢ {why}{(t.Get(FieldKeys.Guard) is { Length: > 0 } g ? $" [{g}]" : "")} → {Label(t.Target)}");
-            Sim.Exec(t.Get(FieldKeys.Effect), Lane, "effect");
-            Enter(t.Target);
+                MachineEventKind.Enter => TraceKind.Enter,
+                MachineEventKind.Exit => TraceKind.Exit,
+                MachineEventKind.Transition => TraceKind.Transition,
+                MachineEventKind.Complete => TraceKind.Complete,
+                MachineEventKind.Warning or MachineEventKind.Error => TraceKind.Warning,
+                _ => TraceKind.Info,
+            }, text);
         }
 
         public override string? Receive(string signal)
         {
-            if (Done || _current is null) return null;
-            var t = TransitionsFrom(_current).FirstOrDefault(x => ParseTrigger(x.Name) is (TriggerKind.Signal, var n) && n == signal && Sim.Guard(x, Lane));
-            if (t is null) { Sim.Log(_current, Lane, TraceKind.Info, $"  {signal} ignored in {Label(_current)}"); return null; }
-            Fire(t, signal);
+            if (Done) return null;
+            var n = _engine.Dispatch(t => ParseTrigger(t.Name) is (TriggerKind.Signal, var s) && s == signal, _ => signal);
+            Sync();
+            if (n == 0) { Sim.Log(Behavior, Lane, TraceKind.Info, $"  {signal} ignored in {_engine.Configuration}"); return null; }
             return Lane;
         }
 
         /// <summary>Completion transitions and change events, re-checked after every event (bounded per event).</summary>
         public override void AfterEvent()
         {
-            for (var guard = 0; guard < 100 && !Done && _current is not null; guard++)
+            for (var guard = 0; guard < 100 && !Done; guard++)
             {
-                var t = TransitionsFrom(_current).FirstOrDefault(x =>
-                {
-                    var (kind, arg) = ParseTrigger(x.Name);
-                    return kind switch
-                    {
-                        TriggerKind.Completion => ReferenceEquals(x.Source, _current) && Sim.Guard(x, Lane),
-                        TriggerKind.When => Sim.Condition(arg, Lane) && Sim.Guard(x, Lane),
-                        _ => false,
-                    };
-                });
-                if (t is null) return;
-                Fire(t, ParseTrigger(t.Name).Kind == TriggerKind.When ? $"when({ParseTrigger(t.Name).Arg})" : "completion");
+                var fired = _engine.FireFirst(t => ParseTrigger(t.Name).Kind == TriggerKind.Completion, completion: true, _ => "completion")
+                            || _engine.FireFirst(t => ParseTrigger(t.Name) is (TriggerKind.When, var c) && Sim.Condition(c, Lane), completion: false,
+                                t => $"when({ParseTrigger(t.Name).Arg})");
+                Sync();
+                if (!fired) return;
             }
         }
     }
+
+    /// <summary>The engines of the state machines being simulated (for inspecting their configuration).</summary>
+    public IReadOnlyList<StateMachineEngine> Machines => _execs.OfType<MachineExec>().Select(e => e.Engine).ToList();
 }

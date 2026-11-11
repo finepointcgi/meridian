@@ -1,3 +1,4 @@
+@inject IDialogService ConfirmDialogs
 @using Meridian.Data
 @using Meridian.Web.Integrations
 @using Meridian.Web.Components.Workbench.Database
@@ -30,8 +31,8 @@
                             </div>
                             @if (_canManage)
                             {
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditTracker(conn)" />
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditTracker(conn)" aria-label="Edit" title="Edit" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" aria-label="Delete" title="Delete" />
                             }
                         </div>
                     }
@@ -113,9 +114,9 @@
                             </div>
                             @if (_canManage)
                             {
-                                <MudTooltip Text="Send a test ping"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Send" Disabled="_busy" OnClick="() => Ping(hook)" /></MudTooltip>
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditHook(hook)" />
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(hook)" />
+                                <MudTooltip Text="Send a test ping"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Send" Disabled="_busy" OnClick="() => Ping(hook)" aria-label="Send a test ping" /></MudTooltip>
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditHook(hook)" aria-label="Edit" title="Edit" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(hook)" aria-label="Delete" title="Delete" />
                             }
                         </div>
                     }
@@ -130,7 +131,7 @@
                     <div class="d-flex align-center mt-4">
                         <MudText Typo="Typo.subtitle2">Recent deliveries</MudText>
                         <span style="flex:1"></span>
-                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" aria-label="Refresh" title="Refresh" />
                     </div>
                     @if (_deliveries.Count == 0)
                     {
@@ -189,7 +190,7 @@
             </MudTabPanel>
 
             @* ------------------------------------------------------------ requirements tools (DOORS Next, Polarion) *@
-            <MudTabPanel Text="Requirements tools">
+            <MudTabPanel Text="DOORS & Polarion">
                 <RequirementsToolsPanel CanManage="_canManage" />
             </MudTabPanel>
 
@@ -387,6 +388,7 @@
     private async Task Delete(IntegrationConnection c)
     {
         if (!_canManage) return;
+        if (!await Confirm.AskAsync(ConfirmDialogs, $"Delete “{c.Name}”?", "The connection and its stored secret are removed; links already made stay in the model.")) return;
         await Integrations.DeleteAsync(ProjectId, c.Id);
         await Reload();
     }
