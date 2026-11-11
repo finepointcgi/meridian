@@ -380,7 +380,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
             return;
         }
         if (change.Kind == ChangeKind.Removed) CleanUpRemoved();
-        if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open) c.ClearInvalidSelection();
+        if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open.ToArray()) c.ClearInvalidSelection();   // a copy: a created diagram may open as a tab meanwhile
         if (change is { Kind: ChangeKind.Added, Element: Diagram created } && !Model.IsApplyingRemote) QueueCreatedDiagram(created);
         Bump();
     }

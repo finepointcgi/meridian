@@ -1261,8 +1261,9 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         section.Find(".code-behaviour-sequence button, button.code-behaviour-sequence").Click();
         Assert.Equal((op, true), asked);
 
-        var (activity, _) = await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false);
-        var (sequence, _) = await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, true);
+        // On the renderer's dispatcher, as the workbench runs it: the workspace reacts to the new diagrams on the same thread.
+        var (activity, _) = await section.InvokeAsync(() => CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false));
+        var (sequence, _) = await section.InvokeAsync(() => CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, true));
         Assert.Equal(DiagramType.Activity, activity!.DiagramType);
         Assert.Contains(activity.Nodes, n => n.Element.Kind == ElementKind.DecisionNode);
         Assert.Equal(DiagramType.Sequence, sequence!.DiagramType);
@@ -1274,7 +1275,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         var cfg = CodeSync.Hosts.CodeRepoConfig.Parse((await _db.FindIntegrationAsync(connection))!.ConfigJson);
         cfg.BehaviourDiagrams = CodeBehaviourMode.Off;
         await hosts.SaveAsync(_project, connection, null, cfg, null);
-        Assert.Contains("off", (await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false)).Message);
+        Assert.Contains("off", (await section.InvokeAsync(() => CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false))).Message);
         ws.Dispose();
     }
 

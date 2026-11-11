@@ -240,7 +240,7 @@ public sealed partial class Workspace
         if (!_cleanupDue) return;
         _cleanupDue = false;
         CleanUpRemoved();
-        foreach (var c in _open) c.ClearInvalidSelection();
+        foreach (var c in _open.ToArray()) c.ClearInvalidSelection();
         Bump();
     }
 
@@ -249,6 +249,6 @@ public sealed partial class Workspace
         if (Selected != null && !Model.Contains(Selected)) Selected = null;
         foreach (var c in _open.Where(c => !Model.Contains(c.Diagram)).ToList()) Close(c);
         foreach (var v in _views.Where(v => v.Element != null && !Model.Contains(v.Element)).ToList()) CloseView(v);
-        foreach (var c in _open) c.ClearInvalidSelection();
+        foreach (var c in _open.ToArray()) c.ClearInvalidSelection();
     }
 }
