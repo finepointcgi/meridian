@@ -279,13 +279,14 @@ public sealed class StateMachineEngine
     }
 
     /// <summary>
-    /// The transitions that would fire now for a trigger: from active states, matching <paramref name="trigger"/>, guard true,
-    /// junction chain enabled; inner states first, without two transitions that exit the same state. With
+    /// Every transition enabled now for a trigger: from active states, matching <paramref name="trigger"/>, guard true,
+    /// junction chain enabled; inner states first. (Which of them fire together is decided when an event is dispatched:
+    /// no two that exit the same state.) With
     /// <paramref name="completion"/>, only from states that have completed (a simple state, or a composite whose regions
     /// all reached a final state).
     /// </summary>
     public IReadOnlyList<Relationship> Enabled(Func<Relationship, bool> trigger, bool completion = false) =>
-        Finished ? [] : Select(trigger, completion).Select(c => c.T).ToList();
+        Finished ? [] : Select(trigger, completion, resolveConflicts: false).Select(c => c.T).ToList();
 
     /// <summary>Fires every selected transition for one event (orthogonal regions react together). Returns how many fired.</summary>
     public int Dispatch(Func<Relationship, bool> trigger, Func<Relationship, string> describe)
@@ -348,7 +349,7 @@ public sealed class StateMachineEngine
 
     private static bool IsElse(Relationship t) => t.Get(FieldKeys.Guard).Trim().Trim('[', ']').Trim().Equals("else", StringComparison.OrdinalIgnoreCase);
 
-    private List<(Relationship T, Queue<Relationship>? Path)> Select(Func<Relationship, bool> trigger, bool completion)
+    private List<(Relationship T, Queue<Relationship>? Path)> Select(Func<Relationship, bool> trigger, bool completion, bool resolveConflicts = true)
     {
         var candidates = new List<(Relationship T, Queue<Relationship>? Path, int Depth, int Order)>();
         var order = 0;
@@ -369,7 +370,7 @@ public sealed class StateMachineEngine
         foreach (var c in candidates.OrderByDescending(c => c.Depth).ThenBy(c => c.Order))
         {
             var exits = ExitSet(c.T, c.Path);
-            if (exits.Overlaps(exited)) continue;
+            if (resolveConflicts && exits.Overlaps(exited)) continue;
             chosen.Add((c.T, c.Path));
             exited.UnionWith(exits);
         }
