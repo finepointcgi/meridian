@@ -113,6 +113,8 @@ public sealed class DocSection
 [JsonDerivedType(typeof(ElementListBlock), "list")]
 [JsonDerivedType(typeof(StatisticsBlock), "statistics")]
 [JsonDerivedType(typeof(ValidationBlock), "validation")]
+[JsonDerivedType(typeof(FmeaBlock), "fmea")]
+[JsonDerivedType(typeof(FaultTreeBlock), "faultTree")]
 [JsonDerivedType(typeof(PageBreakBlock), "pageBreak")]
 [JsonDerivedType(typeof(InstancesBlock), "instances")]
 public abstract class DocBlock
@@ -140,6 +142,8 @@ public abstract class DocBlock
         ("list", "Element list", () => new ElementListBlock()),
         ("statistics", "Model statistics", () => new StatisticsBlock()),
         ("validation", "Validation issues", () => new ValidationBlock()),
+        ("fmea", "FMEA worksheet", () => new FmeaBlock()),
+        ("faultTree", "Fault tree analysis", () => new FaultTreeBlock()),
         ("pageBreak", "Page break", () => new PageBreakBlock()),
         ("instances", "Instances (instance table)", () => new InstancesBlock()),
     ];
@@ -365,6 +369,25 @@ public sealed class InstancesBlock : CaptionedBlock
     public string EmptyText { get; set; } = "No instances.";
     public override string TypeLabel => "Instances";
     public override string Summary => "Instances: " + (string.IsNullOrWhiteSpace(Classifier) ? "current element" : Classifier) + (Layout == "slots" ? " (slots)" : "");
+}
+
+/// <summary>The FMEA worksheet (highest RPN first), optionally only failure modes under the current element or above a minimum RPN.</summary>
+public sealed class FmeaBlock : CaptionedBlock
+{
+    public bool CurrentElementOnly { get; set; }
+    public int MinRpn { get; set; }
+    public bool HighRiskOnly { get; set; }
+    public override string TypeLabel => "FMEA";
+    public override string Summary => "FMEA" + (MinRpn > 0 ? $" (RPN ≥ {MinRpn})" : "") + (HighRiskOnly ? " (high risk)" : "");
+}
+
+/// <summary>Fault tree analysis of one top event (by name or id, else the current element, else every top event): probability and minimal cut sets.</summary>
+public sealed class FaultTreeBlock : CaptionedBlock
+{
+    public string? TopEvent { get; set; }
+    public int MaxCutSets { get; set; } = 50;
+    public override string TypeLabel => "Fault tree";
+    public override string Summary => "Fault tree: " + (TopEvent ?? "current / all top events");
 }
 
 public sealed class PageBreakBlock : DocBlock

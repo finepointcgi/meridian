@@ -21,6 +21,7 @@ public partial class Workbench
         yield return ("trace", "Traceability");
         yield return ("views", "Model views");
         yield return ("simulate", "Simulate");
+        yield return ("safety", "Safety");
         yield return ("generate", "Generate");
         yield return ("ai", "AI");
         if (ShowDatabaseTools) yield return ("database", "Database");

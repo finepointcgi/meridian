@@ -153,6 +153,7 @@
         <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
         <InstanceInspectorSection E="e" />
         <DeploymentInspectorSection E="e" />
+        <SafetyInspectorSection E="e" />
         <div class="section-title">Specification <span class="grow"></span></div>
         foreach (var key in Fields(e))
         {
@@ -330,7 +331,7 @@
 </div>
 
 @code {
-    private static readonly ElementKind[] TraceKinds = [ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.DeriveReqt, ElementKind.Trace, ElementKind.Allocate];
+    private static readonly ElementKind[] TraceKinds = [ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.DeriveReqt, ElementKind.Trace, ElementKind.Allocate, ElementKind.Mitigate];
     private string? _newTag;
     private string? _newTagValue;
     private int _slot;
@@ -379,7 +380,8 @@
 
     private static IEnumerable<string> Fields(Element e) =>
         e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation]
-        : Metamodel.EditableFields(e.Kind).Where(k => !k.StartsWith("db.", StringComparison.Ordinal));   // data-model fields: DatabaseInspectorSection
+        : Metamodel.EditableFields(e.Kind).Where(k => !k.StartsWith("db.", StringComparison.Ordinal))   // data-model fields: DatabaseInspectorSection
+            .Where(k => !Meridian.Core.Safety.SafetyFields.IsSafetyField(k) && !(k == FieldKeys.Subtype && e.Kind is ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate));   // SafetyInspectorSection
 
     private void Set(Element e, string key, string? value)
     {

@@ -137,6 +137,8 @@ else
         TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock or InstancesBlock => Icons.Material.Outlined.TableChart,
         TraceMatrixBlock => Icons.Material.Outlined.GridOn,
         CoverageBlock => Icons.Material.Outlined.DonutLarge,
+        FmeaBlock => Icons.Material.Outlined.ReportProblem,
+        FaultTreeBlock => Icons.Material.Outlined.AccountTree,
         DiagramBlock => Icons.Material.Outlined.Schema,
         RelationMapBlock => Icons.Material.Outlined.Hub,
         ElementListBlock => Icons.Material.Outlined.FormatListBulleted,
@@ -524,6 +526,17 @@ else
                 @Chk("Numbered", l.Numbered, v => l.Numbered = v)
             </div>,
         StatisticsBlock s => Caption(s),
+        FmeaBlock f => @<div>
+                @Caption(f)
+                @Chk("Only failure modes under the current element", f.CurrentElementOnly, v => f.CurrentElementOnly = v)
+                @Chk("High risk only (RPN threshold or AP H)", f.HighRiskOnly, v => f.HighRiskOnly = v)
+                @Num("Minimum RPN", f.MinRpn, v => f.MinRpn = v)
+            </div>,
+        FaultTreeBlock ft => @<div>
+                @Caption(ft)
+                @Opt("Top event (name or id)", ft.TopEvent, v => ft.TopEvent = v, "Empty = the current loop element if it is an event, else every top event")
+                @Num("Cut sets listed", ft.MaxCutSets, v => ft.MaxCutSets = v)
+            </div>,
         ValidationBlock v => @<div>
                 @Caption(v)
                 @Chk("Include info messages", v.IncludeInfo, x => v.IncludeInfo = x)

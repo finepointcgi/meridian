@@ -25,12 +25,13 @@ public sealed record SvgTheme(
             ElementKind.InterfaceBlock or ElementKind.Interface => "#ece2ff",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#d8f0ef",
             ElementKind.ConstraintBlock => "#fbdede", ElementKind.Property or ElementKind.Port => "#fff4d6",
+            ElementKind.FailureMode => "#fde2df",
             ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#dcecfb", _ => "#eef0f4",
         },
         k => k switch
         {
             ElementKind.Comment => "#fff8d0", ElementKind.Package => "#f7f8fa", ElementKind.UseCase => "#fff6e2",
-            ElementKind.Action or ElementKind.State => "#eef5ff", _ => "#ffffff",
+            ElementKind.Action or ElementKind.State => "#eef5ff", ElementKind.FaultTreeGate => "#fff3e6", _ => "#ffffff",
         },
         k => k switch
         {
@@ -38,7 +39,7 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Property => "#c98a00",
             ElementKind.InterfaceBlock or ElementKind.Interface or ElementKind.Port => "#7b4fd6",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#1d8a8a",
-            ElementKind.ConstraintBlock => "#c0392b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#2a7fbf", _ => "#6b7586",
+            ElementKind.ConstraintBlock or ElementKind.FailureMode => "#c0392b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#2a7fbf", _ => "#6b7586",
         });
 
     public static readonly SvgTheme Dark = new(
@@ -50,13 +51,13 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.CommunicationLifeline => "#3a2f14",
             ElementKind.InterfaceBlock or ElementKind.Interface => "#2d2453",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#123c3c",
-            ElementKind.ConstraintBlock => "#4a2222", ElementKind.Property or ElementKind.Port => "#33291a",
+            ElementKind.ConstraintBlock => "#4a2222", ElementKind.Property or ElementKind.Port => "#33291a", ElementKind.FailureMode => "#4a2420",
             ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#16304e", _ => "#232d42",
         },
         k => k switch
         {
             ElementKind.Comment => "#353020", ElementKind.Package => "#1a2335", ElementKind.UseCase => "#2b2517",
-            ElementKind.Action or ElementKind.State => "#172640", _ => "#182133",
+            ElementKind.Action or ElementKind.State => "#172640", ElementKind.FaultTreeGate => "#33261a", _ => "#182133",
         },
         k => k switch
         {
@@ -64,7 +65,7 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Property => "#f0b429",
             ElementKind.InterfaceBlock or ElementKind.Interface or ElementKind.Port => "#a283ff",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#2ec4b6",
-            ElementKind.ConstraintBlock => "#ff6b6b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#4aa3ff", _ => "#7f8ca3",
+            ElementKind.ConstraintBlock or ElementKind.FailureMode => "#ff6b6b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#4aa3ff", _ => "#7f8ca3",
         });
 
     /// <summary>Maps an embedded image's data URI to the URL drawn (the editor serves cached copies so the canvas markup stays small).</summary>
@@ -743,6 +744,12 @@ public static partial class SvgRenderer
             }
             case NodeShape.Timeline:
                 RenderTimeline(sb, d, n.Element, b, c.Name, t);
+                break;
+            case NodeShape.FaultEvent:
+                RenderFaultEvent(sb, m, n.Element, b, fill, t);
+                break;
+            case NodeShape.FaultGate:
+                RenderFaultGate(sb, m, n.Element, b, fill, t);
                 break;
             case NodeShape.DurationMarker:
             {

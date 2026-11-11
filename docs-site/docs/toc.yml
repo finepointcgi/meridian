@@ -50,6 +50,8 @@
     href: simulation.md
   - name: Variants and trade studies
     href: variants-trade-studies.md
+  - name: Safety and reliability (FMEA, fault trees)
+    href: safety.md
   - name: Reports and documents
     href: document-generation.md
   - name: Printing diagrams

@@ -83,6 +83,7 @@ public sealed partial class ModelValidator
         new DataModeling.DbValidationRules(),   // DB-001 … DB-008
         new Instances.InstanceRules(),   // INST-001 … INST-004 (instance specifications and slots)
         new Deployment.DeploymentValidationRules(),   // DEP-001, DEP-002
+        new Safety.SafetyValidationRules(),     // SAF-001 … SAF-007, FTA-001 … FTA-008 (docs/SAFETY.md)
         new QueryRules(),   // the model's own ValidationRule elements
     };
 

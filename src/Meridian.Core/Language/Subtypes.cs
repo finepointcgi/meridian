@@ -70,6 +70,8 @@ public static class Subtypes
         ElementKind.Table => DataModeling.DbFields.TableKinds,
         ElementKind.DbConstraint => DataModeling.DbFields.ConstraintKinds,
         ElementKind.Routine => DataModeling.DbFields.RoutineKinds,
+        ElementKind.FaultTreeEvent => Safety.SafetyFields.EventKinds,
+        ElementKind.FaultTreeGate => Safety.SafetyFields.GateKinds,
         _ => [],
     };
 

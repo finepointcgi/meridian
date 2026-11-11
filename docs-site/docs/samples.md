@@ -68,6 +68,20 @@ are illustrative.
 **Deliberate gaps:** hazard *H-07 Alarm Not Heard* has no risk control yet (residual risk *TBD*), reported by the
 *Hazard without risk control* rule; `PUMP-005 EMR Integration` is *proposed*.
 
+## Electric parking brake (Safety)
+
+An electric parking brake worked through FMEA and fault tree analysis. Ratings and probabilities are illustrative.
+
+| Area | Content |
+| --- | --- |
+| Architecture | EPB system with brake controller, motor actuator, three wheel speed sensors and power supply (*EPB architecture* BDD, which lists each block's failure modes and RPN) |
+| FMEA | four failure modes rated S / O / D, with effects, causes and recommended actions; requirements `EPB-010…012` mitigate three of them (*Mitigations* requirement diagram) |
+| Fault tree | *Loss of hold fta*: OR, AND and 2-of-3 vote gates; *Undervoltage* appears twice, so the exact probability differs from the naive one |
+| Verification | watchdog reset and stall injection tests |
+
+**Deliberate gap:** *Wheel speed signal stuck* (RPN 245, AP H) has no mitigating requirement, reported by rule SAF-003.
+See [Safety and reliability](safety.md).
+
 ## Using the samples
 
 - Open the **Tables** tab and pick a saved table to see the requirement, verification or hazard views.

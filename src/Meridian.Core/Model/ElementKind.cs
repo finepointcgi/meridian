@@ -156,6 +156,12 @@ public enum ElementKind
     Deployment,             // artifact (deployment specification, database / schema) -> node, device or execution environment: «deploy»
     Manifestation,          // artifact -> the block, component, package or code element it manifests: «manifest»
     CommunicationPath,      // node <-> node; field "protocol"
+    // Safety & reliability (appended: keep existing ordinals stable). See Meridian.Core.Safety and docs/SAFETY.md.
+    FailureMode,            // FMEA row: owned by (or allocated to) a block, part or function; fmea.* fields
+    FaultTreeEvent,         // fault tree event; subtype: top / intermediate / basic / undeveloped / house; fta.* fields
+    FaultTreeGate,          // fault tree gate; subtype: and / or / vote (k-of-n, fta.k)
+    FaultTreeLink,          // fault tree edge: parent (event or gate, above) -> child input (event or gate, below)
+    Mitigate,               // requirement (or design element) mitigates a failure mode
 }
 
 public enum DiagramType
@@ -191,6 +197,7 @@ public enum DiagramType
     // Appended: keep existing ordinals stable
     Object,                 // object diagram: instance specifications, their slots and links
     Deployment,
+    FaultTree,
 }
 
 public static class FieldKeys
