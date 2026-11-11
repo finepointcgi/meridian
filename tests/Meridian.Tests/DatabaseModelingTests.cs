@@ -420,8 +420,10 @@ public class DatabaseModelTests
         var fromModel = DbExtract.FromModel(m, r.Database).Catalog;
         var ddl = DdlWriter.Generate(fromModel, dialect);
         var reparsed = DdlParser.Parse(ddl, dialect, fromModel.Name);
-        // Routines and triggers are written as comments (signatures only); everything else must survive.
-        var diff = DbDiff.Compare(fromModel, reparsed).Where(c => c.Type is not (DbObjectType.Routine or DbObjectType.Trigger)).ToList();
+        // Everything survives, routine and trigger bodies included.
+        var diff = DbDiff.Compare(fromModel, reparsed).ToList();
+        if (dialect != "sqlite") Assert.Contains(fromModel.Schemas.SelectMany(s => s.Routines), x => x.Body is { Length: > 0 });
+        if (dialect != "oracle") Assert.Contains(fromModel.AllTables.SelectMany(t => t.Triggers), x => x.Action is { Length: > 0 });
         Assert.True(diff.Count == 0, string.Join("\n", diff.Select(d => d.Describe())) + "\n\n" + ddl);
         Assert.DoesNotContain(reparsed.Warnings, w => !w.Contains("not part of the data model"));
     }

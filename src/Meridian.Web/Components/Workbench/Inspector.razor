@@ -42,7 +42,7 @@
                 <span class="link" @onclick="() => Shell.OpenInSourceProject(e)" data-testid="open-in-source">Open in source project</span>
             </div>
         }
-        else if (Meridian.Core.Analysis.SuspectLinks.LibraryChangeOf(e) is { } why)
+        else if (Meridian.Core.Analysis.SuspectLinks.LibraryChangeOf(e, Ws.Model) is { } why)
         {
             <div class="lib-suspect" data-testid="inspector-library-suspect">
                 <MudIcon Icon="@Icons.Material.Outlined.WarningAmber" Style="font-size:14px" /> Suspect: @why

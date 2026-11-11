@@ -1,0 +1,92 @@
+@using Meridian.Core.Analysis
+@inherits MobileComponent
+
+@* Phone verification view (read-only): the last result of every requirement with a criterion — status, requirement,
+   value against the bound and the margin. Running a verification and editing criteria stay on larger screens. *@
+@{ var rows = Rows().ToList(); var shown = rows.Where(r => Matches(r.Result)).ToList(); }
+<div class="m-list-view" data-testid="m-verification">
+    <div class="m-list-head">
+        <span class="m-head-title">Verification</span>
+    </div>
+    <div class="m-chips" role="tablist">
+        @foreach (var (key, label) in Filters)
+        {
+            var k = key;
+            var n = rows.Count(r => Matches(r.Result, k));
+            <button class="m-chip @(_filter == k ? "on" : "")" role="tab" aria-selected="@(_filter == k ? "true" : "false")" @onclick="() => _filter = k">@label <span class="m-chip-n">@n</span></button>
+        }
+    </div>
+    <div class="m-cards">
+        @foreach (var (req, res) in shown)
+        {
+            var r = req;
+            <article class="m-card m-vfy @(ReferenceEquals(Ws.Selected, r) ? "sel" : "")" data-id="@r.Id" data-status="@Status(res)">
+                <button class="m-card-main" @onclick="() => Open(r)">
+                    <div class="m-card-head">
+                        <span class="m-pill @Tone(res)">@Label(res)</span>
+                        @if (r.Get(FieldKeys.RequirementId) is { Length: > 0 } id) { <span class="req-id">@id</span> }
+                        <span class="m-card-title">@r.Name</span>
+                    </div>
+                    <p class="m-card-text"><code>@Verification.Criterion(r)</code></p>
+                    @if (res is not null)
+                    {
+                        <div class="m-trace">
+                            @if (res.Value.Length > 0) { <span class="m-pill">@res.Value vs @res.Bound</span> }
+                            @if (res.Margin.Length > 0) { <span class="m-pill">margin @res.Margin</span> }
+                            @if (res.At.Length > 0) { <span class="m-pill">@res.At.Replace('T', ' ').TrimEnd('Z')</span> }
+                        </div>
+                    }
+                </button>
+            </article>
+        }
+        @if (shown.Count == 0)
+        {
+            <div class="m-empty">@(rows.Count == 0 ? "No requirement has a verification criterion yet." : "No results match.")</div>
+        }
+        <div class="m-note">Results are read-only here. Run a verification or edit criteria on a larger screen.</div>
+    </div>
+</div>
+
+@code {
+    private static readonly (string Key, string Label)[] Filters =
+        [("all", "All"), ("fail", "Fail"), ("pass", "Pass"), ("stale", "Stale"), ("none", "Not run")];
+
+    private string _filter = "all";
+
+    /// <summary>Requirements with a criterion and their last result (null when never run), in id order.</summary>
+    public IEnumerable<(Element Requirement, StoredResult? Result)> Rows() =>
+        Ws.Model.OfKind(ElementKind.Requirement)
+            .Where(r => Verification.Criterion(r).Length > 0 || Ws.Verification.ResultOf(r) is not null)
+            .OrderBy(r => r.Get(FieldKeys.RequirementId), StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Name)
+            .Select(r => (r, Ws.Verification.ResultOf(r)));
+
+    private bool Matches(StoredResult? r) => Matches(r, _filter);
+
+    private static bool Matches(StoredResult? r, string filter) => filter switch
+    {
+        "fail" => r?.Status == "fail",
+        "pass" => r?.Status == "pass",
+        "stale" => r?.Stale == true,
+        "none" => r is null,
+        _ => true,
+    };
+
+    private static string Status(StoredResult? r) => r is null ? "none" : r.Stale ? "stale" : r.Status;
+
+    private static string Label(StoredResult? r) => r is null ? "not run" : r.Label;
+
+    private static string Tone(StoredResult? r) => r switch
+    {
+        null => "",
+        { Stale: true } => "warn",
+        { Status: "pass" } => "ok",
+        { Status: "fail" } => "bad",
+        _ => "warn",
+    };
+
+    private void Open(Element req)
+    {
+        Ws.Select(req);
+        Ui.OpenSheet(req);
+    }
+}

@@ -544,6 +544,13 @@ public static class ArchitectureConformance
             if (!_seen.Add($"{rule}|{source?.Symbol}|{target?.Symbol}|{s?.Id}|{t?.Id}|{detail}")) return;
             var v = new ArchitectureViolation(rule, severity, message, hint, source?.File is { Length: > 0 } f ? f : null, source?.Line ?? 0,
                 source?.Symbol, target?.Symbol, s?.Id, s?.Name, t?.Id, t?.Name);
+            if (rule is ConformanceRule.Dependency or ConformanceRule.Layering && source is not null && target is not null && source.DependencyLocations.Count > 0)
+            {
+                // The lines that break the rule: the first few uses of the target, and how many more there are.
+                var max = Math.Max(0, _o.MaxLocationsPerViolation);
+                var uses = source.LocationsOf(target.Symbol).Take(max).ToList();
+                v = v with { Locations = uses, MoreLocations = Math.Max(0, source.LocationCountOf(target.Symbol) - uses.Count) };
+            }
             var suppressed = IsAllowed(rule, sourceElements.Append(sourceFallback), targetElements.Append(targetFallback))
                              || IsSuppressed(v, sourceElements.Append(sourceFallback), targetElements.Append(targetFallback));
             (suppressed ? _suppressed : _violations).Add(v);

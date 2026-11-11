@@ -53,6 +53,7 @@ In text fields, ⌘Z and ⇧⌘Z undo and redo the typing instead of the model.
 | Middle-button drag, Space + drag or Alt + drag | pan |
 | Shift while resizing | keep the aspect ratio (pictures: free the aspect ratio) |
 | Right-click | context menu |
+| Right-click a diagram tab | Export ▸, close, close others |
 
 ## Model explorer
 
@@ -62,6 +63,17 @@ In text fields, ⌘Z and ⇧⌘Z undo and redo the typing instead of the model.
 | Drag onto another item | move the element into it |
 | Double-click a diagram | open it |
 | Right-click | New, Rename, Delete, locks (server) and more |
+
+## Menus
+
+The project menu (click the project name) and the right-click menus work from the keyboard.
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓ | move between menu items |
+| → or Enter on an item with ▸ | open its submenu (Export ▸, New element ▸) |
+| ← | back from a submenu |
+| Escape | close the submenu, then the menu |
 
 ## SysML v2 text editor
 

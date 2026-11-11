@@ -59,7 +59,7 @@ public static class TourChapters
                 "Press <b>⌘K</b> (Ctrl+K) and type what you want: “generic table”, “dependency matrix”, “used projects”, “report”…"),
             new("", Icons.Material.Outlined.Commit, "Saving works differently",
                 "Edits save as you go and sync live. <b>Commit</b> is a Teamwork Cloud commit: a named version to compare or restore. " +
-                "<b>Backspace</b> removes a shape from the diagram; <b>Delete</b> removes the element from the model. The user guide's <b>Coming from Cameo / EA</b> page maps every window and menu."),
+                "<b>Backspace</b> removes a shape from the diagram; <b>Delete</b> removes the element from the model. The user guide's <a data-guide href=\"/guide/docs/migration.html\"><b>Coming from Cameo / EA</b></a> page maps every window and menu."),
         ]),
         new("generate", "Generate diagrams", Icons.Material.Outlined.Dashboard, "Auto-diagram and Diagram my model.",
         [
@@ -157,7 +157,7 @@ public static class TourChapters
             new(".titlebar .project", Icons.Material.Outlined.SyncAlt, "DOORS Next and Polarion",
                 "Project menu ▸ <b>Integrations</b> ▸ <b>DOORS &amp; Polarion</b> syncs requirements both ways and can publish satisfy, verify and trace links back. Jira and Azure DevOps issues are under <b>Issue trackers</b>."),
             new(".titlebar .project", Icons.Material.Outlined.CallSplit, "Branches, baselines and reviews",
-                "<b>Branches &amp; merge…</b> and <b>Baselines…</b> are in the project menu; <b>Review ▸ Request</b> asks colleagues to approve the selection."),
+                "<b>Branches &amp; merge…</b> and <b>Baselines…</b> are in the project menu; <b>Traceability ▸ Request review</b> asks colleagues to approve the selection."),
         ]),
         new("settings", "Settings & themes", Icons.Material.Outlined.Palette, "Light and dark, accent colour, density and more.",
         [

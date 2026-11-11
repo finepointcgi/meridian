@@ -18,12 +18,12 @@
                         <td title="@p.AssemblyPath">@p.Name</td>
                         <td>@p.Version</td>
                         <td style="color:@(p.Loaded ? "var(--ok)" : "var(--danger)")">@(p.Loaded ? "Loaded" : "Failed: " + p.Error)</td>
-                        <td>@(p.Loaded ? $"{p.Commands} commands · {p.Rules} rules · {p.Exporters} exporters · {p.Importers} importers" : "")</td>
+                        <td>@(p.Loaded ? $"{Plural.Of(p.Commands, "command")} · {Plural.Of(p.Rules, "rule")} · {Plural.Of(p.Exporters, "exporter")} · {Plural.Of(p.Importers, "importer")}" : "")</td>
                     </tr>
                 }
                 @if (Plugins.Plugins.Count == 0)
                 {
-                    <tr><td colspan="4" style="opacity:.7">No plugins loaded. Copy a plugin's build output to the plugins folder and restart Meridian (see Plugins in the user guide).</td></tr>
+                    <tr><td colspan="4" style="opacity:.7">No plugins loaded. Copy a plugin's build output to the plugins folder and restart Meridian (see <GuideLink Page="plugins">Plugins in the user guide</GuideLink>).</td></tr>
                 }
             </tbody>
         </MudSimpleTable>

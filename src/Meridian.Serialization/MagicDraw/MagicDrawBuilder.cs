@@ -10,7 +10,8 @@ public static partial class MagicDrawImporter
     /// <summary>A stereotype application: profile (XML prefix), stereotype name and the application element (tag values).</summary>
     internal sealed record StereoApp(string Profile, string Name, XElement X);
 
-    internal sealed record PropInfo(string? Name, string? TypeId, string? Aggregation, string? OwnerId, string? Multiplicity);
+    /// <summary>A property or association end: <see cref="Multiplicity"/> defaults to 1, <see cref="ExplicitMultiplicity"/> is null without bounds.</summary>
+    internal sealed record PropInfo(string? Name, string? TypeId, string? Aggregation, string? OwnerId, string? Multiplicity, string? ExplicitMultiplicity = null);
 
     private sealed record PendingRel(ElementKind Kind, string? Id, string? Src, string? Tgt, Element Owner, XElement X, string Label);
 
@@ -368,15 +369,24 @@ public static partial class MagicDrawImporter
                     var cf = Create(ElementKind.CombinedFragment, c, owner, id);
                     if (cf == null) return;
                     ModelRepository.SetFieldForLoad(cf, FieldKeys.Operator, Attr(c, "interactionOperator") ?? "alt");
-                    var guards = c.Elements().Where(e => e.Name.LocalName == "operand")
-                        .Select(o => ValueText(Child(o, "guard")))
-                        .Where(g => !string.IsNullOrEmpty(g)).ToList();
-                    if (guards.Count > 0) ModelRepository.SetFieldForLoad(cf, FieldKeys.Guard, string.Join(" | ", guards));
-                    HandleChildren(c, cf, id);
+                    // Each uml:InteractionOperand becomes an operand of the fragment, guarded by its InteractionConstraint's
+                    // specification; the fragments it covers belong to the interaction (Meridian places them by height).
+                    var operands = c.Elements().Where(e => e.Name.LocalName == "operand" || XmiType(e) == "InteractionOperand").ToList();
+                    foreach (var o in operands)
+                    {
+                        var op = Create(ElementKind.InteractionOperand, o, cf, XmiId(o));
+                        if (op != null)
+                        {
+                            var guard = PlainText(ValueText(Child(o, "guard")));
+                            ModelRepository.SetFieldForLoad(op, FieldKeys.Guard, string.IsNullOrEmpty(guard) ? null : guard);
+                        }
+                        foreach (var ch in o.Elements().Where(e => e.Name.LocalName != "guard")) SafeHandle(ch, cf, id);
+                    }
+                    foreach (var other in c.Elements().Except(operands)) SafeHandle(other, cf, id);
                     return;
                 }
                 case "InteractionOperand":
-                    HandleChildren(c, owner, ownerXmiId);
+                    HandleChildren(c, owner, ownerXmiId);   // an operand outside a fragment: only its contents
                     return;
             }
 
@@ -474,6 +484,8 @@ public static partial class MagicDrawImporter
                     ModelRepository.SetFieldForLoad(el, FieldKeys.DoActivity, BehaviorText(Child(c, "doActivity")));
                     break;
                 case ElementKind.InputPin or ElementKind.OutputPin or ElementKind.ObjectNode:
+                    if (type == "DataStoreNode") ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, Subtypes.DataStore);
+                    else if (type == "CentralBufferNode") ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, Subtypes.CentralBuffer);
                     _typeRefs.Add((el, TypeHolder(c)));
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Multiplicity, Multiplicity(c, null));
                     if (type == "ValuePin") ModelRepository.SetFieldForLoad(el, FieldKeys.DefaultValue, ValueText(Child(c, "value")));
@@ -651,7 +663,7 @@ public static partial class MagicDrawImporter
         {
             if (XmiId(x) is not { } id) return;
             var typeId = Ref(x, "type");
-            _props[id] = new PropInfo(Attr(x, "name"), typeId, Attr(x, "aggregation"), ownerId, Multiplicity(x, "1"));
+            _props[id] = new PropInfo(Attr(x, "name"), typeId, Attr(x, "aggregation"), ownerId, Multiplicity(x, "1"), Multiplicity(x, null));
             if (Attr(x, "name") is { } n) _names.TryAdd(id, n);
         }
 
@@ -786,25 +798,18 @@ public static partial class MagicDrawImporter
 
         private void HandlePseudostate(XElement c, Element owner, string? id)
         {
+            // UML PseudostateKind: initial (also when kind is omitted, its default), deepHistory, shallowHistory, join, fork,
+            // junction, choice, entryPoint, exitPoint, terminate.
             var kind = Attr(c, "kind") ?? "initial";
-            switch (kind)
+            if (kind == "initial") { Create(ElementKind.InitialState, c, owner, id); return; }
+            var known = Subtypes.PseudostateKinds.Contains(kind);
+            var el = Create(ElementKind.Pseudostate, c, owner, id);
+            if (el == null) return;
+            ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, known ? kind : Pseudostates.Choice);
+            if (!known)
             {
-                case "initial":
-                    Create(ElementKind.InitialState, c, owner, id);
-                    return;
-                case "terminate":
-                    Create(ElementKind.FinalState, c, owner, id);
-                    return;
-                default:
-                {
-                    // choice / junction / fork / join / history / entry & exit points: kept as states marked with their kind.
-                    var el = Create(ElementKind.State, c, owner, id);
-                    if (el == null) return;
-                    AppendStereotype(el, kind);
-                    if (string.IsNullOrEmpty(el.Name)) ModelRepository.SetFieldForLoad(el, FieldKeys.Name, kind);
-                    WarnOnce("pseudo:" + kind, $"'{kind}' pseudostates have no Meridian equivalent; imported as states stereotyped «{kind}».");
-                    return;
-                }
+                _report.Approximate(MagicDrawImportReport.UnknownPseudostate, $"'{kind}' ({Attr(c, "name") ?? id}) imported as a choice");
+                WarnOnce("pseudo:" + kind, $"Pseudostates of kind '{kind}' are not a UML kind Meridian knows; imported as choice pseudostates.");
             }
         }
 

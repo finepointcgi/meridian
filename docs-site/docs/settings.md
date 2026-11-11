@@ -49,6 +49,7 @@ The theme is drawn by the server before the first paint, so a reload never flash
 | Setting | What it does |
 | --- | --- |
 | Confirm before deleting from the model | ask before **Delete** removes elements from the model (**Backspace** only removes them from the diagram) |
+| Library changed upstream | team servers: notify me when a used project's source commits a change to the package a project I edit uses (on by default); see [Used projects](libraries.md) |
 | Guided tour | **Show the tour again** restarts the first-run tour |
 | Keyboard shortcuts | the full list; see also [Keyboard shortcuts](keyboard-shortcuts.md) |
 

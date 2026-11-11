@@ -75,7 +75,8 @@ id, diagrams, stereotypes and hand-made content.
 
 A connection's `Language` is `auto` (the default for new connections), `csharp`, `typescript`, `java` or `python`. `auto`
 gives each file to the reader for its extension and merges the results; the host then fetches only the files that reader
-handles. Existing connections keep the language they were created with.
+handles (for TypeScript also its project files: tsconfig, package.json, pnpm-workspace.yaml). Existing connections keep
+the language they were created with.
 
 The TypeScript, Java and Python readers are hand-written, tolerant parsers: they run no Node.js, JVM or Python process and
 never fail on code they do not understand. A part they cannot parse is skipped with a warning
@@ -100,11 +101,37 @@ that resolve to a scanned type. Type parameters are never resolved as types. Col
 | `extends` / `implements` | Generalization / Realization |
 
 Symbols are `folder.path.Name` (`src.power.Battery`). Names resolve through the file's declarations (including enclosing
-namespaces), relative imports (named, default, `* as ns`, `import X = require(…)`), re-exports (`export * from`,
-`export { A as B } from`, `index.ts` barrels), `@/` → `src/`, and the declarations of script files (files without imports
-or exports are global). Package imports (`@acme/logging`) are not resolved. Decorators are ignored, `node_modules/` is
-skipped, and union type aliases (`type Mode = "a" | "b"`) are not types. A property without a type annotation takes its type
-from `= new X(…)`.
+namespaces), imports (named, default, `* as ns`, `import type`, `import X = require(…)`, inline `import("./x").X` types),
+re-exports (`export * from`, `export * as ns from`, `export { A as B } from`, `export { default } from`,
+`export { A as default }`, `index.ts` barrels) and the declarations of script files (files without imports or exports are
+global). Decorators are ignored, `node_modules/` is skipped, and union type aliases (`type Mode = "a" | "b"`) are not types.
+A property without a type annotation takes its type from `= new X(…)`.
+
+**Module resolution.** The reader also reads the project files that steer `tsc`'s module resolution: `tsconfig*.json`,
+`jsconfig*.json`, JSON files in a shared config package's folder (`packages/tsconfig/base.json`,
+`packages/typescript-config/nextjs.json`), every `package.json` and `pnpm-workspace.yaml` (never from `node_modules/`).
+Each source file uses the nearest `tsconfig.json` (else `jsconfig.json`) above it. A specifier resolves, in order:
+
+1. relative (`./x`, `../x`), with `.js` / `.mjs` written for `.ts` / `.mts`, and `index.ts` for a folder; when that fails,
+   through `compilerOptions.rootDirs` (the root folders merge into one);
+2. `compilerOptions.paths`: an exact pattern wins, then the pattern with the longest prefix before its `*`; the
+   substitutions are tried in order, relative to `baseUrl`, or to the config that declares `paths` when there is none;
+3. `compilerOptions.baseUrl`;
+4. a **workspace package** by name (`@acme/ui`, `@acme/ui/gauge`): the packages are the folders matched by the root
+   `package.json` `workspaces` (an array or `{ "packages": [...] }`) or `pnpm-workspace.yaml` `packages` (globs with `*`, `**`,
+   and `!` exclusions). The package's `exports` (subpaths, `./*` patterns, conditions in the order `types`, `typescript`,
+   `source`, `import`, `module`, `default`, `require` …), else `types`, `typings`, `source`, `module` or `main`, else
+   `src/index.ts`, names the entry. Built paths map back to the source when only the source is in the snapshot:
+   `./dist/index.d.ts` → `src/index.ts`, `./dist/components/*.js` → `src/components/*.ts` (`dist`, `build`, `lib`, `out`,
+   `esm`, `cjs`, `types` …);
+5. without a config: `@/x` and `~/x` → `src/x`, and `src/x` from the repository root.
+
+`extends` follows relative paths (with or without `.json`), arrays (later entries win) and package names of configs in
+the snapshot (`@acme/tsconfig/nextjs.json`, or `@acme/tsconfig` → its `package.json` `tsconfig` field or
+`tsconfig.json`). `${configDir}` is the folder of the config the file uses. Anything else (a package in `node_modules`,
+which is never scanned) is **external**: it makes no relationship or dependency, and its type keeps a clean name
+(`logger: Logger`, `x: import("pino").Logger` → `Logger`). A config that is not valid JSON adds a warning and is ignored;
+`extends` cycles are cut. This covers Nx (`tsconfig.base.json` paths), Turborepo / pnpm, npm and Yarn workspaces.
 
 #### Java
 
@@ -143,6 +170,31 @@ Names resolve through enclosing classes, the module, imports (absolute, relative
 re-exports in `__init__.py` and imports inside functions. String annotations (`"Battery"`) and `Optional`, `Union`,
 `X | None` are understood. Virtual environments, `site-packages` and `__pycache__` are skipped. A class that only inherits
 from a scanned enum is not recognised as an enum.
+
+### Where dependencies are used
+
+Every reader also records **where** a type uses each scanned type it depends on, in `CodeType.DependencyLocations`: a
+list of `CodeDependencyUse(Symbol, File, Line, Kind)`, where `Kind` is one of
+
+| Kind | C# | TypeScript / Java / Python |
+|---|---|---|
+| `inherit` | a type in the base list | `extends` / `implements`, a Python base class |
+| `field` | a field, property or event type; a record's positional parameter | a property / field type, a dataclass field, `self.x: T` |
+| `param` | a parameter type | a parameter type (also constructor parameters) |
+| `return` | a method, local function, operator or delegate return type | a return type |
+| `new` | `new T()`, `new()`, `new T[n]` | `new T()`; Python `T()` (calling a class) |
+| `call` | `T.Method()` | `T.method()` |
+| `import` | — (C# imports namespaces, not types) | the import that binds the name, recorded only when the type also uses the target |
+| `use` | anything else: locals, casts, `typeof`, generic arguments, `T.Constant` | anything else |
+
+C# takes the locations from Roslyn's syntax tree (partial classes point at the file of each part); the other readers
+from the tokens. When one line uses a target several ways, one entry is kept (`inherit`, `new`, `call`, `field`, `param`,
+`return`, `import`, `use`, in that order). Entries are sorted by target symbol, file and line, so the output is
+deterministic. To stay small on very large code (200,000 types and more), at most 8 uses are kept per (type, target),
+the first lines in file order (`MaxDependencyUsesPerTarget` on each reader); `CodeType.OmittedDependencyLocations` counts
+the rest per target. The output therefore grows with the number of dependencies, not with the number of uses. Code
+stored before this existed reads back with no locations. The architecture checks use them to point at the lines that
+break a rule ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)); the model mapping does not.
 
 ## Reviewing code changes
 

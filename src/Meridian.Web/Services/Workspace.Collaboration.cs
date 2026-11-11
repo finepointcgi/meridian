@@ -40,6 +40,7 @@ public sealed partial class Workspace
     {
         if (User is null) return false;
         LeaveSession();
+        Pinned = null;
         _joining = true;
         _inbox.Clear();
         var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
@@ -173,6 +174,7 @@ public sealed partial class Workspace
     /// </summary>
     private void DrainInbox()
     {
+        if (Pinned != null) { _inbox.Clear(); return; }   // a historical view (Workspace.Libraries.cs) doesn't follow the live head
         if (_joining || Interlocked.Exchange(ref _draining, 1) == 1) return;
         var dropped = new List<DroppedEdit>();
         var changed = false;
@@ -191,8 +193,8 @@ public sealed partial class Workspace
                         ApplyRemote(ops, dropped);
                         ops.Clear();
                         break;
-                    case InAck:
-                        _sync?.Acknowledge();
+                    case InAck a:
+                        _sync?.Acknowledge(a.Sequence);
                         break;
                     case InReplace r:
                         dropped.AddRange(ApplyReplacement(r.Json, r.Message));
@@ -222,25 +224,11 @@ public sealed partial class Workspace
     /// <summary>The session replaced the whole model: a version restore (no message), a merge, a permission change or a resync.</summary>
     private IReadOnlyList<DroppedEdit> ApplyReplacement(string json, string? message)
     {
-        var activeId = Active?.Diagram.Id;
-        var selectedId = Selected?.Id;
-        // The code-change review stays open across a merge (accepting code changes replaces main's model).
-        var review = message != null && _views.FirstOrDefault(v => v.Kind == ViewTabKind.CodeChanges) is { } rv ? (Active: ReferenceEquals(ActiveView, rv), View: rv) : default;
+        var tabs = CaptureTabs();
         var dropped = Install(ProjectFile.Deserialize(json), keepPending: true);
         if (message != null) Session?.Resynced(ParticipantId);
-        if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
-        else OpenDefaultDiagrams();
-        if (message is null)
-        {
-            SetStatus("The model was restored to an earlier version");
-            return dropped;
-        }
-        if (review.View is { } keep)
-        {
-            _views.Add(keep);
-            if (review.Active) ActiveView = keep;
-        }
-        if (Model.Find(selectedId) is { } sel) Select(sel);
+        RestoreTabs(tabs);   // the code-change review stays open across a merge (accepting code changes replaces main's model)
+        message ??= "The model was restored to an earlier version";
         Log(message);
         SetStatus(message);
         return dropped;

@@ -140,10 +140,10 @@ internal sealed class SimClient
                     if (Inbox.Count > 0 && Inbox.Peek() is Op && n + 1 < max) continue;
                     ApplyOps();
                     break;
-                case Ack:
+                case Ack ack:
                     ApplyOps();
                     Log("ack");
-                    Sync.Acknowledge();
+                    Sync.Acknowledge(ack.Sequence);
                     break;
                 case Snapshot s:
                     ApplyOps();

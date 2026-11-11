@@ -106,10 +106,13 @@ public static class XmiExchange
             foreach (var key in DiagramFields) ModelRepository.SetFieldForLoad(d, key, dx.Attribute(Meridian + key)?.Value);
             model.AttachForLoad(owner, d);
             var shapes = new Dictionary<string, DiagramNode>();
+            var operandTops = new Dictionary<string, double>(StringComparer.Ordinal);
             foreach (var se in dx.Elements().Where(e => XmiType(e) == "UMLShape"))
             {
                 if (!map.TryGetValue(Attr(se, "modelElement") ?? "", out var el)) continue;
                 var b = se.Elements().FirstOrDefault(e => e.Name.LocalName == "bounds");
+                // Other tools draw operands as shapes of their own: their tops are the fragment's separators.
+                if (el.Kind == ElementKind.InteractionOperand) { operandTops.TryAdd(el.Id, D(b, "y")); continue; }
                 var node = new DiagramNode(el, new Bounds(D(b, "x"), D(b, "y"), Math.Max(4, D(b, "width")), Math.Max(4, D(b, "height"))), XmiId(se));
                 if (se.Attribute(Meridian + "parent")?.Value is { } parent) ModelRepository.SetNodeParentForLoad(node, parent);
                 foreach (var kv in (se.Attribute(Meridian + "style")?.Value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
@@ -117,6 +120,7 @@ public static class XmiExchange
                 model.AddNodeForLoad(d, node);
                 shapes[node.Id] = node;
             }
+            OperandSeparators(d, operandTops, warnings);
             foreach (var ee in dx.Elements().Where(e => XmiType(e) == "UMLEdge"))
             {
                 if (!map.TryGetValue(Attr(ee, "modelElement") ?? "", out var rel) || rel is not Relationship r) continue;
@@ -127,6 +131,29 @@ public static class XmiExchange
                     if (kv.Split('=', 2) is [var k, var v]) ModelRepository.SetEdgeStyleForLoad(edge, k, v);
                 model.AddEdgeForLoad(d, edge);
             }
+        }
+    }
+
+    /// <summary>
+    /// Separators of the fragments on an imported diagram: Meridian's own <c>operand:&lt;id&gt;</c> styles when present, else the tops
+    /// of the operands' own shapes. Fragments left with neither are split evenly, which the report lists as approximated.
+    /// </summary>
+    private static void OperandSeparators(Diagram d, Dictionary<string, double> operandTops, List<string> warnings)
+    {
+        foreach (var n in d.Nodes.Where(n => n.Element.Kind == ElementKind.CombinedFragment))
+        {
+            var ops = InteractionOperands.Of(n.Element);
+            if (ops.Count < 2) continue;
+            var guessed = 0;
+            foreach (var op in ops.Skip(1))
+            {
+                if (InteractionOperands.StoredOffset(n, op) != null) continue;
+                if (operandTops.TryGetValue(op.Id, out var top) && top > n.Bounds.Y && top < n.Bounds.Bottom)
+                    ModelRepository.SetNodeStyleForLoad(n, InteractionOperands.StyleKey(op), InteractionOperands.Format(top - n.Bounds.Y));
+                else guessed++;
+            }
+            if (guessed > 0)
+                warnings.Add($"Approximated: diagram '{d.Name}', {n.Element.Get(FieldKeys.Operator)} fragment: {guessed} operand separator(s) not in the file, spread evenly");
         }
     }
 
@@ -555,7 +582,13 @@ public static class XmiExchange
                 if (ek == ElementKind.InteractionOperand)
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Guard, c.Element("guard") is { } og
                         ? og.Descendants().FirstOrDefault(d => d.Name.LocalName == "body")?.Value ?? og.Element("specification")?.Attribute("value")?.Value : null);
-                if (ek == ElementKind.Pseudostate) ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, Attr(c, "kind"));
+                if (ek == ElementKind.Pseudostate)
+                {
+                    var pk = Attr(c, "kind")!;
+                    var known = Subtypes.PseudostateKinds.Contains(pk);
+                    ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, known ? pk : Pseudostates.Choice);
+                    if (!known) warnings.Add($"Approximated: pseudostate '{Attr(c, "name") ?? id}' of unknown kind '{pk}' imported as a choice");
+                }
                 if (ek == ElementKind.ObjectNode && c.Attribute(Meridian + "kind") == null)
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Subtype, type == "DataStoreNode" ? Subtypes.DataStore : Subtypes.CentralBuffer);
                 if (ek == ElementKind.ConstraintBlock) ModelRepository.SetFieldForLoad(el, FieldKeys.Body, c.Element("ownedRule")?.Element("specification")?.Element("body")?.Value);
@@ -707,7 +740,7 @@ public static class XmiExchange
             "State" => ElementKind.State,
             "FinalState" => ElementKind.FinalState,
             "Pseudostate" => (Attr(x, "kind") ?? "initial") == "initial" ? ElementKind.InitialState
-                : Subtypes.PseudostateKinds.Contains(Attr(x, "kind")!) ? ElementKind.Pseudostate : null,
+                : ElementKind.Pseudostate,   // an unknown kind is read as a choice (and reported)
             _ => null,
         };
     }

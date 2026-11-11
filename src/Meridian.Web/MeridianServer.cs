@@ -90,6 +90,7 @@ public static class MeridianServer
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
         builder.AddMeridianAdmin(host); // SSO, lockout + rate limiting, audit log, backups (Admin/AdminHosting.cs)
+        Hosting.UserGuide.AddMeridianUserGuide(builder);   // the bundled user guide at /guide (Hosting/UserGuide.cs)
 
         var app = builder.Build();
         Hosting.OperationsHosting.UseMeridianRequestLogging(app);
@@ -117,6 +118,8 @@ public static class MeridianServer
         }
         app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
         app.UseMeridianAdmin();
+        // The user guide: public documentation, served before sign-in and the desktop's launch-token gate (Hosting/UserGuide.cs).
+        Hosting.UserGuide.UseMeridianUserGuide(app);
         app.UseAuthentication();
 
         // Desktop local mode: the host can import a file it was asked to open (token-guarded; see LocalFileImport).

@@ -190,6 +190,28 @@ public sealed partial class DiagramController
         _selEdges.Clear();
     }
 
+    /// <summary>
+    /// Takes over the zoom, scroll position, layer and selection of <paramref name="old"/>, a controller of the same diagram in
+    /// the model this one replaced (a rebuilt model after a library update, merge or resync). Shapes that no longer exist are
+    /// simply not selected.
+    /// </summary>
+    public void TakeViewFrom(DiagramController old)
+    {
+        Zoom = old.Zoom;
+        PanX = old.PanX;
+        PanY = old.PanY;
+        ViewWidth = old.ViewWidth;
+        ViewHeight = old.ViewHeight;
+        LeftInset = old.LeftInset;
+        NeedsFit = old.NeedsFit;
+        ActiveLayerId = old.ActiveLayerId;
+        ClearSelection();
+        foreach (var n in old._selNodes)
+            if (Diagram.Nodes.FirstOrDefault(x => x.Element.Id == n.Element.Id) is { } node && Pickable(node)) _selNodes.Add(node);
+        foreach (var e in old._selEdges)
+            if (Diagram.Edges.FirstOrDefault(x => x.Relationship.Id == e.Relationship.Id) is { } edge && Pickable(edge)) _selEdges.Add(edge);
+    }
+
     public bool IsSelected(DiagramEdge e) => _selEdges.Contains(e);
 
     /// <summary>Adds a shape to the selection, or takes it out if it is already in.</summary>

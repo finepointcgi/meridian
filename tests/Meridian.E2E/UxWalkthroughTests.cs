@@ -207,7 +207,8 @@ public sealed class UxWalkthroughTests(ServerFixture f) : E2ETest(f)
                 if (!full && d is not ("Requirements" or "Verification")) continue;
                 if (tablet) break;
                 await p.DockTabAsync(d);
-                await Expect(p.DockBody()).ToBeVisibleAsync();
+                // Verification opens as a centre view tab (0.7.1); the dock entry is a shortcut to it.
+                await Expect(d == "Verification" ? p.ViewTab() : p.DockBody()).ToBeVisibleAsync();
                 await ShotAsync(p, "empty-dock-" + d.Replace(' ', '-').ToLowerInvariant());
             }
         });
@@ -331,7 +332,7 @@ public sealed class UxWalkthroughTests(ServerFixture f) : E2ETest(f)
             await StepAsync(p, "verify", async () =>
             {
                 await p.RibbonAsync("Verify");
-                await Expect(p.DockBody()).ToBeVisibleAsync();
+                await Expect(p.ViewTab().Locator("[data-testid=verify-tab]")).ToBeVisibleAsync();   // a centre tab since 0.7.1
                 await Task.Delay(1500);
                 await ShotAsync(p, "verify");
             });

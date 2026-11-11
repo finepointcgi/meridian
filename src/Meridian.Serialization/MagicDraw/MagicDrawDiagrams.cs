@@ -250,6 +250,7 @@ public static partial class MagicDrawImporter
             {
                 if (v.ElementRef == null || !_map.TryGetValue(v.ElementRef, out var el)) { if (v.ElementRef != null) unmapped++; continue; }
                 if (el is Relationship || el is Diagram || el.Kind == ElementKind.Model) continue;
+                if (el.Kind == ElementKind.InteractionOperand) continue;   // drawn by its fragment (separators, below)
                 // The diagram frame shows the context (block / activity / state machine / interaction) itself.
                 if (ReferenceEquals(el, owner) && (v.Class.Contains("Frame", StringComparison.OrdinalIgnoreCase) || d.DiagramType is not (DiagramType.Package or DiagramType.BlockDefinition or DiagramType.Class or DiagramType.Requirement or DiagramType.UseCase)))
                     continue;
@@ -274,6 +275,8 @@ public static partial class MagicDrawImporter
                 foreach (var n in d.NodeList.Where(n => n.ParentId == null && n.Element.Kind != ElementKind.Partition))
                     if (lanes.FirstOrDefault(l => l.Bounds.Contains(n.Bounds.Center)) is { } lane) n.ParentId = lane.Id;
             }
+
+            PlaceOperandSeparators(d, views, diagramName);
 
             var skippedPaths = 0;
             foreach (var v in views.Where(v => v.IsPath))
@@ -300,6 +303,38 @@ public static partial class MagicDrawImporter
             if (skippedPaths > 0) _report.Skip("Diagram paths whose ends are not shown", skippedPaths);
             if (unmapped > 0) _report.Skip("Diagram symbols with no imported element", unmapped);
             return missing;
+        }
+
+        /// <summary>
+        /// Operand separators of the combined fragments on <paramref name="d"/>. MagicDraw draws each operand as a shape of its own
+        /// (an <c>InteractionOperand</c> view nested in the fragment's view, with its bounds); the top of each later operand's
+        /// shape is where its dashed separator is. Stored as the fragment shape's <c>operand:&lt;id&gt;</c> styles, as an offset from
+        /// the fragment's top. Operands with no readable shape share the rest of the fragment evenly (reported as guessed).
+        /// </summary>
+        private void PlaceOperandSeparators(Diagram d, List<View> views, string diagramName)
+        {
+            var tops = new Dictionary<string, double>(StringComparer.Ordinal);
+            foreach (var v in views.Where(v => !v.IsPath && v.ElementRef != null))
+                if (_map.TryGetValue(v.ElementRef!, out var el) && el.Kind == ElementKind.InteractionOperand && ParseBounds(v.Geometry) is { } b)
+                    tops.TryAdd(el.Id, b.Y);
+            foreach (var n in d.NodeList.Where(n => n.Element.Kind == ElementKind.CombinedFragment))
+            {
+                var ops = InteractionOperands.Of(n.Element);
+                if (ops.Count < 2) continue;
+                var guessed = 0;
+                var last = 0.0;
+                foreach (var op in ops.Skip(1))
+                {
+                    var offset = tops.TryGetValue(op.Id, out var top) ? top - n.Bounds.Y : double.NaN;
+                    // A separator must sit inside the fragment, below the one before it.
+                    if (double.IsNaN(offset) || offset <= last || offset >= n.Bounds.Height) { guessed++; continue; }
+                    ModelRepository.SetNodeStyleForLoad(n, InteractionOperands.StyleKey(op), InteractionOperands.Format(offset));
+                    last = offset;
+                }
+                if (guessed > 0)
+                    _report.Approximate(MagicDrawImportReport.OperandGeometryGuessed,
+                        $"'{diagramName}': {Metamodel.DisplayName(n.Element.Kind)} {n.Element.Get(FieldKeys.Operator)} — {guessed} of {ops.Count - 1} separators spread evenly");
+            }
         }
 
         /// <summary>Fallback when no symbols can be read: shows what the diagram's context owns, by diagram type.</summary>

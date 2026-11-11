@@ -30,6 +30,39 @@ internal sealed class TypeExpr
     }
 
     public string LastSegment => Name.Contains('.') ? Name[(Name.LastIndexOf('.') + 1)..] : Name;
+
+    /// <summary>1-based line where the expression starts; 0 when unknown (built by a reader, not parsed).</summary>
+    public int Line { get; set; }
+
+    /// <summary>Every dotted name with its line (a part without a line of its own takes its parent's, then
+    /// <paramref name="fallback"/>).</summary>
+    public IEnumerable<(string Name, int Line)> NamesAt(int fallback)
+    {
+        var line = Line > 0 ? Line : fallback;
+        if (Name.Length > 0) yield return (Name, line);
+        foreach (var r in Refs) yield return (r, line);
+        foreach (var a in Args) foreach (var x in a.NamesAt(line)) yield return x;
+        if (Union != null) foreach (var u in Union) foreach (var x in u.NamesAt(line)) yield return x;
+    }
+
+    /// <summary>The names of this expression as uses of one kind (a field's type, a parameter's type …).</summary>
+    public IEnumerable<NameRef> Uses(int fallback, Meridian.Core.CodeSync.CodeDependencyKind kind) =>
+        NamesAt(fallback).Select(x => new NameRef(x.Name, x.Line, kind));
+
+    /// <summary>Moves the expression and its parts to <paramref name="line"/> (a type parsed from a string literal).</summary>
+    public void Relocate(int line)
+    {
+        Line = line;
+        foreach (var a in Args) a.Relocate(line);
+        if (Union != null) foreach (var u in Union) u.Relocate(line);
+    }
+}
+
+/// <summary>A name used in code: the dotted name as written, its 1-based line and how it is used.</summary>
+internal readonly record struct NameRef(string Name, int Line, Meridian.Core.CodeSync.CodeDependencyKind Kind)
+{
+    /// <summary>The file it is in when that is not the owning type's (declaration merging across files).</summary>
+    public string? File { get; init; }
 }
 
 /// <summary>Per-language knowledge for unwrapping a member's type to the element it holds.</summary>
@@ -100,6 +133,7 @@ internal static class TypeExprs
     public static TypeExpr Parse(List<Tok> toks, ref int pos, int end, bool python, int depth = 0)
     {
         if (depth > 24 || pos >= end) return TypeExpr.Empty;
+        var startLine = toks[pos].Line;
         var alts = new List<TypeExpr>();
         if (pos < end && toks[pos].Is("|")) pos++;   // leading '|' in TypeScript unions
         while (pos < end)
@@ -109,7 +143,34 @@ internal static class TypeExprs
             if (pos < end && toks[pos].Is("|")) { pos++; continue; }
             break;
         }
-        return alts.Count == 1 ? alts[0] : new TypeExpr { Union = alts };
+        var result = alts.Count == 1 ? alts[0] : new TypeExpr { Union = alts };
+        if (result.Line == 0) result.Line = startLine;
+        return result;
+    }
+
+    /// <summary>
+    /// Dotted names in a token range with their line and how they are used: after <c>new</c> a creation, followed by
+    /// <c>(</c> a call (a call of a type itself is a creation; the reader decides once names are resolved), else a use.
+    /// </summary>
+    public static IEnumerable<NameRef> RefsIn(List<Tok> toks, int from, int end)
+    {
+        for (var i = Math.Max(0, from); i < end && i < toks.Count; i++)
+        {
+            var t = toks[i];
+            if (t.Kind != TokKind.Ident) continue;
+            if (i > 0 && (toks[i - 1].Is(".") || toks[i - 1].Is("?."))) continue;
+            var sb = new StringBuilder(t.Text);
+            var j = i + 1;
+            while (j + 1 < end && toks[j].Is(".") && toks[j + 1].Kind == TokKind.Ident)
+            {
+                sb.Append('.').Append(toks[j + 1].Text);
+                j += 2;
+            }
+            var kind = i > 0 && toks[i - 1].Is("new") ? Meridian.Core.CodeSync.CodeDependencyKind.New
+                : j < end && j < toks.Count && toks[j].Is("(") ? Meridian.Core.CodeSync.CodeDependencyKind.Call
+                : Meridian.Core.CodeSync.CodeDependencyKind.Use;
+            yield return new NameRef(sb.ToString(), t.Line, kind);
+        }
     }
 
     private static TypeExpr ParseIntersection(List<Tok> toks, ref int pos, int end, bool python, int depth)
@@ -187,12 +248,21 @@ internal static class TypeExprs
             // A forward reference: "Battery" or "list[Cell]".
             var inner = Lexer.Python(tok.Text).Where(x => x.Kind != TokKind.Newline).ToList();
             var ip = 0;
-            return Parse(inner, ref ip, inner.Count, python, depth + 1);
+            var parsed = Parse(inner, ref ip, inner.Count, python, depth + 1);
+            parsed.Relocate(tok.Line);
+            return parsed;
         }
         if (tok.Kind == TokKind.Number) { pos++; return TypeExpr.Empty; }
         if (tok.Kind == TokKind.Ident)
         {
             var sb = new StringBuilder(tok.Text);
+            if (!python && tok.Is("import") && pos + 4 < end && toks[pos + 1].Is("(") && toks[pos + 2].Kind == TokKind.String && toks[pos + 3].Is(")")
+                && toks[pos + 4].Is("."))
+            {
+                // A TypeScript inline import type: import("./battery").Battery → name "import(./battery).Battery".
+                sb.Clear().Append("import(").Append(toks[pos + 2].Text).Append(')');
+                pos += 3;
+            }
             pos++;
             while (pos + 1 < end && toks[pos].Is(".") && toks[pos + 1].Kind == TokKind.Ident)
             {

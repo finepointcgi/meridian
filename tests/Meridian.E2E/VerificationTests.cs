@@ -15,9 +15,11 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
         await p.Tree().GetByText("Vehicle Requirements", new() { Exact = true }).First.DblClickAsync();
         await Expect(p.Node("Acceleration")).ToHaveCountAsync(1);
 
-        // Ribbon → Verify: the results tab opens with the pass / fail summary.
+        // Ribbon → Verify: the results open as a tab next to the diagrams (not in the bottom dock) with the pass / fail summary.
         await p.RibbonAsync("Verify");
-        var dock = p.DockBody();
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Verification" })).ToHaveClassAsync(new System.Text.RegularExpressions.Regex(@"\bactive\b"));
+        var dock = p.ViewTab();
+        await Expect(dock.Locator("[data-testid=verify-tab]")).ToBeVisibleAsync();
         var table = dock.Locator("[data-testid=verify-results]");
         await Expect(table.Locator("tr.row")).ToHaveCountAsync(3);
         await Expect(table.Locator("tr.row .verdict.pass")).ToHaveCountAsync(2, new() { Timeout = 20_000 });
@@ -43,6 +45,51 @@ public sealed class VerificationTests(ServerFixture f) : E2ETest(f)
         await crit.PressAsync("Tab");
         await Expect(range.Locator(".verdict.stale")).ToHaveCountAsync(1);
         await Expect(svg.Locator("g.vfy-mark.stale")).ToHaveCountAsync(1);
+    }
+
+    /// <summary>
+    /// The results are a centre tab (docs/UX-AUDIT-0.7.md finding 30): the dock's Verification entry opens it, it opens once,
+    /// and at 1280×800 and 1440×900 the table fits without sideways scrolling.
+    /// </summary>
+    [E2EFact]
+    public async Task Verification_results_open_as_a_centre_tab_that_fits_a_laptop_window()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        await p.NewProjectAsync("Vehicle sample", "Verify tab " + Guid.NewGuid().ToString("N")[..6]);
+        await p.Tree().GetByText("Vehicle Requirements", new() { Exact = true }).First.DblClickAsync();
+
+        // The bottom dock keeps a Verification shortcut: it opens the centre tab instead of a dock panel.
+        await p.Locator("[data-testid=dock-verification]").ClickAsync();
+        var tab = p.ViewTab().Locator("[data-testid=verify-tab]");
+        await Expect(tab).ToBeVisibleAsync();
+        await Expect(p.DockBody().Locator("[data-testid=verify-summary]")).ToHaveCountAsync(0);
+        await tab.Locator("[data-testid=verify-run]").ClickAsync();
+        await Expect(tab.Locator("[data-testid=verify-results] tr.row .verdict.pass")).ToHaveCountAsync(2, new() { Timeout = 20_000 });
+
+        // Back to the diagram, then Verify again: the same tab comes forward (one Verification tab).
+        await p.Tabs().Filter(new() { HasTextString = "Vehicle Requirements" }).First.ClickAsync();
+        await Expect(tab).ToHaveCountAsync(0);
+        await p.RibbonAsync("Verify");
+        await Expect(tab).ToBeVisibleAsync();
+        await Expect(p.Tabs().Filter(new() { HasTextString = "Verification" })).ToHaveCountAsync(1);
+
+        foreach (var (w, h) in new[] { (1280, 800), (1440, 900) })
+        {
+            await p.SetViewportSizeAsync(w, h);
+            await Expect(tab.Locator("[data-testid=verify-results]")).ToBeVisibleAsync();
+            var fits = await p.EvaluateAsync<bool>(@"() => {
+                const host = document.querySelector('.diagram-host .view-host');
+                const table = host.querySelector('[data-testid=verify-results]');
+                return host.scrollWidth <= host.clientWidth + 1 && table.getBoundingClientRect().right <= host.getBoundingClientRect().right + 1
+                    && document.documentElement.scrollWidth <= window.innerWidth;
+            }");
+            Assert.True(fits, $"The verification results scroll sideways at {w}×{h}");
+            // Requirement ids stay on one line (they wrapped in the 0.7.0 dock at these sizes).
+            var idHeight = await p.EvaluateAsync<double>("() => document.querySelector('.view-host [data-testid=verify-results] tr.row td').getBoundingClientRect().height");
+            var idLine = await p.EvaluateAsync<double>("() => parseFloat(getComputedStyle(document.querySelector('.view-host [data-testid=verify-results] tr.row td')).lineHeight) || 18");
+            Assert.True(idHeight < idLine * 2 + 12, $"Requirement ids wrap at {w}×{h} ({idHeight}px rows)");
+        }
     }
 
     [E2EFact]

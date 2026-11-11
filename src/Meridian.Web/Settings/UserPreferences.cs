@@ -38,6 +38,8 @@ public sealed class UserPreferences
 
     // ---------------------------------------------------------------- editor
     public bool ConfirmDeleteFromModel { get; set; }
+    /// <summary>Notify me when a project I edit uses a library whose source moved ahead of the pin (docs/LIBRARIES.md).</summary>
+    public bool LibraryUpstreamNotices { get; set; } = true;
     public bool TourSeen { get; set; }
     /// <summary>The release whose "What's new" card the user has seen (or skipped by taking the tour), e.g. "0.5".</summary>
     public string? WhatsNewSeen { get; set; }
@@ -106,6 +108,7 @@ public sealed class UserPreferences
                 break;
             case SettingsSection.Editor:
                 ConfirmDeleteFromModel = d.ConfirmDeleteFromModel;
+                LibraryUpstreamNotices = d.LibraryUpstreamNotices;
                 break;
             case SettingsSection.Assistant:
                 AssistantEnabled = d.AssistantEnabled; AssistantModel = d.AssistantModel;

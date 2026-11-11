@@ -84,10 +84,10 @@ Severity: **High** blocks or misleads a new user; **Medium** slows them down or 
 | # | Sev | Finding | Fix / recommendation |
 |---|---|---|---|
 | 27 | — | Sideways scrolling | None at any size, theme or screen. |
-| 28 | — | Phone | Database, verification, architecture, used projects, code changes and permissions are not on the phone shell (Model, Diagram, Requirements, Reviews, Comments); they are hidden gracefully, and Settings and the tour work as sheets. |
+| 28 | — | Phone | Database, verification, architecture, used projects, code changes and permissions are not on the phone shell (Model, Diagram, Requirements, Reviews, Comments); they are hidden gracefully, and Settings and the tour work as sheets. **0.7.1**: verification results and code changes are read-only lists in the account menu (decision 4). |
 | 29 | Medium | Phone Diagram view | After switching from a desktop width to a phone width in the same session the Diagram view showed an empty grid until Fit; on a fresh phone load it is fine. **Recommendation**: zoom to fit when the phone shell first shows a diagram. |
-| 30 | Medium | Verification dock | At 1280–1440 px the results table squeezes columns (ids and dates wrap). **Recommendation**: open results as a view tab next to the diagrams, like Code changes. |
-| 31 | Low | Status bar | "1 diagrams", "0 relationships" plural forms. Not changed (tests parse the text). |
+| 30 | Medium | Verification dock | At 1280–1440 px the results table squeezes columns (ids and dates wrap). **Recommendation**: open results as a view tab next to the diagrams, like Code changes. **Done in 0.7.1** (decision 3); the rows also had a global `.row { display: flex }` applied, which is what squeezed the columns. |
+| 31 | Low | Status bar | "1 diagrams", "0 relationships" plural forms. **Fixed in 0.7.1** with `Plural.Of` (decision 6). |
 | 32 | Low | Snackbars | Success toasts (e.g. "Imported Database…") stay ~10 s over the ribbon. **Recommendation**: 4 s for success, keep errors until dismissed. |
 | 33 | — | Long operations | Import, sync, verification (Verify disabled while running, progress in the tab), report generation (with *Cancel generation*) and library updates already show progress; AI runs can be stopped. No change. |
 | 34 | Low | Empty canvas hint | With the dock open on a small window the "diagram is empty" hint overlaps the diagram frame label. Recorded. |
@@ -124,10 +124,14 @@ Severity: **High** blocks or misleads a new user; **Medium** slows them down or 
 **Project menu**: *Project* Projects… ⌘O, New project…, Rename model… · *Import* Open a file as a new project…, Import
 into this project…, Paste Mermaid…, Database schema (DDL / .dacpac)…, Connect to a database…, Add UAF profile ·
 *Versions & team* Commit version… ⌘S, Version history…, Branches & merge…, Baselines…, Used projects…, Share &
-members…, Integrations… · *Export* Download .meridian file, Export XMI 2.5.1, Export SysML v2 text, Export diagram as
-SVG / PNG…, Copy diagram as image, Export diagram as Mermaid, Copy diagram as Mermaid.
+members…, Integrations… · **Export ▸** (submenu since 0.7.1) Download .meridian file, Export XMI 2.5.1, Export SysML v2
+text, *Active diagram*: Export diagram as SVG / PNG…, Copy diagram as image, Export diagram as Mermaid, Copy diagram as
+Mermaid.
 
-**Help (?)**: Tour…, Coming from Cameo or EA, Keyboard & mouse, All commands… ⌘K, What's new in 0.7, About Meridian.
+**Diagram tab (right-click, 0.7.1)**: Export ▸ (SVG, PNG…, image, Mermaid), Select in containment tree, Close, Close others.
+
+**Help (?)**: Tour…, Coming from Cameo or EA, Keyboard & mouse, **User guide** (0.7.1), All commands… ⌘K, What's new in
+0.7, About Meridian.
 
 **Ribbon tabs**
 
@@ -136,35 +140,64 @@ SVG / PNG…, Copy diagram as image, Export diagram as Mermaid, Copy diagram as 
 | Create | Package, Block, Interface Block, Value Type, Requirement, Actor, Use Case |
 | Diagram | BOARD, BDD, IBD, REQ, ACT, STM, SD, UC, PKG, More ▾ (Parametric, BPMN, ArchiMate, Database, Class, Timing, Interaction Overview, Communication), Arrange, Auto-diagram, Create from… |
 | Requirements | Test case, Table, Exchange ▾ (ReqIF, CSV, Excel, re-import with preview, renumber) |
-| Traceability | Matrix, Trace table, Impact, Coverage, Validate |
-| Review | Request, Reviews |
+| Traceability | Matrix, Trace table, Impact, Coverage, Validate · *Review*: Request review, Reviews (the Review tab before 0.7.1) |
 | Model views | Generic table, Query, Used projects |
-| Simulate | Simulate, Parametrics, Variants, Verify |
-| Generate | Report, SysML v2, Edit text, XMI, C#, Formats ▾ (SDD, Word / PDF / HTML, HTML report, BPMN, Mermaid, ArchiMate, ReqIF, SQL DDL ×5) |
-| Extend | Script, Plugins ▾ |
+| Simulate | Simulate, Parametrics, Variants, Verify (opens the Verification view tab) |
+| Generate | Report, SysML v2, Edit text, XMI, C#, Formats ▾ (SDD, Word / PDF / HTML, HTML report, BPMN, Mermaid, ArchiMate, ReqIF, SQL DDL ×5) · *Extend*: Script, Plugins ▾ (the Extend tab before 0.7.1) |
 | AI | Assistant, Diagram my model, Diagram from text, Requirements from text, Suggest links, Review model |
 | Database (with a data model) | New table, Add to subject area, Subject areas ▾ (manage, filter, columns), DDL…, Migration…, Refresh…, Data dictionary ▾ |
 | Code (with a repository) | Code changes, Highlight, Architecture |
 
 **Dock**: Validation, Requirements, Matrix, Impact, Simulation, Parametrics, Trace table, Reviews, Script, Variants,
-Verification, SysML text, Assistant, Output. **View tabs** next to diagrams: generic tables, queries, report templates,
-Code changes, Architecture.
+Verification ↗ (opens the view tab), SysML text, Assistant, Output. **View tabs** next to diagrams: generic tables,
+queries, report templates, Code changes, Architecture, **Verification** (0.7.1).
 
-**Balance**: Review (2) and Extend (2) are light, Diagram (13) and Generate (6 + 16 formats) heavy. Moving them is a
-product decision (see below), not done here.
+**Phone account menu**: Projects…, **Verification results**, **Code changes** (read-only, 0.7.1), **User guide**, Light /
+dark mode, Settings…, Tour…, Sign out.
 
-## Decisions needed
+**Balance**: 0.7.0 had Review (2) and Extend (2) as their own light tabs; 0.7.1 merged them (decision 1), so the strip has
+eight tabs (ten with Database and Code). A ribbon tab id remembered from 0.7.0 (`review`, `extend`) opens the tab its
+buttons moved to (`Workbench.MovedRibbonTabs`).
 
-1. **Merge Review into Traceability or Model views, and Extend into Generate?** Two two-button tabs add tab-strip noise;
-   recommendation: *Review* → into *Traceability* as a "Review" group, *Extend* → *Generate*. Changes muscle memory and
-   E2E helpers, so left for a decision.
-2. **Split the project menu's Export section into a submenu** (eight entries, half of them per-diagram). Recommendation:
-   *Export ▸* submenu, with the diagram exports also on the diagram tab's context menu.
-3. **Verification results as a view tab** instead of the dock (finding 30).
-4. **Phone shell**: expose read-only verification results and code changes, or keep them desktop-only (today: hidden).
-5. **Docs hosting**: the app cannot link to the user guide because it has no public URL. Recommendation: publish
-   docs-site and add *Help ▸ User guide* plus "Learn more" links in empty states.
-6. **Status-bar plural forms** (finding 31): fix together with the tests that parse the counts.
+## Decisions (all done in 0.7.1)
+
+All six recommendations were approved and built; `tests/Meridian.E2E/UxDecisionsTests.cs` and
+`tests/Meridian.Web.Tests/UxDecisionsTests.cs` cover them.
+
+1. **Review → Traceability, Extend → Generate.** Done. *Request review* and *Reviews* sit after a divider on the
+   Traceability tab (reviews approve what the trace shows); *Script* and *Plugins ▾* sit after a divider on Generate
+   (plugins mostly add exporters). `RibbonTabs()`, the `data-tab` groups (`PluginsMenu` renders buttons only), the tour
+   text, `Ui.RibbonTabAsync` (old ids still accepted), docs and tests were updated. A remembered `review` / `extend` tab
+   opens `trace` / `generate`.
+2. **Export ▸ submenu.** Done, as a MudBlazor nested menu inside the project menu (the menu is a `MudMenu`; rewriting it
+   on the canvas `ContextMenu` would have broken the parallel branches that add project-menu items). MudBlazor flips the
+   submenu inside the window; `meridian.js` adds the keyboard for `kbd-menu` lists: ↑ / ↓ / Home / End, → or Enter opens
+   the submenu at its first item, ← goes back, Escape closes the submenu first and then the menu. The diagram exports are
+   also on the new diagram-tab context menu (`ContextMenu` with an Export ▸ submenu).
+3. **Verification results as a view tab.** Done: `ViewTabKind.Verification`. *Simulate ▸ Verify*, ⌘K *Verification
+   results* and the dock's *Verification ↗* entry open or bring forward one tab; `OpenDock(VerificationDock)` redirects
+   to it. Only the hosting changed (`VerificationPanel` is unchanged apart from a guide link in its empty state). Checked
+   at 1280×800 and 1440×900: the squeeze came from a global `.row { display: flex }` on the result rows; with real table
+   rows, ids and dates stay on one line and, when the centre is under 760 px wide, the Variant column (also in each row's
+   details) is dropped so nothing scrolls sideways.
+4. **Phone: read-only verification results and code changes.** Done, in the account menu (the bottom bar keeps its five
+   tabs): `MobileVerification` (status, requirement id and name, criterion, value vs bound, margin, time; filter chips;
+   tap for the element sheet) and `MobileCodeChanges` (per review branch: added / changed / removed, element kind, path,
+   with "accept or reject on a larger screen"). Checked at 390×844 without sideways scrolling.
+5. **User guide inside the app.** Done. `build/package.sh` builds docs-site once with DocFX (pinned local tool) and copies
+   it into every desktop package and the server zip as `guide/`; the Dockerfile builds it into `/app/guide`
+   (`SKIP_GUIDE=1` leaves it out). `Hosting/UserGuide.cs` serves it at `/guide` (index.html for folders; a short "how to
+   build it" page when absent; `Meridian:GuidePath` overrides the folder). **Access decision: anonymous.** The guide is the
+   same public documentation as docs-site, the sign-in page links to it (so people without an account can read it),
+   and the desktop app opens it in the system browser, which does not hold the window's sign-in. It is its own pipeline
+   branch, so it never reaches app pages, APIs or project data, and it sits in front of the desktop launch-token gate.
+   *Help ▸ User guide*, ⌘K *User guide* and the phone account menu open it (a new tab, or the system browser from the
+   desktop app); "Learn more" goes to the matching page from import / ReqIF / requirements import errors (snackbar
+   action), the empty project hint (Getting started, Coming from Cameo or EA), the verification empty state, the Plugins
+   dialog and the Cameo / EA tour chapter. The docs build is not part of `dotnet test`.
+6. **Plural forms.** Done: `Plural.Of(count, noun)` for the status bar (elements, relationships, diagrams), model health
+   and validation (errors, warnings), import logs, Auto-diagram, requirement imports, the trace table, plugin counts, the
+   used-project tooltip and the phone code-changes list. `Ui.CountsAsync` accepts the singular.
 
 ## Remaining feature gaps for Cameo / EA users
 

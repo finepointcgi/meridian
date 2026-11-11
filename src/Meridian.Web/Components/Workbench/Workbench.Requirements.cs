@@ -74,7 +74,7 @@ public partial class Workbench
         catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException or ArgumentException
                                        or System.IO.InvalidDataException or DocumentFormat.OpenXml.Packaging.OpenXmlPackageException)
         {
-            Snackbar.Add($"Could not import the file: {Meridian.Web.Services.FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
+            ErrorWithGuide($"Could not import the file: {Meridian.Web.Services.FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
         }
     }
 

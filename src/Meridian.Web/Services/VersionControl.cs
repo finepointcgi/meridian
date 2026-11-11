@@ -51,8 +51,9 @@ public static class VersionControl
         if (author is { } a && await db.RoleOfAsync(session.ProjectId, a) is not (ProjectRole.Editor or ProjectRole.Owner))
             throw new InvalidOperationException("Only editors and owners can commit versions of this project.");
         await session.PersistAsync();
-        var result = await db.CommitBranchVersionAsync(session.ProjectId, session.BranchId, message.Trim(), session.Snapshot(), author);
-        session.NotifyVersionCommitted(result.Number, message.Trim(), authorAccount);   // webhooks
+        var json = session.Snapshot();
+        var result = await db.CommitBranchVersionAsync(session.ProjectId, session.BranchId, message.Trim(), json, author);
+        await session.VersionCommittedAsync(result.Number, message.Trim(), json, authorAccount);   // webhooks, "library changed upstream" notices
         return result;
     }
 
@@ -120,6 +121,8 @@ public static class VersionControl
         }
         else if (plan.Target.BranchId is { } tb) await db.SaveBranchAsync(tb, json, author);
         else await db.SaveProjectAsync(plan.ProjectId, json, author);
+        if (plan.Target.BranchId is null)   // a new version of main: "library changed upstream" for the projects that use this one
+            await hub.LibraryNoticesAsync(plan.ProjectId, null, version.Number, json);
 
         // The incoming side's merged state is now shared by both lines.
         if (plan.Source.BranchId is { } sb) await db.SetBranchBaseAsync(sb, plan.TheirsJson, version.Id);

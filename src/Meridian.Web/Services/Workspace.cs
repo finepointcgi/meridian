@@ -52,7 +52,8 @@ public sealed partial class Workspace : IDisposable, ISessionClient
     public UserAccount? User { get; set; }
     public ProjectSession? Session { get; private set; }
     public ProjectRole Role { get; private set; } = ProjectRole.Owner;
-    public bool ReadOnly => Role == ProjectRole.Viewer;
+    /// <summary>View-only role, or a historical view of a used project at its pinned version (<see cref="Pinned"/>).</summary>
+    public bool ReadOnly => Role == ProjectRole.Viewer || Pinned != null;
 
     /// <summary>The signed-in user is a server administrator (team servers; set when the workbench starts, re-checked before scripts run).</summary>
     public bool IsServerAdmin { get; set; }
@@ -67,6 +68,59 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 
     public IReadOnlyList<Presence> Others =>
         Session?.Participants.Where(p => p.ParticipantId != ParticipantId).ToList() ?? (IReadOnlyList<Presence>)[];
+
+    // ---------------------------------------------------------------- tabs across a rebuilt model
+
+    /// <summary>The open tabs, the active one, the selection and the back/forward history (see <see cref="CaptureTabs"/>).</summary>
+    private sealed record TabSnapshot(IReadOnlyList<DiagramController> Diagrams, string? ActiveDiagramId, IReadOnlyList<ViewTab> Views, ViewTab? ActiveView,
+                                      string? SelectedId, IReadOnlyList<string> Back, IReadOnlyList<string> Forward);
+
+    /// <summary>Remembers the tabs before another model is installed (a library update, a merge, a resync or a version restore).</summary>
+    private TabSnapshot CaptureTabs() =>
+        new(_open.ToList(), Active?.Diagram.Id, _views.ToList(), ActiveView, Selected?.Id, _back.Select(d => d.Id).ToList(), _forward.Select(d => d.Id).ToList());
+
+    /// <summary>
+    /// Re-opens the remembered tabs in the newly installed model: diagrams that still exist keep their tab, place, zoom, scroll
+    /// and selection; the active tab stays active (or its neighbour when it is gone); view tabs of saved elements and the
+    /// code-change and architecture reviews stay open. With no tab left, the default diagrams open.
+    /// </summary>
+    private void RestoreTabs(TabSnapshot tabs)
+    {
+        foreach (var old in tabs.Diagrams)
+        {
+            if (Model.Find(old.Diagram.Id) is not Diagram d || _open.Any(c => ReferenceEquals(c.Diagram, d))) continue;
+            var c = new DiagramController(this, d);
+            c.TakeViewFrom(old);
+            _open.Add(c);
+        }
+        Active = _open.FirstOrDefault(c => c.Diagram.Id == tabs.ActiveDiagramId);
+        if (Active == null && tabs.ActiveDiagramId != null && _open.Count > 0)
+        {
+            var at = tabs.Diagrams.ToList().FindIndex(c => c.Diagram.Id == tabs.ActiveDiagramId);
+            Active = _open[Math.Clamp(at - 1, 0, _open.Count - 1)];
+        }
+        foreach (var v in tabs.Views)
+        {
+            if (v.Element is { } el)
+            {
+                if (Model.Find(el.Id) is not { } now) continue;
+                var tab = new ViewTab(v.Kind) { Element = now, State = v.State };
+                _views.Add(tab);
+                if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = tab;
+            }
+            else if (v.Kind is ViewTabKind.CodeChanges or ViewTabKind.Architecture)
+            {
+                _views.Add(v);   // reviews hold no model objects: the same tab carries on
+                if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = v;
+            }
+        }
+        _back.AddRange(tabs.Back.Select(Model.Find).OfType<Diagram>());
+        _forward.AddRange(tabs.Forward.Select(Model.Find).OfType<Diagram>());
+        if (_open.Count == 0 && _views.Count == 0) OpenDefaultDiagrams();
+        if (Model.Find(tabs.SelectedId) is { } sel) Select(sel, syncCanvas: false);
+        SharePresence();
+        Bump();
+    }
 
     // ---------------------------------------------------------------- branches & element locks
 
@@ -459,7 +513,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -477,6 +531,7 @@ public sealed class ViewTab(ViewTabKind kind)
         ViewTabKind.Query => "New query",
         ViewTabKind.CodeChanges => "Code changes",
         ViewTabKind.Architecture => "Architecture",
+        ViewTabKind.Verification => "Verification",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
 }

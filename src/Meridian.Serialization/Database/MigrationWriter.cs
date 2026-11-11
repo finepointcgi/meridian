@@ -7,15 +7,19 @@ namespace Meridian.Serialization.Database;
 public sealed record MigrationScript(string Sql, IReadOnlyList<string> Warnings, int Steps);
 
 /// <summary>
-/// ALTER scripts that turn one catalog into another (a baseline, a branch or a live database → the model): new schemas,
-/// types, sequences and tables; added, altered and dropped columns; primary keys, unique / check constraints, indexes and
-/// foreign keys (dropped first, added last). Destructive steps are marked with a WARNING comment and listed in
+/// ALTER scripts that turn one catalog into another (a baseline, a branch or a live database → the model): renamed tables
+/// and columns (RENAME, sp_rename) first; new schemas, types, sequences and tables; added, altered and dropped columns;
+/// primary keys, unique / check constraints, indexes and foreign keys (dropped first, added last); routines and triggers
+/// with their bodies (CREATE OR REPLACE / CREATE OR ALTER, or drop and create) last. Constraints whose name the before side
+/// does not know (an unnamed foreign key, a SQL Server default or primary key) are dropped by a small script that looks
+/// the generated name up in the database's catalog. Destructive steps are marked with a WARNING comment and listed in
 /// <see cref="MigrationScript.Warnings"/>. Meridian only writes the script; it never runs it.
 /// </summary>
 public static class MigrationWriter
 {
-    public static MigrationScript Generate(DbCatalog before, DbCatalog after, string dialect, string? title = null) =>
-        Generate(DbDiff.Compare(before, after), before, after, dialect, title);
+    /// <summary>A script from <paramref name="before"/> to <paramref name="after"/>; <paramref name="renames"/> are confirmed renames (see <see cref="DbDiff.SuggestRenames"/>).</summary>
+    public static MigrationScript Generate(DbCatalog before, DbCatalog after, string dialect, string? title = null, IEnumerable<DbRenameHint>? renames = null) =>
+        Generate(DbDiff.Compare(before, after, renames), before, after, dialect, title);
 
     public static MigrationScript Generate(IReadOnlyList<DbChange> changes, DbCatalog before, DbCatalog after, string dialect, string? title = null)
     {
@@ -27,7 +31,8 @@ public static class MigrationWriter
                       || after.Schemas.Any(s => s.Tables.Count > 0 && !IsDefaultSchema(s.Name, d, after.Name));
         string Q(string n) => DdlWriter.Quote(n, d);
         string Name(string schema, string name) => qualify && schema.Length > 0 && d != "sqlite" ? $"{Q(schema)}.{Q(name)}" : Q(name);
-        string Go = d == "sqlserver" ? "GO\n" : "";
+        // SQL Server: end a batch (once: no empty batches).
+        void Go() { if (d == "sqlserver" && !sb.ToString().TrimEnd().EndsWith("GO", StringComparison.Ordinal)) sb.AppendLine("GO"); }
         void Line(string s) { sb.AppendLine(s); steps++; }
         void Warn(DbChange c, string why)
         {
@@ -40,14 +45,52 @@ public static class MigrationWriter
         sb.AppendLine("-- Review it, run it inside a transaction and keep a backup: Meridian never executes DDL against a database.");
         sb.AppendLine();
         if (changes.Count == 0) { sb.AppendLine("-- No differences."); return new MigrationScript(sb.ToString(), warnings, 0); }
+        var lookups = new Lookups(d, qualify, after.Name);
+
+        // 0. Renames: tables (and views), then columns. Everything after this names them as they are in the model.
+        foreach (var c in changes.Where(c => c.Kind == DbChangeKind.Renamed && c.Type is DbObjectType.Table or DbObjectType.View))
+        {
+            var old = c.Fields.First(f => f.Key == "name").Before!;
+            var view = c.Type == DbObjectType.View ? (DbTableDef)c.After! : null;
+            Line(d switch
+            {
+                "sqlserver" => $"EXEC sp_rename {SqlServerName(c.Schema, old)}, N{DdlWriter.Literal(c.Name)};",
+                "mysql" => $"RENAME TABLE {Name(c.Schema, old)} TO {Name(c.Schema, c.Name)};",
+                "postgresql" when view != null => $"ALTER {(view.Kind == DbFields.MaterializedView ? "MATERIALIZED VIEW" : "VIEW")} {Name(c.Schema, old)} RENAME TO {Q(c.Name)};",
+                "oracle" when view != null => $"RENAME {Q(old)} TO {Q(c.Name)};",
+                "sqlite" when view != null => $"DROP VIEW {Q(old)};  -- SQLite can't rename a view: it is created again under its new name below",
+                _ => $"ALTER TABLE {Name(c.Schema, old)} RENAME TO {Q(c.Name)};",
+            });
+        }
+        foreach (var c in changes.Where(c => c.Kind == DbChangeKind.Renamed && c.Type == DbObjectType.Column))
+        {
+            var old = c.Fields.First(f => f.Key == "name").Before!;
+            Line(d switch
+            {
+                "sqlserver" => $"EXEC sp_rename {SqlServerName(c.Schema, c.Table!, old)}, N{DdlWriter.Literal(c.Name)}, N'COLUMN';",
+                "mysql" => $"ALTER TABLE {Name(c.Schema, c.Table!)} RENAME COLUMN {Q(old)} TO {Q(c.Name)};  -- MySQL 8.0+ / MariaDB 10.5+",
+                "sqlite" => $"ALTER TABLE {Name(c.Schema, c.Table!)} RENAME COLUMN {Q(old)} TO {Q(c.Name)};  -- SQLite 3.25+",
+                _ => $"ALTER TABLE {Name(c.Schema, c.Table!)} RENAME COLUMN {Q(old)} TO {Q(c.Name)};",
+            });
+        }
 
         // 1. Drop foreign keys that go away or change (before columns and tables they use are altered).
         foreach (var c in changes.Where(c => c.Type == DbObjectType.ForeignKey && c.Kind is DbChangeKind.Removed or DbChangeKind.Changed))
         {
             var fk = (DbForeignKeyDef)c.Before!;
-            if (string.IsNullOrEmpty(fk.Name)) { sb.AppendLine($"-- Foreign key {c.Name} on {c.Table} has no name: drop it by hand"); continue; }
-            Line(d == "mysql" ? $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP FOREIGN KEY {Q(fk.Name)};" : d == "sqlite" ? $"-- SQLite can't drop foreign key {fk.Name}: rebuild {c.Table}" : $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP CONSTRAINT {Q(fk.Name)};");
+            if (d == "sqlite") { sb.AppendLine($"-- SQLite can't drop foreign key {c.Name}: rebuild {c.Table}"); continue; }
+            if (string.IsNullOrEmpty(fk.Name))
+            {
+                // No name on the before side (a script or model without one): look the generated name up in the database.
+                sb.AppendLine($"-- Foreign key {c.Name} on {c.Table} has a generated name: look it up and drop it");
+                Line(lookups.DropUnnamedForeignKey(c.Schema, c.Table!, fk, Name(c.Schema, c.Table!)));
+                continue;
+            }
+            Line(d == "mysql" ? $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP FOREIGN KEY {Q(fk.Name)};" : $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP CONSTRAINT {Q(fk.Name)};");
         }
+        // Triggers that go away (changed ones are replaced at the end).
+        foreach (var c in changes.Where(c => c.Type == DbObjectType.Trigger && c.Kind == DbChangeKind.Removed))
+            Line(DbModuleSql.DropTrigger(TriggerName(c.Schema, c.Name), Name(c.Schema, c.Table!), d));
         // Drop indexes and constraints that go away or change.
         foreach (var c in changes.Where(c => c.Type is DbObjectType.Index or DbObjectType.Constraint && c.Kind is DbChangeKind.Removed or DbChangeKind.Changed))
         {
@@ -62,9 +105,17 @@ public static class MigrationWriter
         foreach (var c in changes.Where(c => c.Type == DbObjectType.PrimaryKey && c.Kind is DbChangeKind.Removed or DbChangeKind.Changed))
         {
             var t = (DbTableDef)c.Before!;
-            Line(d == "mysql" ? $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP PRIMARY KEY;" : $"ALTER TABLE {Name(c.Schema, c.Table!)} DROP CONSTRAINT {Q(t.PrimaryKeyName ?? $"{t.Name}_pkey")};");
+            var table = Name(c.Schema, c.Table!);
+            Line(d switch
+            {
+                "mysql" => $"ALTER TABLE {table} DROP PRIMARY KEY;",
+                "oracle" when t.PrimaryKeyName is not { Length: > 0 } => $"ALTER TABLE {table} DROP PRIMARY KEY;",
+                "sqlserver" when t.PrimaryKeyName is not { Length: > 0 } => lookups.DropPrimaryKey(c.Schema, c.Table!, table),
+                "sqlite" => $"-- SQLite can't drop the primary key of {c.Table}: rebuild the table",
+                _ => $"ALTER TABLE {table} DROP CONSTRAINT {Q(t.PrimaryKeyName ?? $"{t.Name}_pkey")};",   // PostgreSQL's generated name
+            });
         }
-        if (sb.Length > 0) sb.Append(Go);
+        Go();
 
         // 2. New schemas, types, sequences and tables (a sub-catalog written by the DDL writer, without foreign keys yet).
         var added = new DbCatalog { Name = after.Name, Dialect = d };
@@ -80,7 +131,7 @@ public static class MigrationWriter
         }
         if (added.ObjectCount > 0 || added.Schemas.Count > 0)
         {
-            foreach (var t in added.AllTables) t.ForeignKeys.Clear();
+            foreach (var t in added.AllTables) { t.ForeignKeys.Clear(); t.Triggers.Clear(); }   // both come last
             var ddl = DdlWriter.Generate(added, d, new DdlOptions { Title = "New objects" });
             sb.AppendLine(string.Join("\n", ddl.Split('\n').Skip(3)).TrimEnd());   // without the header
             sb.AppendLine();
@@ -117,6 +168,8 @@ public static class MigrationWriter
                 }
                 case DbChangeKind.Removed:
                     Warn(c, "dropping a column deletes its data");
+                    // SQL Server refuses to drop a column while its default constraint exists.
+                    if (d == "sqlserver" && ((DbColumnDef)c.Before!).Default is { Length: > 0 }) Line(DropDefault(c.Schema, c.Table!, (DbColumnDef)c.Before!));
                     Line(d == "sqlite" ? $"ALTER TABLE {table} DROP COLUMN {Q(c.Name)};  -- SQLite 3.35+" : $"ALTER TABLE {table} DROP COLUMN {Q(c.Name)};");
                     break;
                 case DbChangeKind.Changed:
@@ -154,7 +207,8 @@ public static class MigrationWriter
                             case "default":
                                 Line(d switch
                                 {
-                                    "sqlserver" => col.Default is { Length: > 0 } sdv ? $"ALTER TABLE {table} ADD DEFAULT {sdv} FOR {Q(col.Name)};  -- drop the old default constraint first" : $"-- Drop the default constraint of {c.Table}.{col.Name} by name",
+                                    "sqlserver" => (((DbColumnDef)c.Before!).Default is { Length: > 0 } ? DropDefault(c.Schema, c.Table!, (DbColumnDef)c.Before!) + (col.Default is { Length: > 0 } ? "\n" : "") : "")
+                                                   + (col.Default is { Length: > 0 } sdv ? $"ALTER TABLE {table} ADD {(col.DefaultName is { Length: > 0 } dn ? $"CONSTRAINT {Q(dn)} " : "")}DEFAULT {sdv} FOR {Q(col.Name)};" : ""),
                                     "oracle" => $"ALTER TABLE {table} MODIFY ({Q(col.Name)} DEFAULT {(col.Default is { Length: > 0 } odv ? odv : "NULL")});",
                                     "sqlite" => $"-- SQLite can't change the default of {c.Table}.{col.Name}: rebuild the table",
                                     _ => col.Default is { Length: > 0 } pdv ? $"ALTER TABLE {table} ALTER COLUMN {Q(col.Name)} SET DEFAULT {pdv};" : $"ALTER TABLE {table} ALTER COLUMN {Q(col.Name)} DROP DEFAULT;",
@@ -196,7 +250,7 @@ public static class MigrationWriter
                     if (d == "postgresql") { Warn(c, "dropping a type fails while columns use it"); Line($"DROP {(((DbTypeDef)c.Before!).Kind == "enum" ? "TYPE" : "DOMAIN")} {Name(c.Schema, c.Name)};"); }
                     break;
                 case DbObjectType.Routine:
-                    sb.AppendLine($"-- Routine {c.Name} is gone from the model: drop it by hand if intended");
+                    Line(DbModuleSql.DropRoutine(Name(c.Schema, c.Name), (DbRoutineDef)c.Before!, d));
                     break;
             }
         }
@@ -227,7 +281,7 @@ public static class MigrationWriter
                     Line(f.Key == "start" ? $"ALTER SEQUENCE {Name(c.Schema, c.Name)} RESTART WITH {f.After};" : $"ALTER SEQUENCE {Name(c.Schema, c.Name)} INCREMENT BY {f.After};");
                 else sb.AppendLine($"-- {c.Label}: {f.Key} changed — not scripted");
             }
-        if (sb.Length > 0) sb.Append(Go);
+        Go();
 
         // 5. Primary keys, unique / check constraints and indexes that are new or changed.
         foreach (var c in changes.Where(c => c.Type == DbObjectType.PrimaryKey && c.Kind is DbChangeKind.Added or DbChangeKind.Changed))
@@ -261,9 +315,49 @@ public static class MigrationWriter
             sb.AppendLine("-- Foreign keys");
             foreach (var l in fkLines) Line(l);
         }
-        foreach (var c in changes.Where(c => c.Type is DbObjectType.Trigger or DbObjectType.Routine && c.Kind != DbChangeKind.Removed))
-            sb.AppendLine($"-- {c.Describe()} — triggers and routines are not scripted (signatures only in the model)");
+        // 7. Routines, then triggers (which may call them), created or replaced with their bodies; new tables' triggers too.
+        var sameDialect = after.Dialect.Length == 0 || after.Dialect == d;
+        var newTableTriggers = changes.Where(c => c.Kind == DbChangeKind.Added && c.Type == DbObjectType.Table && c.After is DbTableDef)
+            .SelectMany(c => ((DbTableDef)c.After!).Triggers.Select(tg => new DbChange(DbChangeKind.Added, DbObjectType.Trigger, c.Schema, c.Name, tg.Name,
+                DbPaths.Trigger(c.Path, tg.Name), [], null, tg)));
+        var modules = changes.Where(c => c.Type is DbObjectType.Routine or DbObjectType.Trigger && c.Kind is DbChangeKind.Added or DbChangeKind.Changed)
+            .Concat(newTableTriggers).OrderBy(c => c.Type == DbObjectType.Routine ? 0 : 1).ToList();
+        if (modules.Count > 0)
+        {
+            Go();
+            sb.AppendLine("-- Routines and triggers");
+        }
+        foreach (var c in modules)
+        {
+            if (!sameDialect) { sb.AppendLine($"-- {c.Describe()} — written for {DbReservedWords.DialectName(after.Dialect)}; not scripted for {DbReservedWords.DialectName(d)}"); continue; }
+            if (c.Type == DbObjectType.Routine)
+            {
+                var r = (DbRoutineDef)c.After!;
+                if (!DbModuleSql.CanCreate(r, d)) { sb.AppendLine($"-- {c.Describe()} — {(d == "sqlite" ? "SQLite has no routines" : "no body in the model")}; not scripted"); continue; }
+                var before2 = c.Before as DbRoutineDef;
+                // A changed parameter list or kind is a different routine in PostgreSQL / MySQL / SQL Server functions: drop the old one first.
+                if (before2 != null && (DbDiff.Sql(before2.Signature) != DbDiff.Sql(r.Signature) || before2.Kind != r.Kind || d == "postgresql" && DbDiff.Sql(before2.Returns) != DbDiff.Sql(r.Returns)) && d != "mysql")
+                    Line(DbModuleSql.DropRoutine(Name(c.Schema, before2.Name), before2, d));
+                sb.Append(DbModuleSql.CreateRoutine(Name(c.Schema, r.Name), r, d, replace: c.Kind == DbChangeKind.Changed));
+                steps++;
+            }
+            else
+            {
+                var t = (DbTriggerDef)c.After!;
+                if (DbModuleSql.CannotCreate(t, d) is { } why) { sb.AppendLine($"-- {c.Describe()} — not scripted ({why})"); continue; }
+                sb.Append(DbModuleSql.CreateTrigger(TriggerName(c.Schema, t.Name), Name(c.Schema, c.Table!), t, d, replace: c.Kind == DbChangeKind.Changed));
+                steps++;
+            }
+        }
         return new MigrationScript(sb.ToString(), warnings, steps);
+
+        string TriggerName(string schema, string name) => d is "sqlserver" or "oracle" or "mysql" ? Name(schema, name) : Q(name);
+
+        string DropDefault(string schema, string table, DbColumnDef col) =>
+            col.DefaultName is { Length: > 0 } dn ? $"ALTER TABLE {Name(schema, table)} DROP CONSTRAINT {Q(dn)};" : lookups.DropDefault(schema, table, col.Name, Name(schema, table));
+
+        string SqlServerName(params string[] parts) =>
+            "N" + DdlWriter.Literal(string.Join(".", (qualify || parts.Length > 2 ? parts : parts.Skip(1)).Where(x => x.Length > 0).Select(x => DdlWriter.Quote(x, "sqlserver", always: true))));
 
         string AddFk(string schema, string table, DbForeignKeyDef fk)
         {
@@ -277,6 +371,123 @@ public static class MigrationWriter
             if (fk.OnUpdate is { Length: > 0 } ou && d != "oracle") sql.Append($" ON UPDATE {ou}");
             return sql.Append(';').ToString();
         }
+    }
+
+    /// <summary>
+    /// Scripts that find a constraint's generated name in the database's own catalog and drop it: for foreign keys declared
+    /// without a name, and SQL Server defaults and primary keys whose names the before side does not know. Each is one
+    /// statement block that does nothing when no such constraint exists.
+    /// </summary>
+    private sealed class Lookups(string d, bool qualify, string catalog)
+    {
+        private int _n;
+
+        private static string L(string s) => DdlWriter.Literal(s);
+
+        /// <summary>The name as the catalog stores it: Oracle upper-cases names that need no quotes.</summary>
+        private string Stored(string name) => d == "oracle" && DdlWriter.Quote(name, d) == name ? name.ToUpperInvariant() : name;
+
+        private string SqlServerObject(string schema, string table) =>
+            "N" + L($"{DdlWriter.Quote(schema.Length > 0 ? schema : "dbo", "sqlserver", always: true)}.{DdlWriter.Quote(table, "sqlserver", always: true)}");
+
+        public string DropUnnamedForeignKey(string schema, string table, DbForeignKeyDef fk, string tableSql)
+        {
+            var n = ++_n;
+            var refSchema = fk.RefSchema ?? schema;
+            var cols = string.Join(",", fk.Columns.Select(Stored));
+            switch (d)
+            {
+                case "postgresql":
+                {
+                    var rel = L(QualifiedPg(schema, table));
+                    var refRel = L(QualifiedPg(refSchema, fk.RefTable));
+                    return $"""
+                        DO $meridian$
+                        DECLARE r record;
+                        BEGIN
+                            FOR r IN SELECT k.conname FROM pg_constraint k
+                                     WHERE k.contype = 'f' AND k.conrelid = {rel}::regclass AND k.confrelid = {refRel}::regclass
+                                       AND array_to_string(ARRAY(SELECT a.attname FROM unnest(k.conkey) WITH ORDINALITY u(attnum, ord)
+                                           JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = u.attnum ORDER BY u.ord), ',') = {L(cols)}
+                            LOOP
+                                EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', {rel}::regclass, r.conname);
+                            END LOOP;
+                        END $meridian$;
+                        """;
+                }
+                case "sqlserver":
+                    return $"""
+                        DECLARE @meridian_fk{n} sysname = (SELECT TOP (1) f.name FROM sys.foreign_keys f
+                            WHERE f.parent_object_id = OBJECT_ID({SqlServerObject(schema, table)}) AND f.referenced_object_id = OBJECT_ID({SqlServerObject(refSchema, fk.RefTable)})
+                              AND (SELECT STRING_AGG(c.name, N',') WITHIN GROUP (ORDER BY k.constraint_column_id) FROM sys.foreign_key_columns k
+                                   JOIN sys.columns c ON c.object_id = k.parent_object_id AND c.column_id = k.parent_column_id WHERE k.constraint_object_id = f.object_id) = N{L(cols)});
+                        DECLARE @meridian_sql{n} nvarchar(max) = N{L($"ALTER TABLE {tableSql} DROP CONSTRAINT ")} + QUOTENAME(@meridian_fk{n});
+                        IF @meridian_fk{n} IS NOT NULL EXEC sp_executesql @meridian_sql{n};
+                        """;
+                case "mysql":
+                {
+                    var db = qualify && schema.Length > 0 ? L(schema) : "DATABASE()";
+                    return $"""
+                        SET @meridian_fk = (SELECT k.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE k
+                            WHERE k.TABLE_SCHEMA = {db} AND k.TABLE_NAME = {L(table)} AND k.REFERENCED_TABLE_NAME = {L(fk.RefTable)}
+                            GROUP BY k.CONSTRAINT_NAME HAVING GROUP_CONCAT(k.COLUMN_NAME ORDER BY k.ORDINAL_POSITION) = {L(cols)} LIMIT 1);
+                        SET @meridian_sql = IF(@meridian_fk IS NULL, 'DO 0', CONCAT({L($"ALTER TABLE {tableSql} DROP FOREIGN KEY `")}, @meridian_fk, '`'));
+                        PREPARE meridian_stmt FROM @meridian_sql;
+                        EXECUTE meridian_stmt;
+                        DEALLOCATE PREPARE meridian_stmt;
+                        """;
+                }
+                case "oracle":
+                {
+                    var owner = qualify && schema.Length > 0 ? L(Stored(schema)) : "USER";
+                    return $"""
+                        DECLARE
+                            v_name VARCHAR2(128);
+                        BEGIN
+                            SELECT c.constraint_name INTO v_name FROM all_constraints c
+                              JOIN all_constraints r ON r.owner = c.r_owner AND r.constraint_name = c.r_constraint_name
+                             WHERE c.constraint_type = 'R' AND c.owner = {owner} AND c.table_name = {L(Stored(table))} AND r.table_name = {L(Stored(fk.RefTable))}
+                               AND (SELECT LISTAGG(cc.column_name, ',') WITHIN GROUP (ORDER BY cc.position) FROM all_cons_columns cc
+                                    WHERE cc.owner = c.owner AND cc.constraint_name = c.constraint_name) = {L(cols)}
+                               AND ROWNUM = 1;
+                            EXECUTE IMMEDIATE {L($"ALTER TABLE {tableSql} DROP CONSTRAINT \"")} || v_name || '"';
+                        EXCEPTION
+                            WHEN NO_DATA_FOUND THEN NULL;
+                        END;
+                        /
+                        """;
+                }
+                default:
+                    return $"-- {DbReservedWords.DialectName(d)} can't drop the foreign key ({string.Join(", ", fk.Columns)}) → {fk.RefTable}: rebuild {table}";
+            }
+        }
+
+        /// <summary>SQL Server: the default constraint of a column, by its generated name.</summary>
+        public string DropDefault(string schema, string table, string column, string tableSql)
+        {
+            var n = ++_n;
+            return $"""
+                DECLARE @meridian_df{n} sysname = (SELECT dc.name FROM sys.default_constraints dc
+                    JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+                    WHERE dc.parent_object_id = OBJECT_ID({SqlServerObject(schema, table)}) AND c.name = N{L(column)});
+                DECLARE @meridian_sql{n} nvarchar(max) = N{L($"ALTER TABLE {tableSql} DROP CONSTRAINT ")} + QUOTENAME(@meridian_df{n});
+                IF @meridian_df{n} IS NOT NULL EXEC sp_executesql @meridian_sql{n};
+                """;
+        }
+
+        /// <summary>SQL Server: the primary key, by its generated name.</summary>
+        public string DropPrimaryKey(string schema, string table, string tableSql)
+        {
+            var n = ++_n;
+            return $"""
+                DECLARE @meridian_pk{n} sysname = (SELECT k.name FROM sys.key_constraints k WHERE k.parent_object_id = OBJECT_ID({SqlServerObject(schema, table)}) AND k.type = 'PK');
+                DECLARE @meridian_sql{n} nvarchar(max) = N{L($"ALTER TABLE {tableSql} DROP CONSTRAINT ")} + QUOTENAME(@meridian_pk{n});
+                IF @meridian_pk{n} IS NOT NULL EXEC sp_executesql @meridian_sql{n};
+                """;
+        }
+
+        private string QualifiedPg(string schema, string table) =>
+            schema.Length > 0 && (qualify || !IsDefaultSchema(schema, d, catalog)) ? $"{DdlWriter.Quote(schema, d)}.{DdlWriter.Quote(table, d)}" : DdlWriter.Quote(table, d);
     }
 
     private static bool IsDefaultSchema(string schema, string d, string catalog) => schema.Length == 0 || d switch

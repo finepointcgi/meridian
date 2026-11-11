@@ -52,6 +52,7 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
                     BranchId = branchId,
                     BranchName = branchName ?? Branching.MainBranch,
                     Events = events,
+                    Hub = this,
                 };
                 session.InitRules(await LoadRulesAsync(projectId));
                 session.InitLibraries(libraries);
@@ -97,6 +98,39 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
 
     /// <summary>Every live session of a project (main and branches).</summary>
     public IEnumerable<ProjectSession> SessionsOf(Guid projectId) => _sessions.Where(kv => kv.Key.Project == projectId).Select(kv => kv.Value);
+
+    /// <summary>"Library changed upstream" notices after a commit (<see cref="Libraries.LibraryNotices"/>); a failure is logged, never thrown.</summary>
+    public async Task LibraryNoticesAsync(Guid projectId, Guid? branchId, int number, string modelJson)
+    {
+        try { await Libraries.LibraryNotices.VersionCommittedAsync(db, this, projectId, branchId, number, modelJson); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException or System.Text.Json.JsonException)
+        {
+            log.LogWarning(ex, "Library update notices for project {Project} v{Number} failed", projectId, number);
+        }
+    }
+
+    /// <summary>
+    /// Changes the stored head of a line (null branch = main) that nobody has open, as the system: <paramref name="change"/> gets
+    /// the stored document and returns the new one (or null to leave it), which is saved as the head and committed as a version
+    /// with <paramref name="message"/> (no author). No session can open the line meanwhile. Returns null when the line is open
+    /// (change it through its live session), gone, or unchanged.
+    /// </summary>
+    internal async Task<(int Version, T Result)?> ChangeClosedLineAsync<T>(Guid projectId, Guid? branchId, string message,
+                                                                          Func<string, Task<(string Json, T Result)?>> change)
+    {
+        await _openGate.WaitAsync();
+        try
+        {
+            if (_sessions.ContainsKey((projectId, branchId))) return null;
+            string? head = branchId is { } b ? (await db.LoadBranchAsync(b))?.HeadJson : (await db.LoadProjectAsync(projectId))?.ModelJson;
+            if (head is null || await change(head) is not { } changed) return null;
+            if (branchId is { } branch) await db.SaveBranchAsync(branch, changed.Json, null);
+            else await db.SaveProjectAsync(projectId, changed.Json, null);
+            var version = await db.CommitBranchVersionAsync(projectId, branchId, message, changed.Json, null);
+            return (version.Number, changed.Result);
+        }
+        finally { _openGate.Release(); }
+    }
 }
 
 /// <summary>What a session needs from a connected browser tab. Calls are made while the session lock is held, so
@@ -146,6 +180,7 @@ public sealed partial class ProjectSession : IDisposable
         _log = log;
         _onEmpty = onEmpty;
         _persistTimer = new Timer(_ => _ = PersistIfDueAsync(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        UpgradeMarks(_master);   // earlier library-update marks named library elements: ids only from here on (ProjectSession.Libraries.cs)
     }
 
     public Guid ProjectId { get; }
@@ -304,6 +339,19 @@ public sealed partial class ProjectSession : IDisposable
 
     /// <summary>Tells integrations (webhooks) that a version was committed.</summary>
     public void NotifyVersionCommitted(int number, string message, UserAccount? author) => Events?.VersionCommitted(ProjectId, Name, number, message, author);
+
+    /// <summary>The hub this session belongs to (null in tests that build sessions directly).</summary>
+    internal CollaborationHub? Hub { get; init; }
+
+    /// <summary>
+    /// After a version was committed: webhooks, and "library changed upstream" notices for the projects that use this one
+    /// (<see cref="CollaborationHub.LibraryNoticesAsync"/>). A failed notice is logged; it never fails the commit.
+    /// </summary>
+    public async Task VersionCommittedAsync(int number, string message, string modelJson, UserAccount? author)
+    {
+        NotifyVersionCommitted(number, message, author);
+        if (Hub is not null) await Hub.LibraryNoticesAsync(ProjectId, BranchId, number, modelJson);
+    }
 
     public void NotifyComments()
     {

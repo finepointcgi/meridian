@@ -5,9 +5,15 @@ namespace Meridian.Serialization.Database;
 
 public enum SqlTokenKind { Word, Quoted, String, Number, Symbol, BatchEnd }
 
-/// <summary>One lexical token. <see cref="Text"/> is the identifier / literal content (quotes removed); <see cref="Raw"/> the source text.</summary>
-public readonly record struct SqlToken(SqlTokenKind Kind, string Text, string Raw, int Line)
+/// <summary>
+/// One lexical token. <see cref="Text"/> is the identifier / literal content (quotes removed); <see cref="Raw"/> the source
+/// text; <see cref="Offset"/> where it starts in the (batch-marked) script, -1 when unknown.
+/// </summary>
+public readonly record struct SqlToken(SqlTokenKind Kind, string Text, string Raw, int Line, int Offset = -1)
 {
+    /// <summary>Offset just after the token in the script.</summary>
+    public int End => Offset + Raw.Length;
+
     public bool Is(string word) => Kind == SqlTokenKind.Word && Text.Equals(word, StringComparison.OrdinalIgnoreCase);
     public bool IsSymbol(string s) => Kind == SqlTokenKind.Symbol && Text == s;
     public bool IsName => Kind is SqlTokenKind.Word or SqlTokenKind.Quoted;
@@ -57,9 +63,13 @@ public static partial class SqlTokenizer
         return sql;
     }
 
-    public static List<SqlToken> Tokenize(string sql, bool hashComments = false)
+    public static List<SqlToken> Tokenize(string sql, bool hashComments = false) => Tokenize(sql, hashComments, out _);
+
+    /// <summary>Tokenizes; <paramref name="marked"/> is the script the token offsets refer to (batch separators replaced).</summary>
+    public static List<SqlToken> Tokenize(string sql, bool hashComments, out string marked)
     {
         sql = MarkBatches(sql);
+        marked = sql;
         var tokens = new List<SqlToken>();
         var i = 0;
         var line = 1;
@@ -69,7 +79,7 @@ public static partial class SqlTokenizer
             var c = sql[i];
             if (c == '\n') { line++; i++; continue; }
             if (char.IsWhiteSpace(c)) { i++; continue; }
-            if (c == BatchMark) { tokens.Add(new SqlToken(SqlTokenKind.BatchEnd, "", "GO", line)); i++; continue; }
+            if (c == BatchMark) { tokens.Add(new SqlToken(SqlTokenKind.BatchEnd, "", "GO", line, i)); i++; continue; }
             if (c == '-' && i + 1 < n && sql[i + 1] == '-' || hashComments && c == '#')
             {
                 while (i < n && sql[i] != '\n') i++;
@@ -93,21 +103,21 @@ public static partial class SqlTokenizer
             {
                 i++;
                 var (text, end) = ReadQuoted(sql, i, '\'', ref line, backslash: c is 'E' or 'e');
-                tokens.Add(new SqlToken(SqlTokenKind.String, text, sql[start..end], line));
+                tokens.Add(new SqlToken(SqlTokenKind.String, text, sql[start..end], line, start));
                 i = end;
                 continue;
             }
             if (c == '\'')
             {
                 var (text, end) = ReadQuoted(sql, i, '\'', ref line, backslash: false);
-                tokens.Add(new SqlToken(SqlTokenKind.String, text, sql[start..end], line));
+                tokens.Add(new SqlToken(SqlTokenKind.String, text, sql[start..end], line, start));
                 i = end;
                 continue;
             }
             if (c is '"' or '`')
             {
                 var (text, end) = ReadQuoted(sql, i, c, ref line, backslash: false);
-                tokens.Add(new SqlToken(SqlTokenKind.Quoted, text, sql[start..end], line));
+                tokens.Add(new SqlToken(SqlTokenKind.Quoted, text, sql[start..end], line, start));
                 i = end;
                 continue;
             }
@@ -118,8 +128,8 @@ public static partial class SqlTokenizer
                 if (end < 0) end = n - 1;
                 var text = sql[(i + 1)..end].Replace("]]", "]");
                 // "[]" after a type (int[]) is an array suffix, not an identifier.
-                if (text.Length == 0 || text.All(char.IsDigit)) tokens.Add(new SqlToken(SqlTokenKind.Symbol, "[]", sql[i..(end + 1)], line));
-                else tokens.Add(new SqlToken(SqlTokenKind.Quoted, text, sql[i..(end + 1)], line));
+                if (text.Length == 0 || text.All(char.IsDigit)) tokens.Add(new SqlToken(SqlTokenKind.Symbol, "[]", sql[i..(end + 1)], line, i));
+                else tokens.Add(new SqlToken(SqlTokenKind.Quoted, text, sql[i..(end + 1)], line, start));
                 i = end + 1;
                 continue;
             }
@@ -134,7 +144,7 @@ public static partial class SqlTokenizer
                     if (end < 0) end = n - tag.Length;
                     var body = sql[(close + 1)..Math.Max(close + 1, end)];
                     line += body.Count(ch => ch == '\n');
-                    tokens.Add(new SqlToken(SqlTokenKind.String, body, sql[i..Math.Min(n, end + tag.Length)], line));
+                    tokens.Add(new SqlToken(SqlTokenKind.String, body, sql[i..Math.Min(n, end + tag.Length)], line, start));
                     i = Math.Min(n, end + tag.Length);
                     continue;
                 }
@@ -142,24 +152,24 @@ public static partial class SqlTokenizer
             if (char.IsDigit(c) || c == '.' && i + 1 < n && char.IsDigit(sql[i + 1]))
             {
                 while (i < n && (char.IsDigit(sql[i]) || sql[i] == '.' || (sql[i] is 'e' or 'E') && i + 1 < n && (char.IsDigit(sql[i + 1]) || sql[i + 1] is '+' or '-'))) i++;
-                tokens.Add(new SqlToken(SqlTokenKind.Number, sql[start..i], sql[start..i], line));
+                tokens.Add(new SqlToken(SqlTokenKind.Number, sql[start..i], sql[start..i], line, start));
                 continue;
             }
             if (IsIdentStart(c))
             {
                 while (i < n && IsIdentChar(sql[i])) i++;
-                tokens.Add(new SqlToken(SqlTokenKind.Word, sql[start..i], sql[start..i], line));
+                tokens.Add(new SqlToken(SqlTokenKind.Word, sql[start..i], sql[start..i], line, start));
                 continue;
             }
             // Multi-character operators.
             var two = i + 1 < n ? sql.Substring(i, 2) : "";
             if (two is "::" or "<=" or ">=" or "<>" or "!=" or "||" or "=>" or ":=")
             {
-                tokens.Add(new SqlToken(SqlTokenKind.Symbol, two, two, line));
+                tokens.Add(new SqlToken(SqlTokenKind.Symbol, two, two, line, i));
                 i += 2;
                 continue;
             }
-            tokens.Add(new SqlToken(SqlTokenKind.Symbol, c.ToString(), c.ToString(), line));
+            tokens.Add(new SqlToken(SqlTokenKind.Symbol, c.ToString(), c.ToString(), line, i));
             i++;
         }
         return tokens;

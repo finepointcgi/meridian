@@ -96,10 +96,14 @@ public sealed class ReplicaSync : IDisposable
     /// <summary>The server accepted <paramref name="batch"/>; <paramref name="sequence"/> is the number of its last operation.</summary>
     public static void Accepted(LocalBatch batch, long sequence) => batch.Sequence = sequence;
 
-    /// <summary>The server confirmed the oldest pending batch (acknowledgements come in submission order).</summary>
-    public void Acknowledge()
+    /// <summary>
+    /// The server confirmed the oldest pending batch, whose last operation is number <paramref name="sequence"/>
+    /// (acknowledgements come in submission order). An acknowledgement for a batch this replica no longer holds (a model
+    /// installed afresh meanwhile) confirms nothing. A batch whose number isn't known yet is being submitted right now.
+    /// </summary>
+    public void Acknowledge(long sequence = long.MaxValue)
     {
-        if (_pending.Count > 0) _pending.RemoveAt(0);
+        if (_pending.Count > 0 && (_pending[0].Sequence < 0 || _pending[0].Sequence <= sequence)) _pending.RemoveAt(0);
     }
 
     /// <summary>The server refused <paramref name="batch"/>: it is taken back exactly (anything applied after it is kept).</summary>

@@ -39,6 +39,17 @@ public static class LibraryPins
         LibraryPinKind.Branch => $"{value} (head)",
         _ => $"baseline {name ?? value}",
     };
+
+    /// <summary>
+    /// The banner of a source project opened at a pin ("Open in source project"): "Viewing version 3 (pinned)", "Viewing baseline
+    /// PDR — version 5 (pinned)" or "Viewing branch dev (pinned head)".
+    /// </summary>
+    public static string ViewLabel(LibraryPinKind kind, string label, int? version) => kind switch
+    {
+        LibraryPinKind.Version => $"Viewing version {version} (pinned)",
+        LibraryPinKind.Baseline => $"Viewing {label} — version {version} (pinned)",
+        _ => $"Viewing branch {label.Replace(" (head)", "", StringComparison.Ordinal)} (pinned head)",
+    };
 }
 
 /// <summary>
