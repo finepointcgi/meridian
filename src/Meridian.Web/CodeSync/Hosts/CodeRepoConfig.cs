@@ -110,6 +110,13 @@ public sealed partial class CodeRepoConfig
     /// <summary>Keep deployment artifacts that «manifest» the synced code (one for the repository, or one per top-level
     /// package), so the code can be deployed to nodes. Off by default.</summary>
     public Meridian.Core.CodeSync.CodeArtifactMode DeploymentArtifacts { get; set; } = Meridian.Core.CodeSync.CodeArtifactMode.None;
+    /// <summary>"Behaviour diagrams": activities and sequences from method bodies. Unset (connections from before it
+    /// existed) means on demand; new connections get entry points (docs/CODE-SYNC.md, "Behaviour from code").</summary>
+    public Meridian.Core.CodeSync.CodeBehaviourMode? BehaviourDiagrams { get; set; }
+
+    /// <summary>The behaviour setting in effect: <see cref="BehaviourDiagrams"/>, else on demand.</summary>
+    [JsonIgnore]
+    public Meridian.Core.CodeSync.CodeBehaviourMode EffectiveBehaviour => BehaviourDiagrams ?? Meridian.Core.CodeSync.CodeBehaviourMode.OnDemand;
     /// <summary>Also read the code of git submodules (archives leave it out): each is fetched at the commit the
     /// repository pins it to and merged in under its path (docs/CODE-SYNC.md, "Submodules").</summary>
     public bool IncludeSubmodules { get; set; } = true;

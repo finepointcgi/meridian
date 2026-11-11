@@ -91,6 +91,7 @@ public partial class Workbench
         list.AddRange(AutoDiagramPaletteCommands());
         list.AddRange(DerivationPaletteCommands());   // Workbench.Derivation.cs
         list.AddRange(CodeSyncPaletteCommands());
+        list.AddRange(CodeBehaviourPaletteCommands());   // Workbench.CodeBehaviour.cs
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
@@ -422,6 +423,7 @@ public partial class Workbench
         m.AddRange(InstanceMenuEntries(e));      // Workbench.Instances.cs
         m.AddRange(DeploymentTreeEntries(e));    // Workbench.Deployment.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
+        m.AddRange(CodeBehaviourMenuEntries(e)); // Workbench.CodeBehaviour.cs
         m.AddRange(SafetyTreeEntries(e));        // Workbench.Safety.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
@@ -477,6 +479,7 @@ public partial class Workbench
             foreach (var od in owned) m.Add(MenuEntry.Do($"Open “{od.Name}”", () => Ws.Open(od)));
             foreach (var t in newTypes) m.Add(MenuEntry.Do($"New {Metamodel.DisplayName(t)}", () => CreateDiagram(el, t)));
             m.AddRange(DerivationMenuEntries(el) is { Count: > 0 } derive ? derive : DerivationMenuEntries(c.Diagram));   // Workbench.Derivation.cs
+            m.AddRange(CodeBehaviourMenuEntries(el));   // Workbench.CodeBehaviour.cs
             m.Add(MenuEntry.Sep());
         }
         if (r.Edge is { } edge)

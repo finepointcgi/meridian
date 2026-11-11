@@ -1,0 +1,46 @@
+@using Meridian.Core.CodeSync
+@using Meridian.Web.CodeSync
+@inherits WorkspaceComponent
+
+@* Inspector section for an operation that came from code: its generated activity and sequence (open them), and
+   "Generate activity / sequence from code" from the last synced code (docs/CODE-SYNC.md, "Behaviour from code"). *@
+@if (E is { } e && Ws.Model.Contains(e) && CodeBehaviourUi.IsCodeOperation(e))
+{
+    var activity = CodeBehaviourMapper.Find(Ws.Model, e, sequence: false);
+    var sequence = CodeBehaviourMapper.Find(Ws.Model, e, sequence: true);
+    <div class="section-title">Behaviour from code <span class="grow"></span></div>
+    <div class="code-behaviour" data-testid="code-behaviour" style="display:flex; flex-direction:column; gap:4px; font-size:12px">
+        @foreach (var (b, label) in new[] { (activity, "Activity"), (sequence, "Sequence") })
+        {
+            if (b?.OwnedElements.OfType<Diagram>().FirstOrDefault() is { } d)
+            {
+                <span class="link" @onclick="() => Ws.Open(d)">@label: @b.DisplayName</span>
+            }
+        }
+        @if (!Ws.ReadOnly)
+        {
+            <div style="display:flex; gap:6px; flex-wrap:wrap">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="code-behaviour-activity" Disabled="_busy"
+                           OnClick="() => Run(e, false)">@(activity is null ? CodeBehaviourUi.ActivityLabel : "Update activity from code")</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="code-behaviour-sequence" Disabled="_busy"
+                           OnClick="() => Run(e, true)">@(sequence is null ? CodeBehaviourUi.SequenceLabel : "Update sequence from code")</MudButton>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    /// <summary>Generates the activity (false) or sequence (true) of the operation.</summary>
+    [Parameter] public EventCallback<(Element Operation, bool Sequence)> OnGenerate { get; set; }
+
+    private bool _busy;
+
+    private async Task Run(Element op, bool sequence)
+    {
+        _busy = true;
+        try { await OnGenerate.InvokeAsync((op, sequence)); }
+        finally { _busy = false; }
+    }
+}

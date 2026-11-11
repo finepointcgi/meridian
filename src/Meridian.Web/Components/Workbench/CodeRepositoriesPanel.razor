@@ -214,6 +214,14 @@ else
                 <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.Repository">One for the repository</MudSelectItem>
                 <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.TopLevelPackages">One per top-level package</MudSelectItem>
             </MudSelect>
+            <MudSelect T="Meridian.Core.CodeSync.CodeBehaviourMode" Label="Behaviour diagrams" Value="f.EffectiveBehaviour" ValueChanged="v => f.BehaviourDiagrams = v"
+                       Class="code-repo-behaviour" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                       HelperText="Activity and sequence diagrams from method bodies, in a Behaviour package of each namespace. On demand: from an operation's menu, the inspector or ⌘K.">
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeBehaviourMode.Off">Off</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeBehaviourMode.OnDemand">On demand</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints">Entry points (capped per namespace)</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeBehaviourMode.AllPublic">All public methods</MudSelectItem>
+            </MudSelect>
         </div>
         <MudSwitch T="bool" @bind-Value="f.AutoSync" Label="Sync on every push to the branch" Color="Color.Primary" />
         <MudSwitch T="bool" @bind-Value="f.PostStatus" Label="Post a commit status (meridian/model)" Color="Color.Primary" />
@@ -334,7 +342,7 @@ else
 
     private void New()
     {
-        _form = new CodeRepoConfig();
+        _form = new CodeRepoConfig { BehaviourDiagrams = Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints };
         _editId = null;
         _name = null;
         _paths = null;

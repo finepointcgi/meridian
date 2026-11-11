@@ -1033,6 +1033,109 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         ws.Dispose();
     }
 
+    // ================================================================ behaviour from code
+
+    private CodeSync.Hosts.CodeSyncHostService Hosts()
+    {
+        var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
+        var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
+        return new CodeSync.Hosts.CodeSyncHostService(_db, integrations, factory, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new CodeSync.Hosts.CodeSyncQueue(), new CodeSync.Hosts.CodeSyncRateLimiter(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            NullLogger<CodeSync.Hosts.CodeSyncHostService>.Instance);
+    }
+
+    [Fact]
+    public async Task Behaviour_Setting_Is_Entry_Points_For_New_Connections_And_On_Demand_For_Existing_Ones()
+    {
+        // A connection stored before the setting existed reads as "on demand".
+        Assert.Equal(CodeBehaviourMode.OnDemand, CodeSync.Hosts.CodeRepoConfig.Parse("""{"owner":"acme","repo":"old"}""").EffectiveBehaviour);
+        var hosts = Hosts();
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "app" }, "token");
+        Assert.Equal(CodeBehaviourMode.EntryPoints, CodeSync.Hosts.CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).BehaviourDiagrams);
+        var off = await hosts.SaveAsync(_project, null, "off", new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "b", BehaviourDiagrams = CodeBehaviourMode.Off }, "token");
+        Assert.Equal(CodeBehaviourMode.Off, CodeSync.Hosts.CodeRepoConfig.Parse((await _db.FindIntegrationAsync(off.Connection.Id))!.ConfigJson).EffectiveBehaviour);
+
+        // The settings form shows the setting.
+        var ws = await Open(_ann, ProjectRole.Owner);
+        Services.AddSingleton(ws);
+        Services.AddSingleton(hosts);
+        Services.AddSingleton(new MeridianHostInfo(false, Path.GetTempPath(), null));
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<CodeRepositoriesPanel>(p => p.Add(x => x.CanManage, true));
+        cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("button.code-repo-edit").Count));
+        cut.FindAll("button.code-repo-edit")[0].Click();
+        cut.WaitForAssertion(() => Assert.Contains("Behaviour diagrams", cut.Markup));
+        Assert.NotEmpty(cut.FindAll(".code-repo-behaviour"));
+        Assert.Contains("Entry points", cut.Find(".code-repo-behaviour").ParentElement!.TextContent);
+        ws.Dispose();
+    }
+
+    [Fact]
+    public async Task Generate_Activity_And_Sequence_On_Demand_From_The_Stored_Code()
+    {
+        var hosts = Hosts();
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", BehaviourDiagrams = CodeBehaviourMode.OnDemand }, "token");
+        var connection = saved.Connection.Id;
+        var code = new Serialization.CodeSync.CSharpCodeReader().Read([new CodeFile("src/Fleet.cs", """
+            namespace Sat;
+            public class Battery { public bool IsLow() => true; public void Charge() { } }
+            public class Controller
+            {
+                private Battery _b = new();
+                public void Balance(int n) { if (_b.IsLow()) _b.Charge(); else { for (var i = 0; i < n; i++) _b.Charge(); } }
+            }
+            """)]);
+        var ws = await Open(_ann, ProjectRole.Owner);
+        CodeModelMapper.Apply(ws.Model, code, new CodeSyncOptions { RepoId = connection.ToString(), Commit = "abc" });
+        var op = ws.Model.AllElements.Single(e => e.Get(CodeFieldKeys.Symbol) == "Sat.Controller.Balance(int)");
+
+        // Menu entries only for operations from code (and not read-only).
+        var entries = CodeBehaviourUi.MenuEntries(op, readOnly: false, (_, _) => Task.CompletedTask);
+        Assert.Equal([CodeBehaviourUi.ActivityLabel, CodeBehaviourUi.SequenceLabel], entries.Skip(1).Select(x => x.Label));
+        Assert.Empty(CodeBehaviourUi.MenuEntries(op, readOnly: true, (_, _) => Task.CompletedTask));
+        Assert.Empty(CodeBehaviourUi.MenuEntries(op.Owner, readOnly: false, (_, _) => Task.CompletedTask));
+
+        // Nothing synced yet for the connection: a clear message.
+        var (none, why) = await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false);
+        Assert.Null(none);
+        Assert.Contains("sync the repository first", why);
+
+        await new CodeSync.Conformance.ArchitectureStore(_db).UpdateAsync(_project, connection, r => { r.Commit = "abc"; r.PackedCode = Core.CodeSync.Conformance.CodeModelJson.Pack(code); });
+
+        // The inspector section runs the generation through its callback.
+        Services.AddSingleton(ws);
+        (Element, bool)? asked = null;
+        var section = RenderComponent<CodeBehaviourSection>(p => p.Add(x => x.E, op).Add(x => x.OnGenerate, x => { asked = x; }));
+        section.Find(".code-behaviour-sequence button, button.code-behaviour-sequence").Click();
+        Assert.Equal((op, true), asked);
+
+        var (activity, _) = await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false);
+        var (sequence, _) = await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, true);
+        Assert.Equal(DiagramType.Activity, activity!.DiagramType);
+        Assert.Contains(activity.Nodes, n => n.Element.Kind == ElementKind.DecisionNode);
+        Assert.Equal(DiagramType.Sequence, sequence!.DiagramType);
+        Assert.Contains(sequence.Nodes, n => n.Element.Kind == ElementKind.CombinedFragment && n.Element.Get(FieldKeys.Operator) == "alt");
+        section.Render();
+        Assert.Contains("Update activity from code", section.Markup);
+
+        // Off: refused with the reason.
+        var cfg = CodeSync.Hosts.CodeRepoConfig.Parse((await _db.FindIntegrationAsync(connection))!.ConfigJson);
+        cfg.BehaviourDiagrams = CodeBehaviourMode.Off;
+        await hosts.SaveAsync(_project, connection, null, cfg, null);
+        Assert.Contains("off", (await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false)).Message);
+        ws.Dispose();
+    }
+
+    [Fact]
+    public async Task Runner_Passes_The_Behaviour_Setting_To_The_Mapper()
+    {
+        var hosts = Hosts();
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat" }, "token");
+        _applier.Script.Enqueue(AddBlocks("Battery"));
+        await Runner().RunAsync(Request() with { ConnectionId = saved.Connection.Id });
+        Assert.Equal(CodeBehaviourMode.EntryPoints, _applier.LastOptions!.Behaviour);
+    }
+
     [Fact]
     public void Runner_Is_Registered_Over_The_Hosts_Fallback()
     {

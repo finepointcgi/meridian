@@ -262,6 +262,7 @@ public sealed partial class CodeSyncRunner(
             RemoveDeleted = request.IsFullSnapshot,
             Submodules = request.Submodules.Where(s => s.Fetched).ToList(),
             Artifacts = connection?.DeploymentArtifacts ?? CodeArtifactMode.None,
+            Behaviour = connection?.EffectiveBehaviour ?? CodeBehaviourMode.OnDemand,
         };
         var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
         ct.ThrowIfCancellationRequested();

@@ -88,6 +88,8 @@ public sealed class CodeSyncHostService(
         config.LastSync = stored?.LastSync;
         config.PullRequests = stored?.PullRequests ?? [];
         config.Submodules = stored?.Submodules ?? [];
+        // New connections draw behaviour diagrams for entry points unless the form chose otherwise.
+        if (existing is null) config.BehaviourDiagrams ??= Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints;
         if (config.ProtectedWebhookSecret is null)
         {
             newSecret = CodeWebhooks.NewSecret();

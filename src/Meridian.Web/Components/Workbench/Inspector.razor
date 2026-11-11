@@ -265,6 +265,7 @@
         <RequirementInspectorSection E="e" />
         <OperandsSection E="e" />
         <DerivationChainSection E="e" OnOpen="x => Shell?.OpenChainLink(x)" OnCreate="o => Shell?.DeriveAsync(o) ?? Task.CompletedTask" />
+        <CodeBehaviourSection E="e" OnGenerate="x => Shell?.GenerateBehaviourAsync(x.Operation, x.Sequence) ?? Task.CompletedTask" />
 
         if (Ws.Active is { } activeDiagram && activeDiagram.Diagram.Nodes.FirstOrDefault(n => ReferenceEquals(n.Element, e)) is { } shown && !Ws.ReadOnly)
         {
