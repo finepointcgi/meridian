@@ -207,6 +207,13 @@ else
             {
                 <div class="integration-sub">This project's model sets <code>@CodeSyncRunner.AutoDiagramsField = @ad</code>, which wins over this switch. Clear the field to use the switch.</div>
             }
+            <MudSelect T="Meridian.Core.CodeSync.CodeArtifactMode" Label="Deployment artifacts" @bind-Value="f.DeploymentArtifacts" Class="code-repo-artifacts"
+                       HelperText="Artifacts that «manifest» the synced code, so you can deploy it to nodes on a deployment diagram."
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.None">None</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.Repository">One for the repository</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.TopLevelPackages">One per top-level package</MudSelectItem>
+            </MudSelect>
         </div>
         <MudSwitch T="bool" @bind-Value="f.AutoSync" Label="Sync on every push to the branch" Color="Color.Primary" />
         <MudSwitch T="bool" @bind-Value="f.PostStatus" Label="Post a commit status (meridian/model)" Color="Color.Primary" />

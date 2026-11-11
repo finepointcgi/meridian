@@ -107,6 +107,9 @@ public sealed partial class CodeRepoConfig
     public bool CommentOnPullRequests { get; set; } = true;
     /// <summary>Create diagrams for new packages and blocks. The model root's <c>codeSync.autoDiagrams</c> field overrides it when set.</summary>
     public bool AutoDiagrams { get; set; } = true;
+    /// <summary>Keep deployment artifacts that «manifest» the synced code (one for the repository, or one per top-level
+    /// package), so the code can be deployed to nodes. Off by default.</summary>
+    public Meridian.Core.CodeSync.CodeArtifactMode DeploymentArtifacts { get; set; } = Meridian.Core.CodeSync.CodeArtifactMode.None;
     /// <summary>Also read the code of git submodules (archives leave it out): each is fetched at the commit the
     /// repository pins it to and merged in under its path (docs/CODE-SYNC.md, "Submodules").</summary>
     public bool IncludeSubmodules { get; set; } = true;

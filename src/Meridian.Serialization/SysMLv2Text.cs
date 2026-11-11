@@ -134,6 +134,7 @@ public static class SysMLv2Text
             if (Metamodel.IsClassifier(e.Kind) && e.Kind is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype) && e.IsAbstract) parts.Add("abstract");
             if (e.Get(PrefixField) is { Length: > 0 } prefix) parts.Add(prefix);
             if (e.Kind == ElementKind.Actor) parts.Add("#actor");
+            if (DeploymentTag(e.Kind) is { } dtag) parts.Add("#" + dtag);
             var annotated = Annotations(e).Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
             foreach (var s in e.Stereotypes.Where(s => !annotated.Contains(s))) parts.Add("#" + QName(s));
             var kw = keyword ?? KeywordOf(e);
@@ -367,6 +368,9 @@ public static class SysMLv2Text
                 case ElementKind.DeriveReqt: Line(d, $"#derivation dependency from {S()} to {T()};"); break;
                 case ElementKind.Refine: Line(d, $"#refinement dependency from {S()} to {T()};"); break;
                 case ElementKind.Trace: Line(d, $"#trace dependency from {S()} to {T()};"); break;
+                case ElementKind.Deployment: Line(d, $"#deploy dependency from {S()} to {T()};"); break;
+                case ElementKind.Manifestation: Line(d, $"#manifest dependency from {S()} to {T()};"); break;
+                case ElementKind.CommunicationPath: Line(d, $"#communicationPath dependency from {S()} to {T()};"); break;
                 case ElementKind.Verify when r.Source.Kind != ElementKind.TestCase: Line(d, $"// {S()} verifies {T()}"); break;
                 case ElementKind.Message:
                 {
@@ -421,9 +425,22 @@ public static class SysMLv2Text
         }
     }
 
+    /// <summary>The #tag that marks a deployment element's part definition (and maps it back on import).</summary>
+    internal static string? DeploymentTag(ElementKind k) => k switch
+    {
+        ElementKind.Node => "node",
+        ElementKind.Device => "device",
+        ElementKind.ExecutionEnvironment => "executionEnvironment",
+        ElementKind.Artifact => "artifact",
+        ElementKind.DeploymentSpecification => "deploymentSpec",
+        _ => null,
+    };
+
     internal static string? Keyword(ElementKind k) => k switch
     {
         ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Actor => "part def",
+        // Deployment elements: part definitions tagged #node, #device, #executionEnvironment, #artifact, #deploymentSpec.
+        ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment or ElementKind.Artifact or ElementKind.DeploymentSpecification => "part def",
         ElementKind.InterfaceBlock or ElementKind.Interface => "port def",
         ElementKind.ValueType or ElementKind.DataType => "attribute def",
         ElementKind.Enumeration => "enum def",

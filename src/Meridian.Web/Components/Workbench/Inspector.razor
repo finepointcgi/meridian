@@ -145,6 +145,7 @@
         }
 
         <Meridian.Web.Components.Workbench.Database.DatabaseInspectorSection E="e" />
+        <DeploymentInspectorSection E="e" />
         <div class="section-title">Specification <span class="grow"></span></div>
         foreach (var key in Fields(e))
         {
@@ -532,7 +533,7 @@
         FieldKeys.DefaultValue => "Default value", FieldKeys.Signature => "Signature", FieldKeys.RequirementId => "Id",
         FieldKeys.Text => "Requirement text", FieldKeys.Guard => "Guard", FieldKeys.Effect => "Effect", FieldKeys.Body => "Body",
         FieldKeys.Stereotypes => "Stereotypes", Meridian.Core.Analysis.ViewFields.Query => "Query", Meridian.Core.Analysis.ViewFields.Message => "Message",
-        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? Meridian.Core.DataModeling.DbFields.Label(key) ?? key,
+        _ => ExtFieldKeys.Label(key) ?? InteractionNotation.Label(key) ?? Meridian.Core.DataModeling.DbFields.Label(key) ?? DeploymentFields.Label(key) ?? key,
     };
 
     private static string? Help(string key) => key switch
@@ -542,6 +543,6 @@
         FieldKeys.Stereotypes => "Comma separated",
         Meridian.Core.Analysis.ViewFields.Query => "e.g. kind:Block in:Structure where mass > 50 and not has:satisfy",
         Meridian.Core.Analysis.ViewFields.Message => "Placeholders: {name}, {owner}, {mass} …",
-        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key) ?? Meridian.Core.DataModeling.DbFields.Help(key),
+        _ => ExtFieldKeys.Help(key) ?? InteractionNotation.Help(key) ?? Meridian.Core.DataModeling.DbFields.Help(key) ?? DeploymentFields.Help(key),
     };
 }

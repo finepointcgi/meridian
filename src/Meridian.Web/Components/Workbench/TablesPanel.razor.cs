@@ -19,7 +19,7 @@ public partial class TablesPanel
     public enum Mode { Table, Query }
 
     /// <summary>A request from the shell to switch mode and optionally open a saved view. A new instance re-applies.</summary>
-    public sealed record Request(Mode Mode, Element? View = null);
+    public sealed record Request(Mode Mode, Element? View = null, TableDefinition? Definition = null);
 
     [Parameter] public Request? Open { get; set; }
 
@@ -137,6 +137,15 @@ public partial class TablesPanel
         _applied = Open;
         _mode = Open.Mode;
         if (Open.View != null) Load(Open.View);
+        else if (Open.Definition != null && _mode == Mode.Table) { _view = null; SetDefinition(Open.Definition.Clone()); }
+    }
+
+    /// <summary>A preset table of every artifact with the node and execution environment it is deployed to (unsaved).</summary>
+    private void NewDeploymentTable()
+    {
+        _mode = Mode.Table;
+        _view = null;
+        SetDefinition(Meridian.Core.Deployment.DeploymentModel.DeploymentTable());
     }
 
     protected override void OnAfterRender(bool firstRender)

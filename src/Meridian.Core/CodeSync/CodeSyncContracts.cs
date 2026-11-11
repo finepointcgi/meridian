@@ -223,6 +223,19 @@ public sealed record CodeSyncOptions
     public bool RemoveDeleted { get; init; } = true;
     /// <summary>Submodules whose code is in the snapshot: elements from files under one get <see cref="CodeFieldKeys.Submodule"/>.</summary>
     public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
+    /// <summary>Deployment artifacts that «manifest» the synced code, so it can be deployed to nodes. Off by default.</summary>
+    public CodeArtifactMode Artifacts { get; init; } = CodeArtifactMode.None;
+}
+
+/// <summary>Which deployment artifacts code sync keeps for a repository (each «manifest»s the package it stands for).</summary>
+public enum CodeArtifactMode
+{
+    /// <summary>No artifacts (the default).</summary>
+    None,
+    /// <summary>One artifact for the whole repository, manifesting its root package.</summary>
+    Repository,
+    /// <summary>One artifact per top-level namespace package.</summary>
+    TopLevelPackages,
 }
 
 /// <summary>What one sync did to the model: ids of elements added / changed / removed (relationships included).</summary>

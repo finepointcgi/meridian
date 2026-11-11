@@ -175,6 +175,8 @@ public static class XmiExchange
         ReqFields.Verdict, ReqFields.SourceFingerprint, ReqFields.TargetFingerprint,
         // Simulation-driven verification: criteria, run settings and recorded results.
         Core.Analysis.VerificationKeys.Criterion, .. Core.Analysis.VerificationKeys.RunKeys, .. Core.Analysis.VerificationKeys.ResultKeys,
+        // Deployment: the protocol of a communication path and the deployment specification of a deployment.
+        DeploymentFields.Protocol, DeploymentFields.Specification,
     ];
 
     /// <summary>Kinds without a direct UML metaclass: exported as a UML element marked with meridian:kind.</summary>
@@ -244,11 +246,20 @@ public static class XmiExchange
             ElementKind.State => ("subvertex", "State"),
             ElementKind.InitialState => ("subvertex", "Pseudostate"),
             ElementKind.FinalState => ("subvertex", "FinalState"),
+            ElementKind.Node => ("packagedElement", "Node"),
+            ElementKind.Device => ("packagedElement", "Device"),
+            ElementKind.ExecutionEnvironment => ("packagedElement", "ExecutionEnvironment"),
+            ElementKind.Artifact => ("packagedElement", "Artifact"),
+            ElementKind.DeploymentSpecification => ("packagedElement", "DeploymentSpecification"),
             _ => ("packagedElement", "Class"),
         };
-        // Behaviors nested in classifiers are ownedBehavior; classifiers nested in classifiers are nestedClassifier.
+        // Behaviors nested in classifiers are ownedBehavior; classifiers nested in classifiers are nestedClassifier
+        // (nodes in nodes are nestedNode, artifacts in artifacts nestedArtifact).
         if (tag == "packagedElement" && e.Owner != null && e.Owner.Kind is not (ElementKind.Model or ElementKind.Package))
-            tag = Metamodel.IsBehavior(e.Kind) || e.Kind == ElementKind.TestCase ? "ownedBehavior" : "nestedClassifier";
+            tag = Metamodel.IsBehavior(e.Kind) || e.Kind == ElementKind.TestCase ? "ownedBehavior"
+                : Core.Deployment.DeploymentModel.IsNode(e.Kind) && Core.Deployment.DeploymentModel.IsNode(e.Owner.Kind) ? "nestedNode"
+                : e.Kind == ElementKind.Artifact && e.Owner.Kind == ElementKind.Artifact ? "nestedArtifact"
+                : "nestedClassifier";
 
         var x = new XElement(tag, Type(type), Id(e));
         if (NeedsKindMarker(e.Kind)) x.Add(new XAttribute(Meridian + "kind", e.Kind.ToString()));
@@ -268,6 +279,8 @@ public static class XmiExchange
             if (e.Get(FieldKeys.Guard) is { Length: > 0 } fg) x.Add(new XAttribute(Meridian + "guard", fg));
         }
         if (e.Kind == ElementKind.Port && e.Get(FieldKeys.Direction) is { Length: > 0 } dir) x.Add(new XAttribute(Meridian + "direction", dir));
+        foreach (var key in new[] { DeploymentFields.FileName, DeploymentFields.DeploymentLocation, DeploymentFields.ExecutionLocation })
+            if (Core.Deployment.DeploymentModel.IsArtifact(e.Kind) && e.Get(key) is { Length: > 0 } dv) x.Add(new XAttribute(key, dv));
         AddComments(x, e);
 
         if (Metamodel.IsTypedFeature(e.Kind))
@@ -411,6 +424,25 @@ public static class XmiExchange
                     new XElement("end", Type("ConnectorEnd"), new XAttribute(Xmi + "id", r.Id + "_e1"), new XAttribute("role", r.Source.Id)),
                     new XElement("end", Type("ConnectorEnd"), new XAttribute(Xmi + "id", r.Id + "_e2"), new XAttribute("role", r.Target.Id)));
                 break;
+            case ElementKind.Deployment:
+                // UML: the deployment's client is the location (the node), its supplier the deployed artifact.
+                x = new XElement("packagedElement", Type("Deployment"), Id(r), new XAttribute("client", r.Target.Id), new XAttribute("supplier", r.Source.Id),
+                    new XAttribute("location", r.Target.Id), new XAttribute("deployedArtifact", r.Source.Id));
+                break;
+            case ElementKind.Manifestation:
+                x = new XElement("packagedElement", Type("Manifestation"), Id(r), new XAttribute("client", r.Source.Id), new XAttribute("supplier", r.Target.Id),
+                    new XAttribute("utilizedElement", r.Target.Id));
+                break;
+            case ElementKind.CommunicationPath:
+            {
+                // An association between the two nodes (UML CommunicationPath specialises Association).
+                var srcEnd = r.Id + "_src";
+                var tgtEnd = r.Id + "_tgt";
+                x = new XElement("packagedElement", Type("CommunicationPath"), Id(r), new XAttribute("memberEnd", $"{tgtEnd} {srcEnd}"),
+                    new XElement("ownedEnd", Type("Property"), new XAttribute(Xmi + "id", tgtEnd), new XAttribute("type", r.Target.Id), new XAttribute("association", r.Id)),
+                    new XElement("ownedEnd", Type("Property"), new XAttribute(Xmi + "id", srcEnd), new XAttribute("type", r.Source.Id), new XAttribute("association", r.Id)));
+                break;
+            }
             case ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation:
             {
                 var srcEnd = r.Id + "_src";
@@ -532,6 +564,20 @@ public static class XmiExchange
                     if (ends.Count == 2) pending.Add((binding ? ElementKind.Binding : ElementKind.Connector, id, ends[0], ends[1], owner, c));
                     continue;
                 }
+                // Deployment: client = location (node), supplier = deployed artifact; manifestation: client = artifact, supplier = utilized element.
+                if (type == "Deployment" || tag == "deployment" && type is null or "Deployment")
+                {
+                    pending.Add((ElementKind.Deployment, id, Attr(c, "deployedArtifact") ?? Attr(c, "supplier") ?? c.Element("supplier")?.Attribute(Xmi + "idref")?.Value,
+                                 Attr(c, "location") ?? Attr(c, "client") ?? c.Element("client")?.Attribute(Xmi + "idref")?.Value ?? XmiId(x), owner, c));
+                    continue;
+                }
+                if (type == "Manifestation" || tag == "manifestation" && type is null or "Manifestation")
+                {
+                    pending.Add((ElementKind.Manifestation, id, Attr(c, "client") ?? c.Element("client")?.Attribute(Xmi + "idref")?.Value ?? XmiId(x),
+                                 Attr(c, "utilizedElement") ?? Attr(c, "supplier") ?? c.Element("supplier")?.Attribute(Xmi + "idref")?.Value, owner, c));
+                    continue;
+                }
+                if (type == "CommunicationPath") { pending.Add((ElementKind.CommunicationPath, id, null, null, owner, c)); continue; }
                 if (type == "Association") { pending.Add((ElementKind.Association, id, null, null, owner, c)); continue; }
                 if (type is "Dependency" or "Abstraction" or "Realization" or "Usage" or "Refine" or "Trace")
                 {
@@ -570,6 +616,9 @@ public static class XmiExchange
                     typeRefs.Add((el, c));
                 }
                 if (ek == ElementKind.Operation) ModelRepository.SetFieldForLoad(el, FieldKeys.Signature, ReadSignature(c, map));
+                if (Core.Deployment.DeploymentModel.IsArtifact(ek.Value))
+                    foreach (var key in new[] { DeploymentFields.FileName, DeploymentFields.DeploymentLocation, DeploymentFields.ExecutionLocation })
+                        ModelRepository.SetFieldForLoad(el, key, Attr(c, key));
                 if (ek == ElementKind.Action) ModelRepository.SetFieldForLoad(el, FieldKeys.Body, c.Element("body")?.Value);
                 if (ek == ElementKind.CombinedFragment)
                 {
@@ -625,7 +674,8 @@ public static class XmiExchange
         {
             var kind = kind0; var src = src0; var tgt = tgt0;
             string? mult = null, sourceMult = null;
-            if (kind == ElementKind.Association)
+            var communicationPath = kind == ElementKind.CommunicationPath;   // an association between nodes: ends read the same way
+            if (kind is ElementKind.Association or ElementKind.CommunicationPath)
             {
                 var memberEnds = (Attr(x, "memberEnd") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
                 memberEnds.AddRange(x.Elements().Where(e => e.Name.LocalName == "memberEnd").Select(e => e.Attribute(Xmi + "idref")?.Value).OfType<string>());
@@ -656,6 +706,7 @@ public static class XmiExchange
                 if (otherEnd.Element("lowerValue") != null || otherEnd.Element("upperValue") != null)
                     sourceMult = FormatMultiplicity(otherEnd.Element("lowerValue") is { } sl ? Attr(sl, "value") ?? "0" : "1",
                                                     otherEnd.Element("upperValue") is { } su ? Attr(su, "value") ?? "0" : "1");
+                if (communicationPath) { kind = ElementKind.CommunicationPath; mult = sourceMult = null; }
             }
             if (src == null || tgt == null || !map.TryGetValue(src, out var s) || !map.TryGetValue(tgt, out var t))
             {
@@ -741,6 +792,11 @@ public static class XmiExchange
             "FinalState" => ElementKind.FinalState,
             "Pseudostate" => (Attr(x, "kind") ?? "initial") == "initial" ? ElementKind.InitialState
                 : ElementKind.Pseudostate,   // an unknown kind is read as a choice (and reported)
+            "Node" => ElementKind.Node,
+            "Device" => ElementKind.Device,
+            "ExecutionEnvironment" => ElementKind.ExecutionEnvironment,
+            "Artifact" => ElementKind.Artifact,
+            "DeploymentSpecification" => ElementKind.DeploymentSpecification,
             _ => null,
         };
     }

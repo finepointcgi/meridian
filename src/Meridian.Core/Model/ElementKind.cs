@@ -140,6 +140,16 @@ public enum ElementKind
     Sequence,               // sequence generator in a schema
     Routine,                // stored procedure (subtype "procedure") or function (subtype "function"): signature only
     Trigger,                // trigger on its owning table: db.timing, db.events
+    // Deployment (appended: keep existing ordinals stable). Nodes, devices and execution environments nest inside each other;
+    // artifacts are deployed to them («deploy») and manifest model elements («manifest»). See Deployment.DeploymentModel.
+    Node,
+    Device,
+    ExecutionEnvironment,
+    Artifact,
+    DeploymentSpecification,
+    Deployment,             // artifact (deployment specification, database / schema) -> node, device or execution environment: «deploy»
+    Manifestation,          // artifact -> the block, component, package or code element it manifests: «manifest»
+    CommunicationPath,      // node <-> node; field "protocol"
 }
 
 public enum DiagramType
@@ -172,6 +182,7 @@ public enum DiagramType
     UafProjects,
     UafStandards,
     UafActualResources,
+    Deployment,
 }
 
 public static class FieldKeys

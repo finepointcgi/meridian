@@ -330,7 +330,20 @@ public static partial class MagicDrawImporter
                     foreach (var end in c.Elements().Where(e => e.Name.LocalName == "ownedEnd")) RecordProperty(end, id);
                     AddRel(ElementKind.Association, id, null, null, owner, c, "Association");
                     return;
-                case "Dependency" or "Abstraction" or "Realization" or "Usage" or "Substitution" or "Refine" or "Trace" or "Manifestation":
+                case "CommunicationPath":
+                    foreach (var end in c.Elements().Where(e => e.Name.LocalName == "ownedEnd")) RecordProperty(end, id);
+                    AddRel(ElementKind.CommunicationPath, id, null, null, owner, c, "Communication path");
+                    return;
+                case "Deployment":
+                    // UML: client = the location (node), supplier = the deployed artifact; Cameo nests it in the node.
+                    AddRel(ElementKind.Deployment, id, Ref(c, "deployedArtifact") ?? Refs(c, "supplier").FirstOrDefault(),
+                           Ref(c, "location") ?? Refs(c, "client").FirstOrDefault() ?? ownerXmiId, owner, c, "Deployment");
+                    return;
+                case "Manifestation":
+                    AddRel(ElementKind.Manifestation, id, Refs(c, "client").FirstOrDefault() ?? ownerXmiId,
+                           Ref(c, "utilizedElement") ?? Refs(c, "supplier").FirstOrDefault(), owner, c, "Manifestation");
+                    return;
+                case "Dependency" or "Abstraction" or "Realization" or "Usage" or "Substitution" or "Refine" or "Trace":
                     HandleDependency(c, owner, id, type);
                     return;
                 case "InformationFlow":
@@ -411,7 +424,6 @@ public static partial class MagicDrawImporter
             "InteractionUse" or "Gate" or "StateInvariant" or "Continuation" or "GeneralOrdering" => "Interaction uses, gates, invariants",
             "ConnectionPointReference" => "Connection point references",
             "Reception" => "Receptions",
-            "Node" or "Device" or "ExecutionEnvironment" or "Artifact" or "Deployment" or "CommunicationPath" => "Deployment elements",
             "Constraint" => "Constraints",
             "Slot" => "Slots",
             "ExtensionPoint" => "Extension points",
@@ -450,6 +462,11 @@ public static partial class MagicDrawImporter
                 "ForkNode" or "JoinNode" => ElementKind.ForkNode,
                 "State" => ElementKind.State,
                 "FinalState" => ElementKind.FinalState,
+                "Node" => ElementKind.Node,
+                "Device" => ElementKind.Device,
+                "ExecutionEnvironment" => ElementKind.ExecutionEnvironment,
+                "Artifact" => ElementKind.Artifact,
+                "DeploymentSpecification" => ElementKind.DeploymentSpecification,
                 _ when type.EndsWith("Action", StringComparison.Ordinal) => ElementKind.Action,
                 _ => null,
             };
@@ -466,6 +483,11 @@ public static partial class MagicDrawImporter
         {
             switch (el.Kind)
             {
+                case ElementKind.Artifact or ElementKind.DeploymentSpecification:
+                    ModelRepository.SetFieldForLoad(el, DeploymentFields.FileName, Attr(c, "fileName"));
+                    ModelRepository.SetFieldForLoad(el, DeploymentFields.DeploymentLocation, Attr(c, "deploymentLocation"));
+                    ModelRepository.SetFieldForLoad(el, DeploymentFields.ExecutionLocation, Attr(c, "executionLocation"));
+                    break;
                 case ElementKind.Action:
                     ModelRepository.SetFieldForLoad(el, FieldKeys.Body, Child(c, "body")?.Value ?? Attr(c, "body"));
                     if (Ref(c, "behavior") is { } b) _fieldRefs.Add((el, FieldKeys.Behavior, b, false));

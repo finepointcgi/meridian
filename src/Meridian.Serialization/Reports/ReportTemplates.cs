@@ -241,6 +241,20 @@ public static class ReportTemplates
             },
             new DocSection
             {
+                Title = "Deployment view", Ref = "deployment",
+                Blocks =
+                [
+                    T("This section shows where the system runs: the nodes, devices and execution environments, the artifacts deployed on them and the communication paths between them."),
+                    new DiagramBlock { DiagramTypes = [DiagramType.Deployment], Caption = "{name}", Ref = "fig-{name}" },
+                    new TableBlock { Caption = "Deployment", Ref = "tbl-sdd-deployment", Query = "kind:Artifact,DeploymentSpecification", SortBy = "name",
+                                     Columns = [new("name", "Artifact"), new(Meridian.Core.Deployment.DeploymentModel.NodeKey, "Node"), new(Meridian.Core.Deployment.DeploymentModel.EnvironmentKey, "Environment"), new("manifests", "Manifests")],
+                                     EmptyText = "_The model defines no deployment artifacts._" },
+                    new TableBlock { Caption = "Communication paths", Query = "kind:CommunicationPath",
+                                     Columns = [new("source"), new("target"), new("field:" + DeploymentFields.Protocol, "Protocol")], EmptyText = "_No communication paths are modelled._" },
+                ],
+            },
+            new DocSection
+            {
                 Title = "Requirements allocation", Ref = "allocation", Landscape = true,
                 Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.Requirement], Caption = "{name}" },
                           new TraceTableBlock { Caption = "Requirement allocation to design", Columns = [TraceColumn.SatisfiedBy, TraceColumn.AllocatedTo], ShowCoverage = false },

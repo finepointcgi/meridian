@@ -78,7 +78,16 @@ public static class SysMLv2Sync
 
     /// <summary><c>#tag</c> words with a meaning of their own (not stereotype applications).</summary>
     internal static readonly HashSet<string> SpecialTags = new(StringComparer.Ordinal)
-        { "actor", "derivation", "refinement", "trace", "extend", "derive", "refine", "reply", "async" };
+        { "actor", "derivation", "refinement", "trace", "extend", "derive", "refine", "reply", "async",
+          "node", "device", "executionEnvironment", "artifact", "deploymentSpec", "deploy", "manifest", "communicationPath" };
+
+    /// <summary>The deployment kind a #tag on a part definition stands for (see <see cref="SysMLv2Text.DeploymentTag"/>).</summary>
+    private static ElementKind? DeploymentKindOf(IEnumerable<string> tags) =>
+        tags.Select(t => t switch
+        {
+            "node" => ElementKind.Node, "device" => ElementKind.Device, "executionEnvironment" => ElementKind.ExecutionEnvironment,
+            "artifact" => ElementKind.Artifact, "deploymentSpec" => ElementKind.DeploymentSpecification, _ => (ElementKind?)null,
+        }).FirstOrDefault(k => k != null);
 
     // ====================================================================================================
 
@@ -120,6 +129,7 @@ public static class SysMLv2Sync
             ElementKind.State => "state",
             ElementKind.DecisionNode => "decision",
             ElementKind.ForkNode => "fork",
+            _ when SysMLv2Text.DeploymentTag(e.Kind) is { } tag => tag,   // node, device, executionEnvironment, artifact, deploymentSpec
             _ => null,
         };
 
@@ -131,7 +141,7 @@ public static class SysMLv2Sync
             if (d.IsDef)
                 return kw switch
                 {
-                    "part" => d.Tags.Contains("actor") ? "actor" : "block",
+                    "part" => d.Tags.Contains("actor") ? "actor" : DeploymentKindOf(d.Tags) is { } dk ? SysMLv2Text.DeploymentTag(dk) : "block",
                     "item" or "connection" or "allocation" or "flow" => "block",
                     "port" or "interface" => "portdef",
                     "attribute" => "valuetype",
@@ -186,6 +196,11 @@ public static class SysMLv2Sync
             "state" => ElementKind.State,
             "decision" => ElementKind.DecisionNode,
             "fork" => ElementKind.ForkNode,
+            "node" => ElementKind.Node,
+            "device" => ElementKind.Device,
+            "executionEnvironment" => ElementKind.ExecutionEnvironment,
+            "artifact" => ElementKind.Artifact,
+            "deploymentSpec" => ElementKind.DeploymentSpecification,
             _ => throw new InvalidOperationException(family),
         };
 
@@ -627,6 +642,7 @@ public static class SysMLv2Sync
         [
             ElementKind.Satisfy, ElementKind.Allocate, ElementKind.Dependency, ElementKind.DeriveReqt, ElementKind.Refine, ElementKind.Trace,
             ElementKind.Message, ElementKind.Connector, ElementKind.Binding,
+            ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath,
         ];
 
         /// <summary>Relationships the exporter writes for the elements in this scope (and which the text therefore owns).</summary>
@@ -880,6 +896,9 @@ public static class SysMLv2Sync
                 "derivation" => ElementKind.DeriveReqt,
                 "refinement" => ElementKind.Refine,
                 "trace" => ElementKind.Trace,
+                "deploy" => ElementKind.Deployment,
+                "manifest" => ElementKind.Manifestation,
+                "communicationPath" => ElementKind.CommunicationPath,
                 "include" => ElementKind.Include,
                 "extend" => ElementKind.Extend,
                 "message" => ElementKind.Message,
