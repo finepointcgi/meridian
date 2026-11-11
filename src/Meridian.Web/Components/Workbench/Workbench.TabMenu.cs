@@ -24,6 +24,7 @@ public partial class Workbench
             MenuEntry.Async("Export as SVG", On(ExportSvg)),
             MenuEntry.Async("Export as PNG…", On(ExportImage)),
             MenuEntry.Async("Copy as image", On(CopyDiagramImage)),
+            MenuEntry.Async("Print / PDF…", On(PrintDiagram)),
         };
         if (MermaidExporter.CanExport(tab.Diagram))
         {

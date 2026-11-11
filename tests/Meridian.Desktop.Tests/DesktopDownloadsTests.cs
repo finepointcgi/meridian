@@ -55,6 +55,19 @@ public sealed class DesktopDownloadsTests : IDisposable
         Assert.False(File.Exists(target + ".part"));
     }
 
+    [Fact]
+    public void Only_saved_pdfs_open_afterwards()
+    {
+        // Print… in the desktop app saves the PDF and opens it in the PDF viewer (the web view has no print dialog).
+        var pdf = Path.Combine(_dir.FullName, "Vehicle Structure.PDF");
+        var script = Path.Combine(_dir.FullName, "run.command");
+        File.WriteAllText(pdf, "%PDF");
+        File.WriteAllText(script, "echo");
+        Assert.True(DesktopDownloads.OpensAfterSave(pdf));
+        Assert.False(DesktopDownloads.OpensAfterSave(script));
+        Assert.False(DesktopDownloads.OpensAfterSave(Path.Combine(_dir.FullName, "missing.pdf")));
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(respond(request));

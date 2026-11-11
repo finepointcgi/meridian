@@ -93,6 +93,7 @@ public partial class Workbench
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
+        list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -256,6 +257,7 @@ public partial class Workbench
             case "Undo": Undo(); break;
             case "Redo": Redo(); break;
             case "F7": Validate(); break;
+            case "Print": await PrintDiagram(); break;
         }
         StateHasChanged();
     }
@@ -412,7 +414,10 @@ public partial class Workbench
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
         if (e is not Diagram && e.Descendants().OfType<Diagram>().Any())
+        {
             m.Add(MenuEntry.Async("Export diagrams as images (zip)…", () => ExportImages(e)));
+            m.Add(MenuEntry.Async("Print diagrams…", () => PrintDiagrams(e)));   // Workbench.Print.cs
+        }
         OpenMenu(m, x, y);
     }
 

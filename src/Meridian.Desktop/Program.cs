@@ -124,7 +124,7 @@ internal static class Program
                 _ = SaveFileAsync((string?)msg!["name"] ?? "download", (string?)msg["data"] ?? "");
                 break;
             case "save-url":
-                _ = SaveUrlAsync((string?)msg!["name"] ?? "download", (string?)msg["url"] ?? "");
+                _ = SaveUrlAsync((string?)msg!["name"] ?? "download", (string?)msg["url"] ?? "", (bool?)msg["open"] ?? false);
                 break;
             case "openFile":
                 _ = PickAndOpenAsync();
@@ -671,7 +671,8 @@ internal static class Program
     private static readonly HttpClient _downloads = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     /// <summary>A file the server streams (a generated report): pick the target, then copy the response to it in chunks.</summary>
-    private static async Task SaveUrlAsync(string name, string url)
+    /// <param name="open">Open the saved file afterwards (a printed PDF, see <see cref="DesktopDownloads.OpensAfterSave"/>).</param>
+    private static async Task SaveUrlAsync(string name, string url, bool open = false)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || !DesktopDownloads.IsAllowed(uri, [_localUrl, _serverArg, .. _settings.Servers]))
         {
@@ -685,6 +686,8 @@ internal static class Program
             if (target == null) return;
             var bytes = await DesktopDownloads.SaveAsync(_downloads, uri, target);
             Log($"Saved {name}: {bytes:N0} bytes.");
+            if (open && DesktopDownloads.OpensAfterSave(target))
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true })?.Dispose();
         }
         catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
     }

@@ -11,6 +11,7 @@ menu shows a short version of this page inside Meridian.
 | ⌘S | commit a version |
 | ⌘O | projects |
 | ⌘F | find (focus the model explorer search) |
+| ⌘P | print / PDF of the active diagram ([page setup and preview](printing.md)) |
 | ⌘, | settings |
 | ⌘Z | undo |
 | ⇧⌘Z or ⌘Y | redo |

@@ -17,6 +17,7 @@ public static class KeyboardShortcuts
             ("⌘S", "commit a version"),
             ("⌘O", "projects"),
             ("⌘F", "find (focus the model explorer search)"),
+            ("⌘P", "print / PDF of the active diagram"),
             ("⌘,", "settings"),
             ("⌘Z", "undo"),
             ("⇧⌘Z or ⌘Y", "redo"),

@@ -23,6 +23,14 @@ internal static class DesktopDownloads
         return false;
     }
 
+    /// <summary>
+    /// Whether a saved download may be opened in the system's default app afterwards (Print… in the desktop app: Photino's
+    /// web view has no print dialog, so the printed PDF opens in the PDF viewer). Only PDFs: a page can't make the host
+    /// launch anything else.
+    /// </summary>
+    public static bool OpensAfterSave(string target) =>
+        string.Equals(Path.GetExtension(target), ".pdf", StringComparison.OrdinalIgnoreCase) && File.Exists(target);
+
     /// <summary>Copies the response to <paramref name="target"/> chunk by chunk (through a ".part" file, so a failed or
     /// cancelled download never leaves a truncated file under the chosen name). Returns the number of bytes written.</summary>
     public static async Task<long> SaveAsync(HttpClient http, Uri url, string target, IProgress<long>? progress = null, CancellationToken ct = default)
