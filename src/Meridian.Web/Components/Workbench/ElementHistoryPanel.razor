@@ -233,7 +233,7 @@
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException)
         {
-            _problem = "History is not available right now: " + ex.Message;
+            _problem = "History is not available right now: " + Meridian.Web.Services.FriendlyError.Describe(ex);
         }
         finally { if (generation == _generation) _loading = false; }
         StateHasChanged();
@@ -318,7 +318,7 @@
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException or System.Text.Json.JsonException or FormatException)
         {
-            _diff = new ElementDiff([], null, null, "Couldn't read that version: " + ex.Message);
+            _diff = new ElementDiff([], null, null, "Couldn't read that version: " + Meridian.Web.Services.FriendlyError.Describe(ex));
         }
         finally { _diffLoading = false; }
     }
