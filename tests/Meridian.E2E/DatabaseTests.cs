@@ -147,4 +147,60 @@ public sealed class DatabaseTests(ServerFixture f) : E2ETest(f)
         await Expect(p.Locator(".mud-dialog")).ToHaveCountAsync(0);
         s.AssertNoErrors();
     }
+
+    /// <summary>Picks an option of the migration dialog's "From" select.</summary>
+    private static async Task MigrationFromAsync(IPage p, ILocator dlg, string option)
+    {
+        await dlg.Locator(".mud-select").Filter(new() { Has = p.Locator("label", new() { HasTextString = "From" }) }).First.ClickAsync();
+        await p.Locator(".mud-popover-open .mud-list-item").Filter(new() { HasTextString = option }).First.ClickAsync();
+        await Expect(p.Locator(".mud-popover-open .mud-list-item")).ToHaveCountAsync(0);
+    }
+
+    [E2EFact]
+    public async Task Renaming_a_column_gives_a_rename_in_the_migration_script()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        await p.NewProjectAsync("Blank project", "Db rename " + Guid.NewGuid().ToString("N")[..6]);
+        await ImportScriptAsync(p);
+
+        // Commit a version: the baseline the migration starts from.
+        await p.Locator("header.titlebar .btn-primary").ClickAsync();
+        await p.MudDialog().GetByRole(AriaRole.Button, new() { Name = "OK" }).ClickAsync();
+        await Expect(p.Locator(".mud-dialog")).ToHaveCountAsync(0);
+
+        // Rename customer.name to full_name in the inspector's column list.
+        var (cx, cy, _) = await Table(p, "customer").CenterAsync();
+        await p.Mouse.ClickAsync(cx, cy);
+        var name = p.Inspector().Locator(".db-col-row[data-column=name] input.db-col-name");
+        await Expect(name).ToBeVisibleAsync();
+        await name.FillAsync("full_name");
+        await name.PressAsync("Tab");
+        await Expect(p.Inspector().Locator(".db-col-row[data-column=full_name]")).ToHaveCountAsync(1);
+
+        // Against the committed version the element ids match: a RENAME, no drop and add.
+        await p.RibbonTabAsync("database");
+        await p.Locator("[data-testid=ribbon-migration]").ClickAsync();
+        var dlg = p.MudDialog();
+        await MigrationFromAsync(p, dlg, "Version 1");
+        var preview = dlg.Locator("[data-testid=migration-preview]");
+        await Expect(preview).ToHaveValueAsync(new System.Text.RegularExpressions.Regex(@"ALTER TABLE public\.customer RENAME COLUMN name TO full_name;"));
+        await Expect(preview).Not.ToHaveValueAsync(new System.Text.RegularExpressions.Regex("DROP COLUMN"));
+        await Expect(dlg.Locator("[data-testid=migration-renames]")).ToHaveCountAsync(0);
+
+        // Against the original script (no ids) it is offered as a likely rename, and scripted once ticked.
+        await MigrationFromAsync(p, dlg, "A DDL script");
+        await dlg.Locator("[data-testid=migration-script-input]").FillAsync(Script);
+        var suggestion = dlg.Locator("[data-testid=migration-rename]");
+        await Expect(suggestion).ToContainTextAsync("column customer.name → full_name");
+        await Expect(preview).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("DROP COLUMN name"));
+        await suggestion.Locator("input[type=checkbox]").CheckAsync();
+        await Expect(preview).ToHaveValueAsync(new System.Text.RegularExpressions.Regex("RENAME COLUMN name TO full_name"));
+        await Expect(preview).Not.ToHaveValueAsync(new System.Text.RegularExpressions.Regex("DROP COLUMN"));
+        var download = await p.RunAndWaitForDownloadAsync(() => dlg.Locator("[data-testid=migration-download]").ClickAsync());
+        Assert.EndsWith(".sql", download.SuggestedFilename);
+        await dlg.GetByRole(AriaRole.Button, new() { Name = "Close" }).ClickAsync();
+        await Expect(p.Locator(".mud-dialog")).ToHaveCountAsync(0);
+        s.AssertNoErrors();
+    }
 }

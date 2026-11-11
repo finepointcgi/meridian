@@ -373,6 +373,96 @@ public class LiveOracleImportTests(OracleFixture server) : IClassFixture<OracleF
     }
 }
 
+/// <summary>A throwaway MySQL 8.4 (Testcontainers, random port, root account); skipped when Docker or the image is unavailable.</summary>
+public sealed class MySqlFixture : IAsyncLifetime
+{
+    public static string Image => Environment.GetEnvironmentVariable("MERIDIAN_MYSQL_IMAGE") is { Length: > 0 } i ? i : "mysql:8.4";
+    private Testcontainers.MySql.MySqlContainer? _container;
+    public string? SkipReason { get; private set; }
+    public string ConnectionString => _container?.GetConnectionString() ?? throw new InvalidOperationException(SkipReason);
+
+    public async Task InitializeAsync()
+    {
+        try
+        {
+            _container = new Testcontainers.MySql.MySqlBuilder(Image).WithUsername("root").WithPassword(Guid.NewGuid().ToString("N")).Build();
+            await _container.StartAsync();
+        }
+        catch (Exception ex) when (Environment.GetEnvironmentVariable("MERIDIAN_REQUIRE_MYSQL") is not ("1" or "true"))
+        {
+            SkipReason = $"MySQL live tests skipped: could not start {Image} ({ex.GetType().Name}: {ex.Message.Split('\n')[0]}).";
+            _container = null;
+        }
+    }
+
+    /// <summary>Runs statements one by one (a routine is one statement: no DELIMITER needed through the driver).</summary>
+    public async Task ExecAsync(params string[] statements)
+    {
+        await using var c = new MySqlConnector.MySqlConnection(ConnectionString + ";AllowUserVariables=true");
+        await c.OpenAsync();
+        foreach (var sql in statements)
+        {
+            await using var cmd = new MySqlConnector.MySqlCommand(sql, c);
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (_container != null) await _container.DisposeAsync();
+    }
+}
+
+public class LiveMySqlImportTests(MySqlFixture server) : IClassFixture<MySqlFixture>
+{
+    [SkippableFact]
+    public async Task MySql_Information_Schema_Gives_Keys_And_Bodies_And_The_Lookup_Drop_Runs()
+    {
+        Skip.If(server.SkipReason != null, server.SkipReason);
+        await server.ExecAsync(
+            "CREATE TABLE customer (id int NOT NULL PRIMARY KEY, email varchar(200) NOT NULL, credit decimal(10,2) NOT NULL DEFAULT 0, status enum('new','vip') NOT NULL DEFAULT 'new')",
+            "CREATE TABLE orders (id bigint NOT NULL AUTO_INCREMENT PRIMARY KEY, customer_id int, amount decimal(10,2) NOT NULL, FOREIGN KEY (customer_id) REFERENCES customer (id) ON DELETE CASCADE)",
+            "CREATE INDEX ix_orders_amount ON orders (amount)",
+            """
+            CREATE PROCEDURE add_credit(IN p_id INT, IN p_amount DECIMAL(10,2))
+            MODIFIES SQL DATA
+            BEGIN
+              UPDATE customer SET credit = credit + p_amount WHERE id = p_id;
+              IF ROW_COUNT() = 0 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no such customer'; END IF;
+            END
+            """,
+            "CREATE FUNCTION order_total(p_id INT) RETURNS decimal(12,2) DETERMINISTIC READS SQL DATA RETURN (SELECT COALESCE(SUM(amount), 0) FROM orders WHERE customer_id = p_id)",
+            "CREATE TRIGGER orders_bi BEFORE INSERT ON orders FOR EACH ROW SET NEW.amount = GREATEST(NEW.amount, 0)");
+        var live = await LiveSchemaReader.ReadAsync(LiveProviders.MySql, server.ConnectionString, null, TimeSpan.FromSeconds(60), CancellationToken.None);
+        Assert.Equal("mysql", live.Dialect);
+        var orders = live.AllTables.Single(t => t.Name == "orders");
+        Assert.Equal("autoIncrement", orders.FindColumn("id")!.Identity);
+        var fk = orders.ForeignKeys.Single();
+        Assert.Equal(("customer", "CASCADE"), (fk.RefTable, fk.OnDelete));
+        Assert.StartsWith("orders_ibfk_", fk.Name);   // the generated name, from the catalog
+        Assert.Contains(orders.Indexes, i => i.Name == "ix_orders_amount");
+        Assert.Equal("SET NEW.amount = GREATEST(NEW.amount, 0)", orders.Triggers.Single().Action);
+        var routines = live.Schemas.SelectMany(s => s.Routines).ToList();
+        var proc = routines.Single(r => r.Name == "add_credit");
+        Assert.Equal((DbFields.Procedure, "MODIFIES SQL DATA"), (proc.Kind, proc.Options));
+        Assert.Contains("SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'no such customer'; END IF;", proc.Body);
+        var fn = routines.Single(r => r.Name == "order_total");
+        Assert.Equal(("decimal(12,2)", "DETERMINISTIC READS SQL DATA"), (fn.Returns, fn.Options));
+        Assert.StartsWith("RETURN (SELECT COALESCE(SUM(amount), 0)", fn.Body);
+
+        // The model came from a script without the FK's name: the migration looks it up and drops it, and renames a column.
+        const string before = "CREATE TABLE customer (id int PRIMARY KEY, email varchar(200) NOT NULL); CREATE TABLE orders (id bigint PRIMARY KEY, customer_id int REFERENCES customer (id), amount decimal(10,2) NOT NULL);";
+        var model = DdlParser.Parse(before, "mysql", live.Name);
+        var target = DdlParser.Parse(before.Replace("customer_id int REFERENCES customer (id)", "customer_id int").Replace("email varchar", "email_address varchar"), "mysql", live.Name);
+        var script = MigrationWriter.Generate(model, target, "mysql", renames: DbDiff.SuggestRenames(model, target));
+        Assert.Contains("RENAME COLUMN email TO email_address", script.Sql);
+        await server.ExecAsync(script.Sql);
+        var after = await LiveSchemaReader.ReadAsync(LiveProviders.MySql, server.ConnectionString, null, TimeSpan.FromSeconds(60), CancellationToken.None);
+        Assert.Empty(after.AllTables.Single(t => t.Name == "orders").ForeignKeys);
+        Assert.NotNull(after.AllTables.Single(t => t.Name == "customer").FindColumn("email_address"));
+    }
+}
+
 /// <summary>PostgreSQL: bodies from pg_get_functiondef and a lookup drop of an unnamed foreign key, run for real.</summary>
 public class LivePostgresBodiesTests(PostgresServerFixture server) : IClassFixture<PostgresServerFixture>
 {

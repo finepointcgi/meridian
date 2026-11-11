@@ -37,13 +37,13 @@
         @if (_list.Count == 0)
         {
             <MudText Typo="Typo.body2" Style="opacity:.7">
-                No database connected. Connect PostgreSQL or MySQL / MariaDB@(Connections.LocalMode ? " (or open a SQLite file)" : "") to import its schema
-                and refresh the model later. SQL Server and Oracle: import a DDL script or a .dacpac (Project ▸ Import ▸ Database schema).
+                No database connected. Connect PostgreSQL, SQL Server / Azure SQL, MySQL / MariaDB or Oracle@(Connections.LocalMode ? " (or open a SQLite file)" : "")
+                to import its schema and refresh the model later.
             </MudText>
         }
         <MudText Typo="Typo.caption" Style="display:block; opacity:.7; margin-top:8px">
             Meridian only reads the catalog, in read-only transactions, and never runs DDL against a database. Use a read-only account
-            (PostgreSQL: a role with USAGE on the schemas and SELECT on the catalog; MySQL: SELECT and SHOW VIEW).
+            (PostgreSQL: a role with USAGE on the schemas; SQL Server: a user with VIEW DEFINITION; MySQL: SELECT and SHOW VIEW; Oracle: CREATE SESSION).
         </MudText>
         @if (_canManage)
         {

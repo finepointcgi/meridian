@@ -132,7 +132,10 @@
     /// <summary>The element's db.* fields (the generic list leaves them out), as fitting editors.</summary>
     private RenderFragment Others(Element e) => __builder =>
     {
-        var fields = Metamodel.EditableFields(e.Kind).Where(k => k.StartsWith("db.", StringComparison.Ordinal) && k != DbFields.QualifiedName).ToList();
+        // The default constraint's name only matters to SQL Server (or when an import set it).
+        var sqlServer = DbModel.DatabaseOf(e)?.Get(DbFields.Dialect) == "sqlserver";
+        var fields = Metamodel.EditableFields(e.Kind).Where(k => k.StartsWith("db.", StringComparison.Ordinal) && k != DbFields.QualifiedName)
+            .Where(k => k != DbFields.DefaultName || sqlServer || e.Get(k).Length > 0).ToList();
         if (fields.Count == 0 && e.Get(DbFields.QualifiedName).Length == 0) return;
         <div class="section-title">Database <span class="grow"></span></div>
         foreach (var key in fields)
