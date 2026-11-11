@@ -70,14 +70,32 @@ A **baseline** is an immutable, named tag on a committed version, for example `P
 
 On a team server you can take a pessimistic lock in the model explorer's context menu: **Lock for editing** locks one
 element, **Lock with contents** locks a package and everything in it. Others can still see the element but their edits
-to it are rejected until you **Unlock** or close your tab. The tree shows a lock icon with the holder's name. Project
-owners can **Break lock**. Locks are optional; most teams rely on live co-editing and merging instead.
+to it are rejected until you **Unlock** or close your tab (the rejected edit is undone in their tab, with a message saying
+who holds the lock). The tree shows a lock icon with the holder's name. Project owners can **Break lock**. Locks are an
+optional "check-out": live co-editing is safe without them (see below), so most teams only lock what they want to keep
+others out of for a while.
 
 ## Live collaboration (server)
 
 Everyone who opens the same project on the same line edits one shared model in real time. The title bar shows who is
 there; click someone's avatar to jump to what they have selected. Viewers (the
 *viewer* project role) see changes live but cannot edit.
+
+Your own edits apply instantly, and everyone always ends up with the same model, even when two people change the same
+thing at the same moment:
+
+- **The last edit wins, per field.** If you and a colleague rename the same block at once, both screens settle on the
+  name that reached the server last. Different fields of the same element (say, its name and its documentation) never
+  overwrite each other, and neither do shapes and other elements.
+- **Deleting beats editing.** If someone deletes an element while you are changing it, the delete wins and your change is
+  dropped; the status bar tells you ("Someone else deleted “Engine” — your change to it was dropped."). Relationships,
+  shapes and paths of a deleted element go with it on every screen.
+- **No impossible moves.** If two people move two packages into each other at the same moment, the second move would
+  put a package inside itself; it is refused and undone on that person's screen with a message.
+- **Undo is yours.** Undo and redo only take back your own edits, never a colleague's. If part of what you undo was
+  deleted by someone else meanwhile, that part is skipped and the status bar says so.
+- **Refused edits are undone in place.** An edit the server refuses (a package that is read-only for you, someone's
+  lock) is taken back on your screen with the reason; the rest of your work and your undo history stay as they were.
 
 ## Project roles (server)
 

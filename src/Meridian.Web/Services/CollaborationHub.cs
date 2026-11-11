@@ -8,6 +8,13 @@ namespace Meridian.Web.Services;
 /// <summary>A tab in a session. <paramref name="CanEdit"/> is false for viewers: their operations are refused by the session, not only by their own replica.</summary>
 public sealed record Presence(string ParticipantId, UserAccount User, string? SelectedId, string? DiagramId, bool CanEdit = true);
 
+/// <summary>What the session did with a batch (<see cref="ProjectSession.SubmitBatch"/>): accepted as operations up to
+/// <paramref name="Sequence"/>, or refused for the reason in <paramref name="Refused"/>.</summary>
+public sealed record SubmitResult(long Sequence, string? Refused)
+{
+    public bool Accepted => Refused is null;
+}
+
 /// <summary>
 /// Live collaboration. One <see cref="ProjectSession"/> per open project holds the authoritative model; every
 /// browser tab keeps a replica, submits its operations here, and receives everyone else's in a single global order.
@@ -131,6 +138,19 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
 public interface ISessionClient
 {
     void RemoteOp(ModelOp op);
+
+    /// <summary>
+    /// Someone else's operation, number <paramref name="sequence"/> in the session's order. Operations, acknowledgements and
+    /// replacements reach a client in that order (one FIFO channel), which is what lets it rebase (docs/COLLABORATION.md).
+    /// </summary>
+    void RemoteOp(ModelOp op, long sequence) => RemoteOp(op);
+
+    /// <summary>
+    /// The session applied this client's batch (<see cref="ProjectSession.SubmitBatch"/>); its last operation is number
+    /// <paramref name="sequence"/>. Everything ordered before it has been sent to this client already.
+    /// </summary>
+    void Acked(long sequence) { }
+
     void PresenceChanged();
     void Reset(string modelJson);
     void CommentsChanged();
@@ -243,6 +263,28 @@ public sealed partial class ProjectSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Applies one user action's operations as a batch — the path every tab uses (docs/COLLABORATION.md). The batch is checked
+    /// first (role, package permissions, element locks, ownership cycles against the current model) and then applied and
+    /// relayed all or nothing, in the session's single order; the author gets an acknowledgement through its ordered channel
+    /// (<see cref="ISessionClient.Acked"/>). A refused batch changes nothing here and is not relayed: the result says why, and
+    /// the author's replica takes the batch back itself (no resynchronisation, no lost history).
+    /// </summary>
+    public SubmitResult SubmitBatch(string participantId, Guid userId, IReadOnlyList<ModelOp> ops)
+    {
+        lock (_gate)
+        {
+            if (!_participants.TryGetValue(participantId, out var me)) return new SubmitResult(Sequence, "You are not connected to this project.");
+            if (_rejecting.Contains(participantId)) return new SubmitResult(Sequence, "Your view of the model is being refreshed — try again in a moment.");
+            foreach (var op in ops)
+                if (EditProblem(participantId, userId, op) is { } why) return new SubmitResult(Sequence, why);
+            if (Core.Collaboration.BatchCheck.MoveCycle(_master, ops) is { } cycle) return new SubmitResult(Sequence, cycle);
+            foreach (var op in ops) ApplyLocked(participantId, userId, op);
+            me.Client.Acked(Sequence);
+            return new SubmitResult(Sequence, null);
+        }
+    }
+
     /// <summary>Applies an allowed operation and relays it (under the session lock).</summary>
     private void ApplyLocked(string participantId, Guid userId, ModelOp op, bool events = true)
     {
@@ -255,7 +297,7 @@ public sealed partial class ProjectSession : IDisposable
         MarkDirty();
         _lastEditor = userId;
         foreach (var (id, p) in _participants)
-            if (id != participantId) Relay(id, p.Client, op, probes);
+            if (id != participantId) Relay(id, p.Client, op, Sequence, probes);
     }
 
     public void UpdatePresence(string participantId, string? selectedId, string? diagramId)

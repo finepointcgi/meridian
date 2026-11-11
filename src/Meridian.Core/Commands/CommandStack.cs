@@ -50,8 +50,14 @@ public sealed class CommandStack
     /// <summary>Raised when the outermost command, undo, redo or transaction has finished (also when it threw).</summary>
     public event Action? ActionCompleted;
 
+    private enum LastKind { None, Do, Undo, Redo }
+    private LastKind _lastKind;
+    private IModelCommand? _lastCommand;
+    private List<IModelCommand>? _lastClearedRedo;
+
     private void Run(Action work)
     {
+        if (!InAction) ForgetLast();
         _running++;
         try { work(); }
         finally
@@ -75,6 +81,7 @@ public sealed class CommandStack
     /// <summary>Groups every command executed until disposal into one undo step.</summary>
     public IDisposable Transaction(string description)
     {
+        if (!InAction) ForgetLast();
         _open.Push(new CompositeCommand(description));
         return new TransactionScope(this);
     }
@@ -97,6 +104,7 @@ public sealed class CommandStack
         }
         // Redo history is discarded; if the save point lived there it can never be reached again.
         if (_redo.Contains(_savePoint!)) _savePointValid = false;
+        (_lastKind, _lastCommand, _lastClearedRedo) = (LastKind.Do, command, _redo.Count > 0 ? [.. _redo] : null);
         _redo.Clear();
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -106,8 +114,13 @@ public sealed class CommandStack
         if (!CanUndo) return;
         var c = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
-        Run(c.Undo);
-        _redo.Add(c);
+        // The history moves before the action completes, so a listener of ActionCompleted can still discard it.
+        Run(() =>
+        {
+            c.Undo();
+            _redo.Add(c);
+            (_lastKind, _lastCommand) = (LastKind.Undo, c);
+        });
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -116,9 +129,46 @@ public sealed class CommandStack
         if (!CanRedo) return;
         var c = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
-        Run(c.Do);
-        _undo.Add(c);
+        Run(() =>
+        {
+            c.Do();
+            _undo.Add(c);
+            (_lastKind, _lastCommand) = (LastKind.Redo, c);
+        });
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ForgetLast() => (_lastKind, _lastCommand, _lastClearedRedo) = (LastKind.None, null, null);
+
+    /// <summary>
+    /// Forgets the most recent action's effect on the history after its model changes were taken back (a collaboration
+    /// server refused them): a new command leaves the undo stack (and the redo steps it cleared come back), an undo goes back
+    /// to the undo stack, a redo back to the redo stack. False when there is nothing to discard.
+    /// </summary>
+    public bool DiscardLastAction()
+    {
+        var (kind, c, cleared) = (_lastKind, _lastCommand, _lastClearedRedo);
+        ForgetLast();
+        if (c is null || InAction) return false;
+        switch (kind)
+        {
+            case LastKind.Do when _undo.Count > 0 && ReferenceEquals(_undo[^1], c):
+                _undo.RemoveAt(_undo.Count - 1);
+                if (cleared != null) _redo.AddRange(cleared);
+                break;
+            case LastKind.Undo when _redo.Count > 0 && ReferenceEquals(_redo[^1], c):
+                _redo.RemoveAt(_redo.Count - 1);
+                _undo.Add(c);
+                break;
+            case LastKind.Redo when _undo.Count > 0 && ReferenceEquals(_undo[^1], c):
+                _undo.RemoveAt(_undo.Count - 1);
+                _redo.Add(c);
+                break;
+            default:
+                return false;
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     public void MarkSaved()

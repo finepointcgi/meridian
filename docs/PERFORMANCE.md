@@ -98,38 +98,41 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | Session: first tab (load + replica) | 1,610 ms | 2,954 ms |
 | Session: each further tab | 541 ms | 1,362 ms |
 | Session: op apply + relay to 24 tabs, p95 | 0.06 ms | 0.34 ms |
+| Session: rebase of a pending edit under a relayed one, p95 | 0.004 ms | – |
 | Model tree first render / reveal deepest element | 55 / 14 ms | – |
 
 ## Concurrency load test
 
 `tests/Meridian.Web.Tests/ConcurrencyLoadTests.cs`: 25 in-process tabs (real `Workspace` replicas, each draining its inbox on
 its own logical thread like a Blazor circuit) against one `ProjectSession` for 30 s: field edits, creates, moves, deletes,
-shape moves, undo / redo, element locks (including three "rogue" tabs whose edits inside someone's subtree lock are
-rejected and resynchronised), comments and edits of a shared SysML v2 text. It asserts:
+shape moves, undo / redo, comments and edits of a shared SysML v2 text — and **shared elements edited without locks**:
+everyone writes the same "hot" fields, creates, renames, moves and deletes elements in shared packages, nests the shared
+packages into each other (moves that would make a cycle are refused) and moves and adds shapes on one shared diagram
+(docs/COLLABORATION.md). Some tabs still use element locks as a check-out, and three "rogue" tabs edit inside another tab's
+subtree lock; those actions are refused and rolled back in the rogue tab. It asserts:
 
-- an observer saw every accepted operation exactly once (count = session sequence, no duplicates), and every operation of
-  a tab that was never rejected was accepted;
+- an observer saw every accepted operation exactly once (count = session sequence, no duplicates), every operation a tab
+  emitted was either accepted or refused (and refused ones were never applied), no tab was ever resynchronised, and no
+  tab has unacknowledged edits left;
 - every replica serializes identically to the session's model, every shared-text editor has the server's text, and the
   persisted project equals the session model;
 - managed memory at the end is below 1.5 × the start + 256 MB;
 - **p95 of a local edit (including the server's apply and relay) < 50 ms** and **p95 inbox wait before a tab applies a
   relayed operation < 250 ms**.
 
-Results on the machine above (Debug test build, ~18,600-element project):
+Results on the machine above (Debug test build, ~18,600-element project; both stores run together, as in a full test run):
 
-| Store | Editing | Accepted ops | Submit p50 / p95 / max | Delivery p50 / p95 / max | Heap start → peak → end |
-|---|---|---|---|---|---|
-| SQLite | 15 s | 21,828 (1,444/s) | 0.01 / 12.3 / 48 ms | 5.8 / 87 / 2,135 ms | 1,183 → 3,192 → 1,227 MB |
-| PostgreSQL | 10 s | 11,782 (1,177/s) | 0.02 / 20.6 / 247 ms | 5.7 / 60 / 3,579 ms | 588 → 2,620 → 1,131 MB |
+| Store | Editing | Accepted ops | Refused actions | Rebases | Submit p50 / p95 / max | Delivery p50 / p95 / max | Heap start → peak → end |
+|---|---|---|---|---|---|---|---|
+| SQLite | 30 s | 64,023 (2,134/s) | 757 (697 rogue) | 25,175 | 0.01 / 1.1 / 14 ms | 4.6 / 15 / 2,104 ms | 517 → 1,489 → 627 MB |
+| PostgreSQL | 15 s | 31,813 (2,120/s) | 364 (331 rogue) | 12,465 | 0.02 / 1.2 / 36 ms | 4.6 / 12 / 2,487 ms | 644 → 901 → 603 MB |
 
-Delivery maxima are the rogue tabs' full resynchronisations (a whole-model snapshot is deserialized in the tab).
+Before this change (edits of shared elements only under locks; refused edits answered with a full resync) the same test
+measured submit p95 12–21 ms and delivery p95 60–87 ms: a refusal now costs a local rollback instead of deserializing a
+whole-model snapshot. Delivery maxima are isolated stalls of a few seconds under full CPU load; no tab is resynchronised.
 
 ## Known limits
 
-- **Concurrent writes to the same field without a lock can diverge.** Model operations are ordered by the server but not
-  transformed, and a tab applies its own edit before relayed earlier ones; two tabs writing the same field at the same
-  moment can end up with different values until the next resync or reload. Element locks prevent it (the load test edits
-  shared elements only under a lock), and a tab should process its inbox after taking a lock before editing.
 - **Template reports of the whole model** can exceed .NET's 2 GB string limit: the SDD template over the 200k project
   throws `OverflowException` while writing HTML. Scope such reports to a package.
 - **Merge** is linear but allocation-heavy (three flat snapshots of the model): ~1.6 s at 200k, ~5.7 s at 500k.
