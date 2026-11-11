@@ -44,6 +44,8 @@
     href: variants-trade-studies.md
   - name: Reports and documents
     href: document-generation.md
+  - name: Printing diagrams
+    href: printing.md
 - name: Working as a team
   items:
   - name: Branches, merge and baselines
