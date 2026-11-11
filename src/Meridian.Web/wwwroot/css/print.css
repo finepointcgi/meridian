@@ -9,10 +9,9 @@
 .print-row .lbl { width: 100%; font-size: 12px; opacity: .75; }
 .print-margins .num input { width: 52px; }
 .print-dlg select, .print-dlg input[type=number], .print-dlg input[type=text] {
-  font: 12.5px Inter, sans-serif; color: inherit; background: transparent; border: 1px solid var(--mud-palette-lines-default, rgba(128,128,128,.35));
+  font: 12.5px Inter, sans-serif; color: inherit; background: var(--mud-palette-surface, transparent); border: 1px solid var(--mud-palette-lines-default, rgba(128,128,128,.35));
   border-radius: 6px; padding: 4px 6px;
 }
-.print-dlg select option { color: #1d2330; }
 .print-dlg input[type=number] { width: 64px; }
 .print-paper { flex: 1; min-width: 150px; }
 .print-text { width: 100%; box-sizing: border-box; }
@@ -34,11 +33,11 @@
 .print-preview-pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .print-preview { flex: 1; min-height: 300px; max-height: 52vh; border-radius: 8px; border: 1px solid var(--mud-palette-lines-default, rgba(128,128,128,.3)); background: #c9ced6; display: grid; place-items: center; overflow: hidden; padding: 8px; }
 .print-preview img { max-width: 100%; max-height: 50vh; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
-.print-preview.empty { color: #5f6b7a; font-size: 13px; }
+.print-preview.empty { font-size: 13px; opacity: .7; }
 .print-thumbs { display: flex; flex-wrap: wrap; gap: 10px; max-height: 26vh; overflow: auto; padding: 2px; }
 .print-thumb { position: relative; flex: none; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); border-radius: 2px; }
 .print-thumb .area { position: absolute; background-image: var(--print-src); background-repeat: no-repeat; overflow: hidden; outline: 1px dashed rgba(47,111,236,.35); }
 .print-thumb .band { position: absolute; height: 2px; background: #c3c9d3; border-radius: 1px; }
 .print-thumb .no { position: absolute; right: 3px; bottom: 2px; font: 600 10px Inter, sans-serif; color: #2f6fec; background: rgba(255,255,255,.85); padding: 0 3px; border-radius: 3px; }
-.print-thumb.more { width: 104px; height: 74px; display: grid; place-items: center; font-size: 12px; color: #5f6b7a; }
+.print-thumb.more { width: 104px; height: 74px; display: grid; place-items: center; font-size: 12px; background: transparent; box-shadow: none; border: 1px dashed rgba(128,128,128,.5); opacity: .8; }
 .print-progress { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
