@@ -1,0 +1,71 @@
+@using Meridian.Data
+@using Meridian.Web.CodeSync
+@inherits MobileComponent
+@inject CodeSyncState State
+
+@* Phone code changes view (read-only): the model changes pushed code implies, per review branch, with their kind
+   (added / changed / removed). Accepting or rejecting them needs a larger screen. *@
+<div class="m-list-view" data-testid="m-code-changes">
+    <div class="m-list-head">
+        <span class="m-head-title">Code changes</span>
+    </div>
+    <div class="m-note m-note-top">Accept or reject code changes on a larger screen; this list is read-only.</div>
+    <div class="m-cards">
+        @if (!State.Loaded)
+        {
+            <div class="m-empty">Loading code changes…</div>
+        }
+        else if (State.Reviews.Count == 0)
+        {
+            <div class="m-empty">No code changes to review. When code is pushed to a connected repository, the model changes it implies appear here.</div>
+        }
+        else
+        {
+            @foreach (var review in State.Reviews.OrderBy(x => x.IsPreview).ThenBy(x => x.PullRequest))
+            {
+                <div class="m-section-title">
+                    @(review.IsPreview ? $"PR #{review.PullRequest} · " : "")@review.Branch.Name
+                    <span class="m-row-sub">@Plural.Of(review.Changes.Count, "change") from @Plural.Of(review.Runs.Count, "push", "pushes")</span>
+                </div>
+                @foreach (var c in review.Changes.OrderBy(c => c.Kind).ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    var change = c;
+                    <article class="m-card m-chg" data-element="@change.ElementId" data-kind="@Css(change.Kind)">
+                        <div class="m-card-main">
+                            <div class="m-card-head">
+                                <span class="m-pill @Tone(change.Kind)">@KindTitle(change.Kind)</span>
+                                <span class="m-card-title">@change.Name</span>
+                            </div>
+                            <div class="m-trace">
+                                <span class="m-pill">@Metamodel.DisplayName(change.ElementKind)</span>
+                                @if (change.Fields.Count > 0) { <span class="m-pill">@Plural.Of(change.Fields.Count, "field")</span> }
+                            </div>
+                            @if (change.Path.Length > 0) { <p class="m-card-text"><code>@change.Path</code></p> }
+                        </div>
+                    </article>
+                }
+            }
+        }
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        State.Changed += OnState;
+        if (!State.Loaded) _ = State.ReloadAsync();
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    public override void Dispose()
+    {
+        State.Changed -= OnState;
+        base.Dispose();
+    }
+
+    private static string Css(CodeSyncChangeKind k) => k switch { CodeSyncChangeKind.Added => "added", CodeSyncChangeKind.Changed => "changed", _ => "removed" };
+    private static string KindTitle(CodeSyncChangeKind k) => k switch { CodeSyncChangeKind.Added => "Added", CodeSyncChangeKind.Changed => "Changed", _ => "Removed" };
+    private static string Tone(CodeSyncChangeKind k) => k switch { CodeSyncChangeKind.Added => "ok", CodeSyncChangeKind.Changed => "warn", _ => "bad" };
+}

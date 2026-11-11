@@ -88,8 +88,8 @@ The model itself is never changed by the analysis: a variant or inputs are appli
 
 ## Running
 
-- Ribbon *Simulate → Verify*, ⌘K *Verify requirements*, or the *Verify requirements* button in the **Verification** dock
-  tab. With a run selected, that run is executed; otherwise every run is executed and then every requirement with a
+- Ribbon *Simulate → Verify*, ⌘K *Verify requirements*, or the *Verify requirements* button in the **Verification** tab
+  (a view tab next to the diagrams since 0.7.1; the dock's *Verification* entry opens it). With a run selected, that run is executed; otherwise every run is executed and then every requirement with a
   criterion that no run covers is checked ad hoc (on the variant shown on diagrams, if any).
 - The analyses run on a snapshot in the background; the results are then recorded in **one undo step per run**.
 - The tab shows the pass / fail / inconclusive / stale / not-run summary (click a number to filter), and a row per

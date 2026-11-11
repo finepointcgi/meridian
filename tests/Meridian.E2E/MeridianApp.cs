@@ -45,6 +45,13 @@ public sealed class MeridianApp : IAsyncDisposable
             ["Logging:LogLevel:Default"] = "Warning",
             ["DetailedErrors"] = "true",   // circuit exceptions reach the browser console with their message
         };
+        // A stand-in for the bundled user guide (packaging builds the real one with DocFX; tests never run DocFX).
+        var guide = Path.Combine(data, "guide");
+        Directory.CreateDirectory(Path.Combine(guide, "docs"));
+        File.WriteAllText(Path.Combine(guide, "index.html"), "<!doctype html><title>Meridian test guide</title><h1>User guide</h1>");
+        foreach (var page in new[] { "getting-started", "migration", "verification", "import-export", "requirements", "plugins" })
+            File.WriteAllText(Path.Combine(guide, "docs", page + ".html"), $"<!doctype html><title>{page} — Meridian test guide</title><h1>{page}</h1>");
+        settings[Meridian.Web.Hosting.UserGuide.PathKey] = guide;
         if (localMode) { settings["Meridian:Mode"] = "local"; settings["Meridian:LaunchToken"] = token; }
         if (extra != null) foreach (var kv in extra) settings[kv.Key] = kv.Value;
 

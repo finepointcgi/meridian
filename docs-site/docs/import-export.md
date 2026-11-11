@@ -7,9 +7,10 @@
 | Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml, Mermaid .mmd / .md) | creates a new project from a file |
 | Project menu → **Import into this project…** (BPMN, ArchiMate, SQL, C#, Mermaid, Cameo re-import) | adds the content of one or more files to the open project |
 | Project menu → **Paste Mermaid…** | imports Mermaid text, for example from an AI assistant, with a preview ([Mermaid](#mermaid)) |
-| Project menu → **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG / Mermaid**, **Copy diagram as Mermaid** | exports |
+| Project menu → **Export ▸** **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG / Mermaid**, **Copy diagram as Mermaid** | exports |
+| Right-click a diagram tab → **Export ▸** | SVG, PNG, image or Mermaid of that diagram |
 | Ribbon **Requirements → Exchange** | ReqIF, CSV and Excel import and export, re-import with preview, renumbering |
-| Ribbon **Generate** | report, SysML v2, XMI, C# code, and **Formats** for Word / PDF, BPMN, ArchiMate, ReqIF and SQL DDL |
+| Ribbon **Generate** | report, SysML v2, XMI, C# code, **Formats** for Word / PDF, BPMN, ArchiMate, ReqIF and SQL DDL, and **Plugins** (plugin exporters and importers) |
 
 The desktop app can also open `.meridian`, `.sysml`, `.xmi`, `.qea`, `.qeax` and Mermaid (`.mmd`, `.mermaid`, `.md`) files from the start screen, from
 the operating system (double-click) or by passing the path on the command line.
@@ -202,4 +203,4 @@ SVG and PNG export of diagrams is described in [Reports and documents](document-
 ## Scripted and plugin formats
 
 A [script](scripting.md) can write any text format with `Download(...)`. A [plugin](plugins.md) can register its own
-importers and exporters; they appear under **Extend ▸ Plugins**.
+importers and exporters; they appear under **Generate ▸ Plugins**.

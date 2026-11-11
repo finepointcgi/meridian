@@ -56,7 +56,7 @@ public sealed class UxAuditTests : TestContext
     [Fact]
     public void Every_Ribbon_Tour_Target_Knows_Its_Ribbon_Tab()
     {
-        var ribbonTabs = new[] { "create", "diagram", "requirements", "trace", "review", "views", "simulate", "generate", "extend", "ai", "database", "code" };
+        var ribbonTabs = new[] { "create", "diagram", "requirements", "trace", "views", "simulate", "generate", "ai", "database", "code" };
         foreach (var step in TourChapters.All.SelectMany(c => c.Steps))
             foreach (Match m in Regex.Matches(step.Selector, @"data-tour=([\w-]+)"))
             {

@@ -626,7 +626,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -644,6 +644,7 @@ public sealed class ViewTab(ViewTabKind kind)
         ViewTabKind.Query => "New query",
         ViewTabKind.CodeChanges => "Code changes",
         ViewTabKind.Architecture => "Architecture",
+        ViewTabKind.Verification => "Verification",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
 }

@@ -37,6 +37,7 @@ public partial class Workbench
             yield return new("Connect a code repository…", "Command", Icons.Material.Outlined.Extension, () => IntegrationsDialog.ShowCodeRepositoriesAsync(Dialogs));
         yield return new($"What's new in {TourChapters.WhatsNewVersion}", "Command", Icons.Material.Outlined.NewReleases, ShowWhatsNew);
         yield return new("Keyboard & mouse shortcuts", "Command", Icons.Material.Outlined.Keyboard, ShowHelp);
+        yield return new("User guide", "Command", Icons.Material.Outlined.MenuBook, () => OpenGuide());
 
         // Cameo / MagicDraw and Enterprise Architect names, so ⌘K finds the Meridian equivalent by the name people know.
         foreach (var (alias, icon, run) in CameoAliases())

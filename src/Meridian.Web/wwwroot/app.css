@@ -75,6 +75,8 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .rbtn:disabled { opacity: .4; cursor: default; background: transparent; }
 .rbtn .mud-icon-root { font-size: 17px; }
 .rbtn.on { background: var(--sel); color: var(--text); border-color: var(--sel-border); }
+/* A divider between the button sets of one tab (Traceability | Review, Generate | Extend). */
+.rsep { flex: none; width: 1px; height: 20px; margin: 0 6px; background: var(--border-strong, var(--border)); }
 
 /* ============================================================ workspace grid */
 .workbench { position: absolute; top: 106px; left: 0; right: 0; bottom: 28px; display: grid;
@@ -649,6 +651,19 @@ svg.chart { display: block; max-width: 100%; }
 /* ============================================================ view tabs (tables, queries, report templates) in the centre */
 .view-host { position: absolute; inset: 0; z-index: 30; overflow: auto; background: var(--panel-solid, var(--panel)); }
 .tabstrip .tab.view-tab span { font-style: normal; }
+/* Verification results as a view tab (0.7.1; the bottom dock before): the whole centre's height, ids and dates on one line. */
+/* A global .row is a flex row; the results table's rows must stay table rows or their cells stop lining up with the header. */
+.vfy-table tr.row { display: table-row; }
+.vfy-tab { min-height: 100%; container-type: inline-size; }
+.vfy-tab .vfy-head { position: sticky; top: 0; z-index: 3; background: var(--panel-solid, var(--panel)); border-bottom: 1px solid var(--border); }
+.vfy-tab .vfy-table th { position: static; }
+.vfy-tab .vfy-table tr.row > td:first-child, .vfy-tab .vfy-table tr.row > td:last-child, .vfy-tab .vfy-table th { white-space: nowrap; }
+/* A narrow centre (1280 px windows with both side panels): drop the Variant column (it is in each row's details) and tighten. */
+@container (max-width: 760px) {
+  .vfy-tab .vfy-table tr > :nth-child(8) { display: none; }
+  .vfy-tab .vfy-table td, .vfy-tab .vfy-table th { padding-left: 6px; padding-right: 6px; }
+}
+.dock-tab-link .dl::after { content: " ↗"; opacity: .55; }
 /* Wide tables in a view tab scroll inside the tab: never let focusing a cell scroll the centre card or the tab strip away. */
 main.workbench > section.card.center, .diagram-host { overflow: clip; }
 /* The tables/query panel fits its container (a centre tab or the dock): long help lines wrap, wide tables scroll inside. */

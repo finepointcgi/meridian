@@ -27,8 +27,9 @@ timed(Start Vehicle): endTime <= 10 s
 ## 2. Verify
 
 **Simulate ▸ Verify** (or ⌘K *Verify requirements*) runs the analyses in the background and opens the
-**Verification** tab: a summary (pass, fail, inconclusive, stale, not run; click a number to filter) and a row per
-requirement with its criterion, result, value, bound and margin. Click a row for the details.
+**Verification** tab next to the diagrams (the bottom dock's *Verification* entry and ⌘K *Verification results* open it too): a summary (pass, fail, inconclusive, stale, not run; click a number to filter) and a row per
+requirement with its criterion, result, value, bound and margin. Click a row for the details. On a phone, the account menu ▸
+**Verification results** lists the same results read-only.
 
 On diagrams, requirements are outlined green (pass), red (fail) or amber (inconclusive), dashed when stale. The legend
 chip on the diagram, or ⌘K *Hide verification results on diagrams*, turns this off.

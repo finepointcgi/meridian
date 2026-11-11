@@ -49,12 +49,20 @@ public static class KeyboardShortcuts
             ("⌘ + wheel", "zoom"),
             ("Middle-button drag, Space + drag or Alt + drag", "pan"),
             ("Right-click", "context menu"),
+            ("Right-click a diagram tab", "Export ▸, close, close others"),
         ]),
         new("Model explorer",
         [
             ("Drag onto a diagram", "show the element there"),
             ("Drag onto another item", "move the element into it"),
             ("Double-click a diagram", "open it"),
+        ]),
+        new("Menus",
+        [
+            ("↑ / ↓", "move between menu items"),
+            ("→ or Enter on an item with ▸", "open its submenu (Export ▸, New element ▸)"),
+            ("←", "back from a submenu"),
+            ("Escape", "close the submenu, then the menu"),
         ]),
         new("Text editors",
         [

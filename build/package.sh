@@ -16,6 +16,7 @@
 #   WINDOWS_TIMESTAMP_URL default http://timestamp.digicert.com
 #   SIGNTOOL, ISCC, APPIMAGETOOL   tool paths when they are not on PATH
 #   SKIP_SERVER=1         do not build the server zip
+#   SKIP_GUIDE=1          do not build the user guide (docs-site with DocFX) into the packages' guide/ folder
 #   NO_CHECKSUMS=1        do not write SHA256SUMS.txt (CI writes one over every job's files)
 set -euo pipefail
 
@@ -32,6 +33,32 @@ trap 'rm -f "$WORK/signing.pfx"' EXIT
 
 note() { echo "    $*"; }
 
+# ---------------------------------------------------------------- user guide
+# The user guide (docs-site, DocFX, pinned in docs-site/dotnet-tools.json) is built once and copied into every package as
+# guide/, which the app serves at /guide (src/Meridian.Web/Hosting/UserGuide.cs): offline, in the desktop app too.
+GUIDE="$WORK/guide"
+
+build_guide() {
+  if [ "${SKIP_GUIDE:-}" = "1" ]; then note "SKIP_GUIDE=1: the packages have no user guide"; return 0; fi
+  echo "==> user guide"
+  (
+    cd "$ROOT/docs-site"
+    dotnet tool restore >/dev/null
+    dotnet docfx metadata docfx.json >/dev/null
+    dotnet docfx build docfx.json --warningsAsErrors >/dev/null
+  )
+  rm -rf "$GUIDE" && mkdir -p "$GUIDE"
+  cp -R "$ROOT/docs-site/_site/." "$GUIDE/"
+  [ -f "$GUIDE/index.html" ] || { echo "The user guide build produced no index.html" >&2; exit 1; }
+}
+
+# add_guide <app dir>: the built guide as <app dir>/guide.
+add_guide() {
+  [ -d "$GUIDE" ] || return 0
+  rm -rf "$1/guide"
+  cp -R "$GUIDE" "$1/guide"
+}
+
 publish_desktop() {
   local rid="$1" dir="$2"
   rm -rf "$dir"
@@ -42,6 +69,7 @@ publish_desktop() {
   dotnet publish "$ROOT/src/Meridian.FmuHost" -c Release -r "$rid" --self-contained -p:Version="$VERSION" -o "$dir" --nologo -v q
   # The server executable is not needed inside the desktop app (the desktop host runs it in-process).
   rm -f "$dir/Meridian.Web" "$dir/Meridian.Web.exe" "$dir"/*.pdb "$dir"/appsettings.Development*.json
+  add_guide "$dir"
 }
 
 # make_zip <dir> <entry> <zip>: zip an entry of a directory (zip, else 7-Zip, else PowerShell on Windows runners).
@@ -266,6 +294,8 @@ EOF
 
 # ---------------------------------------------------------------- main
 
+build_guide
+
 for rid in "${RIDS[@]}"; do
   echo "==> $rid"
   case "$rid" in
@@ -282,6 +312,7 @@ if [ "${SKIP_SERVER:-}" != "1" ]; then
   rm -rf "$srv"
   dotnet publish "$ROOT/src/Meridian.Web" -c Release -p:Version="$VERSION" -o "$srv" --nologo -v q
   rm -f "$srv"/*.pdb "$srv"/appsettings.Development*.json
+  add_guide "$srv"
   cp "$ROOT/build/server/README.txt" "$srv/README.txt"
   make_zip "$WORK/server" "meridian-server-$VERSION" "$OUT/Meridian-Server-$VERSION.zip"
 fi
