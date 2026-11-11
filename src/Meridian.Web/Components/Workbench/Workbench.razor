@@ -229,6 +229,7 @@
                 <button title="Traceability matrix: requirements against design elements" class="rbtn @(_dockOpen && _dock == 2 ? "on" : "")" @onclick="() => ToggleDock(2)"><MudIcon Icon="@Icons.Material.Outlined.GridOn" /><span class="t">Matrix</span></button>
                 <MudTooltip Text="Traceability table: links, gaps and suspect links per requirement"><button class="rbtn @(_dockOpen && _dock == 7 ? "on" : "")" @onclick="() => ToggleDock(7)"><MudIcon Icon="@Icons.Material.Outlined.Link" /><span class="t">Trace table</span></button></MudTooltip>
                 <button title="Impact analysis: what depends on the selected element" class="rbtn" disabled="@(Ws.Selected == null)" @onclick="ImpactOfSelection"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" /><span class="t">Impact</span></button>
+                <MudTooltip Text="Relation map: everything connected to the selected element, up to 6 levels (⌘K “Relation map of …”)"><button class="rbtn @(RelationMapTabActive ? "on" : "")" data-testid="ribbon-relation-map" disabled="@(Ws.Selected == null)" @onclick="RelationMapOfSelection"><MudIcon Icon="@Icons.Material.Outlined.Hub" /><span class="t">Relation map</span></button></MudTooltip>
                 <button title="Requirements coverage: how many are satisfied and verified" class="rbtn" @onclick="Coverage"><MudIcon Icon="@Icons.Material.Outlined.DonutLarge" /><span class="t">Coverage</span></button>
                 <button title="Check the model for errors and warnings (F7)" class="rbtn @(_dockOpen && _dock == 0 ? "on" : "")" @onclick="Validate"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span class="t">Validate</span></button>
                 @* Review (its own tab before 0.7.1): asking for and working through approvals of what the trace shows. *@
@@ -372,7 +373,7 @@
                 @if (Ws.ActiveView is { } shownView)
                 {
                     <span class="crumb current">@shownView.Title</span>
-                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", ViewTabKind.Verification => "VERIFICATION", _ => "TEMPLATE" })</span>
+                    <span class="dtype">@(shownView.Kind switch { ViewTabKind.Table => "TABLE", ViewTabKind.Query => "QUERY", ViewTabKind.CodeChanges => "CODE SYNC", ViewTabKind.Architecture => "ARCHITECTURE", ViewTabKind.Verification => "VERIFICATION", ViewTabKind.RelationMap => "RELATION MAP", _ => "TEMPLATE" })</span>
                 }
                 else if (Ws.Active is { } act)
                 {
@@ -509,6 +510,7 @@
         ViewTabKind.CodeChanges => Icons.Material.Outlined.Difference,
         ViewTabKind.Architecture => Icons.Material.Outlined.Rule,
         ViewTabKind.Verification => Icons.Material.Outlined.Rule,
+        ViewTabKind.RelationMap => Icons.Material.Outlined.Hub,
         _ => Icons.Material.Outlined.EditNote,
     };
 
@@ -532,6 +534,10 @@
         else if (v.Kind == ViewTabKind.Verification)
         {
             <div class="vfy-tab" data-testid="verify-tab"><VerificationPanel /></div>
+        }
+        else if (v.Kind == ViewTabKind.RelationMap)
+        {
+            <RelationMapTab Tab="v" />
         }
         else if (v.State is Meridian.Serialization.Reports.DocTemplate template)
         {

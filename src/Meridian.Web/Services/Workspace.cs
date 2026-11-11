@@ -108,9 +108,9 @@ public sealed partial class Workspace : IDisposable, ISessionClient
                 _views.Add(tab);
                 if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = tab;
             }
-            else if (v.Kind is ViewTabKind.CodeChanges or ViewTabKind.Architecture)
+            else if (v.Kind is ViewTabKind.CodeChanges or ViewTabKind.Architecture or ViewTabKind.RelationMap)
             {
-                _views.Add(v);   // reviews hold no model objects: the same tab carries on
+                _views.Add(v);   // reviews and unsaved relation maps (ids only) hold no model objects: the same tab carries on
                 if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = v;
             }
         }
@@ -513,7 +513,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification, RelationMap }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -532,6 +532,7 @@ public sealed class ViewTab(ViewTabKind kind)
         ViewTabKind.CodeChanges => "Code changes",
         ViewTabKind.Architecture => "Architecture",
         ViewTabKind.Verification => "Verification",
+        ViewTabKind.RelationMap => State is Meridian.Core.Analysis.RelationMapSettings s && s.RootName.Length > 0 ? "Relation map: " + s.RootName : "Relation map",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
 }

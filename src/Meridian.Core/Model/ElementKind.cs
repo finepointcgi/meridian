@@ -140,6 +140,8 @@ public enum ElementKind
     Sequence,               // sequence generator in a schema
     Routine,                // stored procedure (subtype "procedure") or function (subtype "function"): signature only
     Trigger,                // trigger on its owning table: db.timing, db.events
+    // Saved relation maps (appended: keep existing ordinals stable): root, depth and filters in the "relationMap" field
+    RelationMap,
 }
 
 public enum DiagramType

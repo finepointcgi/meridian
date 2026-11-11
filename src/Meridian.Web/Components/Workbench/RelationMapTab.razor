@@ -1,0 +1,555 @@
+@inherits WorkspaceComponent
+@implements IAsyncDisposable
+@using System.Text
+@using Meridian.Core.Analysis
+@using Meridian.Serialization
+@inject IJSRuntime JS
+@inject IDialogService Dialogs
+
+@* Relation map (Cameo's Relation Map): everything connected to an element up to N levels, radial or as a tree. The map is
+   built on the server from the relationship index (Core/Analysis/RelationMap.cs) and drawn by RelationMapSvg; panning,
+   zooming and clicks on nodes are handled in js/relation-map.js and routed back here. *@
+<div class="rm-tab" data-testid="relation-map">
+    <div class="rm-toolbar" @onkeydown:stopPropagation="true">
+        <span class="rm-root" title="@(RootElement?.QualifiedName ?? "")">
+            @if (RootElement is { } r)
+            {
+                <MudIcon Icon="@UiKinds.Icon(r.Kind)" Style="@($"font-size:16px; color:{UiKinds.Accent(r.Kind)}")" />
+                <b data-testid="rm-root">@UiKinds.Label(Ws.Model, r)</b>
+            }
+            else { <b data-testid="rm-root">No element</b> }
+        </span>
+        @if (Ws.Selected is { } sel && RootElement != null && !ReferenceEquals(sel, RootElement) && CanBeRoot(sel))
+        {
+            <button class="rm-btn" title="Make the element selected in the model tree or a diagram the centre of the map" @onclick="() => ReCentre(sel)">Use “@Short(sel.DisplayName)”</button>
+        }
+        <span class="rm-sep"></span>
+        <span class="rm-group" title="Levels of relationships shown from the centre (1–6)">
+            <span class="lbl">Depth</span>
+            <button class="rm-step" data-testid="rm-depth-dec" disabled="@(S.Depth <= RelationMapSettings.MinDepth)" @onclick="() => SetDepth(S.Depth - 1)" aria-label="Fewer levels">−</button>
+            <span class="rm-depth" data-testid="rm-depth">@S.Depth</span>
+            <button class="rm-step" data-testid="rm-depth-inc" disabled="@(S.Depth >= RelationMapSettings.MaxDepth)" @onclick="() => SetDepth(S.Depth + 1)" aria-label="More levels">+</button>
+        </span>
+        <span class="rm-seg" role="group" aria-label="Layout">
+            @foreach (var (layout, label, tip) in Layouts)
+            {
+                var l = layout;
+                <button class="@(S.Layout == l ? "on" : "")" data-testid="@($"rm-layout-{l}")" title="@tip" @onclick="() => SetLayout(l)">@label</button>
+            }
+        </span>
+        <select class="rm-select" data-testid="rm-direction" title="Follow relationships in this direction" value="@S.Direction" @onchange="e => SetDirection(Enum.Parse<RelationDirection>((string)e.Value!))">
+            <option value="Both">Both directions</option>
+            <option value="Outgoing">Outgoing</option>
+            <option value="Incoming">Incoming</option>
+        </select>
+        <span class="rm-panel-anchor">
+            <button class="rm-btn @(_panel == "rels" ? "on" : "")" data-testid="rm-rel-filter" @onclick="@(() => TogglePanel("rels"))">
+                <MudIcon Icon="@Icons.Material.Outlined.FilterAlt" Style="font-size:15px" /> Relationships: @(S.Preset ?? $"{S.RelationshipKinds.Count} kinds")
+            </button>
+            @if (_panel == "rels")
+            {
+                <div class="rm-panel" data-testid="rm-rel-panel">
+                    <div class="rm-presets">
+                        @foreach (var (name, _) in RelationMapPresets.All)
+                        {
+                            var n = name;
+                            <button class="rm-chip @(S.Preset == n ? "on" : "")" data-testid="@($"rm-preset-{n}")" @onclick="() => SetPreset(n)">@n</button>
+                        }
+                    </div>
+                    <div class="rm-checks">
+                        @foreach (var k in Metamodel.RelationshipKinds)
+                        {
+                            var kind = k;
+                            <label><input type="checkbox" checked="@(S.RelationshipKinds.Count == 0 || S.RelationshipKinds.Contains(kind))" @onchange="() => ToggleRelationshipKind(kind)" /> @Metamodel.DisplayName(kind)</label>
+                        }
+                    </div>
+                </div>
+            }
+        </span>
+        <span class="rm-panel-anchor">
+            <button class="rm-btn @(_panel == "kinds" ? "on" : "")" data-testid="rm-kind-filter" @onclick="@(() => TogglePanel("kinds"))">
+                Elements: @(S.ElementKinds.Count == 0 ? "all" : $"{S.ElementKinds.Count} kinds")
+            </button>
+            @if (_panel == "kinds")
+            {
+                <div class="rm-panel" data-testid="rm-kind-panel">
+                    <div class="rm-presets"><button class="rm-chip @(S.ElementKinds.Count == 0 ? "on" : "")" @onclick="() => { S.ElementKinds.Clear(); Changed(fit: true); }">All</button></div>
+                    <div class="rm-checks">
+                        @foreach (var k in PresentKinds())
+                        {
+                            var kind = k;
+                            <label><input type="checkbox" checked="@(S.ElementKinds.Count == 0 || S.ElementKinds.Contains(kind))" @onchange="() => ToggleElementKind(kind)" /> @Metamodel.DisplayName(kind)</label>
+                        }
+                    </div>
+                </div>
+            }
+        </span>
+        <span class="rm-panel-anchor">
+            <button class="rm-btn @(_panel == "more" ? "on" : "")" data-testid="rm-include" title="Containment, used projects and code-synced elements" @onclick="@(() => TogglePanel("more"))">Include…</button>
+            @if (_panel == "more")
+            {
+                <div class="rm-panel narrow">
+                    <label><input type="checkbox" data-testid="rm-owned" checked="@S.IncludeOwned" @onchange="() => { S.IncludeOwned = !S.IncludeOwned; Changed(fit: true); }" /> Owned elements</label>
+                    <label><input type="checkbox" data-testid="rm-owner" checked="@S.IncludeOwner" @onchange="() => { S.IncludeOwner = !S.IncludeOwner; Changed(fit: true); }" /> Owner</label>
+                    <label><input type="checkbox" data-testid="rm-library" checked="@S.IncludeLibrary" @onchange="() => { S.IncludeLibrary = !S.IncludeLibrary; Changed(fit: true); }" /> Used-project (library) elements</label>
+                    <label><input type="checkbox" data-testid="rm-code" checked="@S.IncludeCodeSynced" @onchange="() => { S.IncludeCodeSynced = !S.IncludeCodeSynced; Changed(fit: true); }" /> Code-synced elements</label>
+                </div>
+            }
+        </span>
+        <span class="rm-sep"></span>
+        <input class="rm-search" data-testid="rm-search" placeholder="Find on map…" value="@_search" @oninput="e => SetSearch((string?)e.Value)" @onkeydown="SearchKey" />
+        @if (_search.Length > 0) { <span class="rm-hits" data-testid="rm-hits">@Plural.Of(Hits.Count, "match", "matches")</span> }
+        <span class="rm-spacer"></span>
+        <button class="rm-icon" title="Zoom out" aria-label="Zoom out" @onclick="() => Zoom(1 / 1.25)"><MudIcon Icon="@Icons.Material.Outlined.Remove" /></button>
+        <button class="rm-icon" title="Zoom in" aria-label="Zoom in" @onclick="() => Zoom(1.25)"><MudIcon Icon="@Icons.Material.Outlined.Add" /></button>
+        <button class="rm-icon" data-testid="rm-fit" title="Fit the map in the window" aria-label="Fit" @onclick="Fit"><MudIcon Icon="@Icons.Material.Outlined.FitScreen" /></button>
+        <span class="rm-sep"></span>
+        <button class="rm-btn primary" data-testid="rm-create-diagram" disabled="@(SelectedElements.Count == 0 || Ws.ReadOnly)" title="Make a real diagram of the selected elements and the relationships between them" @onclick="CreateDiagramFromSelection">
+            <MudIcon Icon="@Icons.Material.Outlined.AddChart" Style="font-size:15px" /> Create diagram@(SelectedElements.Count > 0 ? $" ({SelectedElements.Count})" : "")
+        </button>
+        <span class="rm-panel-anchor">
+            <button class="rm-icon" data-testid="rm-more" title="Export and save" aria-label="More" @onclick="@(() => TogglePanel("menu"))"><MudIcon Icon="@Icons.Material.Outlined.MoreVert" /></button>
+            @if (_panel == "menu")
+            {
+                <div class="rm-panel narrow right rm-menu">
+                    <button data-testid="rm-save" disabled="@Ws.ReadOnly" @onclick="Save">@(Tab.Element != null ? $"Save “{Tab.Element.DisplayName}”" : "Save as view in the model…")</button>
+                    @if (Tab.Element != null) { <button disabled="@Ws.ReadOnly" @onclick="SaveAs">Save as new view…</button> }
+                    <button data-testid="rm-select-all" @onclick="SelectAll">Select all on the map</button>
+                    <button data-testid="rm-export-svg" @onclick="() => Export(false)">Export as SVG</button>
+                    <button data-testid="rm-export-png" @onclick="() => Export(true)">Export as PNG</button>
+                </div>
+            }
+        </span>
+    </div>
+    @if (_panel != null) { <div class="rm-backdrop" @onclick="() => _panel = null"></div> }
+
+    <div class="rm-canvas" @ref="_host" tabindex="-1">
+        @if (_graph.Root == null)
+        {
+            <div class="rm-empty" data-testid="rm-empty">The element of this map was deleted, or it is hidden from you.</div>
+        }
+        else
+        {
+            <svg class="rm-svg" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, 'Segoe UI', sans-serif" font-size="12">
+                <g class="rm-vp" transform="@Transform"><g class="rm-content">@Markup</g></g>
+            </svg>
+        }
+    </div>
+    <div class="rm-status" data-testid="rm-status">
+        @if (_graph.Root != null)
+        {
+            <span>@Plural.Of(_graph.ElementCount, "element") · @Plural.Of(_graph.Edges.Count(e => e.Relationship != null), "relationship") · built in @(Math.Max(1, (int)Math.Round(_graph.BuildTime.TotalMilliseconds))) ms</span>
+            @if (_graph.Capped) { <span class="rm-cap" data-testid="rm-capped">Showing @S.MaxNodes of more — click “+N more” to see the rest</span> }
+            @if (_selected.Count > 0) { <span>· @_selected.Count selected</span> }
+            <span class="rm-hint">Click to select (⇧ to add) · double-click to open · right-click for the element menu · ± to expand</span>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ViewTab Tab { get; set; } = default!;
+
+    /// <summary>Pan, zoom and selection of one map, kept while its tab is in the background.</summary>
+    private sealed class ViewState { public double X = 20, Y = 20, K = 1; public HashSet<string> Selected = new(StringComparer.Ordinal); public bool Fitted; }
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ViewTab, ViewState> Views = new();
+
+    private static readonly (RelationMapLayout, string, string)[] Layouts =
+    [
+        (RelationMapLayout.Radial, "Radial", "Rings around the element"),
+        (RelationMapLayout.TreeRight, "Tree →", "A tree growing to the right"),
+        (RelationMapLayout.TreeDown, "Tree ↓", "A tree growing downwards"),
+    ];
+
+    private RelationMapSettings S => (RelationMapSettings)Tab.State!;
+    private ViewState V => Views.GetValue(Tab, _ => new ViewState());
+    private HashSet<string> _selected => V.Selected;
+    private RelationMapGraph _graph = new();
+    private ModelRepository? _builtModel;
+    private long _builtRevision = -1;
+    private string? _builtSettings;
+    private MarkupString? _markup;
+    private SvgTheme? _markupTheme;
+    private string _search = "";
+    private HashSet<string>? _hits;
+    private string? _panel;
+    private ElementReference _host;
+    private DotNetObjectReference<RelationMapTab>? _self;
+    private bool _installed, _fitPending;
+
+    /// <summary>The map as drawn now (tests and the workbench read it).</summary>
+    public RelationMapGraph Graph => _graph;
+    public RelationMapSettings Settings => S;
+    public IReadOnlyCollection<string> SelectedIds => _selected;
+
+    private Element? RootElement => _graph.Root?.Element;
+    private string Transform => FormattableString.Invariant($"translate({V.X:0.##},{V.Y:0.##}) scale({V.K:0.####})");
+    private static string Short(string s) => s.Length > 24 ? s[..23] + "…" : s;
+    private static bool CanBeRoot(Element e) => e is not Relationship && e is not Diagram && e.Kind != ElementKind.Model;
+
+    protected override void OnParametersSet()
+    {
+        Tab.State ??= new RelationMapSettings();
+        Rebuild();
+    }
+
+    protected override void OnWorkspaceChanged()
+    {
+        if (!ReferenceEquals(_builtModel, Ws.Model) || _builtRevision != Ws.Model.Revision) Rebuild();
+    }
+
+    /// <summary>Builds the map again when the model or the settings changed since the last build.</summary>
+    private void Rebuild(bool force = false)
+    {
+        var json = S.ToJson();
+        if (!force && ReferenceEquals(_builtModel, Ws.Model) && _builtRevision == Ws.Model.Revision && json == _builtSettings) return;
+        var access = Ws.Access;
+        _graph = RelationMaps.Build(Ws.Model, S, access.HidesAnything ? access.IsHidden : null);
+        _builtModel = Ws.Model; _builtRevision = Ws.Model.Revision; _builtSettings = json;
+        if (_graph.Root?.Element is { } root && S.RootName != root.DisplayName) S.RootName = root.DisplayName;
+        _selected.RemoveWhere(id => _graph.Find(id) is not { IsStub: false });
+        _hits = null;
+        _markup = null;
+    }
+
+    /// <summary>The settings changed: build, redraw, and (for a different picture) fit it into the window.</summary>
+    private void Changed(bool fit)
+    {
+        Rebuild();
+        if (fit) _fitPending = true;
+        StateHasChanged();
+    }
+
+    private IReadOnlySet<string> Hits => _hits ??= _search.Trim() is { Length: > 0 } q
+        ? _graph.Nodes.Where(n => !n.IsStub && n.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).Select(n => n.Id).ToHashSet(StringComparer.Ordinal)
+        : new HashSet<string>();
+
+    private MarkupString Markup
+    {
+        get
+        {
+            var theme = Ws.DarkMode && !Ws.Preferences.CanvasAlwaysLight ? SvgTheme.Dark : SvgTheme.Light;   // as the diagram canvas
+            if (_markup is { } m && ReferenceEquals(theme, _markupTheme)) return m;
+            var sb = new StringBuilder();
+            RelationMapSvg.RenderBody(sb, _graph, theme, UiKinds.Icon, new RelationMapMarks(_selected, Hits, Interactive: true));
+            _markupTheme = theme;
+            _markup = new MarkupString(sb.ToString());
+            return _markup.Value;
+        }
+    }
+
+    private List<Element> SelectedElements => _selected.Select(id => _graph.Find(id)?.Element).OfType<Element>().ToList();
+
+    private IEnumerable<ElementKind> PresentKinds() =>
+        Metamodel.ElementKinds.Where(k => k is not (ElementKind.Model or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule or ElementKind.RelationMap) && Ws.Model.OfKind(k).Any());
+
+    // ================================================================ controls
+
+    public void SetDepth(int depth)
+    {
+        depth = Math.Clamp(depth, RelationMapSettings.MinDepth, RelationMapSettings.MaxDepth);
+        if (depth == S.Depth) return;
+        S.Depth = depth;
+        S.Expanded.Clear(); S.Collapsed.Clear();
+        Changed(fit: true);
+    }
+
+    public void SetLayout(RelationMapLayout layout)
+    {
+        if (S.Layout == layout) return;
+        S.Layout = layout;
+        Changed(fit: true);
+    }
+
+    public void SetDirection(RelationDirection direction)
+    {
+        S.Direction = direction;
+        S.ResetExploration();
+        Changed(fit: true);
+    }
+
+    public void SetPreset(string name)
+    {
+        S.RelationshipKinds = RelationMapPresets.Kinds(name).ToList();
+        S.ResetExploration();
+        Changed(fit: true);
+    }
+
+    public void ToggleRelationshipKind(ElementKind kind)
+    {
+        if (S.RelationshipKinds.Count == 0) S.RelationshipKinds = Metamodel.RelationshipKinds.Where(k => k != kind).ToList();
+        else if (!S.RelationshipKinds.Remove(kind)) S.RelationshipKinds.Add(kind);
+        if (S.RelationshipKinds.Count == Metamodel.RelationshipKinds.Count()) S.RelationshipKinds.Clear();
+        S.ResetExploration();
+        Changed(fit: true);
+    }
+
+    public void ToggleElementKind(ElementKind kind)
+    {
+        var present = PresentKinds().ToList();
+        if (S.ElementKinds.Count == 0) S.ElementKinds = present.Where(k => k != kind).ToList();
+        else if (!S.ElementKinds.Remove(kind)) S.ElementKinds.Add(kind);
+        if (present.All(S.ElementKinds.Contains)) S.ElementKinds.Clear();
+        S.ResetExploration();
+        Changed(fit: true);
+    }
+
+    private void TogglePanel(string panel) => _panel = _panel == panel ? null : panel;
+
+    public void SetSearch(string? text)
+    {
+        _search = text ?? "";
+        _hits = null;
+        _markup = null;
+    }
+
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        if (Hits.FirstOrDefault() is { } id && _graph.Find(id) is { } n && _installed)
+            await JS.InvokeVoidAsync("meridianRelationMap.center", _host, n.CenterX, n.CenterY);
+    }
+
+    /// <summary>Makes <paramref name="e"/> the centre of the map (the depth and filters stay).</summary>
+    public void ReCentre(Element e)
+    {
+        if (!CanBeRoot(e) || !Ws.Model.Contains(e)) return;
+        S.RootId = e.Id;
+        S.RootName = e.DisplayName;
+        S.ResetExploration();
+        _selected.Clear();
+        Changed(fit: true);
+        Ws.Bump();   // the tab title shows the root
+    }
+
+    // ================================================================ node interaction (js/relation-map.js)
+
+    [JSInvokable]
+    public void OnNodeClick(string id, bool additive)
+    {
+        if (_graph.Find(id) is not { Element: { } e }) return;
+        if (additive) { if (!_selected.Remove(id)) _selected.Add(id); }
+        else { _selected.Clear(); _selected.Add(id); }
+        _markup = null;
+        Ws.Select(e, syncCanvas: false);   // the inspector shows it; the diagrams behind the tab are left alone
+        StateHasChanged();
+    }
+
+    /// <summary>Expands a closed node (its neighbours appear) or collapses an open one.</summary>
+    [JSInvokable]
+    public void OnNodeToggle(string id)
+    {
+        if (_graph.Find(id) is not { IsStub: false } n) return;
+        if (n.Explored)
+        {
+            if (n.IsRoot) return;
+            S.Expanded.Remove(id);
+            if (!S.Collapsed.Contains(id)) S.Collapsed.Add(id);
+        }
+        else
+        {
+            S.Collapsed.Remove(id);
+            if (n.Depth >= S.Depth && !S.Expanded.Contains(id)) S.Expanded.Add(id);
+        }
+        Changed(fit: false);
+    }
+
+    /// <summary>"+N more": shows the next batch of a node's neighbours.</summary>
+    [JSInvokable]
+    public void OnStub(string parentId)
+    {
+        S.More[parentId] = S.More.GetValueOrDefault(parentId) + RelationMapSettings.StubStep;
+        Changed(fit: false);
+    }
+
+    /// <summary>Double-click: open the element's diagram (a diagram, or one it owns), else select it in the model tree.</summary>
+    [JSInvokable]
+    public void OnNodeDouble(string id)
+    {
+        if (_graph.Find(id) is not { Element: { } e }) return;
+        if (e is Diagram || e.OwnedElements.OfType<Diagram>().Any()) { Shell?.Activate(e); return; }
+        Ws.Select(e, syncCanvas: false);
+        Ws.SetStatus($"Selected {e.DisplayName} in the model tree");
+    }
+
+    [JSInvokable]
+    public void OnNodeMenu(string id, double x, double y)
+    {
+        if (_graph.Find(id) is not { Element: { } e }) return;
+        if (!_selected.Contains(id)) { _selected.Clear(); _selected.Add(id); _markup = null; }
+        Ws.Select(e, syncCanvas: false);
+        var extra = new List<MenuEntry>
+        {
+            MenuEntry.Title("Relation map"),
+            MenuEntry.Do("Re-centre on this element", () => ReCentre(e)),
+        };
+        if (_graph.Find(id) is { } n && !n.IsRoot && (n.Explored || n.Hidden > 0))
+            extra.Add(MenuEntry.Do(n.Explored ? "Collapse" : "Expand", () => OnNodeToggle(id)));
+        if (!Ws.ReadOnly) extra.Add(MenuEntry.Async($"Create diagram from selection ({_selected.Count})", CreateDiagramFromSelection));
+        StateHasChanged();
+        Shell?.ShowTreeMenu(e, x, y, extra);
+    }
+
+    [JSInvokable]
+    public void OnBackground()
+    {
+        _panel = null;
+        if (_selected.Count == 0) return;
+        _selected.Clear();
+        _markup = null;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnView(double x, double y, double k)
+    {
+        V.X = x; V.Y = y; V.K = k;
+    }
+
+    public void SelectAll()
+    {
+        _panel = null;
+        foreach (var n in _graph.Nodes.Where(n => !n.IsStub)) _selected.Add(n.Id);
+        _markup = null;
+    }
+
+    // ================================================================ commands
+
+    /// <summary>Makes a real diagram (laid out by the auto-diagrammer) of the selected elements and their relationships, and opens it.</summary>
+    public async Task CreateDiagramFromSelection()
+    {
+        _panel = null;
+        var elements = SelectedElements;
+        if (elements.Count == 0) { Ws.SetStatus("Select elements on the map first (⇧-click to select several)"); return; }
+        if (Ws.ReadOnly) { Ws.SetStatus("View-only: you can't add diagrams to this project"); return; }
+        var owner = HomeFor(RootElement ?? elements[0]);
+        if (owner == null) { Ws.SetStatus("There is no package you may edit to put the diagram in"); return; }
+        var name = UniqueDiagramName(owner, $"{S.RootName} relations");
+        try
+        {
+            var d = RelationMaps.CreateDiagram(Ws.Model, elements, owner, name);
+            Ws.Open(d);
+            Ws.SetStatus($"Created {Metamodel.DisplayName(d.DiagramType)} “{d.Name}” with {Plural.Of(d.Nodes.Count, "shape")} and {Plural.Of(d.Edges.Count, "relationship")}");
+            Ws.Log($"Relation map: created diagram {d.QualifiedName} from {elements.Count} selected element(s)");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
+        {
+            Ws.SetStatus($"Could not create the diagram: {FriendlyError.Describe(ex)}");
+        }
+        await Task.CompletedTask;
+    }
+
+    private static string UniqueDiagramName(Element owner, string name)
+    {
+        var used = owner.OwnedElements.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!used.Contains(name)) return name;
+        for (var i = 2; ; i++) if (!used.Contains($"{name} {i}")) return $"{name} {i}";
+    }
+
+    /// <summary>The package for a new diagram: the root's nearest package when I may edit it, else the model.</summary>
+    private Element? HomeFor(Element e)
+    {
+        foreach (var a in e.AncestorsAndSelf().Skip(1))
+            if (a.Kind is ElementKind.Package or ElementKind.Model && Ws.CanEdit(a) && !Ws.IsLockedForMe(a)) return a;
+        return Ws.CanEdit(Ws.Model.Root) ? Ws.Model.Root : null;
+    }
+
+    public async Task Save()
+    {
+        _panel = null;
+        if (Tab.Element is { } existing && Ws.Model.Contains(existing)) { SaveTo(existing.Name, existing); return; }
+        await SaveAs();
+    }
+
+    public async Task SaveAs()
+    {
+        _panel = null;
+        var parameters = new DialogParameters<PromptDialog> { { x => x.Title, "Save relation map" }, { x => x.Label, "Name of the saved view" }, { x => x.Value, $"{S.RootName} relation map" } };
+        var dialog = await Dialogs.ShowAsync<PromptDialog>("Save relation map", parameters);
+        if (await dialog.Result is not { Canceled: false, Data: string name } || string.IsNullOrWhiteSpace(name)) return;
+        SaveTo(name.Trim(), null);
+    }
+
+    /// <summary>Saves the settings as a relation map element in the model (the tab then shows it).</summary>
+    public Element? SaveTo(string name, Element? existing)
+    {
+        try
+        {
+            var e = RelationMaps.Save(Ws.Model, S, name, existing);
+            Tab.Element = e;
+            Ws.SetStatus($"Saved relation map “{e.Name}” in {e.Owner?.DisplayName}");
+            Ws.Bump();
+            return e;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Ws.SetStatus($"Could not save the relation map: {FriendlyError.Describe(ex)}");
+            return null;
+        }
+    }
+
+    private async Task Export(bool png)
+    {
+        _panel = null;
+        if (_graph.Root == null) return;
+        var title = $"Relation map of {S.RootName}";
+        var svg = RelationMapSvg.Render(_graph, SvgTheme.Light, UiKinds.Icon, title: title);
+        var file = DiagramImageExport.SafeName(title);
+        try
+        {
+            if (png) await DiagramImageExport.DownloadAsync(JS, file + ".png", "image/png", await DiagramImageExport.PngAsync(JS, svg, 2));
+            else await DiagramImageExport.DownloadAsync(JS, file + ".svg", "image/svg+xml", Encoding.UTF8.GetBytes(svg));
+            Ws.Log($"Exported the relation map of {S.RootName} as {(png ? "PNG" : "SVG")}");
+        }
+        catch (Exception ex) when (ex is JSException or TaskCanceledException or FormatException)
+        {
+            Ws.SetStatus($"Could not export the picture: {FriendlyError.Describe(ex)}");
+        }
+    }
+
+    /// <summary>The picture as SVG (export and tests).</summary>
+    public string ExportSvg() => RelationMapSvg.Render(_graph, SvgTheme.Light, UiKinds.Icon, title: $"Relation map of {S.RootName}");
+
+    // ================================================================ pan / zoom
+
+    private async Task Fit()
+    {
+        if (_installed) await JS.InvokeVoidAsync("meridianRelationMap.fit", _host);
+    }
+
+    private async Task Zoom(double factor)
+    {
+        if (_installed) await JS.InvokeVoidAsync("meridianRelationMap.zoomBy", _host, factor);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_graph.Root == null) return;
+        if (!_installed)
+        {
+            _self ??= DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("meridianRelationMap.install", _host, _self, V.X, V.Y, V.K);
+                _installed = true;
+            }
+            catch (JSDisconnectedException) { return; }
+            if (!V.Fitted) { V.Fitted = true; _fitPending = true; }
+        }
+        if (_fitPending)
+        {
+            _fitPending = false;
+            try { await JS.InvokeVoidAsync("meridianRelationMap.fit", _host); } catch (JSDisconnectedException) { }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        base.Dispose();
+        if (_installed)
+        {
+            try { await JS.InvokeVoidAsync("meridianRelationMap.uninstall", _host); }
+            catch (Exception ex) when (ex is JSDisconnectedException or TaskCanceledException or ObjectDisposedException) { }
+        }
+        _self?.Dispose();
+    }
+}

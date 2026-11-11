@@ -83,6 +83,7 @@ public partial class Workbench
         };
         list.AddRange(RequirementPaletteCommands());
         list.AddRange(VerificationPaletteCommands());   // Workbench.Verification.cs
+        list.AddRange(RelationMapPaletteCommands());    // Workbench.RelationMap.cs
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
@@ -282,6 +283,7 @@ public partial class Workbench
     {
         if (e is Diagram d) { Ws.Open(d); return; }
         if (e.Kind is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) { OpenSavedView(e); return; }
+        if (e.Kind == ElementKind.RelationMap) { OpenSavedRelationMap(e); return; }   // Workbench.RelationMap.cs
         if (Meridian.Serialization.Reports.ReportTemplates.TryLoad(e, out var template)) { Ws.OpenView(ViewTabKind.ReportTemplate, e, template); return; }
         var owned = e.OwnedElements.OfType<Diagram>().FirstOrDefault();
         if (owned != null) Ws.Open(owned);
@@ -368,8 +370,10 @@ public partial class Workbench
         StateHasChanged();
     }
 
-    public void ShowTreeMenu(Element e, double x, double y)
+    /// <param name="extra">Entries shown first (the relation map's "Re-centre on this element" …).</param>
+    public void ShowTreeMenu(Element e, double x, double y, IReadOnlyList<MenuEntry>? extra = null)
     {
+        if (extra is { Count: > 0 }) { ShowTreeMenu(e, x, y); if (_menu != null) OpenMenu([.. extra, MenuEntry.Sep(), .. _menu], x, y); return; }
         if (Ws.LibraryOf(e) is { } lib) { OpenMenu(LibraryTreeMenu(e, lib), x, y); return; }   // read-only (Workbench.Libraries.cs)
         var m = new List<MenuEntry>();
         var groups = new (string, ElementKind[])[]
@@ -410,6 +414,7 @@ public partial class Workbench
         m.AddRange(DatabaseTreeEntries(e));      // Workbench.Database.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
+        if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
@@ -430,6 +435,7 @@ public partial class Workbench
             m.Add(MenuEntry.Do("Rename", () => c.Editing = n, "F2"));
             m.Add(MenuEntry.Do("Select in containment tree", () => Navigate(el)));
             m.Add(MenuEntry.Do("Display related elements", () => c.DisplayRelated(n)));
+            m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(el)));   // Workbench.RelationMap.cs
             if (c.Diagram.DiagramType is DiagramType.InternalBlock or DiagramType.Parametric && el.Kind == ElementKind.Property)
             {
                 m.Add(MenuEntry.Do("Show ports on border", () => c.ShowPortsOf(n)));

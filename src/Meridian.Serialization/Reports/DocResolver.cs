@@ -387,6 +387,7 @@ public sealed class DocResolver
             case TraceMatrixBlock x: Matrix(x, sc); break;
             case CoverageBlock c: Coverage(c, sc); break;
             case DiagramBlock d: Diagrams(d, sc); break;
+            case RelationMapBlock r: RelationMap(r, sc); break;
             case ElementListBlock l: List(l, sc); break;
             case StatisticsBlock s: Statistics(s, sc); break;
             case ValidationBlock v: Validation(v, sc); break;
@@ -766,6 +767,50 @@ public sealed class DocResolver
             var cap = NewCaption("Figure", Sub(Default(d.Caption, "{name}"), inner), Ref(d, inner));
             Emit(new FigureNode(cap, svg, w, h, Math.Clamp(d.MaxHeight, 0.1, 1), dg.Id));
         }
+    }
+
+    private void RelationMap(RelationMapBlock b, Scope sc)
+    {
+        RelationMapSettings settings;
+        if (!string.IsNullOrWhiteSpace(b.Map))
+        {
+            var key = Sub(b.Map, sc);
+            var saved = _m.Find(key) is { Kind: ElementKind.RelationMap } byId ? byId
+                : RelationMaps.Saved(_m).FirstOrDefault(x => string.Equals(x.Name, key, StringComparison.OrdinalIgnoreCase) || string.Equals(x.QualifiedName, key, StringComparison.OrdinalIgnoreCase));
+            if (saved == null) { _doc.Warnings.Add($"Relation map '{key}' not found."); Emit(ParagraphNode.Plain($"[Relation map '{key}' not found]", italic: true)); return; }
+            settings = RelationMaps.Load(saved);
+        }
+        else
+        {
+            Element? root = sc.Current;
+            if (!string.IsNullOrWhiteSpace(b.Root))
+            {
+                var key = Sub(b.Root, sc).Trim();
+                root = _m.Find(key) ?? _m.AllElements.FirstOrDefault(x => x is not Relationship && (string.Equals(x.QualifiedName, key, StringComparison.OrdinalIgnoreCase)
+                    || x.Kind == ElementKind.Requirement && string.Equals(x.Get(FieldKeys.RequirementId), key, StringComparison.OrdinalIgnoreCase)))
+                    ?? _m.AllElements.FirstOrDefault(x => x is not Relationship && string.Equals(x.Name, key, StringComparison.OrdinalIgnoreCase));
+                if (root == null) { _doc.Warnings.Add($"Relation map root '{key}' not found."); Emit(ParagraphNode.Plain($"[Relation map root '{key}' not found]", italic: true)); return; }
+            }
+            if (root == null || root.Kind == ElementKind.Model && string.IsNullOrWhiteSpace(b.Root))
+            {
+                _doc.Warnings.Add("A relation map block needs a root element (or a loop element).");
+                Emit(ParagraphNode.Plain("[Relation map: no root element]", italic: true));
+                return;
+            }
+            settings = b.Settings(root);
+        }
+        Counted();
+        var rootEl = _m.Find(settings.RootId);
+        var inner = rootEl != null ? sc.With(rootEl, null, sc.Index, sc.Count) : sc;
+        var cap = NewCaption("Figure", Sub(Default(b.Caption, "Relation map of {name}"), inner), Ref(b, inner));
+        string svg = ""; double w = 0, h = 0;
+        if (!_indexOnly)
+        {
+            var g = Meridian.Core.Analysis.RelationMaps.Build(_m, settings);
+            svg = RelationMapSvg.Render(g, title: cap.Display);
+            (w, h) = (Math.Max(g.Width, 200), Math.Max(g.Height, 80));
+        }
+        Emit(new FigureNode(cap, svg, w, h, Math.Clamp(b.MaxHeight, 0.1, 1), "relmap:" + settings.ToJson()));
     }
 
     private (string Svg, double W, double H) Svg(Diagram d)

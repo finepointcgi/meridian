@@ -5,6 +5,12 @@
     <span style="flex:1">Properties</span>
     @if (E is { } sel && sel.Kind != ElementKind.Model)
     {
+        @if (sel is not Relationship && sel is not Diagram)
+        {
+            <MudTooltip Text="@(sel.Kind == ElementKind.RelationMap ? "Open this relation map" : "Relation map: everything connected to this element")">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Hub" data-testid="inspector-relation-map" OnClick="() => Shell.OpenRelationMap(sel)" aria-label="Relation map" />
+            </MudTooltip>
+        }
         <MudTooltip Text="Favorite">
             <MudIconButton Size="Size.Small" Icon="@(Ws.Favorites.Contains(sel.Id) ? Icons.Material.Filled.Star : Icons.Material.Outlined.StarBorder)"
                            Style="@(Ws.Favorites.Contains(sel.Id) ? "color:#f0b429" : "")" OnClick="() => Ws.ToggleFavorite(sel)" aria-label="Favorite" />
