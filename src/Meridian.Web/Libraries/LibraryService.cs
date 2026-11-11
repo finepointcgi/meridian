@@ -45,8 +45,21 @@ public sealed class LibraryUpdatePlan
         }, StringComparer.Ordinal);
 }
 
-/// <summary>What an applied update did, to undo it as one step.</summary>
-public sealed record LibraryUpdateResult(Guid UsageId, LibraryPinKind FromKind, string FromValue, string? FromMount, int Suspect, IReadOnlyList<LibraryMark> Marks);
+/// <summary>
+/// The suspect marks a library update set on one line (main or a branch) of a project: the project that accepted it, or one that
+/// uses that project and so moved to the new pin too. <paramref name="Version"/> is the system commit that wrote them into a line
+/// nobody had open (null when they went to a live session).
+/// </summary>
+public sealed record LineMarks(Guid ProjectId, Guid? BranchId, string Line, IReadOnlyList<LibraryMark> Marks, int? Version = null);
+
+/// <summary>
+/// What an applied update did, to undo it as one step. <see cref="Marks"/> are those of the line the update was accepted on;
+/// <see cref="Lines"/> lists every line that got marks (open or not, of this project and of the projects that use it).
+/// </summary>
+public sealed record LibraryUpdateResult(Guid UsageId, LibraryPinKind FromKind, string FromValue, string? FromMount, int Suspect, IReadOnlyList<LibraryMark> Marks)
+{
+    public IReadOnlyList<LineMarks> Lines { get; init; } = [];
+}
 
 /// <summary>
 /// Used projects (docs/LIBRARIES.md): adding, re-pinning and removing usages with their permission checks, checking for and
@@ -136,25 +149,86 @@ public sealed class LibraryService(IMeridianStore db, CollaborationHub hub)
     /// Rebuilds every live session of the project with its current libraries. Returns the model document for
     /// <paramref name="initiator"/> (that tab installs it itself), if it is connected to one of them.
     /// </summary>
-    public async Task<string?> ReloadAsync(Guid projectId, string message, string? initiator = null, Func<ModelRepository, IReadOnlyList<LibraryMark>>? afterMount = null,
-                                           List<IReadOnlyList<LibraryMark>>? marks = null)
+    public async Task<string?> ReloadAsync(Guid projectId, string message, string? initiator = null) =>
+        (await ReloadLiveAsync(projectId, message, initiator, null)).InitiatorJson;
+
+    /// <summary>What rebuilding a project's live sessions did: the initiator's document, and the marks set per live line.</summary>
+    private sealed record Reloaded(string? InitiatorJson, LineMarks? InitiatorLine, IReadOnlyList<LineMarks> Lines);
+
+    /// <summary>
+    /// Rebuilds every live session of the project with its current libraries; <paramref name="afterMount"/> may change each rebuilt
+    /// model (suspect marks, or clearing them on undo) and returns what it set. Each session is persisted at once, so a session
+    /// that is closing doesn't lose the marks.
+    /// </summary>
+    private async Task<Reloaded> ReloadLiveAsync(Guid projectId, string message, string? initiator,
+                                                 Func<ProjectSession, ModelRepository, IReadOnlyList<LibraryMark>>? afterMount)
     {
         string? mine = null;
+        LineMarks? initiatorLine = null;
+        var lines = new List<LineMarks>();
         foreach (var session in hub.SessionsOf(projectId).ToList())
         {
             var resolution = await LibraryLoader.ResolveAsync(db, hub, projectId);
             var per = new Dictionary<string, IReadOnlyList<LibraryPayload>>(StringComparer.Ordinal);
             var byUser = new Dictionary<Guid, IReadOnlyList<LibraryPayload>>();
-            foreach (var (participant, user) in session.ParticipantUsers())
+            var participants = session.ParticipantUsers();
+            foreach (var (participant, user) in participants)
             {
                 if (!byUser.TryGetValue(user, out var list)) byUser[user] = list = await LibraryLoader.ForUserAsync(db, hub, resolution, user);
                 per[participant] = list;
             }
-            var (json, result) = session.ReloadLibraries(resolution, per, message, initiator, m => afterMount?.Invoke(m) ?? []);
-            marks?.Add(result);
+            var (json, result) = session.ReloadLibraries(resolution, per, message, initiator, m => afterMount?.Invoke(session, m) ?? []);
+            var line = new LineMarks(projectId, session.BranchId, session.BranchName, result);
+            if (result.Count > 0) lines.Add(line);
+            if (initiator != null && participants.Any(p => p.ParticipantId == initiator)) initiatorLine = line;
             mine ??= json;
+            if (afterMount != null) await session.PersistAsync();
         }
-        return mine;
+        return new Reloaded(mine, initiatorLine, lines);
+    }
+
+    /// <summary>
+    /// The one place suspect marks are written into lines nobody has open (docs/LIBRARIES.md): for each line (main and every
+    /// branch) of the project without a live session, the stored head is loaded with the project's current libraries,
+    /// <paramref name="change"/> runs on it — the same function the live sessions run — and, when it set anything, the head is
+    /// saved and committed as a system version with <paramref name="commitMessage"/>. A line that is open is left to
+    /// <see cref="ReloadLiveAsync"/>.
+    /// </summary>
+    private async Task<IReadOnlyList<LineMarks>> ChangeClosedLinesAsync(Guid projectId, string commitMessage,
+                                                                         Func<Guid?, ModelRepository, IReadOnlyList<LibraryMark>> change)
+    {
+        var lines = new List<LineMarks>();
+        foreach (var line in await VersionControl.LinesAsync(db, projectId))
+        {
+            var done = await hub.ChangeClosedLineAsync<IReadOnlyList<LibraryMark>>(projectId, line.BranchId, commitMessage, async json =>
+            {
+                var resolution = await LibraryLoader.ResolveAsync(db, hub, projectId);
+                var model = resolution.Payloads.Count == 0 ? ProjectFile.Deserialize(json) : ProjectFile.Deserialize(json, resolution.Payloads);
+                IReadOnlyList<LibraryMark> marks = change(line.BranchId, model).Where(m => m.Before != m.After).ToList();   // already marked: nothing to commit
+                return marks.Count == 0 ? null : (ProjectFile.Serialize(model), marks);   // library content is never written
+            });
+            if (done is { } d) lines.Add(new LineMarks(projectId, line.BranchId, line.Name, d.Result, d.Version));
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// Projects that use <paramref name="projectId"/> directly or through other libraries: they load its libraries transitively,
+    /// so they move to a new pin of one of its usages too.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> DependentsAsync(Guid projectId)
+    {
+        var found = new List<Guid>();
+        var seen = new HashSet<Guid> { projectId };
+        var queue = new Queue<Guid>([projectId]);
+        while (queue.Count > 0 && seen.Count < 200)
+            foreach (var u in await db.ListProjectUsersAsync(queue.Dequeue()))
+                if (seen.Add(u.ProjectId))
+                {
+                    found.Add(u.ProjectId);
+                    queue.Enqueue(u.ProjectId);
+                }
+        return found;
     }
 
     // ---------------------------------------------------------------- updates
@@ -242,23 +316,64 @@ public sealed class LibraryService(IMeridianStore db, CollaborationHub hub)
             throw new InvalidOperationException("Someone changed this usage while you were reviewing the update. Review it again.");
         await db.UpdateProjectUsageAsync(usage.Id, plan.ToKind, plan.ToValue, usage.MountPointId);
         var names = plan.Before.AllElements.Concat(plan.After.AllElements).GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.Last().DisplayName, StringComparer.Ordinal);
-        var allMarks = new List<IReadOnlyList<LibraryMark>>();
-        var json = await ReloadAsync(usage.ProjectId, $"“{plan.LibraryName}” was updated to {plan.ToLabel}.", initiator,
-            m => LibraryUpdates.MarkSuspects(m, plan.LibraryName, plan.FromLabel, plan.ToLabel, plan.Changed, plan.Removed, names), allMarks);
-        var marks = allMarks.FirstOrDefault() ?? [];
-        return (json, new LibraryUpdateResult(usage.Id, usage.PinKind, usage.PinValue, usage.MountPointId, marks.Count, marks));
+        // The one choke point for the marks, open or not: references to what the reviewer saw change (the plan is their view of
+        // the library, so hidden packages are never named), on the project's own elements only (library content is read-only).
+        IReadOnlyList<LibraryMark> Mark(ModelRepository m) => LibraryUpdates.MarkSuspects(m, plan.LibraryName, plan.FromLabel, plan.ToLabel, plan.Changed, plan.Removed, names);
+
+        // Suspect marks belong to the project that accepts the update — every line of it, since the pin is the project's — and to
+        // the projects that use it (they load its libraries transitively, so they move to the new pin as well).
+        var lines = new List<LineMarks>();
+        string? json = null;
+        LineMarks? accepted = null;
+        foreach (var project in new[] { usage.ProjectId }.Concat(await DependentsAsync(usage.ProjectId)))
+        {
+            var own = project == usage.ProjectId;
+            var live = await ReloadLiveAsync(project, own ? $"“{plan.LibraryName}” was updated to {plan.ToLabel}." : $"“{plan.LibraryName}” (used through another project) was updated to {plan.ToLabel}.",
+                own ? initiator : null, (_, m) => Mark(m));
+            if (own) (json, accepted) = (live.InitiatorJson, live.InitiatorLine);
+            lines.AddRange(live.Lines);
+            lines.AddRange(await ChangeClosedLinesAsync(project, $"Library update: “{plan.LibraryName}” {plan.FromLabel} → {plan.ToLabel} (suspect references marked)", (_, m) => Mark(m)));
+        }
+        var marks = accepted?.Marks ?? [];
+        return (json, new LibraryUpdateResult(usage.Id, usage.PinKind, usage.PinValue, usage.MountPointId, marks.Count, marks) { Lines = lines });
     }
 
-    /// <summary>Undoes an applied update: the pin moves back and the suspect marks it set are cleared.</summary>
+    /// <summary>
+    /// Undoes an applied update: the pin moves back and the suspect marks it set are cleared — in the open sessions and, as a
+    /// system commit, in the lines nobody has open (of this project and of the projects that use it).
+    /// </summary>
     public async Task<string?> UndoUpdateAsync(LibraryUpdateResult result, Guid userId, string? initiator)
     {
         var usage = await db.GetProjectUsageAsync(result.UsageId) ?? throw new InvalidOperationException("That usage no longer exists.");
         await EnsureEditorAsync(usage.ProjectId, userId);
         await db.UpdateProjectUsageAsync(usage.Id, result.FromKind, result.FromValue, result.FromMount);
-        return await ReloadAsync(usage.ProjectId, $"The update of “{usage.UsedProjectName}” was undone.", initiator, m =>
+        IReadOnlyList<LibraryMark> MarksOf(Guid project, Guid? branch) =>
+            result.Lines.FirstOrDefault(l => l.ProjectId == project && l.BranchId == branch)?.Marks
+            ?? (project == usage.ProjectId && result.Lines.Count == 0 ? result.Marks : []);
+        IReadOnlyList<LibraryMark> Unmark(Guid project, Guid? branch, ModelRepository m)
         {
-            LibraryUpdates.UnmarkSuspects(m, result.Marks);
+            LibraryUpdates.UnmarkSuspects(m, MarksOf(project, branch));
             return [];
-        });
+        }
+
+        string? json = null;
+        var projects = new[] { usage.ProjectId }.Concat(result.Lines.Select(l => l.ProjectId)).Distinct().ToList();
+        foreach (var project in projects)
+        {
+            var live = await ReloadLiveAsync(project, $"The update of “{usage.UsedProjectName}” was undone.", project == usage.ProjectId ? initiator : null,
+                (s, m) => Unmark(project, s.BranchId, m));
+            if (project == usage.ProjectId) json = live.InitiatorJson;
+            foreach (var line in result.Lines.Where(l => l.ProjectId == project))
+                await hub.ChangeClosedLineAsync<IReadOnlyList<LibraryMark>>(project, line.BranchId, $"Undo library update of “{usage.UsedProjectName}” (suspect marks cleared)", async head =>
+                {
+                    var resolution = await LibraryLoader.ResolveAsync(db, hub, project);
+                    var model = resolution.Payloads.Count == 0 ? ProjectFile.Deserialize(head) : ProjectFile.Deserialize(head, resolution.Payloads);
+                    var before = ProjectFile.Serialize(model);
+                    LibraryUpdates.UnmarkSuspects(model, line.Marks);
+                    var after = ProjectFile.Serialize(model);
+                    return after == before ? null : (after, line.Marks);
+                });
+        }
+        return json;
     }
 }

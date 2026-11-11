@@ -96,6 +96,14 @@ Warnings are shown in the **Used projects** dialog.
   for hidden shapes). A library whose mount point is hidden from the participant in the using project is left out too.
   Participants without access keep the references as missing references (validation LIB-001) — nothing is dropped.
 - Library elements are read-only for everyone in the using project; the inspector offers **Open in source project**.
+- **Open in source project** needs a role on the source project and opens it as that user sees it there (`PackagePermissions.RedactJson`
+  with their view; hidden packages stay hidden). A version or baseline pin opens as a *viewer* (the session refuses edits too),
+  whatever the user's role.
+- **Suspect marks** are written by the system on the project's own elements only (never on library content, which stays
+  read-only and unsaved). Their text names library elements as the *accepting* user's review showed them, so a package hidden
+  from that user is never named. Accepting needs an editor or owner role on the using project, as before.
+- **Upstream notices** go only to owners and editors of the using project who have a role on the source project and can see
+  the used package there; the text names projects and versions, never elements.
 
 ## Using a library
 
@@ -104,6 +112,22 @@ Warnings are shown in the **Used projects** dialog.
   project* and *Used projects…* only.
 - **Diagrams.** Library elements shown on the project's diagrams carry a small marker (top right, with a tooltip naming the
   library and pin). Library diagrams open read-only, with a banner naming the used project.
+- **Open in source project** (inspector, tree menu, ⌘K, the phone's element sheet) respects the pin
+  (`Workspace.OpenAtPinAsync`):
+  - a **branch** pin joins that branch's live session (`main` is the main line), editable for the source project's editors;
+  - a **version** or **baseline** pin opens a **historical view** (`Workspace.Pinned`): the tab joins the source project's
+    main session *as a viewer* (so it is listed as present and the server refuses any edit), then installs the stored version
+    (`LibraryLoader.LoadAtPinAsync`, the same loader the libraries use) redacted for the user, with the source project's own
+    libraries as that user may read them. While it is shown, `Workspace.ReadOnly` is true, undo history is read-only, and
+    remote operations, resets and replacements from the live session are ignored (they belong to the head). A banner
+    (`PinnedViewBanner`) says **Viewing version 3 (pinned)** / **Viewing baseline PDR — version 5 (pinned)**
+    (`LibraryPins.ViewLabel`) with **Go to latest**, which opens the main line normally.
+- **Phones** (`Components/Mobile`): the model list shows a library's root package with its pin badge (`m-lib-badge`), its
+  content in italics with "read-only" in the subtitle, and a "From … — read-only" hint inside it; the element sheet names the
+  used project and offers *Open source*. The top bar shows a library icon with the number of updates
+  (`MobileLibraryUpdates`); one update opens its review, several are listed in an action sheet first. The review
+  (`LibraryUpdateDialog`) opens full screen on a phone (`lib-sheet` styles: wrapped header, diagrams and changes fitting the
+  width, large buttons). Checked at 390×844 without horizontal scrolling (E2E `LibraryGapsTests`).
 - **Typing and linking.** The inspector's type picker lists library blocks and value types. Drag a library requirement onto
   a diagram and draw satisfy / trace / allocate to it, or use the traceability tools; these relationships belong to the project.
 - **Exports.** XMI, SysML v2 text and the HTML report ask whether to **include library content** (inline, as if it were part
@@ -124,6 +148,33 @@ Warnings are shown in the **Used projects** dialog.
   (`ReqFields.LibraryChange`): trace links appear in the suspect lists and traceability table, other elements (a part typed by
   a changed block) in validation **TRC-001** and in the inspector with *Mark reviewed*. A library element counts as changed
   when it or anything it owns changed. It is **one undo step**: ⌘Z moves the pin back and clears the marks it set.
+- **Where the marks go.** Suspect marks belong to the project that accepts the update, at the moment it accepts it. The pin
+  is the project's (one `project_usages` row for all its lines), so every line of that project moves, and so does every
+  project that uses it, directly or through other libraries (they load its usages transitively, `DependentsAsync`).
+  `LibraryService.ApplyUpdateAsync` runs **one marking function** (`LibraryUpdates.MarkSuspects` with the reviewed change
+  set) through two paths:
+  - lines with a live session are rebuilt (`ProjectSession.ReloadLibraries`), marked, and persisted at once;
+  - lines nobody has open are changed through `CollaborationHub.ChangeClosedLineAsync`, which holds the session-open gate (no
+    session can open that line meanwhile), loads the stored head with the project's current libraries, marks it, saves it as
+    the head and commits it as a **system version** (no author) named *Library update: “Parts” v3 → v4 (suspect references
+    marked)*. A line where nothing new was marked gets no commit.
+
+  `LibraryUpdateResult.Lines` records the marks per project and line (and the system commit, if any); undo clears them the same
+  way (live sessions rebuilt, closed lines changed by a system commit *Undo library update …*).
+- **Tabs survive.** Installing a rebuilt model (accepting or undoing an update here, or receiving one from the session —
+  `Replaced`, also used for merges and resyncs — and version restores) keeps every diagram tab whose diagram still exists, in
+  order, with its zoom, scroll position, active layer and canvas selection (`DiagramController.TakeViewFrom`); the active tab
+  stays active (or its left neighbour when its diagram was removed), view tabs of saved elements and the code-change and
+  architecture reviews stay open, the selected element and back/forward history are kept (`Workspace.CaptureTabs` /
+  `RestoreTabs`). Only when nothing is left do the default diagrams open.
+- **Library changed upstream.** When a project commits a version of its main line (`VersionControl.CommitAsync` →
+  `ProjectSession.VersionCommittedAsync`, and merges into main), `LibraryNotices.VersionCommittedAsync` looks at the projects
+  that use one of its packages pinned to an older **version**. When this commit changed that package (compared with the
+  previous version) and it differs from the pinned content, their owners and editors who may read it (see Permissions) get a
+  notification of kind `library_update` — the usage id in the notification's element id — with **Review update**, which opens
+  the project, checks for updates and opens that usage's review. At most one unread notice per usage and user; each user can
+  turn them off (Settings ▸ Editor ▸ *Library changed upstream*, `UserPreferences.LibraryUpstreamNotices`). A failure is
+  logged and never fails the commit. System commits (suspect marks) don't notify.
 - **Removed library elements** that are still referenced become **missing references** (see above): kept, drawn as dashed
   placeholders and reported by LIB-001 until someone retargets or deletes the reference.
 
@@ -168,10 +219,12 @@ and a throwaway Testcontainers PostgreSQL.
 
 ## Limits
 
-- Suspect marks are applied to the live sessions of the project (main and open branches); a branch nobody has open is not
-  marked until it is next opened and checked.
 - A participant who can't read a library sees references to it as missing references; operations of others that create new
   references to library elements reach such a participant only on their next resynchronisation.
-- "Open in source project" opens the source project's main line, whatever the pin.
+- Upstream notices are sent for version pins only: a branch pin follows its head live (it can't fall behind), and a baseline
+  pin moves when a baseline is made, which doesn't notify.
+- A historical (pinned) view mounts the source project's *current* libraries, not the ones it used at that version.
+- A project that uses the accepting project through a **baseline or version** pin still moves to the new pin of the library
+  (usages are followed as they are now, not as they were at that version), so it gets the marks too.
 - The Cameo import recognises used projects from `href`s, project metadata and proxies; the module's own copy rules
   (shared packages, read-only flags) are not interpreted.

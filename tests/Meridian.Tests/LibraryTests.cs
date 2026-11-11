@@ -360,6 +360,70 @@ public class LibraryTests
         Assert.Contains(sat.Id, ProjectFile.Serialize(fromLive));
     }
 
+    // ================================================================= closing the gaps (offline marks, phone, pinned view, tabs)
+
+    /// <summary>
+    /// The stored-head path of a library update: a project document nobody has open is loaded with the new pin, marked by the same
+    /// function the live sessions run, and written back — with the marks, without library content; marking it again changes
+    /// nothing (so no second system commit).
+    /// </summary>
+    [Fact]
+    public void Stored_Head_Is_Marked_By_The_Same_Function_And_Saved_Without_Library_Content()
+    {
+        var (src, pkg, wheel, _) = PartsLibrary();
+        var (_, json, part, _) = UsingProject(Payload(src, pkg));
+        src.Set(src.Find(wheel.Id)!, FieldKeys.Documentation, "19 inch");
+        var v2 = Payload(src, pkg, "2");
+
+        var head = ProjectFile.Deserialize(json, [v2]);
+        var marks = LibraryUpdates.MarkSuspects(head, "Parts Library", "v1", "v2", new HashSet<string> { wheel.Id }, new HashSet<string>(), new Dictionary<string, string>());
+        Assert.Contains(marks, mk => mk.ElementId == part.Id && mk.Before is null);
+        var saved = ProjectFile.Serialize(head);
+        Assert.DoesNotContain("19 inch", saved);                         // library content is never written
+        Assert.Contains("Wheel changed in Parts Library (v1", saved);
+
+        var again = ProjectFile.Deserialize(saved, [v2]);
+        var second = LibraryUpdates.MarkSuspects(again, "Parts Library", "v1", "v2", new HashSet<string> { wheel.Id }, new HashSet<string>(), new Dictionary<string, string>());
+        Assert.All(second, mk => Assert.Equal(mk.Before, mk.After));    // already marked: nothing new to commit
+        Assert.Throws<ReadOnlyElementException>(() => again.Set(again.Find(wheel.Id)!, ReqFields.LibraryChange, "x"));   // library elements are never marked
+    }
+
+    /// <summary>The phone list shows a badge on a library's root and "read-only" for everything inside it, nested libraries included.</summary>
+    [Fact]
+    public void Library_Root_And_Nested_Content_Are_Recognised_For_The_Phone_List()
+    {
+        var (src, pkg, wheel, _) = PartsLibrary();
+        var (m, _, part, _) = UsingProject(Payload(src, pkg));
+        var root = m.Find(pkg.Id)!;
+        Assert.True(m.IsLibraryRoot(root));
+        Assert.Same(m.LibraryOf(root), m.LibraryOf(m.Find(wheel.Id)));
+        Assert.False(m.IsLibraryRoot(m.Find(wheel.Id)!));
+        Assert.Null(m.LibraryOf(part));
+        Assert.Contains(root, m.Root.OwnedElements);   // listed below its mount point like any package
+    }
+
+    [Theory]
+    [InlineData(LibraryPinKind.Version, "v3", 3, "Viewing version 3 (pinned)")]
+    [InlineData(LibraryPinKind.Baseline, "baseline PDR", 5, "Viewing baseline PDR — version 5 (pinned)")]
+    [InlineData(LibraryPinKind.Branch, "dev (head)", null, "Viewing branch dev (pinned head)")]
+    public void Pinned_View_Labels_Name_The_Pin(LibraryPinKind kind, string label, int? version, string expected) =>
+        Assert.Equal(expected, LibraryPins.ViewLabel(kind, label, version));
+
+    /// <summary>Rebuilding a model with a new pin keeps the project's own diagrams (same ids, same shapes), so their tabs can stay open.</summary>
+    [Fact]
+    public void Rebuilt_Model_Keeps_The_Projects_Diagrams_And_Drops_Removed_Library_Ones()
+    {
+        var (src, pkg, _, _) = PartsLibrary();
+        var (m, json, _, _) = UsingProject(Payload(src, pkg));
+        var own = m.Diagrams.Where(d => !m.IsLibraryElement(d)).Select(d => (d.Id, d.Nodes.Count)).ToList();
+        var libDiagram = m.Diagrams.Single(m.IsLibraryElement).Id;
+
+        src.Delete(src.Diagrams.Single());
+        var rebuilt = ProjectFile.Deserialize(json, [Payload(src, pkg, "2")]);
+        foreach (var (id, nodes) in own) Assert.Equal(nodes, Assert.IsType<Diagram>(rebuilt.Find(id)).Nodes.Count);
+        Assert.Null(rebuilt.Find(libDiagram));
+    }
+
     [Fact]
     public void Models_Without_Libraries_Are_Unchanged()
     {

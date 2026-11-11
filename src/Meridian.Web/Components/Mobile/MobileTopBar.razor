@@ -7,7 +7,8 @@
         <span class="logo"><MudIcon Icon="@Icons.Material.Filled.Hub" /></span>
         <span class="m-project-text">
             <span class="name">@(Ws.Session?.Name ?? "No project")</span>
-            @if (Ws.ReadOnly) { <span class="ro-badge">View only</span> }
+            @if (Ws.Pinned is { } pin) { <span class="m-pinned-badge" data-testid="m-pinned">@pin.Label</span> }
+            else if (Ws.ReadOnly) { <span class="ro-badge">View only</span> }
         </span>
         <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Class="chev" />
     </button>
@@ -16,6 +17,10 @@
         <span class="m-branch"><BranchPicker /></span>
     }
     <span class="grow"></span>
+    @if (Ws.Session != null)
+    {
+        <MobileLibraryUpdates />
+    }
     <button class="m-icon-btn" aria-label="Search" @onclick="Search"><MudIcon Icon="@Icons.Material.Outlined.Search" /></button>
     @if (!Host.LocalMode)
     {

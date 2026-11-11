@@ -23,6 +23,17 @@ hidden here.
 - Library elements **can't be changed** here. The inspector says where they come from and offers **Open in source project**.
 - Library diagrams open read-only.
 
+### Open in source project
+
+**Open in source project** opens the library's project *at your pin*, with the element selected:
+
+- pinned to a **version** or a **baseline**: a read-only view of that stored version, labelled **Viewing version 3 (pinned)**
+  (or *Viewing baseline PDR — version 5 (pinned)*). Nothing can be edited there, and edits others make to the project meanwhile
+  don't change what you see. **Go to latest** opens the project's current main line;
+- pinned to a **branch**: that branch, live — editable if you are an editor of the source project.
+
+Packages hidden from you in the source project stay hidden in this view too.
+
 Library content is never saved into your project: only your references to it are. When you **export** XMI, SysML v2 text or
 the HTML report, Meridian asks whether to include the library content or only reference it.
 
@@ -39,7 +50,26 @@ that use what changed. **Update** moves the pin:
   validation) until you mark them reviewed;
 - references to library elements that were **removed** stay, as **missing references**: a dashed shape on diagrams and a
   validation error (LIB-001), never silently dropped;
-- it is **one undo step** — ⌘Z puts the old pin back.
+- the pin belongs to the whole project, so **every branch** gets the suspect marks — also branches nobody has open, and
+  projects that use your project (they load its libraries too): there the marks arrive as a version committed by the system
+  (*Library update: “Parts” v3 → v4 …*), so they are waiting when someone opens it;
+- your open diagram **tabs stay open** (except diagrams the update removed), with the same active tab, zoom, scroll position and
+  selection;
+- it is **one undo step** — ⌘Z puts the old pin back and clears the marks it set, everywhere.
+
+### Library changed upstream
+
+When a project you edit uses a library pinned to a version, and someone commits a new version of the library's project that
+changes the package you use, you get a notification (the bell): *“Parts” changed upstream: v5 is available for “Vehicle”
+(pinned to v4).* **Review update** opens the project and the update review. You only hear about libraries you can read, at
+most once until you have read the notification; turn it off in **Settings ▸ Editor ▸ Library changed upstream**.
+
+## On a phone
+
+The **Model** list shows used projects like everything else, with the pin as a badge (for example `v3`) and *read-only* on
+their content; an element's sheet says which used project it comes from and offers **Open source**. When updates are available
+a library icon with a count appears in the top bar: it opens the update review as a full-screen sheet, with **Update** at the
+bottom.
 
 ## Manage usages
 

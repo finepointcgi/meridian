@@ -131,7 +131,12 @@ window.meridian = (() => {
         try { el.setPointerCapture(e.pointerId); } catch { }
         if (e.button === 1) e.preventDefault();
       });
-      const ro = new ResizeObserver(() => { const r = el.getBoundingClientRect(); dotnet.invokeMethodAsync("OnResize", r.width, r.height); });
+      // The canvas may be leaving the page (e.g. a project without diagrams opened): its .NET side is then already disposed.
+      const ro = new ResizeObserver(() => {
+        if (!el.isConnected) return;
+        const r = el.getBoundingClientRect();
+        dotnet.invokeMethodAsync("OnResize", r.width, r.height).catch(() => { });
+      });
       ro.observe(el);
       el._meridianRo = ro;
     },

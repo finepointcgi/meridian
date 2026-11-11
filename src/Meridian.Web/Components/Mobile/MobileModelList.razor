@@ -27,19 +27,32 @@
         <input type="search" placeholder="Search elements" value="@_query" aria-label="Search elements"
                @oninput="e => _query = e.Value?.ToString()" />
     </div>
+    @if (_query is not { Length: > 0 } && Ws.Model.LibraryOf(container) is { } inLib)
+    {
+        @* Used project (docs/LIBRARIES.md): its content is read-only here. *@
+        <div class="m-lib-hint" data-testid="m-lib-hint">
+            <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" />
+            <span>From @inLib.Info.SourceProjectName · @inLib.Info.PinLabel — read-only</span>
+        </div>
+    }
     <ul class="m-list" role="list">
         @foreach (var e in Items(container))
         {
             var el = e;
             var children = ChildCount(el);
             var drill = children > 0 && el is not Diagram && _query is not { Length: > 0 };
-            <li class="m-row @(ReferenceEquals(Ui.ModelHighlight, el) || ReferenceEquals(Ws.Selected, el) ? "sel" : "")" data-id="@el.Id">
+            var lib = Ws.Model.HasLibraries ? Ws.Model.LibraryOf(el) : null;
+            <li class="m-row @(ReferenceEquals(Ui.ModelHighlight, el) || ReferenceEquals(Ws.Selected, el) ? "sel" : "") @(lib != null ? "lib" : "")" data-id="@el.Id">
                 <button class="m-row-main" @onclick="() => Tap(el, drill)">
                     @KindIcon.For(el)
                     <span class="m-row-text">
                         <span class="m-row-title">@Title(el)</span>
-                        <span class="m-row-sub">@Subtitle(el, children)</span>
+                        <span class="m-row-sub">@(lib != null ? $"{Subtitle(el, children)} · {lib.Info.SourceProjectName} (read-only)" : Subtitle(el, children))</span>
                     </span>
+                    @if (lib != null && ReferenceEquals(lib.Root, el))
+                    {
+                        <span class="m-lib-badge" data-testid="m-lib-badge" title="@($"From {lib.Info.Badge} — read-only")"><MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" Style="font-size:12px" />@lib.Info.PinLabel</span>
+                    }
                     @if (drill) { <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="m-chev" /> }
                 </button>
                 @if (drill || el is Diagram)

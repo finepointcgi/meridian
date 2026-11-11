@@ -43,6 +43,17 @@ public sealed partial class ProjectSession
 
     private void ForgetLibraries(string participantId) => _libraryAccess.Remove(participantId);
 
+    /// <summary>The libraries a participant may read (what their snapshot carries), for a historical view of this project.</summary>
+    internal IReadOnlyList<LibraryPayload> LibrariesFor(string participantId)
+    {
+        lock (_gate)
+        {
+            if (!_libraryAccess.TryGetValue(participantId, out var mine)) return [];
+            var view = _access.TryGetValue(participantId, out var a) ? a.View : AccessView.ReadAll;
+            return mine.Where(p => MountVisible(view, p.Info)).ToList();
+        }
+    }
+
     /// <summary>Adds a participant's libraries to their (possibly filtered) project document.</summary>
     private string WithLibrariesFor(string participantId, AccessView view, string json)
     {
