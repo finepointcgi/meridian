@@ -1745,6 +1745,9 @@ public sealed partial class DiagramController
             if (Notation.IsBorderShape(from.Element) && Diagram.ParentOf(from) is { } fp) Model.Set(r, FieldKeys.SourcePart, fp.Element.Id);
             if (Notation.IsBorderShape(to.Element) && Diagram.ParentOf(to) is { } tp) Model.Set(r, FieldKeys.TargetPart, tp.Element.Id);
             edge = Model.AddEdge(Diagram, r);
+            // Links: typed by the one association between the instances' classifiers; with several, the user picks (after this step).
+            if (kind == ElementKind.Link && Meridian.Core.Instances.InstanceModel.TypeLink(Model, r) is { Count: > 1 } choices && _ws.AskLinkAssociation != null)
+                _pendingLinkChoice = (r, choices);
             // Foreign keys: from the column the drag started on to the one it ended on; the referencing column is created when needed.
             if (kind == ElementKind.ForeignKey && from.Element.Kind == ElementKind.Table && to.Element.Kind == ElementKind.Table && r is Relationship fk)
                 Meridian.Core.DataModeling.DbModel.CompleteForeignKey(Model, fk,
@@ -1753,12 +1756,23 @@ public sealed partial class DiagramController
             // A message's vertical position is its place in time: use where the user started dragging.
             if (edge != null && kind == ElementKind.Message)
                 Model.SetWaypoints(Diagram, edge, [new Pt(0, Snap(Math.Max(_pressModel.Y, from.Bounds.Y + Notation.LifelineHeader + 20)))]);
-            if (!select) return edge;
+            if (!select) { AskPendingLinkType(); return edge; }
             _selNodes.Clear();
             SelectedEdge = edge;
         }
         Notify();
+        AskPendingLinkType();
         return edge;
+    }
+
+    private (Relationship Link, IReadOnlyList<Relationship> Choices)? _pendingLinkChoice;
+
+    /// <summary>Asks which association a link just drawn is an instance of, once the step that created it is over.</summary>
+    private void AskPendingLinkType()
+    {
+        if (_pendingLinkChoice is not var (link, choices) || _ws.AskLinkAssociation is not { } ask) return;
+        _pendingLinkChoice = null;
+        _ = ask(link, choices);
     }
 
     private void InsertWaypoint(DiagramEdge edge, Pt at)

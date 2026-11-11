@@ -45,6 +45,7 @@ can always compare against it.
 | Relation map / impact analysis | **Traceability → Impact** (transitive dependents, as a list) |
 | Suspect links | **Suspect links**, cleared in the traceability table |
 | Generic table | **Model views → Generic table** (saved as a *Table View* element) |
+| Instance specifications, slots, instance table, "Create instance" | **Instances**: right-click a block ▸ **Create instance of…** builds the whole part tree; the **instance table** edits slots with units and exports CSV / XLSX; **object diagrams**; links typed by associations; a run's subject can be an instance ([details](instances.md)) |
 | Find / smart packages / derived queries | **Model views → Query** (saved as a *Query* element); the **command palette** (⌘K) finds anything by name |
 | Validation suites and constraints | **Validate** (built-in rules) plus **validation rules** written as model queries, and plugin rules |
 | Profiles, stereotypes, customizations | **Profiles** with stereotypes, metaclasses, colours and tag definitions; *Add UAF profile* |
@@ -88,6 +89,7 @@ can always compare against it.
 | Relationship Matrix | **Traceability matrix** |
 | Traceability window | **Traceability table** and **Impact** |
 | Model Search, Model Views | **Query** and **Generic table** in *Model views* |
+| Objects (instances) with run state, object diagrams | **Instances** with slots, the **instance table** and **object diagrams**; `.qea` Objects import with their run state as slots ([details](instances.md)) |
 | Security: package permissions | **Package permissions** (none / read / edit / manage per person or team) ([details](permissions.md)) |
 | Simulation-based requirement checks | **Simulate ▸ Verify** with requirement criteria ([details](verification.md)) |
 | Architecture and code conformance checks | **Code ▸ Architecture**: synced code against the model's allowed dependencies ([details](code-sync.md)) |

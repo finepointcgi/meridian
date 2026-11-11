@@ -252,6 +252,23 @@ public sealed class MagicDrawImportTests : IDisposable
     }
 
     [Fact]
+    public void Instance_Specifications_Import_With_Slots_And_Links()
+    {
+        var (m, _) = ImportFixture();
+        var drone1 = ById(m, "_inst");
+        Assert.Equal(ElementKind.InstanceSpecification, drone1.Kind);
+        Assert.Equal(["_drone"], Meridian.Core.Instances.InstanceModel.ClassifierIds(drone1));
+        var lines = Meridian.Core.Instances.InstanceModel.Slots(drone1).Select(s => Meridian.Core.Instances.InstanceModel.SlotLine(m, s)).Order().ToList();
+        Assert.Equal(["controller = fc1", "mass = 1.4"], lines);
+        Assert.Equal(["_ctrl"], Meridian.Core.Instances.InstanceModel.ClassifierIds(ById(m, "_inst2")));   // classifier as a child reference
+        var link = Assert.IsType<Relationship>(ById(m, "_lnk"));
+        Assert.Equal(ElementKind.Link, link.Kind);
+        Assert.Same(drone1, link.Source);
+        Assert.Same(ById(m, "_inst3"), link.Target);
+        Assert.Same(ById(m, "_assoc1"), Meridian.Core.Instances.InstanceModel.AssociationOf(m, link));
+    }
+
+    [Fact]
     public void Report_Counts_Kinds_And_Lists_Skipped_Constructs()
     {
         var (_, report) = ImportFixture();
@@ -259,7 +276,9 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Equal(2, report.Imported["Requirement"]);
         Assert.Equal(1, report.Imported["Satisfy"]);
         Assert.Equal(1, report.Imported["Composition"]);
-        Assert.Equal(1, report.Skipped["Instance specifications"]);
+        Assert.Equal(3, report.Imported["Instance"]);
+        Assert.Equal(1, report.Imported["Link"]);
+        Assert.False(report.Skipped.ContainsKey("Instance specifications"));
         Assert.Equal(1, report.Skipped["uml:Frobnicator"]);
         Assert.True(report.Skipped["Project resources (options, proxies, used-project backups)"] >= 3);
         Assert.Equal(1, report.Imported["Pseudostate"]);

@@ -52,7 +52,8 @@ diagram, or ⌘K *Hide verification results on diagrams*, turns this off.
 ## Verification runs
 
 For repeatable checks, press **New run** in the Verification tab. A run is a test case that says what to analyse:
-the subject, the analysis, a **variant** to verify (see [Variants and trade studies](variants-trade-studies.md)),
+the subject (a block or behaviour, or an [instance](instances.md) whose slot values replace its block's default values),
+the analysis, a **variant** to verify (see [Variants and trade studies](variants-trade-studies.md)),
 input overrides such as `mass = 1.7 t`, Monte Carlo samples and simulation stop time. Select a run and press
 **Verify** to execute just that run. Its overall verdict shows in the VCRM and the traceability views like any test
 case.

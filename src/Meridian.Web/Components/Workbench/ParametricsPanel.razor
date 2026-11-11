@@ -7,6 +7,16 @@
                ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
         @foreach (var b in Blocks()) { <MudSelectItem Value="@b.Id">@b.DisplayName</MudSelectItem> }
     </MudSelect>
+    @{ var instances = Instances().ToList(); }
+    @if (instances.Count > 0)
+    {
+        @* An instance of the block: its slot values replace the block's default values (Instances/InstanceAnalysis.cs). *@
+        <MudSelect T="string" Label="Instance" @bind-Value="_instanceId" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="min-width:200px"
+                   ToStringFunc="@(id => string.IsNullOrEmpty(id) ? "(default values)" : Ws.Model.Find(id)?.DisplayName ?? "")">
+            <MudSelectItem Value="@("")">(default values)</MudSelectItem>
+            @foreach (var i in instances) { <MudSelectItem Value="@i.Id">@Meridian.Core.Instances.InstanceTable.PathOf(i)</MudSelectItem> }
+        </MudSelect>
+    }
     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Functions" Disabled="_blockId == null" OnClick="Solve">Solve</MudButton>
     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Save" Disabled="@(_result == null || Ws.ReadOnly)" OnClick="Store">Store results as tagged values</MudButton>
     <MudText Typo="Typo.caption" Style="color:var(--text-3)">Value properties with a default are inputs; the rest are solved through the bound constraint equations.</MudText>
@@ -34,6 +44,10 @@
 
 @code {
     private string? _blockId;
+    private string? _instanceId;
+
+    private IEnumerable<Element> Instances() =>
+        Ws.Model.Find(_blockId) is { } block ? Meridian.Core.Instances.InstanceModel.InstancesOf(Ws.Model, block) : [];
     private ParametricResult? _result;
 
     private IEnumerable<Element> Blocks() => Ws.Model.AllElements.Where(e => e.Kind is ElementKind.Block or ElementKind.Class && Parametrics.ConstraintUsages(Ws.Model, e).Any()).OrderBy(e => e.Name);
@@ -47,13 +61,14 @@
     private void Solve()
     {
         if (Ws.Model.Find(_blockId) is not { } block) return;
-        _result = Parametrics.Solve(Ws.Model, block);
+        var instance = Ws.Model.Find(_instanceId) is { Kind: ElementKind.InstanceSpecification } i ? i : null;
+        _result = Parametrics.Solve(Ws.Model, block, instance == null ? null : Meridian.Core.Instances.InstanceAnalysis.ValueOverrides(Ws.Model, instance, block));
         Ws.SetStatus(_result.Complete ? "Parametric solution complete" : "Parametric solution incomplete — see the panel");
     }
 
     private void Store()
     {
-        if (_result == null) return;
+        if (_result == null || !string.IsNullOrEmpty(_instanceId)) { if (_result != null) Ws.SetStatus("Results of an instance are not stored on the block"); return; }
         try
         {
             using (Ws.Model.History.Transaction("Store parametric results"))

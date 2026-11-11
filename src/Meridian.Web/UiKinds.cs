@@ -23,6 +23,7 @@ public static class UiKinds
         ElementKind.Operation => "#8a5a00",
         ElementKind.Feature or ElementKind.Configuration or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes => "#8e44ad",
         ElementKind.TradeStudy => "#d35400",
+        ElementKind.InstanceSpecification or ElementKind.Slot or ElementKind.Link => "#16a085",
         _ => "#6b7586",
     };
 
@@ -37,6 +38,7 @@ public static class UiKinds
         ElementKind.Comment => "”", ElementKind.InitialNode or ElementKind.InitialState => "●", ElementKind.ActivityFinalNode or ElementKind.FinalState => "◉",
         ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬", ElementKind.Pseudostate => "◇", ElementKind.InteractionOperand => "┄",
         ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
+        ElementKind.InstanceSpecification => "i", ElementKind.Slot => "=",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
     };
@@ -50,6 +52,8 @@ public static class UiKinds
             return $"{name}«{kw}» {r.Source.DisplayName} → {r.Target.DisplayName}";
         }
         if (e.Kind == ElementKind.Requirement) return $"{e.Get(FieldKeys.RequirementId)} {e.DisplayName}".Trim();
+        if (e.Kind == ElementKind.InstanceSpecification) return Meridian.Core.Instances.InstanceModel.Label(m, e);
+        if (e.Kind == ElementKind.Slot) return Meridian.Core.Instances.InstanceModel.SlotLine(m, e);
         if (Metamodel.IsTypedFeature(e.Kind))
         {
             var t = m.TypeDisplayName(e);
@@ -146,6 +150,9 @@ public static class UiKinds
         ElementKind.InlineInteraction => MudBlazor.Icons.Material.Outlined.SwapVert,
         ElementKind.CommunicationLifeline => MudBlazor.Icons.Material.Outlined.CropSquare,
         ElementKind.CommunicationLink => MudBlazor.Icons.Material.Outlined.HorizontalRule,
+        ElementKind.InstanceSpecification => MudBlazor.Icons.Material.Outlined.DataObject,
+        ElementKind.Slot => MudBlazor.Icons.Material.Outlined.DragHandle,
+        ElementKind.Link => MudBlazor.Icons.Material.Outlined.Link,
         _ => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
     };
 
@@ -216,6 +223,7 @@ public static class UiKinds
         DiagramType.Timing => MudBlazor.Icons.Material.Outlined.Timeline,
         DiagramType.InteractionOverview => MudBlazor.Icons.Material.Outlined.Schema,
         DiagramType.Communication => MudBlazor.Icons.Material.Outlined.Hub,
+        DiagramType.Object => MudBlazor.Icons.Material.Outlined.DataObject,
         _ when UafViewpoints.IsUaf(t) => MudBlazor.Icons.Material.Outlined.Widgets,
         _ => MudBlazor.Icons.Material.Outlined.Class,
     };

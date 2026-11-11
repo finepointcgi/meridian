@@ -54,6 +54,7 @@ public static partial class MagicDrawImporter
             ReadProjectMetadata();   // used projects (MagicDrawUsedProjects.cs)
             ResolveTypes();
             ResolveRelationships();
+            BuildInstances();   // instance specifications, slots and links (MagicDrawInstances.cs)
             ResolveFieldRefs();
             ClassifyProperties();
             BuildDiagrams();
@@ -357,6 +358,7 @@ public static partial class MagicDrawImporter
                     return;
                 case "Extension" or "ProfileApplication" or "PackageImport" or "ElementImport" or "Diagram":
                     return;
+                case "InstanceSpecification": CollectInstance(c, owner, id); return;   // built after the model (MagicDrawInstances.cs)
                 case "Pseudostate": HandlePseudostate(c, owner, id); return;
                 case "Lifeline":
                 {

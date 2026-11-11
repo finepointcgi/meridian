@@ -513,7 +513,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification, Instances }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -525,7 +525,7 @@ public sealed class ViewTab(ViewTabKind kind)
     /// <summary>Per-tab state owned by the view (e.g. the template being edited).</summary>
     public object? State { get; set; }
 
-    public string Title => Element is { } e ? e.DisplayName : Kind switch
+    public string Title => Kind == ViewTabKind.Instances && Element is { } c ? $"{c.DisplayName} instances" : Element is { } e ? e.DisplayName : Kind switch
     {
         ViewTabKind.Table => "New generic table",
         ViewTabKind.Query => "New query",

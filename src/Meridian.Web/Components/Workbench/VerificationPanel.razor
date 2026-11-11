@@ -309,7 +309,8 @@ else
     }
 
     private IEnumerable<Element> Subjects() => Ws.Model.AllElements
-        .Where(e => e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Activity or ElementKind.StateMachine)
+        .Where(e => e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Activity or ElementKind.StateMachine
+                    || e.Kind == ElementKind.InstanceSpecification && e.Owner?.Kind != ElementKind.InstanceSpecification)   // an instance: its slots override defaults
         .OrderBy(e => e.Kind).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
 
     private void NewRun()
