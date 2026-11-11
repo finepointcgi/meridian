@@ -122,8 +122,8 @@ public sealed class RequirementsToolConfig
     public string? Validate(bool needProject = true)
     {
         if (!RequirementsToolKinds.All.Contains(Type)) return "Choose DOORS Next or Polarion.";
-        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback)))
-            return "The server URL must be an absolute https:// URL.";
+        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp) || u.Host.Length == 0)
+            return "The server URL must be an absolute http:// or https:// URL.";
         if (IsDoors)
         {
             if (!JazzAuth.All.Contains(Auth)) return "Choose how to sign in.";

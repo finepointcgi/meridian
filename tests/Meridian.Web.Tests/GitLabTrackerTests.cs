@@ -238,7 +238,8 @@ public class GitLabTrackerTests
         Assert.Null(Config("https://gitlab.acme.test", "group/sub.group/my-project_1").Validate());
         Assert.NotNull(Config(project: "justone").Validate());
         Assert.NotNull(Config(project: "a//b c").Validate());
-        Assert.NotNull(Config("http://gitlab.com").Validate());
+        Assert.Null(Config("http://gitlab.internal").Validate());
+        Assert.NotNull(Config("ftp://gitlab.com").Validate());
         var bad = Config();
         bad.IssueType = "Epic";
         Assert.NotNull(bad.Validate());
