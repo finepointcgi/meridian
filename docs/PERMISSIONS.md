@@ -83,6 +83,9 @@ placeholders. The server never sends them hidden data:
 - **Their workspace model** (Blazor Server keeps it on the server, but everything rendered — tree, diagrams, search,
   tables, matrices, reports, exports, validation, the assistant's context and tools, scripts' reads — is built from it)
   is installed from `ProjectSession.SnapshotFor(participant)`.
+- **Generated reports** are written from a snapshot of that model and downloaded from `GET /api/reports/{id}/file` by
+  their owner only, while still a project member. The job records which packages' contents the owner could see; if a
+  rule later hides one of them, the download is refused (403, "generate it again").
 - **Live collaboration**: others' operations are relayed only when they touch what the user can see; operations inside
   hidden packages are dropped; an operation that changes what they can see (a move across the boundary, a new view of a
   hidden element) is replaced by a fresh filtered model (`PermissionCheck.Probe`/`Decide`). Merges, restores and code

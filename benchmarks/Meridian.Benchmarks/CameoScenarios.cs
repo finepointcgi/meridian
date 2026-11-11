@@ -65,11 +65,15 @@ public static class CameoScenarios
 
         // ---------------------------------------------------------------- reports, auto diagrams, code sync
         time("HTML report (HtmlReport)", () => HtmlReport.Generate(m).Length);
-        time("SRS template report (HTML)", () =>
-        {
-            try { return ReportEngine.Generate(m, ReportTemplates.Srs(), ReportFormat.Html).Length; }
-            catch (OverflowException) { Console.WriteLine("  (SRS report: the document exceeds the 2 GB string limit)"); return -1; }
-        });
+        time("SRS template report (HTML)", () => ReportEngine.Generate(m, ReportTemplates.Srs(), ReportFormat.Html).Length);
+        // Whole-model template reports, streamed (docs/PERFORMANCE.md, "Reports"); MERIDIAN_HEAVY=1 HeavyReportTests does Word and PDF too.
+        foreach (var t in new[] { ReportTemplates.Sdd(), ReportTemplates.ModelOverview() })
+            time($"{t.Name} template report (HTML, streamed)", () =>
+            {
+                var prepared = ReportEngine.Prepare(m, t);
+                ReportEngine.Write(prepared, ReportFormat.Html, Stream.Null);
+                return (int)prepared.EstimatedPages;
+            });
         time("AutoDiagrammer plan (whole model)", () => AutoDiagrammer.Plan(m).Diagrams.Count);
         timeOnce("Code-sync apply (300 types)", copy => CodeModelMapper.Apply(copy, SyntheticCode(300), new CodeSyncOptions { RepoId = "gh:bench", Commit = "c1", RootPackage = "Flight Software" }).Added.Count);
 

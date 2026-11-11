@@ -62,6 +62,7 @@ public sealed class ReportJob
     /// was made; null when package permissions don't apply (no project, or nothing hidden by design).</summary>
     internal IReadOnlyList<string[]>? VisiblePackages { get; }
     internal DateTime LastNotified;
+    internal int TrailingScheduled;
 }
 
 /// <summary>
@@ -228,7 +229,8 @@ public sealed class ReportJobService : IDisposable
 
     // ------------------------------------------------------------ housekeeping
 
-    internal void Sweep(DateTime now)
+    /// <summary>Removes finished jobs (and their files) older than <see cref="Retention"/>, and expired tickets. Runs every five minutes.</summary>
+    public void Sweep(DateTime now)
     {
         foreach (var j in _jobs.Values)
             if (j.IsDone && j.FinishedAt is { } f && now - f > Retention && _jobs.TryRemove(j.Id, out _)) DeleteFile(j);
@@ -243,10 +245,22 @@ public sealed class ReportJobService : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _log.LogDebug(ex, "Could not delete {Path}", p); }
     }
 
+    private static readonly TimeSpan Throttle = TimeSpan.FromMilliseconds(250);
+
     private void Raise(ReportJob job, bool force = false)
     {
         var now = DateTime.UtcNow;
-        if (!force && now - job.LastNotified < TimeSpan.FromMilliseconds(250)) return;
+        if (!force && now - job.LastNotified < Throttle)
+        {
+            // Too soon: make sure the latest state still goes out shortly (a job may then sit quietly for a long time).
+            if (Interlocked.Exchange(ref job.TrailingScheduled, 1) == 0)
+                _ = Task.Delay(Throttle).ContinueWith(_ =>
+                {
+                    Volatile.Write(ref job.TrailingScheduled, 0);
+                    Raise(job, force: true);
+                }, TaskScheduler.Default);
+            return;
+        }
         job.LastNotified = now;
         try { Changed?.Invoke(job); }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { _log.LogDebug(ex, "Report job listener failed"); }

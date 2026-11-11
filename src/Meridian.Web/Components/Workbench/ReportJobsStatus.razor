@@ -16,18 +16,18 @@
         {
             <span>@Short(job.Title) · @((int)Math.Round(job.Fraction * 100)) %</span>
             <MudProgressLinear Color="Color.Primary" Value="@(job.Fraction * 100)" Size="Size.Small" Style="width:56px" />
-            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Cancel" Class="report-job-cancel" OnClick="() => Jobs.Cancel(job)" Style="padding:0" />
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" title="Cancel" Class="report-job-cancel" OnClick="() => Jobs.Cancel(job)" Style="padding:0" />
         }
         else if (job.State == ReportJobState.Completed)
         {
             <span>@Short(job.Title) ready</span>
             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" Class="report-job-download" OnClick="() => Download(job)" Style="min-width:0; padding:0 6px">Download</MudButton>
-            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
         }
         else
         {
             <span>@Short(job.Title) @(job.State == ReportJobState.Failed ? "failed" : "cancelled")</span>
-            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
         }
     </span>
 }

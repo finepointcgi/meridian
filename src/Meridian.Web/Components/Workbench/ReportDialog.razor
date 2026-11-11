@@ -342,7 +342,7 @@
         }
         finally
         {
-            StateHasChanged();
+            if (!_disposed) StateHasChanged();   // a background job may finish after the dialog closed
         }
     }
 
@@ -368,7 +368,7 @@
         _busy = true;
         StateHasChanged();
         try { await run(); }
-        finally { StateHasChanged(); }
+        finally { if (!_disposed) StateHasChanged(); }
     }
 
     /// <summary>Starts the job: big documents keep running in the background (status bar), small ones are awaited and downloaded.</summary>
