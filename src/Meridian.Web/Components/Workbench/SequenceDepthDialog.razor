@@ -1,0 +1,50 @@
+@using Meridian.Core.CodeSync
+@* "Generate sequence from code": how deep the sequence follows calls into the scanned code (1–4). Returns the depth. *@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">Generate sequence from code</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">How deep should the sequence of <b>@OperationName</b> follow calls into the synced code?</MudText>
+        <MudRadioGroup T="int" @bind-Value="_depth" data-testid="sequence-depth">
+            @for (var d = 1; d <= CodeBehaviourLimits.MaxSequenceDepth; d++)
+            {
+                var depth = d;
+                <MudRadio T="int" Value="@depth" Color="Color.Primary" data-testid="@($"sequence-depth-{depth}")">@Label(depth)</MudRadio>
+            }
+        </MudRadioGroup>
+        <MudText Typo="Typo.caption" Class="mt-2" Style="display:block">
+            Getters, setters and one-line forwarding methods are never followed; at most @CodeBehaviourLimits.OnDemandMaxMessages messages, then a “… N more calls” note.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Class="sequence-depth-ok" OnClick="() => MudDialog.Close(DialogResult.Ok(_depth))">Generate</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string OperationName { get; set; } = "";
+    /// <summary>The depth offered first (the one the sequence was made with, else the default).</summary>
+    [Parameter] public int Depth { get; set; } = new CodeBehaviourLimits().SequenceDepth;
+
+    private int _depth;
+
+    protected override void OnParametersSet() => _depth = Math.Clamp(Depth, 1, CodeBehaviourLimits.MaxSequenceDepth);
+
+    private static string Label(int depth) => depth switch
+    {
+        1 => "1 level — only the calls the method makes",
+        2 => "2 levels — and what those calls do (default)",
+        _ => $"{depth} levels — deeper, for a fuller picture",
+    };
+
+    /// <summary>Asks for the depth; null when cancelled.</summary>
+    public static async Task<int?> AskAsync(IDialogService dialogs, string operationName, int depth)
+    {
+        var parameters = new DialogParameters<SequenceDepthDialog> { { x => x.OperationName, operationName }, { x => x.Depth, depth } };
+        var dialog = await dialogs.ShowAsync<SequenceDepthDialog>("Generate sequence from code", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, CloseOnEscapeKey = true });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: int d } ? d : null;
+    }
+}

@@ -7,7 +7,11 @@ using Meridian.Core.Model;
 namespace Meridian.Core.CodeSync;
 
 /// <summary>What generating behaviour from code did: element ids added and changed, and warnings.</summary>
-public sealed record CodeBehaviourChanges(IReadOnlyList<string> Added, IReadOnlyList<string> Changed, IReadOnlyList<string> Warnings);
+public sealed record CodeBehaviourChanges(IReadOnlyList<string> Added, IReadOnlyList<string> Changed, IReadOnlyList<string> Warnings)
+{
+    /// <summary>Generated behaviours removed because they no longer meet the "Entry points" rules (and nobody touched them).</summary>
+    public int TrivialRemoved { get; init; }
+}
 
 /// <summary>
 /// Behaviour from code: activities and interactions (with their diagrams) generated from method bodies
@@ -27,11 +31,24 @@ public static class CodeBehaviourMapper
     public const string HashKey = "code.hash";
     /// <summary>Hash of where the diagram's shapes were last put; a different current layout means someone moved them.</summary>
     public const string LayoutKey = "code.layout";
+    /// <summary><see cref="LayoutKey"/> of a generated diagram on which someone moved shapes: its layout is kept for good
+    /// (and the behaviour is never cleaned up as untouched).</summary>
+    public const string MovedLayout = "moved";
     /// <summary>On a generated activity or interaction: id of the operation it is the method of (UML Behavior.specification).</summary>
     public const string SpecificationKey = "specification";
     public const string PackageName = "Behaviour";
     public const string ActivityPrefix = "act:";
     public const string SequencePrefix = "seq:";
+    /// <summary>On a generated behaviour: "demand" when someone asked for it ("Generate … from code"); such behaviours are
+    /// kept up to date but never cleaned up for not meeting the "Entry points" rules.</summary>
+    public const string OriginKey = "code.origin";
+    /// <summary>On a sequence generated on demand: the depth it follows calls to (kept by later syncs).</summary>
+    public const string DepthKey = "code.depth";
+
+    /// <summary>The depth stored on a sequence generated on demand, if any.</summary>
+    public static int? StoredDepth(Element? behaviour) =>
+        behaviour != null && int.TryParse(behaviour.Get(DepthKey), NumberStyles.Integer, CultureInfo.InvariantCulture, out var d)
+            ? Math.Clamp(d, 1, CodeBehaviourLimits.MaxSequenceDepth) : null;
 
     public static bool IsBehaviourSymbol(string symbol) =>
         symbol.StartsWith(ActivityPrefix, StringComparison.Ordinal) || symbol.StartsWith(SequencePrefix, StringComparison.Ordinal);
@@ -67,7 +84,11 @@ public static class CodeBehaviourMapper
     /// "Generate activity / sequence from code" for one operation, from a stored code model, as one undo step. Returns the
     /// behaviour's diagram, or null with a reason when the operation's code is not in <paramref name="code"/>.
     /// </summary>
-    public static (Diagram? Diagram, string Message) Generate(ModelRepository m, CodeModel code, Element operation, bool sequence, CodeSyncOptions o)
+    /// <remarks>A sequence follows calls <paramref name="depth"/> levels deep (1 to <see cref="CodeBehaviourLimits.MaxSequenceDepth"/>;
+    /// null keeps the depth it was generated with, else the default) with the longer on-demand message cap; the depth is
+    /// kept on the interaction (<see cref="DepthKey"/>) so later syncs keep it. Behaviours made here are marked
+    /// <see cref="OriginKey"/> = "demand", so the clean-up of "Entry points" never takes them.</remarks>
+    public static (Diagram? Diagram, string Message) Generate(ModelRepository m, CodeModel code, Element operation, bool sequence, CodeSyncOptions o, int? depth = null)
     {
         var symbol = operation.Get(CodeFieldKeys.Symbol);
         var run = new Run(m, code, o);
@@ -75,9 +96,33 @@ public static class CodeBehaviourMapper
         if ((run.Index.WithBody(method) ?? method).Member.Body is null) return (null, $"{operation.DisplayName} has no body in the code (abstract, interface or not read).");
         Element? behaviour;
         using (m.History.Transaction(sequence ? $"Generate sequence of {operation.DisplayName}" : $"Generate activity of {operation.DisplayName}"))
-            behaviour = run.Ensure(method, operation, sequence);
+        {
+            behaviour = run.Ensure(method, operation, sequence, depth ?? StoredDepth(Find(m, operation, sequence)) ?? o.BehaviourLimits.SequenceDepth);
+            if (behaviour != null && behaviour.Get(OriginKey) != "demand") m.Set(behaviour, OriginKey, "demand");
+        }
         var d = behaviour?.OwnedElements.OfType<Diagram>().FirstOrDefault();
         return (d, d is null ? "Nothing was generated." : $"{(sequence ? "Sequence" : "Activity")} of {operation.DisplayName} generated from code.");
+    }
+
+    /// <summary>
+    /// Whether a mode picks <paramref name="cm"/> for an activity (or, with <paramref name="sequence"/>, a sequence), before
+    /// the caps. "Entry points": not tests, generated or sample code (<see cref="CodeBehaviourIndex.IsGeneratedOrSample"/>)
+    /// or builders (<see cref="CodeBehaviourIndex.IsBuilder"/>); activities for public methods with a branch or loop (or
+    /// <see cref="CodeBehaviourLimits.MinCallsForActivity"/> calls inside try / using / lock blocks), sequences for entry
+    /// points that call scanned types. "All public methods": every public method (that calls a scanned type, for sequences).
+    /// </summary>
+    public static bool Qualifies(CodeBehaviourIndex index, CodeMethod cm, CodeBehaviourMode mode, CodeBehaviourLimits limits, bool sequence)
+    {
+        if (cm.Member.Body is not { } body || body.Statements.Count == 0 || CodeBehaviourIndex.IsTest(cm.Type, cm.Member)) return false;
+        var scannedCalls = CodeBodies.Walk(body.Statements).Any(s => s.ReceiverType != null && (s.HasCall || s.Kind == CodeStatementKind.Call));
+        if (mode == CodeBehaviourMode.AllPublic) return cm.Member.Visibility == "public" && (!sequence || scannedCalls);
+        if (mode != CodeBehaviourMode.EntryPoints) return false;
+        if (CodeBehaviourIndex.IsGeneratedOrSample(cm.Type, cm.Member) || CodeBehaviourIndex.IsBuilder(body, limits)) return false;
+        if (sequence) return scannedCalls && index.EntryReason(cm) != null;
+        if (cm.Member.Visibility != "public") return false;
+        var (branches, loops, calls) = CodeBodies.Shape(body.Statements);
+        return branches + loops > 0
+               || calls >= limits.MinCallsForActivity && CodeBodies.Walk(body.Statements).Any(s => s.Kind is CodeStatementKind.Try or CodeStatementKind.Using or CodeStatementKind.Lock);
     }
 
     /// <summary>The methods a mode picks, with the caps applied (new ones only; existing behaviours are always kept).</summary>
@@ -93,19 +138,10 @@ public static class CodeBehaviourMapper
         foreach (var cm in index.Methods.OrderBy(x => x.Symbol, StringComparer.Ordinal))
         {
             if (cm.Member.Body is not { } body || body.Statements.Count == 0 || eligible?.Invoke(cm) == false) continue;
-            if (CodeBehaviourIndex.IsTest(cm.Type, cm.Member)) continue;
             var (branches, loops, calls) = CodeBodies.Shape(body.Statements);
             var score = branches * 3 + loops * 3 + calls;
-            var scannedCalls = CodeBodies.Walk(body.Statements).Count(s => s.ReceiverType != null && (s.HasCall || s.Kind == CodeStatementKind.Call));
-            if (mode == CodeBehaviourMode.AllPublic)
-            {
-                if (cm.Member.Visibility != "public") continue;
-                acts.Add((cm, score));
-                if (scannedCalls > 0) seqs.Add((cm, score));
-                continue;
-            }
-            if (cm.Member.Visibility == "public" && (branches + loops > 0 || calls >= limits.MinCallsForActivity)) acts.Add((cm, score));
-            if (scannedCalls > 0 && index.EntryReason(cm) != null) seqs.Add((cm, score));
+            if (Qualifies(index, cm, mode, limits, sequence: false)) acts.Add((cm, score));
+            if (Qualifies(index, cm, mode, limits, sequence: true)) seqs.Add((cm, score));
         }
         var perNsAct = mode == CodeBehaviourMode.EntryPoints ? limits.ActivitiesPerNamespace : int.MaxValue;
         var perNsSeq = mode == CodeBehaviourMode.EntryPoints ? limits.SequencesPerNamespace : int.MaxValue;
@@ -143,9 +179,11 @@ public static class CodeBehaviourMapper
         private readonly List<string> _warnings = [];
         private Dictionary<string, Element>? _symbols;
 
+        private int _trivialRemoved;
+
         public CodeBehaviourChanges Result() =>
             new(_added.Where(id => m.Find(id) != null).Distinct().ToList(),
-                _changed.Where(id => m.Find(id) != null && !_added.Contains(id)).Distinct().ToList(), _warnings);
+                _changed.Where(id => m.Find(id) != null && !_added.Contains(id)).Distinct().ToList(), _warnings) { TrivialRemoved = _trivialRemoved };
 
         /// <summary>Elements of this repository by code symbol.</summary>
         private Dictionary<string, Element> Symbols()
@@ -167,16 +205,27 @@ public static class CodeBehaviourMapper
             var acts = new HashSet<string>(StringComparer.Ordinal);
             var seqs = new HashSet<string>(StringComparer.Ordinal);
             var inCode = code.Types.Select(t => t.Symbol).ToHashSet(StringComparer.Ordinal);
+            CodeSyncDiagrams.References? references = null;
             foreach (var (symbol, e) in existing)
             {
                 var sequence = symbol.StartsWith(SequencePrefix, StringComparison.Ordinal);
                 var opSymbol = symbol[(sequence ? SequencePrefix : ActivityPrefix).Length..];
-                (sequence ? seqs : acts).Add(opSymbol);
                 if (Index.Method(opSymbol) is { } method && Operation(opSymbol) is { } op)
                 {
-                    Ensure(method, op, sequence);
+                    // Made by "Entry points" before its rules got stricter (sample code, builders, straight runs of calls):
+                    // removed while nobody touched it, kept otherwise.
+                    if (o.Behaviour == CodeBehaviourMode.EntryPoints && e.Get(OriginKey) != "demand" && !Qualifies(Index, method, o.Behaviour, o.BehaviourLimits, sequence)
+                        && Untouched(e, references ??= new CodeSyncDiagrams.References(m)))
+                    {
+                        m.Delete(e);
+                        _trivialRemoved++;
+                        continue;
+                    }
+                    (sequence ? seqs : acts).Add(opSymbol);
+                    Ensure(method, op, sequence, StoredDepth(e));
                     continue;
                 }
+                (sequence ? seqs : acts).Add(opSymbol);
                 // The method is gone (on a partial push only when its type was read and lacks it).
                 var typeSymbol = CodeStep(opSymbol);
                 if (!o.RemoveDeleted && !inCode.Contains(typeSymbol)) continue;
@@ -227,12 +276,28 @@ public static class CodeBehaviourMapper
             return pkg;
         }
 
-        /// <summary>Creates or updates the activity (or interaction) of a method and its diagram.</summary>
-        public Element? Ensure(CodeMethod method, Element op, bool sequence)
+        /// <summary>
+        /// A generated behaviour nobody touched: only generated elements, one diagram laid out where code sync last put it
+        /// (<see cref="LayoutKey"/>) showing only them, and nothing else in the model refers to it.
+        /// </summary>
+        private bool Untouched(Element behaviour, CodeSyncDiagrams.References references)
         {
+            if (behaviour.Get(CodeModelMapper.RemovedKey).Length > 0) return false;
+            var diagrams = behaviour.Descendants().OfType<Diagram>().ToList();
+            if (diagrams is not [var d] || d.Get(LayoutKey) is not { Length: > 0 } stored || stored != LayoutHash(d)) return false;
+            if (behaviour.Descendants().Any(x => x is not Diagram && !IsGenerated(x))) return false;
+            if (d.Nodes.Any(n => !IsGenerated(n.Element) || !behaviour.IsAncestorOf(n.Element))) return false;
+            return !references.Mentions(behaviour) && !references.Mentions(d);
+        }
+
+        /// <summary>Creates or updates the activity (or interaction) of a method and its diagram. <paramref name="depth"/>:
+        /// a sequence generated on demand, with that depth and the on-demand message cap.</summary>
+        public Element? Ensure(CodeMethod method, Element op, bool sequence, int? depth = null)
+        {
+            var limits = sequence && depth is { } dd ? o.BehaviourLimits.ForDemand(dd) : o.BehaviourLimits;
             var plan = sequence
-                ? CodeSequencePlanner.Plan(Index, method, TypeElement, o.BehaviourLimits)
-                : CodeActivityPlanner.Plan(Index, Index.WithBody(method) is { } b && b.Member.Body != null && method.Member.Body == null ? b : method, Operation);
+                ? CodeSequencePlanner.Plan(Index, method, TypeElement, limits)
+                : CodeActivityPlanner.Plan(Index, Index.WithBody(method) is { } b && b.Member.Body != null && method.Member.Body == null ? b : method, Operation, limits);
             var hash = plan.Hash();
             var symbols = Symbols();
             symbols.TryGetValue(plan.Symbol, out var behaviour);
@@ -255,6 +320,7 @@ public static class CodeBehaviourMapper
                 m.Set(behaviour, CodeFieldKeys.File, file);
                 m.Set(behaviour, CodeFieldKeys.Line, line);
                 if (behaviour.Get(CodeModelMapper.RemovedKey).Length > 0) { m.Set(behaviour, CodeModelMapper.RemovedKey, null); _changed.Add(behaviour.Id); }
+                StampDepth(behaviour, sequence, depth);
                 return behaviour;
             }
             else _changed.Add(behaviour.Id);
@@ -267,8 +333,15 @@ public static class CodeBehaviourMapper
             m.Set(behaviour, CodeFieldKeys.Line, line);
             m.Set(behaviour, CodeFieldKeys.Commit, o.Commit);
             m.Set(behaviour, CodeModelMapper.RemovedKey, null);
+            StampDepth(behaviour, sequence, depth);
             Apply(behaviour, plan);
             return behaviour;
+        }
+
+        private void StampDepth(Element behaviour, bool sequence, int? depth)
+        {
+            var want = sequence && depth is { } d ? Math.Clamp(d, 1, CodeBehaviourLimits.MaxSequenceDepth).ToString(CultureInfo.InvariantCulture) : null;
+            if (want != null && behaviour.Get(DepthKey) != want) m.Set(behaviour, DepthKey, want);
         }
 
         private void Stamp(Element e, string key)
@@ -292,6 +365,10 @@ public static class CodeBehaviourMapper
 
         private static readonly string[] OwnedFields =
             [FieldKeys.Guard, FieldKeys.Operator, FieldKeys.MessageSort, FieldKeys.Type, FieldKeys.Stereotypes, FieldKeys.Body, CodeActivityPlanner.OperationField, FieldKeys.Behavior];
+
+        /// <summary>The fields a planned node sets: the documentation too when it has one (summary actions list what they hold),
+        /// so documentation people write on other generated nodes stays.</summary>
+        private static IEnumerable<string> Owned(PlannedNode n) => n.Fields.ContainsKey(FieldKeys.Documentation) ? OwnedFields.Append(FieldKeys.Documentation) : OwnedFields;
 
         /// <summary>Brings the behaviour's contents and diagram in line with the plan, matching by key.</summary>
         private void Apply(Element behaviour, BehaviourPlan plan)
@@ -320,11 +397,11 @@ public static class CodeBehaviourMapper
                 if (nodes.TryGetValue(n.Key, out var e) && m.Contains(e))
                 {
                     if (!ReferenceEquals(e.Owner, owner)) m.Move(e, owner);
-                    if (Write(e, n.Name, n.Fields, OwnedFields)) _changed.Add(e.Id);
+                    if (Write(e, n.Name, n.Fields, Owned(n))) _changed.Add(e.Id);
                     continue;
                 }
                 e = m.Create(owner, n.Kind, n.Name.Length > 0 ? n.Name : null);
-                Write(e, n.Name, n.Fields, OwnedFields);
+                Write(e, n.Name, n.Fields, Owned(n));
                 Stamp(e, n.Key);
                 nodes[n.Key] = e;
                 _added.Add(e.Id);
@@ -366,7 +443,8 @@ public static class CodeBehaviourMapper
             }
             else if (d.Name != plan.Name) m.Rename(d, plan.Name);
             // Shapes keep where people put them; a diagram nobody moved is laid out afresh.
-            var moved = d.Get(LayoutKey) is { Length: > 0 } stored && stored != LayoutHash(d);
+            // Once moved, always moved: the diagram's layout is someone's from then on.
+            var moved = d.Get(LayoutKey) is { Length: > 0 } stored && (stored == MovedLayout || stored != LayoutHash(d));
             var bounds = new Dictionary<DiagramNode, Bounds>();
             var fresh = new List<DiagramNode>();
             foreach (var n in plan.Nodes)
@@ -397,7 +475,7 @@ public static class CodeBehaviourMapper
                     m.SetWaypoints(d, edge, [new Pt(0, y)]);
             }
             EdgeRouter.Invalidate(d);
-            m.Set(d, LayoutKey, LayoutHash(d));
+            m.Set(d, LayoutKey, moved ? MovedLayout : LayoutHash(d));
         }
     }
 }

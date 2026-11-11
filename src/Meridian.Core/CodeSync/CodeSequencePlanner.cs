@@ -7,8 +7,11 @@ namespace Meridian.Core.CodeSync;
 /// depth first into the scanned types it calls (up to <see cref="CodeBehaviourLimits.SequenceDepth"/> levels and
 /// <see cref="CodeBehaviourLimits.MaxMessages"/> messages). Each object gets a lifeline named after the field, parameter
 /// or local that holds it ("runner : CodeSyncRunner"), static calls go to a lifeline of the type. Calls are synchronous
-/// messages (asynchronous when awaited), with a reply when the method returns a value; if / else and switch become alt
-/// fragments (opt for a lone if), loops loop fragments and catch clauses break fragments.
+/// messages (asynchronous when awaited), with a reply when the method returns a value the caller uses; if / else and
+/// switch become alt fragments (opt for a lone if), loops loop fragments and catch clauses break fragments.
+/// To keep it readable: getters, setters and one-line forwarding methods are not followed, the same call repeated in a
+/// loop (or right after itself) is one message, and past the cap a single "… N more calls" note stands for the rest
+/// (a fragment the cap would cut goes into that count whole).
 /// </summary>
 internal sealed class CodeSequencePlanner
 {
@@ -24,6 +27,16 @@ internal sealed class CodeSequencePlanner
     private double _y = FirstMessageY;
     private int _messages;
     private bool _capped;
+    /// <summary>Messages up to the end of the body: the cap less the entry's reply.</summary>
+    private int _budget;
+    /// <summary>Replies still owed to calls being followed (room is kept for them under the cap).</summary>
+    private int _reserved;
+    /// <summary>Calls left out by the cap.</summary>
+    private int _more;
+    /// <summary>Calls already shown in each open loop fragment (innermost on top).</summary>
+    private readonly Stack<HashSet<string>> _loopSeen = new();
+    /// <summary>The last call message, while nothing but its reply came after it.</summary>
+    private LastCall? _last;
     private readonly SortedSet<string> _depthCut = new(StringComparer.Ordinal);
     private readonly SortedSet<string> _recursion = new(StringComparer.Ordinal);
 
@@ -34,6 +47,14 @@ internal sealed class CodeSequencePlanner
         public double Bottom { get; set; }
         public int Depth { get; init; }
         public HashSet<string> Lifelines { get; } = new(StringComparer.Ordinal);
+    }
+
+    private sealed class LastCall
+    {
+        public required string Same { get; init; }
+        public required int Edge { get; init; }
+        public bool Replied { get; set; }
+        public int Count { get; set; } = 1;
     }
 
     private readonly Stack<OpenFragment> _open = new();
@@ -63,16 +84,17 @@ internal sealed class CodeSequencePlanner
         var self = Lifeline("ll:self:" + method.Type.Symbol, Camel(method.Type.Name), method.Type.Symbol);
         var args = string.Join(", ", method.Member.Parameters.Where(p => p.Direction != CodeParameterDirection.Return).Select(p => p.Name));
         Message("msg:entry", caller, self, $"{method.Member.Name}({args})", "synchCall");
+        _budget = Math.Max(2, _limits.MaxMessages - (method.IsVoid ? 0 : 1));
         var body = _index.WithBody(method) ?? method;
         Walk(body.Member.Body?.Statements ?? [], self, 1, [method.Symbol], new KeyScope("m"));
         if (!method.IsVoid) Message("msg:entry/reply", self, caller, Type(method.Member.TypeName), "reply");
 
         var notes = new List<string>();
-        if (_capped) notes.Add($"Stopped at {_limits.MaxMessages} messages; later calls are not shown.");
-        if (_depthCut.Count > 0) notes.Add($"Calls deeper than {_limits.SequenceDepth} levels are not followed ({string.Join(", ", _depthCut.Take(4))}{(_depthCut.Count > 4 ? ", …" : "")}).");
+        if (_more > 0) notes.Add($"… {_more} more call{(_more == 1 ? "" : "s")} (stopped at {_limits.MaxMessages} messages).");
+        if (_depthCut.Count > 0) notes.Add($"Calls deeper than {_limits.SequenceDepth} level{(_limits.SequenceDepth == 1 ? "" : "s")} are not followed ({string.Join(", ", _depthCut.Take(4))}{(_depthCut.Count > 4 ? ", …" : "")}).");
         if (_recursion.Count > 0) notes.Add($"Recursive calls are shown once ({string.Join(", ", _recursion.Take(4))}).");
         if (method.Member.Body is { Omitted: > 0 } b) notes.Add($"+{b.Omitted} more statements of the method were not read.");
-        _plan.Documentation = $"Calls made by {method.Type.Name}.{method.Member.Name} into the scanned code, followed {_limits.SequenceDepth} levels deep ({method.Type.File}).";
+        _plan.Documentation = $"Calls made by {method.Type.Name}.{method.Member.Name} into the scanned code, followed {_limits.SequenceDepth} level{(_limits.SequenceDepth == 1 ? "" : "s")} deep ({method.Type.File}).";
         var height = _y + 40;
         if (notes.Count > 0)
         {
@@ -83,7 +105,7 @@ internal sealed class CodeSequencePlanner
         foreach (var ll in _lifelineNodes.Values) ll.Bounds = ll.Bounds!.Value with { Height = height - 20 };
         foreach (var f in _fragments)
         {
-            var xs = f.Lifelines.Select(k => _lifelineNodes[k].Bounds!.Value).ToList();
+            var xs = f.Lifelines.Where(_lifelineNodes.ContainsKey).Select(k => _lifelineNodes[k].Bounds!.Value).ToList();
             if (xs.Count == 0) continue;
             var inset = f.Depth * 12;
             var x0 = xs.Min(b => b.X + b.Width / 2) - 95 + inset;
@@ -148,10 +170,10 @@ internal sealed class CodeSequencePlanner
     {
         foreach (var s in statements)
         {
-            if (_capped) return;
+            // Past the cap the walk goes on, only counting the calls it would have shown (without following them).
             var key = scope.Next(KeyScope.For(s));
             var calls = new KeyScope(key + "/c");
-            foreach (var c in s.Calls) Call(c, current, depth, stack, calls.Next(c.CallLabel));
+            foreach (var c in s.Calls) Call(c, current, depth, stack, calls.Next(c.CallLabel), used: true);
             switch (s.Kind)
             {
                 case CodeStatementKind.If:
@@ -163,7 +185,7 @@ internal sealed class CodeSequencePlanner
                         arms.Add((cur.Text ?? "", cur.Body));
                         if (cur.Else is [{ Kind: CodeStatementKind.If } next])
                         {
-                            foreach (var c in next.Calls) Call(c, current, depth, stack, calls.Next(c.CallLabel));
+                            foreach (var c in next.Calls) Call(c, current, depth, stack, calls.Next(c.CallLabel), used: true);
                             cur = next;
                             continue;
                         }
@@ -189,24 +211,33 @@ internal sealed class CodeSequencePlanner
                     Walk(s.Body, current, depth, stack, new KeyScope(key));
                     break;
             }
-            if (s.HasCall) Call(s, current, depth, stack, key);
+            // A plain call statement throws its result away; an assignment, return or yield uses it.
+            if (s.HasCall) Call(s, current, depth, stack, key, used: s.Kind != CodeStatementKind.Call);
             if (s.Kind is CodeStatementKind.Return or CodeStatementKind.Throw) return;
         }
     }
 
     private void Fragment(string key, string op, IReadOnlyList<(string Guard, IReadOnlyList<CodeStatement> Body)> arms, string current, int depth, List<string> stack)
     {
-        if (_capped) return;
+        if (_capped)
+        {
+            // Only counting: nothing more is drawn.
+            var counting = new KeyScope(key);
+            foreach (var (guard, body) in arms) Walk(body, current, depth, stack, new KeyScope(counting.Next("arm:" + guard)));
+            return;
+        }
         var startY = _y;
         var startMessages = _messages;
         var startEdges = _plan.Edges.Count;
         var startNodes = _plan.Nodes.Count;
         var startFragments = _fragments.Count;
+        var startLifelines = _lifelines.Count;
         var node = new PlannedNode { Key = KeyScope.Stored("frag:" + key), Kind = ElementKind.CombinedFragment };
         node.Fields[FieldKeys.Operator] = op;
         var f = new OpenFragment { Node = node, Top = startY - 6, Depth = _open.Count };
         f.Lifelines.Add(current);
         _open.Push(f);
+        if (op == "loop") _loopSeen.Push(new HashSet<string>(StringComparer.Ordinal));
         _y += HeaderGap;
         var operands = new List<(PlannedNode Operand, double Top)>();
         var scope = new KeyScope(key);
@@ -218,17 +249,30 @@ internal sealed class CodeSequencePlanner
             opNode.Fields[FieldKeys.Guard] = CodeBodies.Clip(guard, 60);
             var before = _messages;
             operands.Add((opNode, _y - OperandGap / 2 - 10));
+            _last = null;
             Walk(body, current, depth, stack, new KeyScope(scope.Next("arm:" + guard)));
             if (_messages == before) _y += 20;   // room for the empty operand's guard
         }
+        if (op == "loop") _loopSeen.Pop();
         _open.Pop();
-        if (_messages == startMessages)
+        _last = null;
+        // The cap struck inside: rather than a fragment cut halfway, the whole fragment joins the "… N more calls", when
+        // what came before it fills at least half the sequence; otherwise it keeps what fits (or little would be left).
+        var cut = _capped && startMessages - 1 >= _budget / 2;
+        if (_messages == startMessages || cut)
         {
-            // No messages inside: the fragment is not worth drawing.
+            if (cut) _more += _plan.Edges.Skip(startEdges).Count(e => e.Fields.GetValueOrDefault(FieldKeys.MessageSort) != "reply");
+            _messages -= _plan.Edges.Count - startEdges;
             _y = startY;
             _plan.Edges.RemoveRange(startEdges, _plan.Edges.Count - startEdges);
             _plan.Nodes.RemoveRange(startNodes, _plan.Nodes.Count - startNodes);
             _fragments.RemoveRange(startFragments, _fragments.Count - startFragments);
+            foreach (var gone in _lifelines.Skip(startLifelines))
+            {
+                _lifelineNodes.Remove(gone);
+                foreach (var o in _open) o.Lifelines.Remove(gone);
+            }
+            _lifelines.RemoveRange(startLifelines, _lifelines.Count - startLifelines);
             return;
         }
         foreach (var o in _open) o.Lifelines.UnionWith(f.Lifelines);
@@ -245,16 +289,42 @@ internal sealed class CodeSequencePlanner
         _fragments.Insert(startFragments, f);
     }
 
-    private void Call(CodeStatement call, string current, int depth, List<string> stack, string key)
+    /// <summary>A getter, setter or one-line forwarding method: one statement without control flow. Its call is shown;
+    /// what it does inside is not followed.</summary>
+    internal static bool IsTrivial(CodeBody body) =>
+        body.Omitted == 0 && body.Statements is [var only] && only.Kind is not (CodeStatementKind.If or CodeStatementKind.Switch
+            or CodeStatementKind.Loop or CodeStatementKind.Try or CodeStatementKind.Using or CodeStatementKind.Lock);
+
+    private void Call(CodeStatement call, string current, int depth, List<string> stack, string key, bool used)
     {
-        if (_capped || call.ReceiverType is null || _index.Resolve(call) is not { } callee) return;
-        if (_messages >= _limits.MaxMessages) { _capped = true; return; }
+        if (call.ReceiverType is null || _index.Resolve(call) is not { } callee) return;
+        if (_capped) { _more++; return; }
         var target = Target(call, current, callee);
+        var reply = used && !callee.IsVoid && target != current;
+        // The same call again in a loop is the same message: shown once.
+        var same = $"{current}>{target}:{call.Method}";
+        if (_loopSeen.Count > 0 && !_loopSeen.Peek().Add(same)) return;
+        // The same call right after itself is one message "Method(…) ×n".
+        if (_last is { } last && last.Same == same && _plan.Edges.Count - 1 == last.Edge + (last.Replied ? 1 : 0))
+        {
+            last.Count++;
+            _plan.Edges[last.Edge].Name = CodeBodies.Clip($"{call.Method}(…) ×{last.Count}", 60);
+            return;
+        }
+        if (_messages + _reserved + 1 + (reply ? 1 : 0) > _budget)
+        {
+            _capped = true;
+            _more++;
+            return;
+        }
         var args = call.Arguments is { Length: > 0 } a ? CodeBodies.Clip(a, 30) : "";
         var path = string.Join(">", stack.Skip(1).Select(s => s[(s.LastIndexOf('.', s.IndexOf('(') < 0 ? s.Length - 1 : s.IndexOf('(')) + 1)..])) + "/" + key;
         Message("msg:" + path, current, target, $"{call.Method}({args})", call.IsAwait ? "asynchCall" : "synchCall");
+        var mine = new LastCall { Same = same, Edge = _plan.Edges.Count - 1, Replied = reply };
+        if (reply) _reserved++;
+        _last = null;
         var body = _index.WithBody(callee);
-        if (body?.Member.Body is { Statements.Count: > 0 } b)
+        if (body?.Member.Body is { Statements.Count: > 0 } b && !IsTrivial(b))
         {
             if (stack.Contains(callee.Symbol)) _recursion.Add($"{callee.Type.Name}.{callee.Member.Name}");
             else if (depth >= _limits.SequenceDepth)
@@ -268,7 +338,12 @@ internal sealed class CodeSequencePlanner
                 stack.RemoveAt(stack.Count - 1);
             }
         }
-        if (!callee.IsVoid && target != current && !_capped)
+        if (reply)
+        {
+            _reserved--;
             Message("msg:" + path + "/reply", target, current, Type(callee.Member.TypeName), "reply");
+        }
+        // Only a call that nothing but its own reply followed can absorb the next identical one.
+        _last = _plan.Edges.Count - 1 == mine.Edge + (reply ? 1 : 0) ? mine : null;
     }
 }

@@ -8,6 +8,11 @@ namespace Meridian.Core.CodeSync;
 /// one action per run of other simple statements, decisions and merges for if / switch / try-catch, a decision with a
 /// back edge for loops, activity finals for returns and «exception» finals for throws. Laid out top to bottom: each
 /// decision's branches side by side below it, their merge below the longest branch.
+/// To stay readable, a run of <see cref="CodeBehaviourLimits.FoldRun"/> or more plain statements is one summary action
+/// ("12 calls: AddBlock, Connect, …", the list in its documentation), and an activity that would still draw more than
+/// <see cref="CodeBehaviourLimits.MaxActivityShapes"/> shapes and flows is simplified step by step: shorter runs fold,
+/// then blocks nested deeper than 3, 2, 1 levels become one action each, and last the tail of the method; the decisions,
+/// loops and try blocks that remain keep the control flow, and a note says what was folded.
 /// </summary>
 internal sealed class CodeActivityPlanner
 {
@@ -16,9 +21,23 @@ internal sealed class CodeActivityPlanner
     /// <summary>Field on a call action: id of the called operation (a CallOperationAction's operation).</summary>
     public const string OperationField = "operation";
 
+    /// <summary>Words in the documentation of an activity that was simplified to fit the shape cap.</summary>
+    public const string SimplifiedNote = "Simplified to fit";
+
+    /// <summary>The simplification steps: fold runs of this many (0 = the limits' FoldRun), summarize blocks nested this
+    /// deep, summarize the tail of the method.</summary>
+    private static readonly (int Fold, int Nest, bool Tail)[] Steps =
+        [(0, int.MaxValue, false), (2, int.MaxValue, false), (2, 3, false), (2, 2, false), (2, 1, false), (2, 0, false), (2, 0, true)];
+
     private readonly CodeBehaviourIndex _index;
     private readonly Func<string, Element?> _operation;
     private readonly BehaviourPlan _plan;
+    private readonly CodeBehaviourLimits _limits;
+    private readonly int _foldRun;
+    private readonly int _nestCap;
+    private readonly bool _tail;
+    private int _nest;
+    private int _foldedRuns, _foldedBlocks, _foldedTail;
     private readonly Dictionary<string, (double W, double H)> _size = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _edgeCount = new(StringComparer.Ordinal);
 
@@ -48,32 +67,65 @@ internal sealed class CodeActivityPlanner
         public List<Tail> Breaks { get; } = [];
     }
 
-    private CodeActivityPlanner(CodeBehaviourIndex index, Func<string, Element?> operation, BehaviourPlan plan)
+    private CodeActivityPlanner(CodeBehaviourIndex index, Func<string, Element?> operation, BehaviourPlan plan, CodeBehaviourLimits limits,
+                                (int Fold, int Nest, bool Tail) step)
     {
         _index = index;
         _operation = operation;
         _plan = plan;
+        _limits = limits;
+        _foldRun = Math.Max(2, step.Fold > 0 ? step.Fold : limits.FoldRun);
+        _nestCap = step.Nest;
+        _tail = step.Tail;
     }
 
-    public static BehaviourPlan Plan(CodeBehaviourIndex index, CodeMethod method, Func<string, Element?> operation)
+    public static BehaviourPlan Plan(CodeBehaviourIndex index, CodeMethod method, Func<string, Element?> operation, CodeBehaviourLimits? limits = null)
     {
-        var plan = new BehaviourPlan
+        limits ??= new CodeBehaviourLimits();
+        BehaviourPlan plan = null!;
+        CodeActivityPlanner p = null!;
+        var tries = 0;
+        foreach (var step in Steps)
         {
-            Symbol = "act:" + method.Symbol, Kind = ElementKind.Activity, DiagramType = DiagramType.Activity,
-            Name = $"{method.Type.Name}.{method.Member.Name}",
-        };
-        plan.Documentation = $"The control flow of {method.Type.Name}.{method.Member.Name}, from its code ({method.Type.File}).";
-        var p = new CodeActivityPlanner(index, operation, plan);
-        p.Build(method);
+            tries++;
+            plan = new BehaviourPlan
+            {
+                Symbol = "act:" + method.Symbol, Kind = ElementKind.Activity, DiagramType = DiagramType.Activity,
+                Name = $"{method.Type.Name}.{method.Member.Name}",
+            };
+            plan.Documentation = $"The control flow of {method.Type.Name}.{method.Member.Name}, from its code ({method.Type.File}).";
+            p = new CodeActivityPlanner(index, operation, plan, limits, step);
+            p.Build(method);
+            if (plan.Nodes.Count + plan.Edges.Count <= limits.MaxActivityShapes) break;
+        }
+        if (tries > 1) p.Simplified();
         return plan;
     }
+
+    /// <summary>Says what was folded to fit the cap: in the activity's documentation and in a note on the diagram.</summary>
+    private void Simplified()
+    {
+        var what = new List<string>();
+        if (_foldedRuns > 0) what.Add($"runs of {_foldRun} or more plain statements are one action each");
+        if (_foldedBlocks > 0) what.Add($"{_foldedBlocks} block{(_foldedBlocks == 1 ? "" : "s")} nested {(_nestCap == 1 ? "inside another" : $"{_nestCap} levels deep")} are summarized as one action");
+        if (_foldedTail > 0) what.Add($"the last {_foldedTail} statement{(_foldedTail == 1 ? " is" : "s are")} one action");
+        if (what.Count == 0) return;
+        var text = $"{SimplifiedNote} about {_limits.MaxActivityShapes} shapes: {string.Join("; ", what)}. The summary actions list what they hold in their documentation; “Generate activity from code” shows the same.";
+        _plan.Documentation += " " + text;
+        var right = _plan.Nodes.Where(n => n.Bounds != null).Select(n => n.Bounds!.Value.Right).DefaultIfEmpty(Left).Max();
+        var note = new PlannedNode { Key = "note", Kind = ElementKind.Comment, Bounds = new Bounds(right + Gap, Top, 300, 110) };
+        note.Fields[FieldKeys.Body] = text;
+        _plan.Nodes.Add(note);
+    }
+
+    private int Shapes => _plan.Nodes.Count + _plan.Edges.Count;
 
     private void Build(CodeMethod method)
     {
         var root = new SeqRegion();
         Node(root, "initial", ElementKind.InitialNode, "");
         var statements = method.Member.Body?.Statements ?? [];
-        var tails = Sequence(statements, new KeyScope(""), [new Tail("initial", "")], root, null);
+        var tails = Sequence(statements, new KeyScope(""), [new Tail("initial", "")], root, null, top: true);
         if (method.Member.Body is { Omitted: > 0 } b && tails.Count > 0)
         {
             Node(root, "more", ElementKind.Action, $"+{b.Omitted} more");
@@ -135,19 +187,92 @@ internal sealed class CodeActivityPlanner
 
     // ================================================================ statements
 
-    private List<Tail> Sequence(IReadOnlyList<CodeStatement> list, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop)
+    /// <summary>A statement without control flow of its own: a call, assignment, creation or the like.</summary>
+    private static bool IsPlain(CodeStatement s) =>
+        s.Body.Count == 0 && s.Else.Count == 0 && s.Branches.Count == 0 && s.Finally.Count == 0
+        && (s.Kind is CodeStatementKind.Call or CodeStatementKind.Assign or CodeStatementKind.Create or CodeStatementKind.Yield
+            || s.Kind == CodeStatementKind.Other && s.Text is not ("break" or "continue"));
+
+    private static bool IsControl(CodeStatement s) => s.Kind is CodeStatementKind.If or CodeStatementKind.Switch or CodeStatementKind.Loop or CodeStatementKind.Try;
+
+    /// <summary>One line per statement (calls and labels), at most 40, for a summary action's documentation.</summary>
+    private static string Listing(IEnumerable<CodeStatement> statements)
+    {
+        var lines = CodeBodies.Walk(statements).Where(x => x.HasCall || IsPlain(x) || x.Kind is CodeStatementKind.Return or CodeStatementKind.Throw)
+            .Select(Label).Where(l => l.Length > 0).ToList();
+        return string.Join("\n", lines.Take(40)) + (lines.Count > 40 ? $"\n… (+{lines.Count - 40})" : "");
+    }
+
+    /// <summary>"12 calls: AddBlock, Connect, …" or "5 statements: x = 1, Charge, …".</summary>
+    private static string RunName(IReadOnlyList<CodeStatement> run)
+    {
+        var allCalls = run.All(x => x.HasCall);
+        var names = run.Select(x => x.HasCall ? x.Method! : Label(x)).Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        var head = $"{run.Count} {(allCalls ? "calls" : "statements")}: ";
+        var list = new System.Text.StringBuilder();
+        foreach (var n in names)
+        {
+            var next = (list.Length > 0 ? ", " : "") + n;
+            if (head.Length + list.Length + next.Length > 54) { list.Append(", …"); break; }
+            list.Append(next);
+        }
+        return head + list;
+    }
+
+    private List<Tail> Sequence(IReadOnlyList<CodeStatement> list, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop, bool top = false)
     {
         for (var i = 0; i < list.Count; i++)
         {
             if (tails.Count == 0) break;   // after return / throw / break: unreachable
             var s = list[i];
+            if (top && _tail && Shapes >= _limits.MaxActivityShapes - 6)
+            {
+                // Last resort: the rest of the method is one action.
+                var rest = list.Skip(i).ToList();
+                _foldedTail = CodeBodies.Count(rest);
+                var key = scope.Next("rest:" + KeyScope.For(s));
+                var n = Node(region, key, ElementKind.Action, $"… {_foldedTail} more statement{(_foldedTail == 1 ? "" : "s")}");
+                n.Fields[FieldKeys.Documentation] = Listing(rest);
+                Connect(tails, key);
+                tails = One(key);
+                break;
+            }
+            if (IsPlain(s))
+            {
+                var run = new List<CodeStatement> { s };
+                while (i + 1 < list.Count && IsPlain(list[i + 1])) run.Add(list[++i]);
+                if (run.Count >= _foldRun)
+                {
+                    // A long run of plain statements is one summary action, the list in its documentation.
+                    var key = scope.Next("fold:" + Label(run[0]));
+                    var n = Node(region, key, ElementKind.Action, RunName(run));
+                    n.Fields[FieldKeys.Documentation] = Listing(run);
+                    Connect(tails, key);
+                    tails = One(key);
+                    _foldedRuns++;
+                    continue;
+                }
+                tails = Plain(run, scope, tails, region, loop);
+                continue;
+            }
+            tails = Statement(s, scope, tails, region, loop);
+        }
+        return tails;
+    }
+
+    /// <summary>A short run of plain statements: an action per call, one action per run of other simple statements.</summary>
+    private List<Tail> Plain(List<CodeStatement> run, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop)
+    {
+        for (var i = 0; i < run.Count; i++)
+        {
+            var s = run[i];
             if (IsSimple(s))
             {
                 // A run of simple statements is one action named after them.
-                var run = new List<CodeStatement> { s };
-                while (i + 1 < list.Count && IsSimple(list[i + 1])) run.Add(list[++i]);
-                var key = scope.Next("do:" + Label(run[0]));
-                var name = run.Count == 1 ? Label(s) : $"{Label(run[0])}; … (+{run.Count - 1})";
+                var simple = new List<CodeStatement> { s };
+                while (i + 1 < run.Count && IsSimple(run[i + 1])) simple.Add(run[++i]);
+                var key = scope.Next("do:" + Label(simple[0]));
+                var name = simple.Count == 1 ? Label(s) : $"{Label(simple[0])}; … (+{simple.Count - 1})";
                 Node(region, key, ElementKind.Action, name);
                 Connect(tails, key);
                 tails = One(key);
@@ -158,6 +283,35 @@ internal sealed class CodeActivityPlanner
         return tails;
     }
 
+    /// <summary>A whole if / switch / loop / try as one action ("if x … (7 statements)"), what it holds in its documentation.</summary>
+    private List<Tail> Summary(CodeStatement s, KeyScope scope, List<Tail> tails, SeqRegion region)
+    {
+        var key = scope.Next("fold:" + KeyScope.For(s));
+        var inside = CodeBodies.Count([s]) - 1 - s.Calls.Count;
+        var count = $"{inside} statement{(inside == 1 ? "" : "s")}";
+        var name = s.Kind switch
+        {
+            CodeStatementKind.If => $"if {CodeBodies.Clip(s.Text, 30)} … ({count})",
+            CodeStatementKind.Switch => $"switch {CodeBodies.Clip(s.Text, 24)} ({s.Branches.Count} cases, {count})",
+            CodeStatementKind.Loop => $"loop {CodeBodies.Clip(s.Text, 30)} ({count})",
+            _ => $"try … ({count})",
+        };
+        var n = Node(region, key, ElementKind.Action, name);
+        n.Fields[FieldKeys.Documentation] = Listing([s]);
+        Connect(tails, key);
+        _foldedBlocks++;
+        return One(key);
+    }
+
+    private List<Tail> Statement(CodeStatement s, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop)
+    {
+        if (!IsControl(s)) return StatementCore(s, scope, tails, region, loop);
+        if (_nest >= _nestCap) return Summary(s, scope, tails, region);
+        _nest++;
+        try { return StatementCore(s, scope, tails, region, loop); }
+        finally { _nest--; }
+    }
+
     private List<Tail> Call(CodeStatement s, string key, List<Tail> tails, SeqRegion region)
     {
         var n = Node(region, key, ElementKind.Action, Label(s));
@@ -166,7 +320,7 @@ internal sealed class CodeActivityPlanner
         return One(key);
     }
 
-    private List<Tail> Statement(CodeStatement s, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop)
+    private List<Tail> StatementCore(CodeStatement s, KeyScope scope, List<Tail> tails, SeqRegion region, LoopContext? loop)
     {
         var key = scope.Next(KeyScope.For(s));
         switch (s.Kind)

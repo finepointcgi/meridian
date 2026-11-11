@@ -22,7 +22,11 @@ public sealed class NullCodeSyncRunner : ICodeSyncRunner
 }
 
 /// <summary>One element a pull request preview changes, for the pull request comment.</summary>
-public sealed record PreviewChange(CodeSyncChangeKind Kind, string Name, string Path, string ElementKind);
+public sealed record PreviewChange(CodeSyncChangeKind Kind, string Name, string Path, string ElementKind)
+{
+    /// <summary>For a diagram: "structure", "activity" or "sequence"; null for other elements.</summary>
+    public string? Diagram { get; init; }
+}
 
 /// <summary>Pull request preview branches (implemented by the review-branch runner, <see cref="CodeSyncRunner"/>).</summary>
 public interface IPullRequestPreviews
@@ -429,6 +433,12 @@ public sealed class CodeSyncHostService(
             return sb.ToString();
         }
         sb.Append($"PR #{number} at `{Short(commit)}` changes the model: **{added} added, {changed} changed, {removed} removed**.\n\n");
+        var newDiagrams = changes.Where(x => x.Kind == CodeSyncChangeKind.Added && x.Diagram != null).ToList();
+        var removedDiagrams = changes.Count(x => x.Kind == CodeSyncChangeKind.Removed && x.Diagram != null);
+        var diagrams = CodeSyncRunner.DiagramSummary(newDiagrams.Count(x => x.Diagram == "structure"), newDiagrams.Count(x => x.Diagram == "activity"),
+            newDiagrams.Count(x => x.Diagram == "sequence"), 0);
+        if (removedDiagrams > 0) diagrams += (diagrams.Length > 0 ? "; " : "") + $"{removedDiagrams} diagram{(removedDiagrams == 1 ? "" : "s")} removed";
+        if (diagrams.Length > 0) sb.Append($"Diagrams: {diagrams}.\n\n");
         sb.Append("| Change | Element | Kind | Owner |\n|---|---|---|---|\n");
         foreach (var x in changes.OrderBy(x => x.Kind).Take(CommentTopItems))
             sb.Append($"| {x.Kind} | {Escape(x.Name)} | {Escape(x.ElementKind)} | {Escape(x.Path)} |\n");

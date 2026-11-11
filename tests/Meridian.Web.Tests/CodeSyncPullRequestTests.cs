@@ -129,6 +129,19 @@ public class CodeSyncPullRequestParsingTests
         Assert.Contains("[Open the preview in Meridian](https://meridian.test/r)", body);
         Assert.Contains(@"Evil\|\<img src=x\>\[link\](http://x) \@team", body);
 
+        Assert.DoesNotContain("Diagrams:", body);
+
+        // Diagrams are counted by kind.
+        var withDiagrams = changes.Concat([
+            new PreviewChange(CodeSyncChangeKind.Added, "Sat – package overview", "Code", "Diagram") { Diagram = "structure" },
+            new PreviewChange(CodeSyncChangeKind.Added, "Eps.Run", "Code::Behaviour", "Diagram") { Diagram = "activity" },
+            new PreviewChange(CodeSyncChangeKind.Added, "Eps.Run sequence", "Code::Behaviour", "Diagram") { Diagram = "sequence" },
+            new PreviewChange(CodeSyncChangeKind.Added, "Eps.Stop", "Code::Behaviour", "Diagram") { Diagram = "activity" },
+            new PreviewChange(CodeSyncChangeKind.Removed, "Pcu – internal structure", "Code::Sat", "Diagram") { Diagram = "structure" },
+        ]).ToList();
+        var withBody = CodeSyncHostService.PreviewComment(7, Head, new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, "x", "/r", Guid.NewGuid()), withDiagrams, null);
+        Assert.Contains("Diagrams: 1 structure, 2 activity, 1 sequence diagrams; 1 diagram removed.", withBody);
+
         Assert.Contains("does not change the model", CodeSyncHostService.PreviewComment(7, Head, new CodeSyncOutcome(CodeSyncStatus.NoChanges, "No model changes", null, null), [], null));
         Assert.Contains("failed: boom", CodeSyncHostService.PreviewComment(7, Head, new CodeSyncOutcome(CodeSyncStatus.Failed, "boom", null, null), [], null));
     }

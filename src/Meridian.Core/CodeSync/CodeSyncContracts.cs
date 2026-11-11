@@ -251,6 +251,12 @@ public sealed record CodeSyncOptions
     /// the symbol "pkgdep:A->B" (A, B namespaces) so re-syncs update them. On by default.
     /// </summary>
     public bool PackageDependencies { get; init; } = true;
+    /// <summary>
+    /// Ids of the diagrams earlier syncs of this repository created (from their run records). With the layout stamp code
+    /// sync now puts on the diagrams it makes, they tell its "internal structure" diagrams from ones people made with
+    /// Auto-diagram, so only code sync's own trivial ones are cleaned up (<see cref="CodeSyncDiagrams.RemoveTrivialIbds"/>).
+    /// </summary>
+    public IReadOnlySet<string> SyncedDiagrams { get; init; } = new HashSet<string>();
 }
 
 /// <summary>Which deployment artifacts code sync keeps for a repository (each «manifest»s the package it stands for).</summary>
@@ -268,6 +274,11 @@ public enum CodeArtifactMode
 public sealed record CodeSyncChanges(IReadOnlyList<string> Added, IReadOnlyList<string> Changed, IReadOnlyList<string> Removed, IReadOnlyList<string> Warnings)
 {
     public bool IsEmpty => Added.Count == 0 && Changed.Count == 0 && Removed.Count == 0;
+
+    /// <summary>Diagrams made by earlier syncs that no longer meet the rules and that nobody touched, removed by this sync
+    /// ("internal structure" diagrams of blocks with fewer than two parts, behaviours "Entry points" no longer picks).
+    /// Their ids are in <see cref="Removed"/> like any other removal.</summary>
+    public int TrivialDiagramsRemoved { get; init; }
 }
 
 /// <summary>A sync request, from a webhook, the "Sync now" button or a test. Files are already fetched.</summary>

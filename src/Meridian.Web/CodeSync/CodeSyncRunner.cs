@@ -150,19 +150,22 @@ public sealed partial class CodeSyncRunner(
         if (runs.Count == 0 || await db.LoadBranchAsync(branch.Id) is not { } models) return [];
         var baseModel = ProjectFile.Deserialize(models.BaseJson);
         var head = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(db, hub, projectId, branch.Id));
-        return CodeSyncReviewService.Pending(baseModel, head, baseModel, runs).SelectMany(PreviewChanges).ToList();
+        return CodeSyncReviewService.Pending(baseModel, head, baseModel, runs).SelectMany(c => PreviewChanges(c, head.Find(c.ElementId) ?? baseModel.Find(c.ElementId))).ToList();
     }
 
     /// <summary>A pending change as pull request comment rows: a submodule bump (a change of the pins on the model root)
     /// reads "libs/core 1a2b3c4 → 5d6e7f8", kind "Submodule".</summary>
-    private static IEnumerable<Hosts.PreviewChange> PreviewChanges(CodeSyncPendingChange c)
+    private static IEnumerable<Hosts.PreviewChange> PreviewChanges(CodeSyncPendingChange c, Element? element)
     {
         var pins = c.Fields.Where(f => CodeSubmodulePins.IsPinsField(f.Key)).ToList();
         foreach (var bump in pins.SelectMany(f => CodeSubmodulePins.Bumps(f.Before, f.After)))
             yield return new Hosts.PreviewChange(bump.OldSha is null ? CodeSyncChangeKind.Added : bump.NewSha is null ? CodeSyncChangeKind.Removed : CodeSyncChangeKind.Changed,
                 $"{bump.Path} {(bump.OldSha is { } o ? Short(o) : "∅")} → {(bump.NewSha is { } n ? Short(n) : "∅")}", "", "Submodule");
         if (pins.Count == 0 || pins.Count < c.Fields.Count)
-            yield return new Hosts.PreviewChange(c.Kind, c.Name, c.Path, Metamodel.DisplayName(c.ElementKind));
+            yield return new Hosts.PreviewChange(c.Kind, c.Name, c.Path, Metamodel.DisplayName(c.ElementKind))
+            {
+                Diagram = element is Diagram d ? d.DiagramType switch { DiagramType.Activity => "activity", DiagramType.Sequence => "sequence", _ => "structure" } : null,
+            };
     }
 
     /// <summary>The branch a run is working on, and whether the run created it (a failed run deletes a branch it created).</summary>
@@ -264,11 +267,19 @@ public sealed partial class CodeSyncRunner(
             Artifacts = connection?.DeploymentArtifacts ?? CodeArtifactMode.None,
             Behaviour = connection?.EffectiveBehaviour ?? CodeBehaviourMode.OnDemand,
             CollapseRootNamespace = connection?.CollapseRootNamespace ?? true,
+            // The diagrams earlier runs of this repository made: only those may be cleaned up as trivial.
+            SyncedDiagrams = (await db.ListCodeSyncRunsAsync(request.ProjectId, 500)).Where(r => r.ConnectionId == request.ConnectionId)
+                .SelectMany(r => r.Changes).Where(c => c.Kind == CodeSyncChangeKind.Added && c.ElementKind == nameof(ElementKind.Diagram))
+                .Select(c => c.ElementId).ToHashSet(StringComparer.Ordinal),
         };
         var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
         ct.ThrowIfCancellationRequested();
 
-        if (changes.IsEmpty)
+        // Diagrams are refreshed even when the code brought no change: a project synced before the package overview
+        // existed gets it on its next sync.
+        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
+            codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
+        if (changes.IsEmpty && refresh.Created.Count == 0)
         {
             if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
             runBranch.Id = null;
@@ -277,8 +288,6 @@ public sealed partial class CodeSyncRunner(
             return new CodeSyncOutcome(CodeSyncStatus.NoChanges, nothing, null, runId);
         }
 
-        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
-            codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
         model.OpEmitted -= ops.Add;
         var list = ChangeList(before, model, changes, refresh);
         var message = CommitMessage(request);
@@ -287,7 +296,11 @@ public sealed partial class CodeSyncRunner(
 
         int added = list.Count(c => c.Kind == CodeSyncChangeKind.Added), changed = list.Count(c => c.Kind == CodeSyncChangeKind.Changed),
             removed = list.Count(c => c.Kind == CodeSyncChangeKind.Removed);
-        var summary = Summary(added, changed, removed) + (refresh.Created.Count > 0 ? $"; {refresh.Created.Count} new diagram{(refresh.Created.Count == 1 ? "" : "s")}" : "")
+        // Every diagram the run made on the branch: structure diagrams from the refresh, behaviour diagrams from the mapping.
+        var made = changes.Added.Select(model.Find).OfType<Diagram>().Concat(refresh.Created).DistinctBy(d => d.Id).ToList();
+        var (structure, activity, sequence) = DiagramCounts(made);
+        var diagrams = DiagramSummary(structure, activity, sequence, changes.TrivialDiagramsRemoved);
+        var summary = Summary(added, changed, removed) + (diagrams.Length > 0 ? "; " + diagrams : "")
                       + (changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
         await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
         return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
@@ -355,6 +368,28 @@ public sealed partial class CodeSyncRunner(
         if (changed > 0) parts.Add($"{changed} changed");
         if (removed > 0) parts.Add($"{removed} removed");
         return parts.Count == 0 ? "No changes" : string.Join(", ", parts);
+    }
+
+    /// <summary>Structure (package, block, internal block …), activity and sequence diagrams among <paramref name="diagrams"/>.</summary>
+    public static (int Structure, int Activity, int Sequence) DiagramCounts(IEnumerable<Diagram> diagrams)
+    {
+        int structure = 0, activity = 0, sequence = 0;
+        foreach (var d in diagrams)
+        {
+            if (d.DiagramType == DiagramType.Activity) activity++;
+            else if (d.DiagramType == DiagramType.Sequence) sequence++;
+            else structure++;
+        }
+        return (structure, activity, sequence);
+    }
+
+    /// <summary>"3 structure, 217 activity, 83 sequence diagrams; 380 trivial diagrams removed" (empty when there is nothing to say).</summary>
+    public static string DiagramSummary(int structure, int activity, int sequence, int trivialRemoved)
+    {
+        var parts = new List<string>();
+        if (structure + activity + sequence > 0) parts.Add($"{structure} structure, {activity} activity, {sequence} sequence diagram{(structure + activity + sequence == 1 ? "" : "s")}");
+        if (trivialRemoved > 0) parts.Add($"{trivialRemoved} trivial diagram{(trivialRemoved == 1 ? "" : "s")} removed");
+        return string.Join("; ", parts);
     }
 
     /// <summary>The workbench on the review branch with "What changed" open; absolute when Meridian:PublicUrl is set.</summary>

@@ -52,9 +52,44 @@ public static class CodeSyncBench
         var seqs = model.AllElements.Count(e => e.Kind == ElementKind.Interaction);
         Console.WriteLine($"map (on demand)       {mapOff,10:N0} ms");
         Console.WriteLine($"map (entry points)    {mapOn,10:N0} ms   {acts} activities, {seqs} sequences");
+        BehaviourStats(model);
         Console.WriteLine($"sync total            {plainMs + mapOff,10:N0} ms → {bodiesMs + mapOn,10:N0} ms ({(bodiesMs + mapOn) / (plainMs + mapOff):0.00}×)");
         foreach (var w in changes!.Warnings.Where(w => w.StartsWith("Behaviour", StringComparison.Ordinal))) Console.WriteLine(w);
         var (resync, again) = Best(() => CodeModelMapper.Apply(model, bodies, new CodeSyncOptions { RepoId = "r", Behaviour = CodeBehaviourMode.EntryPoints }));
         Console.WriteLine($"re-sync, same code    {resync,10:N0} ms   ({(again.IsEmpty ? "no changes" : "CHANGES")})");
+    }
+
+    /// <summary>Sizes of the generated behaviours: shapes per activity diagram, messages per sequence, and how many hit the caps.</summary>
+    private static void BehaviourStats(ModelRepository model)
+    {
+        static string Dist(List<int> xs)
+        {
+            if (xs.Count == 0) return "none";
+            xs.Sort();
+            int P(double q) => xs[Math.Min(xs.Count - 1, (int)Math.Ceiling(q * xs.Count) - 1)];
+            return $"median {P(0.5),4}   p95 {P(0.95),4}   max {xs[^1],4}";
+        }
+        var activities = model.AllElements.Where(e => e.Kind == ElementKind.Activity).ToList();
+        var diagrams = activities.Select(a => a.OwnedElements.OfType<Diagram>().FirstOrDefault()).ToList();
+        var shapes = diagrams.Select(d => d?.Nodes.Count ?? 0).ToList();
+        var drawn = diagrams.Select(d => d is null ? 0 : d.Nodes.Count + d.Edges.Count).ToList();
+        var largest = activities.Zip(drawn).MaxBy(x => x.Second);
+        var simplified = activities.Count(a => a.Documentation.Contains("Simplified", StringComparison.Ordinal));
+        var sequences = model.AllElements.Where(e => e.Kind == ElementKind.Interaction).ToList();
+        var messages = sequences.Select(s => s.Descendants().Count(x => x.Kind == ElementKind.Message)).ToList();
+        var capped = sequences.Count(s => s.Descendants().Any(x => x.Kind == ElementKind.Comment
+            && (x.Get(FieldKeys.Body).Contains("Stopped at", StringComparison.Ordinal) || x.Get(FieldKeys.Body).Contains("more call", StringComparison.Ordinal))));
+        Console.WriteLine($"activity nodes        {Dist(shapes)}");
+        Console.WriteLine($"activity shapes+flows {Dist(drawn)}   ({drawn.Count(n => n > 60)} over 60, {simplified} simplified to fit; largest {largest.First?.Name})");
+        Console.WriteLine($"sequence messages     {Dist(messages)}   ({capped} hit the message cap)");
+        if (Environment.GetEnvironmentVariable("MERIDIAN_BENCH_DUMP") is { Length: > 0 } dump)
+            foreach (var s in sequences.Where(s => s.Name.Contains(dump, StringComparison.Ordinal)).Take(3))
+            {
+                var d = s.OwnedElements.OfType<Diagram>().First();
+                Console.WriteLine($"--- {s.Name}");
+                foreach (var e in d.Edges.OrderBy(e => e.Waypoints.FirstOrDefault().Y))
+                    Console.WriteLine($"  {e.Waypoints.FirstOrDefault().Y,5} {e.Relationship.Source.Name} -> {e.Relationship.Target.Name}: {e.Relationship.Name} [{e.Relationship.Get(FieldKeys.MessageSort)}]");
+                foreach (var c in s.OwnedElements.Where(x => x.Kind == ElementKind.Comment)) Console.WriteLine("  note: " + c.Get(FieldKeys.Body).Replace("\n", " | "));
+            }
     }
 }

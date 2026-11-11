@@ -547,6 +547,27 @@ public static class AutoDiagrammer
         return d;
     }
 
+    /// <summary>
+    /// Where <see cref="Build"/> would put the shapes of a <paramref name="type"/> diagram of <paramref name="owner"/>
+    /// showing <paramref name="elements"/>, without changing the model: shape path (the element ids from the top-level
+    /// shape down, joined by '/') → bounds. Code sync compares it with a diagram to tell whether anyone moved its shapes.
+    /// </summary>
+    public static IReadOnlyDictionary<string, Bounds> PlannedLayout(ModelRepository m, DiagramType type, Element owner, IReadOnlyList<Element> elements)
+    {
+        var roots = Collect(m, type, owner, elements);
+        Layout(m, type, roots, Links(m, type, roots));
+        var result = new Dictionary<string, Bounds>(StringComparer.Ordinal);
+        void Add(LNode n, string prefix)
+        {
+            var path = prefix.Length == 0 ? n.E.Id : prefix + "/" + n.E.Id;
+            result.TryAdd(path, new Bounds(n.X, n.Y, n.W, n.H));
+            foreach (var p in n.Ports) result.TryAdd(path + "/" + p.E.Id, new Bounds(p.X, p.Y, p.W, p.H));
+            foreach (var k in n.Kids) Add(k, path);
+        }
+        foreach (var r in roots) Add(r, "");
+        return result;
+    }
+
     private static void Materialize(ModelRepository m, Diagram d, LNode n, DiagramNode? parent)
     {
         var dn = m.AddNode(d, n.E, new Bounds(n.X, n.Y, n.W, n.H), showRelationships: false, parent);

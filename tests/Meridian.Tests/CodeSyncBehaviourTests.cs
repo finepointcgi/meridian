@@ -445,27 +445,154 @@ public class CodeSyncBehaviourTests
         Assert.Equal(fragments.Count + lifelines.Count, d.Nodes.Count);
     }
 
-    [Fact]
-    public void Sequence_depth_and_message_caps_leave_a_note()
-    {
-        var src = """
-            public class A { private B b = new(); public void Go() { b.Go(); } }
-            public class B { private C c = new(); public void Go() { c.Go(); } }
-            public class C { private D d = new(); public void Go() { d.Go(); d.Go(); d.Go(); } }
-            public class D { private E e = new(); public void Go() { e.Go(); } }
-            public class E { public void Go() { } }
-            """;
-        var (m, code) = Synced(src);
-        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options with { BehaviourLimits = new() { SequenceDepth = 2 } });
-        var seq = d!.Owner!;
-        var names = seq.OwnedElements.Where(e => e.Kind == ElementKind.Lifeline).Select(e => e.Name).ToList();
-        Assert.Equal(["caller", "a", "b", "c"], names);   // A -> B (depth 1) -> C (depth 2), C's calls not followed
-        Assert.Contains("deeper than 2", seq.OwnedElements.Single(e => e.Kind == ElementKind.Comment).Get(FieldKeys.Body));
+    private const string Chain = """
+        public class A { private B b = new(); public void Go() { b.Go(); b.Stop(); } }
+        public class B { private C c = new(); public void Go() { c.Go(); c.Log(); } public void Stop() { c.Stop(); } }
+        public class C { private D d = new(); public void Go() { d.Go(); d.Log(); } public void Log() { } public void Stop() { d.Go(); } }
+        public class D { private E e = new(); public void Go() { e.Go(); e.Go2(); } public void Log() { } }
+        public class E { public void Go() { } public void Go2() { } }
+        """;
 
-        var (d2, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options with { BehaviourLimits = new() { MaxMessages = 4 } });
-        var count = m.Relationships.Count(r => r.Kind == ElementKind.Message && ReferenceEquals(r.Source.Owner, d2!.Owner));
-        Assert.Equal(4, count);
-        Assert.Contains("Stopped at 4 messages", d2!.Owner!.OwnedElements.Single(e => e.Kind == ElementKind.Comment).Get(FieldKeys.Body));
+    private static List<string> Lifelines(Diagram d) => d.Owner!.OwnedElements.Where(e => e.Kind == ElementKind.Lifeline).Select(e => e.Name).ToList();
+
+    private static List<Relationship> Messages(ModelRepository m, Diagram d) =>
+        m.Relationships.Where(r => r.Kind == ElementKind.Message && ReferenceEquals(r.Source.Owner, d.Owner))
+            .OrderBy(r => d.EdgeFor(r)!.Waypoints[0].Y).ToList();
+
+    private static string Note(Diagram d) => d.Owner!.OwnedElements.SingleOrDefault(e => e.Kind == ElementKind.Comment)?.Get(FieldKeys.Body) ?? "";
+
+    [Fact]
+    public void Sequences_follow_two_levels_by_default_and_skip_one_line_forwarders()
+    {
+        Assert.Equal((2, 25), (new CodeBehaviourLimits().SequenceDepth, new CodeBehaviourLimits().MaxMessages));
+        var (m, code) = Synced(Chain);
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options with { BehaviourLimits = new() });
+        // A.Go (level 1) -> B.Go (level 2) -> C's calls are shown but not followed; B.Stop forwards in one line: not followed.
+        Assert.Equal(["caller", "a", "b", "c"], Lifelines(d!));
+        Assert.Equal(["Go()", "Go()", "Go()", "Log()", "Stop()"], Messages(m, d!).Select(r => r.Name));
+        Assert.Contains("deeper than 2 levels", Note(d!));
+        Assert.DoesNotContain("B.Stop", Note(d!));
+    }
+
+    [Fact]
+    public void On_demand_sequences_take_the_depth_asked_for_and_keep_it_on_later_syncs()
+    {
+        var (m, code) = Synced(Chain);
+        var (d1, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options, depth: 1);
+        Assert.Equal(["caller", "a", "b"], Lifelines(d1!));
+        Assert.Contains("deeper than 1 level", Note(d1!));
+
+        var (d4, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options, depth: 4);
+        Assert.Same(d1!.Owner, d4!.Owner);   // the same interaction, regenerated
+        Assert.Equal(["caller", "a", "b", "c", "d", "e"], Lifelines(d4));
+        Assert.Equal("4", d4.Owner!.Get(CodeBehaviourMapper.DepthKey));
+        Assert.Equal("demand", d4.Owner!.Get(CodeBehaviourMapper.OriginKey));
+        Assert.Equal(4, CodeBehaviourMapper.StoredDepth(d4.Owner));
+
+        // A later sync brings it up to date at the depth it was made with (nothing changes).
+        Assert.True(CodeModelMapper.Apply(m, code, Options with { Commit = "c2" }).IsEmpty);
+        Assert.Equal(["caller", "a", "b", "c", "d", "e"], Lifelines(d4));
+        // Without a depth, "Generate" keeps the stored one.
+        CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options);
+        Assert.Equal(6, Lifelines(d4).Count);
+    }
+
+    [Fact]
+    public void Replies_only_for_results_that_are_used()
+    {
+        var (m, code) = Synced("""
+            public class S { public int Read() { var x = 1; return x + 1; } public void Write(int v) { var y = v; y++; } }
+            public class A
+            {
+                private S s = new();
+                public int Go()
+                {
+                    s.Read();
+                    s.Write(1);
+                    var v = s.Read();
+                    s.Write(v);
+                    if (s.Read() > 2) s.Write(v);
+                    return v;
+                }
+            }
+            """);
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go()"), true, Options);
+        var names = Messages(m, d!).Select(r => (r.Name, r.Get(FieldKeys.MessageSort))).ToList();
+        Assert.Equal([
+            ("Go()", "synchCall"),
+            ("Read()", "synchCall"),             // result thrown away: no reply
+            ("Write(1)", "synchCall"),           // void: no reply
+            ("Read()", "synchCall"), ("int", "reply"),   // assigned: reply
+            ("Write(v)", "synchCall"),
+            ("Read()", "synchCall"), ("int", "reply"),   // in the condition: reply
+            ("Write(v)", "synchCall"),
+            ("int", "reply"),                    // the entry's own reply
+        ], names);
+    }
+
+    [Fact]
+    public void Repeated_calls_in_a_loop_and_runs_of_the_same_call_are_one_message()
+    {
+        var (m, code) = Synced("""
+            public class B { public void Add(int i) { var x = i; x++; } public void Flush() { var y = 0; y++; } }
+            public class A
+            {
+                private B b = new();
+                public void Go(int[] xs)
+                {
+                    foreach (var x in xs) { b.Add(x); b.Flush(); b.Add(x + 1); b.Add(x + 2); b.Flush(); }
+                    b.Add(1); b.Add(2); b.Add(3);
+                    b.Flush();
+                }
+            }
+            """);
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go(int[])"), true, Options);
+        var seq = d!.Owner!;
+        var loop = seq.OwnedElements.Single(e => e.Kind == ElementKind.CombinedFragment);
+        Assert.Equal("loop", loop.Get(FieldKeys.Operator));
+        var frame = d.NodeFor(loop)!.Bounds;
+        var inLoop = Messages(m, d).Where(r => d.EdgeFor(r)!.Waypoints[0].Y is var y && y > frame.Y && y < frame.Bottom).Select(r => r.Name).ToList();
+        Assert.Equal(["Add(x)", "Flush()"], inLoop);
+        Assert.Equal(["Go(xs)", "Add(x)", "Flush()", "Add(…) ×3", "Flush()"], Messages(m, d).Select(r => r.Name));
+    }
+
+    [Fact]
+    public void The_message_cap_ends_with_one_note_and_never_cuts_a_fragment()
+    {
+        var calls = string.Join(" ", Enumerable.Range(1, 15).Select(i => $"b.M{i}();"));
+        var guarded = string.Join(" ", Enumerable.Range(16, 20).Select(i => $"b.M{i}();"));
+        var methods = string.Join(" ", Enumerable.Range(1, 40).Select(i => $"public void M{i}() {{ }}"));
+        var (m, code) = Synced($$"""
+            public class B { {{methods}} }
+            public class A
+            {
+                private B b = new();
+                public void Go(bool on) { {{calls}} if (on) { {{guarded}} } b.M36(); b.M37(); }
+            }
+            """);
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go(bool)"), true, Options with { BehaviourLimits = new() }, depth: 2);
+        // On demand the cap is 60: everything fits.
+        Assert.Equal(1 + 37, Messages(m, d!).Count);
+        Assert.Single(d!.Owner!.OwnedElements, e => e.Kind == ElementKind.CombinedFragment);
+
+        // The sync's own cap (25): the 15 calls, then the opt fragment would be cut, so it goes whole into the note.
+        var index = new CodeBehaviourIndex(code);
+        var plan = CodeSequencePlanner.Plan(index, index.Method("A.Go(bool)")!, _ => null, new CodeBehaviourLimits());
+        Assert.Equal(16, plan.Edges.Count);
+        Assert.DoesNotContain(plan.Nodes, n => n.Kind == ElementKind.CombinedFragment);
+        Assert.Equal("… 22 more calls (stopped at 25 messages).", plan.Nodes.Single(n => n.Kind == ElementKind.Comment).Fields[FieldKeys.Body]);
+
+        // With nothing before it, a fragment keeps what fits rather than leaving the sequence empty.
+        var (m3, code3) = Synced($$"""
+            public class B { {{methods}} }
+            public class A { private B b = new(); public void Go(bool on) { if (on) { {{calls}} {{guarded}} } } }
+            """);
+        var index3 = new CodeBehaviourIndex(code3);
+        var plan3 = CodeSequencePlanner.Plan(index3, index3.Method("A.Go(bool)")!, _ => null, new CodeBehaviourLimits());
+        Assert.Equal(25, plan3.Edges.Count);
+        Assert.Single(plan3.Nodes, n => n.Kind == ElementKind.CombinedFragment);
+        Assert.StartsWith("… 11 more calls", plan3.Nodes.Single(n => n.Kind == ElementKind.Comment).Fields[FieldKeys.Body]);
+        Assert.NotNull(m3);
     }
 
     [Fact]
@@ -567,5 +694,156 @@ public class CodeSyncBehaviourTests
         var refresh = CodeSyncDiagrams.Refresh(m, changes, createDiagrams: true);
         Assert.DoesNotContain(refresh.Created, d => d.Owner?.Name == "Behaviour");
         Assert.DoesNotContain(m.Diagrams.Where(d => !CodeBehaviourMapper.IsGenerated(d)).SelectMany(d => d.Nodes), n => CodeBehaviourMapper.IsGenerated(n.Element));
+    }
+
+    // ================================================================ readable activities
+
+    private static BehaviourPlan ActivityPlan(CodeModel code, string symbol, CodeBehaviourLimits? limits = null)
+    {
+        var index = new CodeBehaviourIndex(code);
+        return CodeActivityPlanner.Plan(index, index.Method(symbol)!, _ => null, limits);
+    }
+
+    private const string Wiring = "public class B { public void AddBlock() { } public void Connect() { } public void Done() { } public void Check() { } }";
+
+    [Fact]
+    public void Runs_of_four_or_more_plain_statements_fold_into_one_action_listing_them()
+    {
+        var run = string.Join(" ", Enumerable.Range(1, 12).Select(i => i % 2 == 0 ? "b.AddBlock();" : "b.Connect();"));
+        var src = $$"""
+            {{Wiring}}
+            public class A { private B b = new(); public void Go(bool on) { if (on) { b.Done(); b.Check(); b.Done(); } {{run}} } }
+            """;
+        var plan = ActivityPlan(ReadCs(src), "A.Go(bool)");
+        var fold = plan.Nodes.Single(n => n.Name.StartsWith("12 calls", StringComparison.Ordinal));
+        Assert.Equal("12 calls: Connect, AddBlock", fold.Name);
+        Assert.Equal(12, fold.Fields[FieldKeys.Documentation].Split('\n').Length);
+        Assert.StartsWith("b.Connect()\nb.AddBlock()", fold.Fields[FieldKeys.Documentation]);
+        Assert.Equal(2, plan.Nodes.Count(n => n.Name == "b.Done()"));   // a run of three stays as it is
+        Assert.DoesNotContain(CodeActivityPlanner.SimplifiedNote, plan.Documentation);
+
+        // In the model: the summary action carries the list as its documentation.
+        var (m, code) = Synced(src);
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go(bool)"), false, Options);
+        var action = d!.Owner!.OwnedElements.Single(e => e.Name.StartsWith("12 calls", StringComparison.Ordinal));
+        Assert.Contains("b.AddBlock()", action.Documentation);
+    }
+
+    [Fact]
+    public void Large_activities_keep_their_control_flow_and_fold_leaf_blocks_to_fit_the_shape_cap()
+    {
+        var arms = string.Join("\n", Enumerable.Range(1, 4).Select(i => $$"""
+            if (n == {{i}})
+            {
+                for (var k = 0; k < n; k++) { b.AddBlock(); b.Connect(); if (k > 2) { b.Check(); b.Done(); } else b.Done(); }
+                b.Done(); b.Check();
+            }
+            """));
+        var code = ReadCs($$"""
+            {{Wiring}}
+            public class A { private B b = new(); public void Go(int n) { {{arms}} } }
+            """);
+        var full = ActivityPlan(code, "A.Go(int)", new CodeBehaviourLimits { MaxActivityShapes = 10_000 });
+        Assert.True(full.Nodes.Count + full.Edges.Count > 100);
+
+        var plan = ActivityPlan(code, "A.Go(int)");
+        Assert.True(plan.Nodes.Count + plan.Edges.Count <= 61, $"{plan.Nodes.Count + plan.Edges.Count} shapes");
+        Assert.True(plan.Nodes.Count(n => n.Kind == ElementKind.DecisionNode) >= 4);   // the four ifs (and their merges) stay
+        // The loops stay; the ifs inside them are one action each, listing what they hold.
+        var inner = plan.Nodes.Where(n => n.Name == "if k > 2 … (3 statements)").ToList();
+        Assert.Equal(4, inner.Count);
+        Assert.Equal("b.Check()\nb.Done()\nb.Done()", inner[0].Fields[FieldKeys.Documentation]);
+        Assert.Contains(CodeActivityPlanner.SimplifiedNote, plan.Documentation);
+        Assert.Contains("summarized", plan.Nodes.Single(n => n.Kind == ElementKind.Comment).Fields[FieldKeys.Body]);
+    }
+
+    [Fact]
+    public void Even_a_huge_flat_method_ends_up_near_the_shape_cap()
+    {
+        var ifs = string.Join(" ", Enumerable.Range(1, 80).Select(i => $"if (n == {i}) {{ b.Done(); b.Check(); }}"));
+        var code = ReadCs($$"""
+            {{Wiring}}
+            public class A { private B b = new(); public void Go(int n) { {{ifs}} } }
+            """);
+        var plan = ActivityPlan(code, "A.Go(int)");
+        Assert.True(plan.Nodes.Count + plan.Edges.Count <= 61, $"{plan.Nodes.Count + plan.Edges.Count} shapes");
+        Assert.Contains(plan.Nodes, n => n.Name.StartsWith("… ", StringComparison.Ordinal) && n.Name.EndsWith("more statements", StringComparison.Ordinal));
+        Assert.Single(plan.Nodes, n => n.Kind == ElementKind.ActivityFinalNode);
+    }
+
+    // ================================================================ what "Entry points" picks
+
+    private static CodeModel ReadFiles(params (string Path, string Source)[] files) =>
+        new CSharpCodeReader().Read(files.Select(f => new CodeFile(f.Path, f.Source)).ToList());
+
+    private const string Repo = "namespace App.Data { public class Repo { public void A() { } public void B() { } public void C() { } public void D() { } } }";
+
+    [Fact]
+    public void Entry_points_skip_samples_generated_code_builders_and_straight_runs_of_calls()
+    {
+        var seed = string.Join(" ", Enumerable.Range(0, 10).Select(i => "_r." + "ABCD"[i % 4] + "();"));
+        var code = ReadFiles(
+            ("src/Data/Repo.cs", Repo),
+            ("src/Samples/Demo.cs", "namespace App.Samples { public class Demo { private App.Data.Repo _r = new(); public void Build(bool x) { if (x) _r.A(); else _r.B(); } } }"),
+            ("src/Ui/Form1.Designer.cs", "namespace App.Ui { public class Form1 { private App.Data.Repo _r = new(); public void InitializeComponent(bool x) { if (x) _r.A(); } } }"),
+            ("src/Ui/Gen.cs", "namespace App.Ui { [System.CodeDom.Compiler.GeneratedCode(\"t\", \"1\")] public class Gen { private App.Data.Repo _r = new(); public void Run(bool x) { if (x) _r.A(); } } }"),
+            ("src/Api/SeedController.cs", "namespace App.Api { public class SeedController { private App.Data.Repo _r = new(); public void Seed() { " + seed + " } public void Pick(bool x) { if (x) _r.A(); else _r.B(); } } }"),
+            ("src/Core/Steps.cs", "namespace App.Core { public class Steps { private App.Data.Repo _r = new(); "
+                + "public void Straight() { _r.A(); _r.B(); _r.C(); _r.D(); _r.A(); } "
+                + "public void Guarded() { using (var x = new System.IO.MemoryStream()) { _r.A(); _r.B(); _r.C(); _r.D(); _r.A(); } } } }"));
+        var o = Options with { Behaviour = CodeBehaviourMode.EntryPoints };
+        var m = new ModelRepository();
+        CodeModelMapper.Apply(m, code, o);
+        var symbols = m.AllElements.Select(e => e.Get(CodeFieldKeys.Symbol)).Where(CodeBehaviourMapper.IsBehaviourSymbol).OrderBy(x => x).ToList();
+        Assert.Contains("act:App.Api.SeedController.Pick(bool)", symbols);
+        Assert.Contains("seq:App.Api.SeedController.Pick(bool)", symbols);
+        Assert.Contains("act:App.Core.Steps.Guarded()", symbols);   // calls inside a using block: worth a diagram
+        Assert.DoesNotContain(symbols, x => x.Contains("Samples", StringComparison.Ordinal));
+        Assert.DoesNotContain(symbols, x => x.Contains("Form1", StringComparison.Ordinal));
+        Assert.DoesNotContain(symbols, x => x.Contains("Gen.", StringComparison.Ordinal));
+        Assert.DoesNotContain(symbols, x => x.Contains("Seed()", StringComparison.Ordinal));   // a builder, even in a controller
+        Assert.DoesNotContain("act:App.Core.Steps.Straight()", symbols);   // five calls in a row fold into one action: no diagram
+
+        Assert.True(CodeBehaviourIndex.IsGeneratedOrSample(code.Types.Single(t => t.Name == "Demo")));
+        Assert.DoesNotContain(code.Types, t => t.Name == "Form1");   // the reader already leaves designer files out
+        Assert.True(CodeBehaviourIndex.IsGeneratedOrSample(code.Types.Single(t => t.Name == "Gen")));
+        Assert.False(CodeBehaviourIndex.IsGeneratedOrSample(code.Types.Single(t => t.Name == "Steps")));
+
+        // They stay available on demand.
+        var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "App.Samples.Demo.Build(bool)"), false, o);
+        Assert.NotNull(d);
+        var (seq, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "App.Api.SeedController.Seed()"), true, o);
+        Assert.NotNull(seq);
+    }
+
+    [Fact]
+    public void Behaviours_entry_points_no_longer_pick_are_removed_when_untouched_and_kept_otherwise()
+    {
+        static (string, string) Type(string folder, string name) =>
+            ($"src/{folder}/{name}.cs", $"namespace App.Logic {{ public class {name} {{ private App.Data.Repo _r = new(); public void Run(bool x) {{ if (x) _r.A(); else _r.B(); }} }} }}");
+        var o = Options with { Behaviour = CodeBehaviourMode.EntryPoints };
+        var m = new ModelRepository();
+        var before = ReadFiles(("src/Data/Repo.cs", Repo), Type("Logic", "Plain"), Type("Logic", "Moved"), Type("Logic", "Asked"));
+        CodeModelMapper.Apply(m, before, o);
+        Element Act(string name) => m.AllElements.Single(e => e.Get(CodeFieldKeys.Symbol) == $"act:App.Logic.{name}.Run(bool)");
+        var (plain, moved, asked) = (Act("Plain"), Act("Moved"), Act("Asked"));
+        // Someone moves a shape on one; another is regenerated on demand (it is now theirs).
+        var d = moved.OwnedElements.OfType<Diagram>().Single();
+        m.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [d.Nodes[1]] = d.Nodes[1].Bounds with { X = d.Nodes[1].Bounds.X + 90 } });
+        CodeBehaviourMapper.Generate(m, before, Op(m, "App.Logic.Asked.Run(bool)"), false, o);
+
+        // The code moves into a Samples folder: "Entry points" no longer picks these methods.
+        var after = ReadFiles(("src/Data/Repo.cs", Repo), Type("Samples", "Plain"), Type("Samples", "Moved"), Type("Samples", "Asked"));
+        var changes = CodeModelMapper.Apply(m, after, o with { Commit = "c2" });
+        Assert.False(m.Contains(plain));
+        Assert.Contains(plain.Id, changes.Removed);
+        Assert.True(m.Contains(moved));
+        Assert.True(m.Contains(asked));
+        // Plain's activity and the three sequences (all untouched, none asked for) went.
+        Assert.Equal(4, changes.TrivialDiagramsRemoved);
+        Assert.DoesNotContain(m.AllElements, e => e.Get(CodeFieldKeys.Symbol).StartsWith("seq:", StringComparison.Ordinal));
+        // And they are not made again.
+        var third = CodeModelMapper.Apply(m, after, o with { Commit = "c3" });
+        Assert.True(third.IsEmpty, string.Join(" | ", third.Added.Concat(third.Changed).Select(id => m.Find(id)).Select(e => $"{e?.Kind}:{e?.Name}:{e?.Get(CodeFieldKeys.Symbol)}")) + " removed " + third.Removed.Count);
     }
 }
