@@ -28,6 +28,8 @@
     href: sysml-v2.md
   - name: Database modelling
     href: database.md
+  - name: Deployment diagrams
+    href: deployment-diagrams.md
   - name: Mermaid
     href: mermaid.md
   - name: AI assistant

@@ -55,6 +55,8 @@ in later versions, `…uml_umodel.model` / `…uml_umodel.shared_umodel`) and `.
 | any other `kind` | choice pseudostate, listed as *Unknown pseudostate kinds* |
 | `uml:DataStoreNode`, `uml:CentralBufferNode` | object node with the «datastore» / «centralBuffer» kind |
 | association `memberEnd`s | the target end's multiplicity, and the other end's as the **source multiplicity** (when the file states one) |
+| `uml:Node`, `uml:Device`, `uml:ExecutionEnvironment` (and `nestedNode`), `uml:Artifact` (`fileName`), `uml:DeploymentSpecification` | node, device, execution environment (nested), artifact, deployment specification ([deployment diagrams](deployment-diagrams.md)) |
+| `uml:Deployment` (`deployedArtifact` / `location`, or supplier / client), `uml:Manifestation`, `uml:CommunicationPath` | «deploy» artifact → node, «manifest» artifact → element, communication path; *Deployment Diagram*s keep their layout |
 
 **Used projects.** Meridian reads the project metadata (`com.nomagic.ci.metamodel.project`, or `project.xmi` where present):
 the project's own id, the packages it shares, and each **project usage** with its `usedProjectURI`, project id and mount
@@ -107,6 +109,12 @@ A fragment's **operands** are EA's *partitions*: the `t_xref` row named `Partiti
 around a guard are removed), and the heights place the separators. When the heights do not fit the fragment's shape the
 separators are spread evenly and the import report says so. Association ends keep `DestCard` as the target multiplicity and
 `SourceCard` as the source multiplicity (swapped for compositions and aggregations, which EA draws from the part).
+
+Deployment content maps too: `Node` (a «device» or «executionEnvironment» node becomes a device or execution
+environment), `Device`, `ExecutionEnvironment`, `Artifact` and `DeploymentSpecification` objects nest by `ParentID`;
+`Deployment` and `Manifest` connectors (or dependencies stereotyped «deploy» / «manifest») and communication paths become
+«deploy», «manifest» and communication paths, and *Deployment* diagrams stay deployment diagrams
+([deployment diagrams](deployment-diagrams.md)).
 
 "Confirmed" codes match Sparx's EA object model as used by the open-source EA tools of the OpenMBEE MTIP project and Geert
 Bellekens' EA toolpack; the others are listed so you can check them after an import.

@@ -82,6 +82,7 @@ public sealed partial class ModelValidator
         new Libraries.MissingReferenceRule(),   // references to library elements that are gone (docs/LIBRARIES.md)
         new DataModeling.DbValidationRules(),   // DB-001 … DB-008
         new Instances.InstanceRules(),   // INST-001 … INST-004 (instance specifications and slots)
+        new Deployment.DeploymentValidationRules(),   // DEP-001, DEP-002
         new QueryRules(),   // the model's own ValidationRule elements
     };
 

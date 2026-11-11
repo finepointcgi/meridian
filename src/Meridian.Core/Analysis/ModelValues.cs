@@ -40,6 +40,8 @@ public static class ModelValues
         ["supertypes"] = "rel:out:Generalization", ["subtypes"] = "rel:in:Generalization",
         ["doc"] = "documentation", ["path"] = "qualifiedName", ["stereotypes"] = "stereotype",
         ["reqId"] = "field:reqId", ["text"] = "field:text",
+        ["deployedTo"] = "rel:out:Deployment", ["deployedArtifacts"] = "rel:in:Deployment",
+        ["manifests"] = "rel:out:Manifestation", ["manifestedBy"] = "rel:in:Manifestation",
     };
 
     private static readonly HashSet<string> Specials = new(StringComparer.OrdinalIgnoreCase)
@@ -108,6 +110,7 @@ public static class ModelValues
         if (key == VerificationCriteriaKey) return string.Join("; ", Verification.StoredChecks(m, e).Select(c => $"{c.Criterion}: {c.Label}"));
         if (key == SubjectAreasKey) return string.Join(", ", DataModeling.DbModel.GroupsOf(m, e.Kind == ElementKind.Column && e.Owner != null ? e.Owner : e).Select(g => g.Name));
         if (key == KeysKey) return e.Kind == ElementKind.Column && e.Owner != null ? KeyMarkers(m, e) : "";
+        if (key is Deployment.DeploymentModel.NodeKey or Deployment.DeploymentModel.EnvironmentKey) return Deployment.DeploymentModel.Value(m, e, key);
         if (key.StartsWith("field:", StringComparison.OrdinalIgnoreCase)) return e.Get(key[6..]);
         if (key.StartsWith(FieldKeys.TagPrefix, StringComparison.OrdinalIgnoreCase)) return TagValue(e, key[4..]);
         if (key.StartsWith("prop:", StringComparison.OrdinalIgnoreCase)) return ValueProperty(e, key[5..])?.Get(FieldKeys.DefaultValue) ?? "";
@@ -121,7 +124,8 @@ public static class ModelValues
     public static bool CanEdit(Element e, string key)
     {
         key = Canonical(key);
-        if (key is "kind" or "owner" or "qualifiedName" or "id" or "type" or VerificationResultKey or VerificationCriteriaKey or SubjectAreasKey or KeysKey) return false;
+        if (key is "kind" or "owner" or "qualifiedName" or "id" or "type" or VerificationResultKey or VerificationCriteriaKey or SubjectAreasKey or KeysKey
+            or Deployment.DeploymentModel.NodeKey or Deployment.DeploymentModel.EnvironmentKey) return false;
         if (TryRel(key, out _, out _)) return false;
         if (key.StartsWith("prop:", StringComparison.OrdinalIgnoreCase)) return ValueProperty(e, key[5..]) != null;
         if (key is "name" or "stereotype" or "documentation") return true;

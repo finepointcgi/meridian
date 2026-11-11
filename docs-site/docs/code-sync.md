@@ -21,6 +21,8 @@ Connect a GitHub or GitLab repository and Meridian keeps a part of the model in 
    - **Folders to include** (for example `src/Domain, src/Shared`). Empty means the whole repository.
    - **Model package**: the package the code goes into. By default it is named after the repository.
    - **Sync on every push to the branch** and **Post a commit status (meridian/model)**.
+   - **Deployment artifacts**: *None* (default), *One for the repository* or *One per top-level package*: artifacts that
+     «manifest» the synced packages, so you can deploy the code to nodes ([deployment diagrams](deployment-diagrams.md#deploying-code)).
 5. **Test connection**, then **Save**.
 6. Copy the **Payload URL** and **Secret** into the repository's webhook settings, as the dialog explains. The secret is
    shown once and stored encrypted.

@@ -26,9 +26,11 @@ public class ReportStreamingTests
     private static ModelRepository Small() => LargeModelGenerator.Generate(new LargeModelOptions { Scale = 0.02, UseCases = 10, BreakdownDepth = 3, LargeDiagrams = 2 });
 
     /// <summary>The built-ins as they were at a847aca, when the golden hashes below were taken: matrices without hidden empty
-    /// rows and columns, and the VCRM table without the "Criteria" column (added later with several criteria per requirement).</summary>
+    /// rows and columns, the VCRM table without the "Criteria" column (added later with several criteria per requirement), and
+    /// the SDD without its "Deployment view" section (added with deployment diagrams; DeploymentTests covers it).</summary>
     private static DocTemplate AsBefore(DocTemplate t)
     {
+        t.Sections.RemoveAll(s => s.Ref == "deployment");
         foreach (var s in t.AllSections())
             foreach (var b in Flatten(s.Blocks))
             {

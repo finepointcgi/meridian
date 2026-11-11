@@ -1630,6 +1630,7 @@ public sealed partial class DiagramController
         {
             var owner = Model.DefaultOwnerFor(Diagram.Owner ?? Model.Root, kind);
             DiagramNode? container = null;
+            Element? deployTo = null;   // an artifact created inside a node is deployed to it (deployment shown by nesting)
 
             // Creating inside a shape nests the new element: ports/parts on parts (owned by the part's type),
             // pins on actions, substates in states, contents of swimlanes, pools and lanes.
@@ -1640,6 +1641,7 @@ public sealed partial class DiagramController
                 if (Metamodel.CanOwn(host.Kind, kind) && host.Kind is not (ElementKind.Package or ElementKind.Model)) { owner = host; container = hit; }
                 else if (kind is ElementKind.Port or ElementKind.Property && typeOfHost != null && Metamodel.CanOwn(typeOfHost.Kind, kind)) { owner = typeOfHost; container = hit; }
                 else if (Notation.ShapeOf(host) is NodeShape.Swimlane or NodeShape.Pool && kind != ElementKind.Comment) container = hit;
+                else if (Meridian.Core.Deployment.DeploymentModel.IsArtifact(kind) && Meridian.Core.Deployment.DeploymentModel.IsNode(host.Kind)) { container = hit; deployTo = host; }
             }
             if (kind is ElementKind.InputPin or ElementKind.OutputPin && container?.Element.Kind != ElementKind.Action)
                 throw new InvalidOperationException("Pins go on actions: click on an action with the pin tool.");
@@ -1671,6 +1673,7 @@ public sealed partial class DiagramController
                 var bounds = new Bounds(Snap(p.X - w / 2), Snap(p.Y - h / 3), w, h);
                 if (Notation.IsBorderShape(e) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
                 node = Model.AddNode(Diagram, e, bounds, parent: container);
+                if (deployTo != null) Model.Connect(ElementKind.Deployment, e, deployTo);
                 PutOnActiveLayer(node);
                 if (container != null) GrowContainers([node]);
             }

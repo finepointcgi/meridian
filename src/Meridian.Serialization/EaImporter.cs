@@ -509,7 +509,15 @@ public static class EaImporter
         "Part" or "Property" => ElementKind.Property,
         "Note" => ElementKind.Comment,
         "Object" => ElementKind.InstanceSpecification,
-        "Signal" or "Artifact" => ElementKind.Class,
+        "Node" => stereo.ToLowerInvariant() switch
+        {
+            "device" => ElementKind.Device, "executionenvironment" or "execution environment" => ElementKind.ExecutionEnvironment, _ => ElementKind.Node,
+        },
+        "Device" => ElementKind.Device,
+        "ExecutionEnvironment" => ElementKind.ExecutionEnvironment,
+        "Artifact" => stereo.Equals("deployment spec", StringComparison.OrdinalIgnoreCase) ? ElementKind.DeploymentSpecification : ElementKind.Artifact,
+        "DeploymentSpecification" => ElementKind.DeploymentSpecification,
+        "Signal" => ElementKind.Class,
         "Constraint" => ElementKind.Comment,
         _ => null,
     };
@@ -526,8 +534,14 @@ public static class EaImporter
         "include" => ElementKind.Include,
         "extend" => ElementKind.Extend,
         "fk" => ElementKind.ForeignKey,
+        "deploy" => ElementKind.Deployment,
+        "manifest" => ElementKind.Manifestation,
+        "communicationpath" => ElementKind.CommunicationPath,
         _ => type switch
         {
+            "Deployment" => ElementKind.Deployment,
+            "Manifest" or "Manifestation" => ElementKind.Manifestation,
+            "CommunicationPath" => ElementKind.CommunicationPath,
             "Association" => ElementKind.Association,
             "Aggregation" => subType.Equals("Strong", StringComparison.OrdinalIgnoreCase) ? ElementKind.Composition : ElementKind.Aggregation,
             "Generalization" => ElementKind.Generalization,
@@ -557,6 +571,7 @@ public static class EaImporter
             "Sequence" => DiagramType.Sequence,
             "Package" => DiagramType.Package,
             "Requirements" => DiagramType.Requirement,
+            "Deployment" => DiagramType.Deployment,
             _ => DiagramType.Class,
         };
     }

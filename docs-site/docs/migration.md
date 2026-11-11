@@ -76,6 +76,7 @@ can always compare against it.
 | OSLC / DataHub | **OSLC RM provider**, issue tracker links, webhooks |
 | Cameo AI assistant / third-party AI plugins | **AI assistant** on Claude, a local model or Claude Code; every change reviewed before it is applied ([details](ai-assistant.md)) |
 | Import from diagram-as-code tools | **Mermaid** import and export ([details](mermaid.md)) |
+| Deployment diagrams: nodes, devices, execution environments, artifacts, «deploy», «manifest», communication paths (`uml:Node`, `uml:Device`, `uml:ExecutionEnvironment`, `uml:Artifact`, `uml:Deployment`, `uml:Manifestation`, `uml:CommunicationPath`) | **Deployment diagrams** with 3D node boxes, nesting, automatic «deploy» / «manifest» lines, **Deploy to…**, a deployment table and matrix; imported from Cameo with their diagrams ([details](deployment-diagrams.md)) |
 | Data modeling with SQL / database profiles (Cameo DataHub, SQL profile), entity-relationship diagrams | **Database diagrams** (crow's foot) with tables, views, keys, subject areas and logical entities; DDL, `.dacpac`, Mermaid `erDiagram` and live import with refresh; DDL and migration scripts; data dictionary ([details](database.md)) |
 
 ## Enterprise Architect
@@ -109,6 +110,7 @@ can always compare against it.
 | Scripting (JavaScript, JScript, VBScript) | **Script console** (C#) |
 | Simulation (SysML simulation, executable state machines) | **Simulation** tabs |
 | BPMN, ArchiMate | **BPMN** and **ArchiMate** diagrams with BPMN XML and ArchiMate exchange |
+| Deployment diagrams: Node, Device, ExecutionEnvironment, Artifact, Deployment and Manifest connectors, communication paths | **Deployment diagrams**, imported from the `.qea` with nesting and «deploy» / «manifest» links; **Deploy to…** for a selection ([details](deployment-diagrams.md)) |
 | Database Engineering: data models, «table» / «column», PK / FK operations | **Database modelling**: databases, schemas, tables, views, keys, indexes, sequences, enum types; EA data models import with lengths, NOT NULL, PK / FK / unique / index operations and «FK» connectors ([details](database.md)) |
 | Database Builder: connect to a live database, import / synchronize schema | **Connect to a database…** (PostgreSQL, MySQL / MariaDB, SQLite) and **Refresh…** with a change review; SQL Server and Oracle through DDL or `.dacpac` |
 | Generate DDL, DDL compare / transformation | **Generate DDL…** for five dialects and **Migration script…** (ALTER statements from a version, branch, baseline or live database, with warnings) |

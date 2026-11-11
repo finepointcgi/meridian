@@ -103,6 +103,7 @@ public partial class Workbench
             list.Add(new($"New {Metamodel.DisplayName(type)}", "Command", UiKinds.DiagramIcon(type), () => { NewDiagramSmart(type); return Task.CompletedTask; }));
         }
         list.AddRange(TablesPaletteCommands());
+        list.AddRange(DeploymentPaletteCommands());   // Workbench.Deployment.cs
         list.AddRange(LibraryPaletteCommands());   // used projects (Workbench.Libraries.cs)
         foreach (var d in Ws.Model.Diagrams.OrderBy(d => d.Name))
         {
@@ -417,6 +418,7 @@ public partial class Workbench
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
         m.AddRange(DatabaseTreeEntries(e));      // Workbench.Database.cs
         m.AddRange(InstanceMenuEntries(e));      // Workbench.Instances.cs
+        m.AddRange(DeploymentTreeEntries(e));    // Workbench.Deployment.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
@@ -452,6 +454,7 @@ public partial class Workbench
             if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
             m.AddRange(DatabaseCanvasEntries(c, n));   // Workbench.Database.cs
             m.AddRange(InstanceMenuEntries(el, c, n));   // Workbench.Instances.cs
+            m.AddRange(DeploymentCanvasEntries(c, n)); // Workbench.Deployment.cs
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));

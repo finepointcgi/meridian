@@ -22,6 +22,9 @@ documentation, and the current validation results. Save or print it from the bro
 | **Package depth** | with the whole model or a selection: leave out elements nested more than this many packages deep (0 = everything) |
 | **Output** | *One document*; *One document, a part per top-level package* (each package is a numbered part with the template's sections inside, all listed in one table of contents); or *A zip with one document per top-level package* |
 
+The *System Design Description* has a **Deployment view** section (after *Behavior*): the deployment diagrams, a table of
+artifacts with the node and execution environment they are deployed to, and the communication paths ([deployment diagrams](deployment-diagrams.md)).
+
 A scope limits what the template's queries, diagram lists, tables, statistics and validation results see; links to
 elements outside it (a requirement's *satisfied by*, for example) are still shown. With *A package…*, "top-level
 package" means that package's own sub-packages.

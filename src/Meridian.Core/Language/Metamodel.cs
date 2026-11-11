@@ -38,6 +38,7 @@ public static class Metamodel
         ElementKind.Message, ElementKind.Binding, ElementKind.BpmnFlow, ElementKind.ArchiRelation, ElementKind.ForeignKey, ElementKind.Line,
         ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes, ElementKind.CommunicationLink,
         ElementKind.Link,
+        ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath,
     };
 
     private static readonly HashSet<ElementKind> Classifiers = new()
@@ -46,6 +47,7 @@ public static class Metamodel
         ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock,
         ElementKind.Actor, ElementKind.UseCase, ElementKind.Requirement, ElementKind.TestCase,
         ElementKind.Activity, ElementKind.StateMachine, ElementKind.Interaction, ElementKind.Table, ElementKind.Stereotype,
+        ElementKind.Node, ElementKind.Device, ElementKind.ExecutionEnvironment, ElementKind.Artifact, ElementKind.DeploymentSpecification,
     };
 
     private static readonly HashSet<ElementKind> StructuralClassifiers = new()
@@ -130,6 +132,11 @@ public static class Metamodel
             ElementKind.Table => child is ElementKind.Column or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Trigger,
             ElementKind.Feature => child == ElementKind.Feature,   // feature tree by containment
             ElementKind.InstanceSpecification => child is ElementKind.Slot or ElementKind.InstanceSpecification,   // slots and nested part instances
+            // Deployment: nodes nest (a device holding an execution environment holding another); artifacts nest artifacts.
+            ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment =>
+                Deployment.DeploymentModel.IsNode(child) || child is ElementKind.Property or ElementKind.Operation or ElementKind.Port,
+            ElementKind.Artifact => child is ElementKind.Artifact or ElementKind.Property or ElementKind.Operation,
+            ElementKind.DeploymentSpecification => child == ElementKind.Property,
             _ => false,
         };
     }
@@ -166,6 +173,7 @@ public static class Metamodel
             ElementKind.CommunicationLink => source is ElementKind.CommunicationLifeline or ElementKind.Lifeline && target is ElementKind.CommunicationLifeline or ElementKind.Lifeline
                 ? null : "Communication links connect lifelines",
             ElementKind.Link => source == ElementKind.InstanceSpecification && target == ElementKind.InstanceSpecification ? null : "Links connect two instance specifications",
+            ElementKind.Deployment or ElementKind.Manifestation or ElementKind.CommunicationPath => Deployment.DeploymentModel.CheckEnds(rel, source, target),
             _ => null, // Dependency, Refine, Trace, Allocate: any to any
         };
     }
@@ -239,6 +247,8 @@ public static class Metamodel
                                             ElementKind.DecisionNode, ElementKind.ForkNode, ElementKind.Comment],
         DiagramType.Communication => [ElementKind.CommunicationLifeline, ElementKind.Comment],
         DiagramType.Object => [ElementKind.InstanceSpecification, ElementKind.Block, ElementKind.Comment],
+        DiagramType.Deployment => [ElementKind.Node, ElementKind.Device, ElementKind.ExecutionEnvironment, ElementKind.Artifact, ElementKind.DeploymentSpecification,
+                                   ElementKind.Component, ElementKind.Package, ElementKind.Comment],
         _ when UafViewpoints.Of(t) is { } uaf => uaf.Elements.Select(x => x.Kind).Distinct().Append(ElementKind.Comment).ToList(),
         _ => [],
     };
@@ -260,6 +270,7 @@ public static class Metamodel
         DiagramType.InteractionOverview => [ElementKind.ControlFlow],
         DiagramType.Communication => [ElementKind.CommunicationLink],
         DiagramType.Object => [ElementKind.Link, ElementKind.Dependency],
+        DiagramType.Deployment => [ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath, ElementKind.Dependency, ElementKind.Association],
         _ when UafViewpoints.Of(t) is { } uaf => uaf.Links.Select(x => x.Kind).Distinct().ToList(),
         _ => [],
     };
@@ -297,6 +308,7 @@ public static class Metamodel
         DiagramType.InteractionOverview => "io",
         DiagramType.Communication => "comm",
         DiagramType.Object => "obj",
+        DiagramType.Deployment => "deploy",
         _ when UafViewpoints.Of(t) is { } uaf => "uaf " + uaf.Code,
         _ => "diagram",
     };
@@ -352,6 +364,9 @@ public static class Metamodel
         ElementKind.DbIndex => "Index",
         ElementKind.DbConstraint => "Constraint",
         ElementKind.InstanceSpecification => "Instance",
+        ElementKind.ExecutionEnvironment => "Execution Environment",
+        ElementKind.DeploymentSpecification => "Deployment Specification",
+        ElementKind.CommunicationPath => "Communication Path",
         _ => k.ToString(),
     };
 
@@ -400,6 +415,10 @@ public static class Metamodel
         ElementKind.TradeStudy => "tradeStudy",
         ElementKind.Sequence => "sequence",
         ElementKind.Routine => "routine",
+        ElementKind.Device => "device",
+        ElementKind.ExecutionEnvironment => "executionEnvironment",
+        ElementKind.Artifact => "artifact",
+        ElementKind.DeploymentSpecification => "deployment spec",
         _ => null,
     };
 
@@ -457,6 +476,8 @@ public static class Metamodel
         _ when k is ElementKind.Configuration or ElementKind.TradeStudy => (200, 110),
         _ when k == ElementKind.Feature => (140, 60),
         _ when k == ElementKind.InstanceSpecification => (200, 100),
+        _ when Deployment.DeploymentModel.IsNode(k) => (220, 130),
+        _ when k is ElementKind.Artifact or ElementKind.DeploymentSpecification => (200, 76),
         _ => (180, 110),
     };
 
@@ -488,6 +509,9 @@ public static class Metamodel
         ElementKind.Excludes => new(true, ArrowHead.Open, ArrowHead.Open, "excludes"),
         ElementKind.CommunicationLink => new(false, ArrowHead.None, ArrowHead.None, null),
         ElementKind.Link => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Deployment => new(true, ArrowHead.Open, ArrowHead.None, "deploy"),
+        ElementKind.Manifestation => new(true, ArrowHead.Open, ArrowHead.None, "manifest"),
+        ElementKind.CommunicationPath => new(false, ArrowHead.None, ArrowHead.None, null),
         _ => new(false, ArrowHead.None, ArrowHead.None, null),
     };
 
@@ -523,6 +547,7 @@ public static class Metamodel
         f.AddRange(DataModeling.DbFields.EditableFields(k));
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
+        f.AddRange(DeploymentFields.EditableFields(k));
         f.AddRange(ExtFieldKeys.EditableFields(k));
         f.AddRange(InteractionNotation.EditableFields(k));
         f.Add(FieldKeys.Stereotypes);

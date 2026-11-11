@@ -261,6 +261,7 @@ public sealed partial class CodeSyncRunner(
             // A partial push (only the changed files) must not read as "everything else was deleted".
             RemoveDeleted = request.IsFullSnapshot,
             Submodules = request.Submodules.Where(s => s.Fetched).ToList(),
+            Artifacts = connection?.DeploymentArtifacts ?? CodeArtifactMode.None,
         };
         var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
         ct.ThrowIfCancellationRequested();

@@ -25,6 +25,7 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 | ArchiMate | `archi` | package | business, application and technology elements and ArchiMate relationships |
 | Entity-relationship | `erd` | package | tables, columns, foreign keys |
 | Feature model | `fm` | package | features, configurations; feature decomposition, requires, excludes |
+| Deployment | `deploy` | package | nodes, devices, execution environments (nested), artifacts, deployment specifications; deploy, manifest, communication paths ([details](deployment-diagrams.md)) |
 | Whiteboard | `board` | package | free shapes, sticky notes and lines |
 | Object | `obj` | package | instances (`name : Type`, underlined, with slots) and the blocks they instantiate; links ([details](instances.md)) |
 

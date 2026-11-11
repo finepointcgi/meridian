@@ -45,6 +45,7 @@ public static class UserGuide
         public const string Mermaid = "mermaid";
         public const string FindReplace = "find-replace";
         public const string Instances = "instances";
+        public const string DeploymentDiagrams = "deployment-diagrams";
     }
 
     /// <summary>The guide folder: <c>Meridian:GuidePath</c>, else <c>guide</c> next to the content root or the app, else (Development) docs-site/_site.</summary>

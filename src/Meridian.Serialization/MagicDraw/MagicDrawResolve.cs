@@ -116,10 +116,11 @@ public static partial class MagicDrawImporter
             string? mult = null, srcMult = null, srcPart = null, tgtPart = null;
             var x = p.X;
 
-            if (kind == ElementKind.Association)
+            var communicationPath = kind == ElementKind.CommunicationPath;   // an association between nodes: its ends are read the same way
+            if (kind is ElementKind.Association or ElementKind.CommunicationPath)
             {
                 var ends = Refs(x, "memberEnd").Select(id => _props.GetValueOrDefault(id)).ToList();
-                if (ends.Count != 2 || ends.Any(e => e == null)) { _report.Warn($"Association {p.Id} skipped: it needs two resolvable member ends"); _report.Skip("Associations with unresolved ends"); return; }
+                if (ends.Count != 2 || ends.Any(e => e == null)) { _report.Warn($"{p.Label} {p.Id} skipped: it needs two resolvable member ends"); _report.Skip("Associations with unresolved ends"); return; }
                 var whole = ends.FindIndex(e => e!.Aggregation is "composite" or "shared");
                 // Plain associations read in memberEnd order; aggregations go from the whole to the part.
                 var partEnd = ends[whole >= 0 ? whole : 1]!;
@@ -138,6 +139,7 @@ public static partial class MagicDrawImporter
                 mult = partEnd.Multiplicity;
                 // The other member end's multiplicity is drawn at the source end (only when the file states one).
                 srcMult = otherEnd.ExplicitMultiplicity;
+                if (communicationPath) { kind = ElementKind.CommunicationPath; mult = srcMult = null; }
             }
             else if (kind == ElementKind.Message)
             {

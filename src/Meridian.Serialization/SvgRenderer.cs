@@ -223,7 +223,7 @@ public static partial class SvgRenderer
         // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then paths, then contents by depth.
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
-        foreach (var e in d.Edges) RenderEdge(sb, d, e, routes[e], t, jumps, model);
+        foreach (var e in d.Edges.Where(e => !Core.Deployment.DeploymentModel.ShownByNesting(d, e))) RenderEdge(sb, d, e, routes[e], t, jumps, model);
         if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
         foreach (var n in d.Nodes.Except(containers).OrderBy(n => Depth(d, n))) RenderNode(sb, model, d, n, bounds(n), t);
         if (d.DiagramType == DiagramType.Timing) RenderTimeAxis(sb, d, bounds, t);
@@ -803,6 +803,7 @@ public static partial class SvgRenderer
                     break;
                 }
                 if (n.Element.Kind == ElementKind.Table) { RenderTable(sb, m, d, n, b, c, fill, header, t); break; }
+                if (RenderDeployment(sb, m, d, n, b, c, fill, header, t)) break;   // SvgRenderer.Deployment.cs
                 RenderCompartments(sb, b, c, fill, n.Element.Kind, t, header);
                 break;
         }

@@ -24,6 +24,8 @@ public static class UiKinds
         ElementKind.Feature or ElementKind.Configuration or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes => "#8e44ad",
         ElementKind.TradeStudy => "#d35400",
         ElementKind.InstanceSpecification or ElementKind.Slot or ElementKind.Link => "#16a085",
+        ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment or ElementKind.CommunicationPath => "#3b6fb6",
+        ElementKind.Artifact or ElementKind.DeploymentSpecification or ElementKind.Deployment or ElementKind.Manifestation => "#1d8a8a",
         _ => "#6b7586",
     };
 
@@ -39,6 +41,7 @@ public static class UiKinds
         ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬", ElementKind.Pseudostate => "◇", ElementKind.InteractionOperand => "┄",
         ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
         ElementKind.InstanceSpecification => "i", ElementKind.Slot => "=",
+        ElementKind.Node => "N", ElementKind.Device => "Dv", ElementKind.ExecutionEnvironment => "EE", ElementKind.Artifact => "Ar", ElementKind.DeploymentSpecification => "DS",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
     };
@@ -154,6 +157,14 @@ public static class UiKinds
         ElementKind.InstanceSpecification => MudBlazor.Icons.Material.Outlined.DataObject,
         ElementKind.Slot => MudBlazor.Icons.Material.Outlined.DragHandle,
         ElementKind.Link => MudBlazor.Icons.Material.Outlined.Link,
+        ElementKind.Node => MudBlazor.Icons.Material.Outlined.Dns,
+        ElementKind.Device => MudBlazor.Icons.Material.Outlined.Memory,
+        ElementKind.ExecutionEnvironment => MudBlazor.Icons.Material.Outlined.WebAsset,
+        ElementKind.Artifact => MudBlazor.Icons.Material.Outlined.Description,
+        ElementKind.DeploymentSpecification => MudBlazor.Icons.Material.Outlined.Article,
+        ElementKind.Deployment => MudBlazor.Icons.Material.Outlined.Publish,
+        ElementKind.Manifestation => MudBlazor.Icons.Material.Outlined.Code,
+        ElementKind.CommunicationPath => MudBlazor.Icons.Material.Outlined.SettingsEthernet,
         _ => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
     };
 
@@ -225,6 +236,7 @@ public static class UiKinds
         DiagramType.InteractionOverview => MudBlazor.Icons.Material.Outlined.Schema,
         DiagramType.Communication => MudBlazor.Icons.Material.Outlined.Hub,
         DiagramType.Object => MudBlazor.Icons.Material.Outlined.DataObject,
+        DiagramType.Deployment => MudBlazor.Icons.Material.Outlined.Dns,
         _ when UafViewpoints.IsUaf(t) => MudBlazor.Icons.Material.Outlined.Widgets,
         _ => MudBlazor.Icons.Material.Outlined.Class,
     };

@@ -32,7 +32,8 @@ public static partial class MagicDrawImporter
         if (s.Contains("sequence")) return DiagramType.Sequence;
         if (s.Contains("use case")) return DiagramType.UseCase;
         if (s.Contains("package") || s.Contains("profile")) return DiagramType.Package;
-        if (s.Contains("class") || s.Contains("component") || s.Contains("deployment") || s.Contains("object")) return DiagramType.Class;
+        if (s.Contains("deployment")) return DiagramType.Deployment;
+        if (s.Contains("class") || s.Contains("component") || s.Contains("object")) return DiagramType.Class;
         return null;
     }
 
