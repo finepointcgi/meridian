@@ -1,0 +1,93 @@
+@* Status-bar entries for reports generated in the background (Services/ReportJobs.cs): progress with cancel while they
+   run, then "Download". A notification with a Download action says when one is ready, unless the dialog that started
+   it is still open and reports it itself. *@
+@implements IDisposable
+@inject Workspace Ws
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject IServiceProvider Services
+
+@foreach (var j in Visible)
+{
+    var job = j;
+    <span class="item report-job" data-state="@job.State.ToString().ToLowerInvariant()" title="@Tooltip(job)">
+        <MudIcon Icon="@Icons.Material.Outlined.Description" Style="font-size:14px" />
+        @if (!job.IsDone)
+        {
+            <span>@Short(job.Title) · @((int)Math.Round(job.Fraction * 100)) %</span>
+            <MudProgressLinear Color="Color.Primary" Value="@(job.Fraction * 100)" Size="Size.Small" Style="width:56px" />
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Cancel" Class="report-job-cancel" OnClick="() => Jobs.Cancel(job)" Style="padding:0" />
+        }
+        else if (job.State == ReportJobState.Completed)
+        {
+            <span>@Short(job.Title) ready</span>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" Class="report-job-download" OnClick="() => Download(job)" Style="min-width:0; padding:0 6px">Download</MudButton>
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
+        }
+        else
+        {
+            <span>@Short(job.Title) @(job.State == ReportJobState.Failed ? "failed" : "cancelled")</span>
+            <MudIconButton Icon="@Icons.Material.Outlined.Close" Size="Size.Small" Title="Dismiss" OnClick="() => Dismiss(job)" Style="padding:0" />
+        }
+    </span>
+}
+
+@code {
+    private ReportJobService Jobs = default!;
+    private readonly HashSet<Guid> _notified = new();
+
+    private IEnumerable<ReportJob> Visible => Jobs.JobsFor(Ws.User?.Id).Where(j => j.Background && !j.Dismissed).Take(3);
+
+    protected override void OnInitialized()
+    {
+        Jobs = ReportJobService.From(Services);
+        Jobs.Changed += OnChanged;
+    }
+
+    private void OnChanged(ReportJob job)
+    {
+        if (job.OwnerId != Ws.User?.Id || !job.Background) return;
+        _ = InvokeAsync(() =>
+        {
+            if (job.IsDone && !job.Watched && _notified.Add(job.Id))
+            {
+                if (job.State == ReportJobState.Completed)
+                    Snackbar.Add($"{job.FileName} is ready ({job.Length / 1024:N0} KB)", Severity.Success, c =>
+                    {
+                        c.Action = "Download";
+                        c.ActionColor = Color.Primary;
+                        c.RequireInteraction = true;
+                        c.OnClick = _ => Download(job);
+                    });
+                else if (job.State == ReportJobState.Failed)
+                    Snackbar.Add($"Could not generate {job.FileName}: {job.Error}", Severity.Error);
+            }
+            StateHasChanged();
+        });
+    }
+
+    private async Task Download(ReportJob job)
+    {
+        await ReportDownloads.DownloadAsync(JS, Jobs, job);
+        job.Dismissed = true;
+        Ws.SetStatus($"Downloaded {job.FileName}");
+    }
+
+    private void Dismiss(ReportJob job)
+    {
+        job.Dismissed = true;
+        if (!job.IsDone) Jobs.Cancel(job);
+    }
+
+    private static string Short(string title) => title.Length > 28 ? title[..27] + "…" : title;
+
+    private static string Tooltip(ReportJob j) => j.State switch
+    {
+        ReportJobState.Completed => $"{j.FileName} — {j.Length / 1024:N0} KB, ready to download",
+        ReportJobState.Failed => $"{j.FileName} — {j.Error}",
+        ReportJobState.Cancelled => $"{j.FileName} — cancelled",
+        _ => $"{j.FileName} — {j.Phase}{(j.Detail.Length > 0 ? " · " + j.Detail : "")} (~{j.EstimatedPages:N0} pages)",
+    };
+
+    public void Dispose() => Jobs.Changed -= OnChanged;
+}

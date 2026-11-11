@@ -488,6 +488,7 @@ else
                 @Txt("Column query", x.ColumnQuery, v => x.ColumnQuery = v, 1, mono: true)
                 @Multi("Relationship kinds", Metamodel.RelationshipKinds.Select(k => k.ToString()), Names(x.RelationshipKinds), vs => x.RelationshipKinds = Parse<ElementKind>(vs))
                 @Num("Columns per table", x.MaxColumns, v => x.MaxColumns = v, "Wider matrices continue in further tables")
+                @Chk("Hide empty rows and columns", x.HideEmpty, v => x.HideEmpty = v)
             </div>,
         CoverageBlock c => @<div>
                 @Caption(c)

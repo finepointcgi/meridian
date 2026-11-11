@@ -1,5 +1,7 @@
 @* Template-driven document generation (SRS, ICD, SDD, VCRM, model overview, user templates) to PDF / Word / HTML,
-   generated in the background on a model snapshot with progress and cancel. *@
+   generated on a model snapshot with progress and cancel. A numbering pass sizes the document first: very big documents
+   get a warning (split per package, or narrow the scope), big ones run as background jobs (status bar + notification),
+   small ones download straight away. Files stream from GET api/reports/{id}/file (Services/ReportJobs.cs). *@
 @using Meridian.Serialization.Reports
 @implements IDisposable
 @inject Workspace Ws
@@ -53,6 +55,35 @@
                 <MudRadio Value="ReportFormat.Docx" Color="Color.Primary" Dense="true">Word (.docx)</MudRadio>
                 <MudRadio Value="ReportFormat.Html" Color="Color.Primary" Dense="true">HTML (single file)</MudRadio>
             </MudRadioGroup>
+            <div class="section-title" style="margin-top:4px">Scope</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+                <MudSelect T="string" @bind-Value="_scope" Label="Report on" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy" Class="report-scope">
+                    <MudSelectItem Value="@("model")">Whole model</MudSelectItem>
+                    @if (SelectionScope is { } sel)
+                    {
+                        <MudSelectItem Value="@("selection")">Selection: @sel.Name</MudSelectItem>
+                    }
+                    <MudSelectItem Value="@("package")">A package…</MudSelectItem>
+                </MudSelect>
+                @if (_scope == "package")
+                {
+                    <MudSelect T="string" @bind-Value="_scopePackage" Label="Package" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy" Class="report-scope-package">
+                        @foreach (var p in _packages)
+                        {
+                            <MudSelectItem Value="@p.Id">@p.Label</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudNumericField T="int" @bind-Value="_depth" Label="Package depth (0 = all)" Min="0" Max="20" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" Class="report-depth" />
+                }
+                <MudSelect T="ReportSplit" @bind-Value="_split" Label="Output" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="_busy" Class="report-split" Style="grid-column:1 / span 2">
+                    <MudSelectItem Value="ReportSplit.None">One document</MudSelectItem>
+                    <MudSelectItem Value="ReportSplit.PartPerPackage">One document, a part per top-level package (with contents)</MudSelectItem>
+                    <MudSelectItem Value="ReportSplit.ZipPerPackage">A zip with one document per top-level package</MudSelectItem>
+                </MudSelect>
+            </div>
             @if (_ai != null)
             {
                 @* AI narrative: Claude drafts an overview and rationale per section; shown here for review and editing, never added silently. *@
@@ -92,11 +123,27 @@
                     }
                 }
             }
+            @if (_warning != null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="report-size-warning">
+                    <div>@_warning</div>
+                    <div class="d-flex gap-2 mt-2" style="flex-wrap:wrap">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="report-split-zip" OnClick="SplitAndGenerate">Split per top-level package</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="report-limit" OnClick="LimitScope">Limit to a package or depth</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Class="report-anyway" OnClick="GenerateAnyway">Generate anyway</MudButton>
+                    </div>
+                </MudAlert>
+            }
             @if (_busy || _progressText.Length > 0)
             {
-                <div>
+                <div class="report-progress">
                     <MudProgressLinear Color="Color.Primary" Value="@(_progress * 100)" Rounded="true" Size="Size.Small" />
-                    <MudText Typo="Typo.caption" Style="color:var(--text-3)">@_progressText</MudText>
+                    <MudText Typo="Typo.caption" Style="color:var(--text-3)" Class="report-progress-text">@_progressText</MudText>
+                    @if (_detail.Length > 0) { <MudText Typo="Typo.caption" Style="color:var(--text-3); display:block" Class="report-progress-detail">@_detail</MudText> }
+                    @if (_job is { Background: true, IsDone: false })
+                    {
+                        <MudText Typo="Typo.caption" Style="display:block" Class="report-background-note">This is a big document, so it is generated in the background: you can close this dialog and keep working. The status bar shows its progress, and a Download button when it is ready.</MudText>
+                    }
                 </div>
             }
         </div>
@@ -107,7 +154,7 @@
         {
             <MudButton OnClick="CancelGeneration" StartIcon="@Icons.Material.Outlined.StopCircle">Cancel generation</MudButton>
         }
-        else
+        @if (!_busy || _job is { Background: true })
         {
             <MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton>
         }
@@ -126,8 +173,25 @@
     private ReportFormat _format = ReportFormat.Pdf;
     private bool _busy;
     private double _progress;
-    private string _progressText = "";
+    private string _progressText = "", _detail = "";
     private CancellationTokenSource? _cts;
+
+    // Scope and splitting.
+    private sealed record PackageOption(string Id, string Label);
+    private string _scope = "model";
+    private string? _scopePackage;
+    private int _depth;
+    private ReportSplit _split = ReportSplit.None;
+    private List<PackageOption> _packages = new();
+
+    // Size check and the job.
+    private string? _warning;
+    private (ModelRepository Snapshot, DocTemplate Template, ResolveOptions Options, PreparedReport Prepared)? _pending;
+    private ReportJobService _jobs = default!;
+    private ReportJob? _job;
+    private System.Diagnostics.Stopwatch _clock = new();
+
+    private Element? SelectionScope => Ws.Selected is { } e && e.Kind != ElementKind.Model && !e.IsRelationship ? e : null;
 
     /// <summary>Name of a built-in template to select when the dialog opens (e.g. the SDD from "Generate SDD…").</summary>
     [Parameter] public string? Preselect { get; set; }
@@ -141,6 +205,15 @@
 
     protected override void OnInitialized()
     {
+        _jobs = ReportJobService.From(Services);
+        _jobs.Changed += OnJobChanged;
+        // Packages to scope to: the first few levels (a Cameo-size model has thousands of packages).
+        _packages = Ws.Model.OfKind(ElementKind.Package)
+            .Select(p => (p, Depth: p.AncestorsAndSelf().Count()))
+            .Where(x => x.Depth <= 4 && x.p.Name != ReportTemplates.PackageName)
+            .OrderBy(x => x.p.QualifiedName, StringComparer.OrdinalIgnoreCase).Take(400)
+            .Select(x => new PackageOption(x.p.Id, x.p.QualifiedName)).ToList();
+        _scopePackage = _packages.FirstOrDefault()?.Id;
         Load();
         var pre = Preselect is { Length: > 0 } name ? _entries.FirstOrDefault(e => e.Element == null && e.Template.Name == name)?.Key : null;
         Select(pre ?? _entries.FirstOrDefault()?.Key ?? "");
@@ -206,56 +279,173 @@
         return t;
     }
 
+    /// <summary>The scope and output options chosen in the dialog.</summary>
+    private ResolveOptions Options() => new()
+    {
+        Scope = _scope switch
+        {
+            "selection" when SelectionScope is { } e => [e.Id],
+            "package" when _scopePackage != null => [_scopePackage],
+            _ => null,
+        },
+        ScopeDepth = _scope == "package" ? 0 : Math.Max(0, _depth),
+        SplitByPackage = _split == ReportSplit.PartPerPackage,
+    };
+
+    /// <summary>Snapshot, then a numbering pass that sizes the document; warns when it is huge, otherwise generates.</summary>
     private async Task Generate()
     {
         if (_current == null) return;
         _busy = true;
+        _warning = null;
+        _pending = null;
         _progress = 0;
+        _detail = "";
         _progressText = "Taking a model snapshot…";
         StateHasChanged();
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
-        var format = _format;
         var template = Effective();
         if (_aiNarrative && _narrative != null) Meridian.Assistant.Engine.NarrativeWriter.ApplyTo(template, _narrative);
         try
         {
             var snapshot = ReportEngine.Snapshot(Ws.Model);   // UI thread: consistent copy, then work off-thread
-            var lastUi = DateTime.MinValue;
-            var progress = new Progress<ReportProgress>(p =>
-            {
-                _progress = p.Fraction;
-                _progressText = p.Phase;
-                if ((DateTime.UtcNow - lastUi).TotalMilliseconds < 120 && p.Fraction < 1) return;
-                lastUi = DateTime.UtcNow;
-                _ = InvokeAsync(StateHasChanged);
-            });
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            var bytes = await ReportEngine.GenerateAsync(snapshot, template, format, progress, ct);
+            var options = Options();
+            _progressText = "Estimating the document's size…";
+            StateHasChanged();
+            var progress = UiProgress();
+            var prepared = await Task.Run(() => ReportEngine.Prepare(snapshot, template, options, progress, ct), ct);
             ct.ThrowIfCancellationRequested();
-            var title = DocResolverTitle(template, snapshot);
-            var name = string.Join("_", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + "." + ReportEngine.Extension(format);
-            await JS.InvokeVoidAsync("meridian.download", name, ReportEngine.MimeType(format), Convert.ToBase64String(bytes));
-            _progress = 1;
-            _progressText = $"Generated {name} ({bytes.Length / 1024:N0} KB) in {sw.Elapsed.TotalSeconds:0.0} s";
-            Snackbar.Add($"Generated {name}", Severity.Success);
+            if (ReportEngine.ShouldWarn(prepared.Stats) && _split == ReportSplit.None)
+            {
+                // Don't start a 40,000-page document by accident: offer to split it or narrow it first.
+                _pending = (snapshot, template, options, prepared);
+                _warning = $"This {_current.Template.Name} would be ~{prepared.EstimatedPages:N0} pages ({prepared.Stats.TableRows:N0} table rows, " +
+                           $"{prepared.Stats.FigureCount:N0} diagrams). Generate it per top-level package, or limit it to a package or a package depth?";
+                _progressText = "";
+                _busy = false;
+                return;
+            }
+            await Run(snapshot, template, options, prepared);
         }
         catch (OperationCanceledException)
         {
             _progressText = "Generation cancelled.";
+            _busy = false;
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or Meridian.Core.Analysis.QueryParseException or System.Text.Json.JsonException)
         {
             _progressText = "";
+            _busy = false;
             Snackbar.Add($"Could not generate the document: {FriendlyError.Describe(ex)}. Check the template's queries, or try another format.", Severity.Error);
         }
         finally
         {
-            _busy = false;
-            _cts?.Dispose();
-            _cts = null;
             StateHasChanged();
         }
+    }
+
+    private Task GenerateAnyway() => _pending is { } p ? Start(() => Run(p.Snapshot, p.Template, p.Options, p.Prepared)) : Task.CompletedTask;
+
+    private Task SplitAndGenerate()
+    {
+        _split = ReportSplit.ZipPerPackage;
+        return _pending is { } p ? Start(() => Run(p.Snapshot, p.Template, p.Options, p.Prepared)) : Task.CompletedTask;
+    }
+
+    private void LimitScope()
+    {
+        _warning = null;
+        _pending = null;
+        if (_scope == "model") _scope = "package";
+    }
+
+    private async Task Start(Func<Task> run)
+    {
+        _warning = null;
+        _pending = null;
+        _busy = true;
+        StateHasChanged();
+        try { await run(); }
+        finally { StateHasChanged(); }
+    }
+
+    /// <summary>Starts the job: big documents keep running in the background (status bar), small ones are awaited and downloaded.</summary>
+    private async Task Run(ModelRepository snapshot, DocTemplate template, ResolveOptions options, PreparedReport prepared)
+    {
+        var format = _format;
+        var split = _split;
+        var title = DocResolverTitle(template, snapshot);
+        var (ext, mime) = ReportEngine.Output(format, split);
+        var name = ReportEngine.FileName(title) + "." + ext;
+        var background = ReportEngine.ShouldRunInBackground(prepared.Stats);
+        // The numbering pass is reused for the document; a zip prepares each package's document itself.
+        var reuse = split == ReportSplit.ZipPerPackage ? null : prepared;
+        _clock = System.Diagnostics.Stopwatch.StartNew();
+        _job = _jobs.Start(title, name, mime, (stream, progress, ct) => ReportEngine.Generate(snapshot, template, format, stream, split, options, progress, ct, reuse),
+                           Ws.User?.Id, Ws.Session?.ProjectId, background, prepared.EstimatedPages, snapshot, Ws.Access);
+        _job.Watched = true;   // this dialog reports the outcome while it is open
+        _progress = 0.05;
+        _progressText = background ? $"Generating ~{prepared.EstimatedPages:N0} pages in the background…" : "Generating…";
+        StateHasChanged();
+        if (background)
+        {
+            Ws.SetStatus($"Generating {name} in the background");
+            await _jobs.WhenDone(_job);
+            if (_disposed) return;   // the status bar has taken over
+        }
+        else await _jobs.WhenDone(_job);
+        await Finish(_job);
+    }
+
+    private async Task Finish(ReportJob job)
+    {
+        _busy = false;
+        switch (job.State)
+        {
+            case ReportJobState.Completed:
+                await ReportDownloads.DownloadAsync(JS, _jobs, job);
+                job.Dismissed = true;   // downloaded from here: the status bar needn't offer it again
+                _progress = 1;
+                _progressText = $"Generated {job.FileName} ({job.Length / 1024:N0} KB) in {_clock.Elapsed.TotalSeconds:0.0} s";
+                Snackbar.Add($"Generated {job.FileName}", Severity.Success);
+                break;
+            case ReportJobState.Cancelled:
+                _progressText = "Generation cancelled.";
+                break;
+            default:
+                _progressText = "";
+                Snackbar.Add($"Could not generate the document: {job.Error}. Check the template's queries, or try another format.", Severity.Error);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    private bool _disposed;
+
+    private void OnJobChanged(ReportJob job)
+    {
+        if (!ReferenceEquals(job, _job) || _disposed) return;
+        _progress = Math.Max(_progress, job.Fraction);
+        _progressText = job.IsDone ? _progressText : job.Phase;
+        _detail = job.Detail;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Progress of the sizing pass, throttled for the UI.</summary>
+    private IProgress<ReportProgress> UiProgress()
+    {
+        var lastUi = DateTime.MinValue;
+        return new Progress<ReportProgress>(p =>
+        {
+            if (!double.IsNaN(p.Fraction)) _progress = Math.Min(0.05, p.Fraction * 0.05);
+            _progressText = "Estimating the document's size: " + p.Phase;
+            _detail = p.Sections > 0 ? $"Section {Math.Max(1, p.Section)} of {p.Sections} · {p.Elements:N0} elements" : "";
+            if ((DateTime.UtcNow - lastUi).TotalMilliseconds < 120) return;
+            lastUi = DateTime.UtcNow;
+            _ = InvokeAsync(StateHasChanged);
+        });
     }
 
     private static string DocResolverTitle(DocTemplate t, ModelRepository m)
@@ -268,6 +458,7 @@
     private void CancelGeneration()
     {
         _cts?.Cancel();
+        if (_job != null) _jobs.Cancel(_job);
         _progressText = "Cancelling…";
     }
 
@@ -327,9 +518,14 @@
 
     public void Dispose()
     {
+        _disposed = true;
+        _jobs.Changed -= OnJobChanged;
         _draftCts?.Cancel();
         _draftCts?.Dispose();
         _cts?.Cancel();
         _cts?.Dispose();
+        // A small document generated for this dialog is abandoned with it; a background one carries on (status bar).
+        if (_job is { Background: false, IsDone: false } job) _jobs.Cancel(job);
+        if (_job != null) _job.Watched = false;
     }
 }

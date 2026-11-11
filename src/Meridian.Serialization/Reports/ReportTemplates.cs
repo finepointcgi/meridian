@@ -244,7 +244,7 @@ public static class ReportTemplates
                 Title = "Requirements allocation", Ref = "allocation", Landscape = true,
                 Blocks = [new DiagramBlock { DiagramTypes = [DiagramType.Requirement], Caption = "{name}" },
                           new TraceTableBlock { Caption = "Requirement allocation to design", Columns = [TraceColumn.SatisfiedBy, TraceColumn.AllocatedTo], ShowCoverage = false },
-                          new TraceMatrixBlock { Caption = "Requirement × design matrix", RowQuery = "kind:Requirement", ColumnQuery = "kind:Block", RelationshipKinds = [ElementKind.Satisfy, ElementKind.Allocate, ElementKind.Refine] }],
+                          new TraceMatrixBlock { Caption = "Requirement × design matrix", RowQuery = "kind:Requirement", ColumnQuery = "kind:Block", RelationshipKinds = [ElementKind.Satisfy, ElementKind.Allocate, ElementKind.Refine], HideEmpty = true }],
             },
         ],
     };
@@ -266,7 +266,7 @@ public static class ReportTemplates
                     new TableBlock { Caption = "VCRM", Query = "kind:Requirement", SortBy = "reqId",
                                      Columns = [new("reqId"), new("name"), new("verifyMethod", "Method"), new("verifiedBy", "Verified by"), new("status"),
                                                 new("verificationResult", "Analysis result"), new("field:verify.value", "Computed"), new("field:verify.margin", "Margin")] },
-                    new TraceMatrixBlock { Caption = "Requirement × test case", RowQuery = "kind:Requirement", ColumnQuery = "kind:TestCase", RelationshipKinds = [ElementKind.Verify] },
+                    new TraceMatrixBlock { Caption = "Requirement × test case", RowQuery = "kind:Requirement", ColumnQuery = "kind:TestCase", RelationshipKinds = [ElementKind.Verify], HideEmpty = true },
                 ],
             },
             new DocSection

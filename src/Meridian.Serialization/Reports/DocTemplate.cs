@@ -261,6 +261,9 @@ public sealed class TraceMatrixBlock : CaptionedBlock
     public List<ElementKind> RelationshipKinds { get; set; } = [ElementKind.Satisfy, ElementKind.Verify, ElementKind.Allocate, ElementKind.Refine, ElementKind.Trace];
     /// <summary>Columns per table before the matrix is split into continuation tables.</summary>
     public int MaxColumns { get; set; } = 20;
+    /// <summary>Leave out columns without any link, and rows without a link in a table's columns. A requirement × design
+    /// matrix of a big model is otherwise mostly empty cells: 16,000 requirements × 6,000 blocks is ~5 million rows.</summary>
+    public bool HideEmpty { get; set; }
     public override string TypeLabel => "Matrix";
     public override string Summary => $"Matrix: {RowQuery} × {ColumnQuery}";
 }

@@ -1,6 +1,7 @@
 using System.Globalization;
+using System.IO.Compression;
+using System.Text;
 using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using QuestPDF.Fluent;
 using Q = QuestPDF.Infrastructure;
@@ -17,6 +18,10 @@ namespace Meridian.Serialization.Reports;
 /// field, "Table of Figures" fields, captions built from SEQ / STYLEREF fields, bookmarks with REF / PAGEREF
 /// cross-reference fields, PAGE / NUMPAGES in the footer, landscape sections, and diagrams as SVG with a PNG fallback.
 /// Field results are pre-filled, and the document asks Word to update fields on open so page numbers are exact.
+/// <para>The body is written with the SDK's streaming <see cref="OpenXmlWriter"/> straight into a zip entry: one paragraph or
+/// table is in memory at a time, and the package is assembled by hand (no package DOM), so the output stream needn't
+/// be seekable and a document of hundreds of megabytes takes no more memory than a small one. Diagram images, the
+/// numbering definitions (lists are numbered as they come) and the other parts follow the body.</para>
 /// </summary>
 public sealed class DocWord
 {
@@ -24,13 +29,14 @@ public sealed class DocWord
     private readonly ResolvedDocument _doc;
     private readonly IProgress<ReportProgress>? _progress;
     private readonly CancellationToken _ct;
-    private MainDocumentPart _main = null!;
-    private Body _body = null!;
-    private string _headerId = "", _footerId = "";
+    private OpenXmlWriter _w = null!;
+    private Numbering _numbering = null!;
+    private const string HeaderId = "rIdHeader1", FooterId = "rIdFooter1";
     private int _bookmarkId, _drawingId = 1, _nextNumId = 3;
     private readonly int _pageW, _pageH;
     private bool _landscape;
-    private readonly Dictionary<string, (string PngRel, string SvgRel)> _images = new();
+    /// <summary>Diagram images by figure key, numbered in order of first use; the files are written after the body.</summary>
+    private readonly Dictionary<string, (int N, string Svg, double W, double H)> _images = new();
 
     private DocWord(ResolvedDocument doc, IProgress<ReportProgress>? progress, CancellationToken ct)
     {
@@ -42,34 +48,119 @@ public sealed class DocWord
     public static byte[] Write(ResolvedDocument doc, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
     {
         using var ms = new MemoryStream();
-        using (var w = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
-            new DocWord(doc, progress, ct).Build(w);
+        Write(doc, doc.Nodes, ms, progress, ct);
         return ms.ToArray();
     }
 
-    private void Build(WordprocessingDocument w)
+    /// <summary>Writes the .docx to <paramref name="output"/> (any writable stream), enumerating <paramref name="nodes"/> once.
+    /// <paramref name="progress"/> follows the body; <paramref name="imagesProgress"/> the diagrams written after it (0 to 1).</summary>
+    public static void Write(ResolvedDocument doc, IEnumerable<DocNode> nodes, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default,
+                             IProgress<ReportProgress>? imagesProgress = null)
     {
-        _main = w.AddMainDocumentPart();
-        _main.Document = new Document(new Body());
-        _body = _main.Document.Body!;
-        AddStyles();
-        AddNumbering();
-        var settings = _main.AddNewPart<DocumentSettingsPart>();
-        settings.Settings = new Settings(new UpdateFieldsOnOpen { Val = true });
-        AddHeaderFooter();
+        using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+        new DocWord(doc, progress, ct).Build(zip, nodes, imagesProgress);
+    }
 
-        var nodes = _doc.Nodes;
-        for (var i = 0; i < nodes.Count; i++)
+    private const string RelNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+    private void Build(ZipArchive zip, IEnumerable<DocNode> nodes, IProgress<ReportProgress>? imagesProgress)
+    {
+        _numbering = NewNumbering();
+        var total = Math.Max(1, _doc.Stats.Nodes);
+        using (var stream = zip.CreateEntry("word/document.xml", CompressionLevel.Fastest).Open())
+        using (_w = OpenXmlWriter.Create(stream))
         {
-            if (i % 50 == 0)
+            _w.WriteStartDocument(true);
+            _w.WriteStartElement(new Document(), [],
+            [
+                new("w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main"), new("r", RelNs),
+                new("wp", "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"), new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
+                new("pic", "http://schemas.openxmlformats.org/drawingml/2006/picture"), new("asvg", "http://schemas.microsoft.com/office/drawing/2016/SVG/main"),
+            ]);
+            _w.WriteStartElement(new Body());
+            DocNode? prev = null;
+            long i = 0;
+            foreach (var n in nodes)
             {
-                _ct.ThrowIfCancellationRequested();
-                _progress?.Report(new ReportProgress("Writing Word document", (double)i / nodes.Count));
+                if (i++ % 50 == 0)
+                {
+                    _ct.ThrowIfCancellationRequested();
+                    _progress?.Report(new ReportProgress("Writing Word document", (double)i / total));
+                }
+                Node(n, prev);
+                prev = n;
             }
-            Node(nodes[i], i > 0 ? nodes[i - 1] : null);
+            _w.WriteElement(SectionProps(_landscape));
+            _w.WriteEndElement();
+            _w.WriteEndElement();
         }
-        _body.Append(SectionProps(_landscape));
-        _main.Document.Save();
+
+        Part(zip, "word/styles.xml", NewStyles());
+        Part(zip, "word/numbering.xml", _numbering);
+        Part(zip, "word/settings.xml", new Settings(new UpdateFieldsOnOpen { Val = true }));
+        var (header, footer) = HeaderFooter();
+        Part(zip, "word/header1.xml", header);
+        Part(zip, "word/footer1.xml", footer);
+        // Each diagram once, however many figures show it: the SVG and a PNG fallback rendered now. Rasterising is the slow
+        // part of a diagram-heavy document, so a few at a time in parallel, written in order.
+        var images = _images.Values.OrderBy(x => x.N).ToList();
+        var batch = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+        // Hundreds of diagrams: a coarser fallback (Word 2016 and later draw the SVG anyway).
+        var dpi = images.Count > 200 ? 80 : 110;
+        for (var start = 0; start < images.Count; start += batch)
+        {
+            _ct.ThrowIfCancellationRequested();
+            imagesProgress?.Report(new ReportProgress($"Writing diagrams: {start:N0} of {images.Count:N0}", (double)start / images.Count));
+            var chunk = images.GetRange(start, Math.Min(batch, images.Count - start));
+            var pngs = new byte[chunk.Count][];
+            Parallel.For(0, chunk.Count, new ParallelOptions { MaxDegreeOfParallelism = batch, CancellationToken = _ct },
+                         i => pngs[i] = Rasterize(chunk[i].Svg, chunk[i].W, chunk[i].H, dpi));
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var n = chunk[i].N;
+                using (var s = zip.CreateEntry($"word/media/image{n}.png", CompressionLevel.NoCompression).Open()) s.Write(pngs[i]);
+                using (var s = zip.CreateEntry($"word/media/image{n}.svg", CompressionLevel.Fastest).Open()) s.Write(Encoding.UTF8.GetBytes(chunk[i].Svg));
+            }
+        }
+
+        var rels = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        void Rel(string id, string type, string target) => rels.Append($"<Relationship Id=\"{id}\" Type=\"{RelNs}/{type}\" Target=\"{target}\"/>");
+        Rel("rIdStyles", "styles", "styles.xml");
+        Rel("rIdNumbering", "numbering", "numbering.xml");
+        Rel("rIdSettings", "settings", "settings.xml");
+        Rel(HeaderId, "header", "header1.xml");
+        Rel(FooterId, "footer", "footer1.xml");
+        foreach (var (n, _, _, _) in _images.Values.OrderBy(x => x.N))
+        {
+            Rel(PngRel(n), "image", $"media/image{n}.png");
+            Rel(SvgRel(n), "image", $"media/image{n}.svg");
+        }
+        rels.Append("</Relationships>");
+        Text(zip, "word/_rels/document.xml.rels", rels.ToString());
+        Text(zip, "_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
+                                 $"<Relationship Id=\"rIdDocument\" Type=\"{RelNs}/officeDocument\" Target=\"word/document.xml\"/></Relationships>");
+        const string Wml = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
+        Text(zip, "[Content_Types].xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
+            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+            "<Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"svg\" ContentType=\"image/svg+xml\"/>" +
+            $"<Override PartName=\"/word/document.xml\" ContentType=\"{Wml}document.main+xml\"/><Override PartName=\"/word/styles.xml\" ContentType=\"{Wml}styles+xml\"/>" +
+            $"<Override PartName=\"/word/numbering.xml\" ContentType=\"{Wml}numbering+xml\"/><Override PartName=\"/word/settings.xml\" ContentType=\"{Wml}settings+xml\"/>" +
+            $"<Override PartName=\"/word/header1.xml\" ContentType=\"{Wml}header+xml\"/><Override PartName=\"/word/footer1.xml\" ContentType=\"{Wml}footer+xml\"/></Types>");
+    }
+
+    private static string PngRel(int n) => "rIdImg" + n.ToString(CultureInfo.InvariantCulture);
+    private static string SvgRel(int n) => "rIdSvg" + n.ToString(CultureInfo.InvariantCulture);
+
+    private static void Part(ZipArchive zip, string name, OpenXmlPartRootElement root)
+    {
+        using var s = zip.CreateEntry(name, CompressionLevel.Fastest).Open();
+        root.Save(s);
+    }
+
+    private static void Text(ZipArchive zip, string name, string xml)
+    {
+        using var s = zip.CreateEntry(name, CompressionLevel.Fastest).Open();
+        s.Write(Encoding.UTF8.GetBytes(xml));
     }
 
     // ================================================================== nodes
@@ -80,26 +171,26 @@ public sealed class DocWord
         {
             case TitlePageNode: TitlePage(); break;
             case RevisionHistoryNode:
-                _body.Append(Para("Revision History", "TOCHeading"));
-                _body.Append(Table(new TableNode(null, ["Revision", "Date", "Description", "Author"], DocPdf.RevisionRows(_doc), [0.8, 1.2, 4, 1.5])));
+                _w.WriteElement(Para("Revision History", "TOCHeading"));
+                _w.WriteElement(Table(new TableNode(null, ["Revision", "Date", "Description", "Author"], DocPdf.RevisionRows(_doc), [0.8, 1.2, 4, 1.5])));
                 break;
             case ListingNode l: Listing(l.Kind); break;
-            case PageBreakNode: _body.Append(new Paragraph(new Run(new Break { Type = BreakValues.Page }))); break;
+            case PageBreakNode: _w.WriteElement(new Paragraph(new Run(new Break { Type = BreakValues.Page }))); break;
             case OrientationNode o:
                 // A section break: the paragraph's sectPr describes the section that ends here.
-                _body.Append(new Paragraph(new ParagraphProperties(SectionProps(_landscape))));
+                _w.WriteElement(new Paragraph(new ParagraphProperties(SectionProps(_landscape))));
                 _landscape = o.Landscape;
                 break;
             case HeadingNode h: Heading(h, prev is OrientationNode or PageBreakNode); break;
-            case ParagraphNode p: _body.Append(Paragraph(p)); break;
+            case ParagraphNode p: _w.WriteElement(Paragraph(p)); break;
             case TableNode t:
-                if (t.Caption != null) _body.Append(CaptionPara(t.Caption, keepNext: true));
-                _body.Append(Table(t));
-                _body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "0", Line = "120", LineRule = LineSpacingRuleValues.Exact })));
+                if (t.Caption != null) _w.WriteElement(CaptionPara(t.Caption, keepNext: true));
+                _w.WriteElement(Table(t));
+                _w.WriteElement(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { After = "0", Line = "120", LineRule = LineSpacingRuleValues.Exact })));
                 break;
             case FigureNode f:
-                _body.Append(Figure(f));
-                _body.Append(CaptionPara(f.Caption, keepNext: false));
+                _w.WriteElement(Figure(f));
+                _w.WriteElement(CaptionPara(f.Caption, keepNext: false));
                 break;
         }
     }
@@ -111,7 +202,7 @@ public sealed class DocWord
         if (h.PageBreakBefore && !atPageTop) ppr.Append(new PageBreakBefore());
         if (h.Number.Length == 0) ppr.Append(new NumberingProperties(new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 0 }));
         var id = (++_bookmarkId).ToString(CultureInfo.InvariantCulture);
-        _body.Append(new Paragraph(ppr,
+        _w.WriteElement(new Paragraph(ppr,
             new BookmarkStart { Name = h.Anchor, Id = id },
             TextRun(h.Text),
             new BookmarkEnd { Id = id }));
@@ -145,7 +236,7 @@ public sealed class DocWord
             ListingKind.Figures => ("List of Figures", " TOC \\h \\z \\c \"Figure\" ", "TableofFigures"),
             _ => ("List of Tables", " TOC \\h \\z \\c \"Table\" ", "TableofFigures"),
         };
-        _body.Append(Para(title, "TOCHeading"));
+        _w.WriteElement(Para(title, "TOCHeading"));
         var entries = kind switch
         {
             ListingKind.Contents => _doc.Headings.Where(h => h.InToc && h.Level <= _doc.Template.TocDepth).Select(h => (h.Display, h.Anchor, Style: "TOC" + Math.Min(h.Level, 6))),
@@ -170,15 +261,15 @@ public sealed class DocWord
         }
         if (paras.Count == 0) { first.Append(TextRun("No entries.")); paras.Add(first); }
         paras[^1].Append(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
-        foreach (var p in paras) _body.Append(p);
+        foreach (var p in paras) _w.WriteElement(p);
     }
 
     private void TitlePage()
     {
-        _body.Append(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { Before = "2400" })));
-        if (_doc.Organization.Length > 0) _body.Append(Para(_doc.Organization, "Subtitle"));
-        _body.Append(Para(_doc.Title, "Title"));
-        if (_doc.Subtitle.Length > 0) _body.Append(Para(_doc.Subtitle, "Subtitle"));
+        _w.WriteElement(new Paragraph(new ParagraphProperties(new SpacingBetweenLines { Before = "2400" })));
+        if (_doc.Organization.Length > 0) _w.WriteElement(Para(_doc.Organization, "Subtitle"));
+        _w.WriteElement(Para(_doc.Title, "Title"));
+        if (_doc.Subtitle.Length > 0) _w.WriteElement(Para(_doc.Subtitle, "Subtitle"));
         var rows = new List<IReadOnlyList<string>>();
         void Row(string k, string v) { if (v.Length > 0) rows.Add([k, v]); }
         Row("Document number", _doc.DocumentNumber);
@@ -187,8 +278,8 @@ public sealed class DocWord
         Row("Classification", _doc.Classification);
         Row("Prepared by", _doc.Author);
         Row("Model", _doc.ModelName);
-        _body.Append(Table(new TableNode(null, ["", ""], rows, [1, 3], KeyValue: true)));
-        foreach (var n in _doc.TitleNotes) if (n is ParagraphNode p) _body.Append(Paragraph(p));
+        _w.WriteElement(Table(new TableNode(null, ["", ""], rows, [1, 3], KeyValue: true)));
+        foreach (var n in _doc.TitleNotes) if (n is ParagraphNode p) _w.WriteElement(Paragraph(p));
     }
 
     // ================================================================== text
@@ -279,8 +370,7 @@ public sealed class DocWord
     {
         if (_createdNums.Add(numId))
         {
-            var numbering = _main.NumberingDefinitionsPart!.Numbering!;
-            numbering.Append(new NumberingInstance(new AbstractNumId { Val = 2 },
+            _numbering.Append(new NumberingInstance(new AbstractNumId { Val = 2 },
                 new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 }) { NumberID = numId });
         }
         return numId;
@@ -337,15 +427,8 @@ public sealed class DocWord
 
     private Paragraph Figure(FigureNode f)
     {
-        if (!_images.TryGetValue(f.Key, out var rels))
-        {
-            var png = Rasterize(f.Svg, f.Width, f.Height);
-            var pngPart = _main.AddImagePart(ImagePartType.Png);
-            using (var s = new MemoryStream(png)) pngPart.FeedData(s);
-            var svgPart = _main.AddImagePart(ImagePartType.Svg);
-            using (var s = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(f.Svg))) svgPart.FeedData(s);
-            _images[f.Key] = rels = (_main.GetIdOfPart(pngPart), _main.GetIdOfPart(svgPart));
-        }
+        if (!_images.TryGetValue(f.Key, out var image)) _images[f.Key] = image = (_images.Count + 1, f.Svg, f.Width, f.Height);
+        var rels = (PngRel: PngRel(image.N), SvgRel: SvgRel(image.N));
         // px → EMU (9525 per px), then fit the text width and the height budget (1 twip = 635 EMU).
         double cx = f.Width * 9525, cy = f.Height * 9525;
         double maxW = ContentWidthTw * 635.0, maxH = ContentHeightTw * 635.0 * f.MaxHeightFraction;
@@ -370,10 +453,17 @@ public sealed class DocWord
         return new Paragraph(new ParagraphProperties(new KeepNext(), new Justification { Val = JustificationValues.Center }), new Run(new Drawing(inline)));
     }
 
+    /// <summary>Longest side of a PNG fallback, in pixels: the 500-shape diagrams of a Cameo-size model would otherwise be
+    /// 5,000 px rasters, slow to make and tens of megabytes each, for a picture Word only shows when it can't draw SVG.</summary>
+    internal const int MaxRasterPixels = 2_400;
+
     /// <summary>PNG fallback for Word versions without SVG support (rendered by QuestPDF's Skia backend).</summary>
     internal static byte[] Rasterize(string svg, double w, double h, int dpi = 110)
     {
         QuestPDF.Settings.License = Q.LicenseType.Community;
+        // CSS px are 1/96 in, so the raster is (px / 96 × dpi) wide.
+        var longest = Math.Max(w, h) / 96 * dpi;
+        if (longest > MaxRasterPixels) dpi = Math.Max(24, (int)(dpi * MaxRasterPixels / longest));
         var images = QuestPDF.Fluent.Document.Create(c => c.Page(p =>
         {
             p.Size(new QuestPDF.Helpers.PageSize((float)(w * 0.75), (float)(h * 0.75)));
@@ -389,8 +479,8 @@ public sealed class DocWord
     private SectionProperties SectionProps(bool landscape)
     {
         var sp = new SectionProperties(
-            new HeaderReference { Type = HeaderFooterValues.Default, Id = _headerId },
-            new FooterReference { Type = HeaderFooterValues.Default, Id = _footerId },
+            new HeaderReference { Type = HeaderFooterValues.Default, Id = HeaderId },
+            new FooterReference { Type = HeaderFooterValues.Default, Id = FooterId },
             new SectionType { Val = SectionMarkValues.NextPage },
             landscape
                 ? new PageSize { Width = (uint)_pageH, Height = (uint)_pageW, Orient = PageOrientationValues.Landscape }
@@ -399,33 +489,26 @@ public sealed class DocWord
         return sp;
     }
 
-    private void AddHeaderFooter()
+    private (Header Header, Footer Footer) HeaderFooter()
     {
         static Run PTab(AbsolutePositionTabAlignmentValues align) =>
             new(new PositionalTab { Alignment = align, RelativeTo = AbsolutePositionTabPositioningBaseValues.Margin, Leader = AbsolutePositionTabLeaderCharValues.None });
 
-        var header = _main.AddNewPart<HeaderPart>();
-        header.Header = new Header(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Header" }),
+        var header = new Header(new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Header" }),
             TextRun(_doc.HeaderLeft), PTab(AbsolutePositionTabAlignmentValues.Center), TextRun(_doc.Classification, bold: true),
             PTab(AbsolutePositionTabAlignmentValues.Right), TextRun(_doc.Title)));
-        header.Header.Save();
-        _headerId = _main.GetIdOfPart(header);
 
-        var footer = _main.AddNewPart<FooterPart>();
         var fp = new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Footer" }),
             TextRun(_doc.Date), PTab(AbsolutePositionTabAlignmentValues.Center), TextRun(_doc.Classification, bold: true),
             PTab(AbsolutePositionTabAlignmentValues.Right), TextRun("Page "));
         foreach (var r in Field(" PAGE ", "1")) fp.Append(r);
         fp.Append(TextRun(" of "));
         foreach (var r in Field(" NUMPAGES ", "1")) fp.Append(r);
-        footer.Footer = new Footer(fp);
-        footer.Footer.Save();
-        _footerId = _main.GetIdOfPart(footer);
+        return (header, new Footer(fp));
     }
 
-    private void AddNumbering()
+    private static Numbering NewNumbering()
     {
-        var part = _main.AddNewPart<NumberingDefinitionsPart>();
         Level HeadingLevel(int i) => new(
             new StartNumberingValue { Val = 1 },
             new NumberingFormat { Val = NumberFormatValues.Decimal },
@@ -442,7 +525,7 @@ public sealed class DocWord
             new PreviousParagraphProperties(new Indentation { Left = (360 + 360 * i).ToString(CultureInfo.InvariantCulture), Hanging = "360" }))
         { LevelIndex = i };
 
-        part.Numbering = new Numbering(
+        return new Numbering(
             new AbstractNum(new MultiLevelType { Val = MultiLevelValues.Multilevel }, HeadingLevel(0), HeadingLevel(1), HeadingLevel(2), HeadingLevel(3), HeadingLevel(4), HeadingLevel(5)) { AbstractNumberId = 0 },
             new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel }, ListLevel(0, true), ListLevel(1, true), ListLevel(2, true), ListLevel(3, true)) { AbstractNumberId = 1 },
             new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel }, ListLevel(0, false), ListLevel(1, false), ListLevel(2, false), ListLevel(3, false)) { AbstractNumberId = 2 },
@@ -450,9 +533,8 @@ public sealed class DocWord
             new NumberingInstance(new AbstractNumId { Val = 1 }) { NumberID = 2 });
     }
 
-    private void AddStyles()
+    private static Styles NewStyles()
     {
-        var part = _main.AddNewPart<StyleDefinitionsPart>();
         Style P(string id, string name, int halfPts, bool bold = false, string color = "1D2330", int before = 0, int after = 120,
                 bool keepNext = false, string basedOn = "Normal", int? outline = null, bool italic = false, string? font = null, int? numLevel = null,
                 bool tabs = false, string? shade = null, int indent = 0)
@@ -511,7 +593,6 @@ public sealed class DocWord
             P("Subheading", "Subheading", 22, true, keepNext: true, before: 120, after: 60),
             P("Header", "header", 16, color: "4C586D", after: 0),
             P("Footer", "footer", 16, color: "4C586D", after: 0));
-        part.Styles = styles;
-        part.Styles.Save();
+        return styles;
     }
 }

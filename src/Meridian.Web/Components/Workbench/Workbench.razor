@@ -468,6 +468,7 @@
             @(health.Errors == 0 && health.Warnings == 0 ? "Model healthy" : $"{health.Errors} errors · {health.Warnings} warnings")
         </span>
         <span class="msg">@Ws.Status</span>
+        <ReportJobsStatus />
         <span class="item">@Counts()</span>
         <span class="item"><MudIcon Icon="@Icons.Material.Outlined.CloudDone" Style="font-size:14px" /> @SavedText()</span>
     </footer>
