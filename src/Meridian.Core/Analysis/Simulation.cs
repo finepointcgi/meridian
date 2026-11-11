@@ -68,13 +68,24 @@ public abstract class Simulator
     protected static string Label(Element e) => string.IsNullOrEmpty(e.Name) ? Metamodel.DisplayName(e.Kind) : e.Name;
 }
 
+/// <summary>
+/// Token flow through an activity. Decisions take the first true guard (else <c>[else]</c>), a fork node with several
+/// incoming flows joins them, a <b>central buffer</b> holds tokens and passes each one to a single outgoing flow (in turn),
+/// a <b>data store</b> keeps its data and gives every outgoing flow a copy.
+/// </summary>
 public sealed class ActivitySimulator(ModelRepository model, Element activity) : Simulator(model, activity)
 {
     private readonly Queue<Element> _tokens = new();
     private readonly Dictionary<Element, HashSet<Relationship>> _joinArrivals = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Element, int> _held = new(ReferenceEqualityComparer.Instance);   // central buffer / data store → tokens held
+    private readonly Dictionary<Element, int> _next = new(ReferenceEqualityComparer.Instance);   // central buffer → next outgoing flow (round robin)
     private Element? _last;
 
-    public override IReadOnlyCollection<Element> Active => _tokens.Concat(_last is null ? [] : [_last]).Distinct().ToList();
+    public override IReadOnlyCollection<Element> Active =>
+        _tokens.Concat(_last is null ? [] : [_last]).Concat(_held.Where(h => h.Value > 0).Select(h => h.Key)).Distinct().ToList();
+
+    /// <summary>Tokens a central buffer holds, or 1 when a data store holds data (0 otherwise).</summary>
+    public int Held(Element node) => _held.GetValueOrDefault(node);
 
     private IEnumerable<Relationship> Outgoing(Element n) =>
         Model.Outgoing(n).Where(r => r.Kind is ElementKind.ControlFlow or ElementKind.ObjectFlow);
@@ -86,6 +97,8 @@ public sealed class ActivitySimulator(ModelRepository model, Element activity) :
     {
         _tokens.Clear();
         _joinArrivals.Clear();
+        _held.Clear();
+        _next.Clear();
         Finished = false;
         Steps = 0;
         foreach (var i in Behavior.OwnedElements.Where(e => e.Kind == ElementKind.InitialNode)) _tokens.Enqueue(i);
@@ -108,9 +121,47 @@ public sealed class ActivitySimulator(ModelRepository model, Element activity) :
         _tokens.Enqueue(target);
     }
 
+    private bool Enabled(Relationship f) => string.IsNullOrEmpty(f.Get(FieldKeys.Guard)) || Guard(f);
+
+    /// <summary>
+    /// A central buffer passes each token it holds to ONE outgoing flow whose guard holds (taking the flows in turn); tokens
+    /// no flow accepts stay buffered and are offered again on later steps.
+    /// </summary>
+    private void ReleaseBuffer(Element buffer)
+    {
+        var outgoing = Outgoing(buffer).ToList();
+        while (_held.GetValueOrDefault(buffer) > 0 && outgoing.Count > 0)
+        {
+            var start = _next.GetValueOrDefault(buffer);
+            Relationship? chosen = null;
+            for (var k = 0; k < outgoing.Count && chosen is null; k++)
+            {
+                var i = (start + k) % outgoing.Count;
+                if (Enabled(outgoing[i])) { chosen = outgoing[i]; _next[buffer] = (i + 1) % outgoing.Count; }
+            }
+            if (chosen is null) return;
+            _held[buffer]--;
+            Log.Add($"  ▣ {Label(buffer)} passes a token to {Label(chosen.Target)} ({_held[buffer]} left)");
+            Offer(chosen);
+        }
+    }
+
+    private static bool IsBuffer(Element e) => e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) == Subtypes.CentralBuffer;
+    private static bool IsStore(Element e) => e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Subtype) == Subtypes.DataStore;
+
     public override bool Step()
     {
-        if (Finished || _tokens.Count == 0) { if (!Finished) { Finished = true; Log.Add("■ No more tokens — activity complete"); } return false; }
+        if (Finished) return false;
+        // Buffered tokens are offered again (a guard may have become true since).
+        foreach (var b in _held.Where(h => h.Value > 0 && IsBuffer(h.Key)).Select(h => h.Key).ToList()) ReleaseBuffer(b);
+        if (_tokens.Count == 0)
+        {
+            Finished = true;
+            Log.Add("■ No more tokens — activity complete");
+            foreach (var (held, n) in _held.Where(h => h.Value > 0))
+                Log.Add(IsStore(held) ? $"  (data store {Label(held)} keeps its data)" : $"  (central buffer {Label(held)} still holds {n} token{(n == 1 ? "" : "s")})");
+            return false;
+        }
         var node = _tokens.Dequeue();
         _last = node;
         Steps++;
@@ -131,6 +182,17 @@ public sealed class ActivitySimulator(ModelRepository model, Element activity) :
                 Offer(chosen);
                 return true;
             }
+            case ElementKind.ObjectNode when IsBuffer(node):
+                _held[node] = _held.GetValueOrDefault(node) + 1;
+                Log.Add($"▣ {Label(node)} buffers a token ({_held[node]} held)");
+                ReleaseBuffer(node);
+                return true;
+            case ElementKind.ObjectNode when IsStore(node):
+                // A data store keeps its data (a new token replaces the stored one) and gives every outgoing flow a copy.
+                _held[node] = 1;
+                Log.Add($"⛁ {Label(node)} stores the data");
+                foreach (var f in outgoing.Where(Enabled)) { Log.Add($"  ⛁ {Label(node)} → copy to {Label(f.Target)}"); Offer(f); }
+                return true;
             case ElementKind.Action:
                 Log.Add($"● {Label(node)}");
                 Exec(node.Get(FieldKeys.Body), Label(node));
@@ -139,83 +201,74 @@ public sealed class ActivitySimulator(ModelRepository model, Element activity) :
                 Log.Add($"○ {Label(node)}");
                 break;
         }
-        foreach (var f in outgoing.Where(f => string.IsNullOrEmpty(f.Get(FieldKeys.Guard)) || Guard(f))) Offer(f);
+        foreach (var f in outgoing.Where(Enabled)) Offer(f);
         if (outgoing.Count == 0 && node.Kind != ElementKind.ActivityFinalNode) Log.Add($"  (flow ends at {Label(node)})");
         return true;
     }
 }
 
-public sealed class StateMachineSimulator(ModelRepository model, Element machine) : Simulator(model, machine)
+/// <summary>
+/// Steps a state machine with <see cref="StateMachineEngine"/>: <see cref="Step"/> takes one completion (event-less)
+/// transition, <see cref="Send"/> dispatches an event (a transition's name) to every active region. Choice guards are
+/// evaluated as they are reached; a choice with no enabled branch stops the run with <see cref="Error"/>.
+/// </summary>
+public sealed class StateMachineSimulator : Simulator, IStateMachineHost
 {
-    private Element? _current;
+    private readonly StateMachineEngine _engine;
 
-    public Element? Current => _current;
-    public override IReadOnlyCollection<Element> Active => _current is null ? [] : _current.AncestorsAndSelf().TakeWhile(a => !ReferenceEquals(a, Behavior)).ToList();
+    public StateMachineSimulator(ModelRepository model, Element machine) : base(model, machine) => _engine = new StateMachineEngine(model, machine, this);
 
-    private IEnumerable<Relationship> TransitionsFrom(Element vertex) =>
-        vertex.AncestorsAndSelf().TakeWhile(a => !ReferenceEquals(a, Behavior))
-              .SelectMany(v => Model.Outgoing(v, ElementKind.Transition));
+    public StateMachineEngine Engine => _engine;
 
-    /// <summary>Named transitions (events) that are enabled right now.</summary>
+    /// <summary>The first active innermost state (with orthogonal regions, see <see cref="ActiveLeaves"/>).</summary>
+    public Element? Current => _engine.ActiveLeaves.FirstOrDefault();
+    public IReadOnlyList<Element> ActiveLeaves => _engine.ActiveLeaves;
+    /// <summary>The active innermost states by path, e.g. "Operating.Heating, Operating.Monitoring".</summary>
+    public string Configuration => _engine.Configuration;
+    public string? Error => _engine.Error;
+    public bool Terminated => _engine.Terminated;
+    public override IReadOnlyCollection<Element> Active => _engine.Active;
+
+    /// <summary>Named transitions (events) that are enabled right now, one per name.</summary>
     public IReadOnlyList<Relationship> EnabledEvents =>
-        _current is null ? [] : TransitionsFrom(_current).Where(t => !string.IsNullOrEmpty(t.Name) && Guard(t)).ToList();
+        Finished ? [] : _engine.Enabled(t => !string.IsNullOrEmpty(t.Name)).DistinctBy(t => t.Name).ToList();
 
     public override void Start()
     {
         Finished = false;
         Steps = 0;
         Log.Add($"▶ State machine '{Behavior.Name}' started");
-        var initial = Behavior.OwnedElements.FirstOrDefault(e => e.Kind == ElementKind.InitialState);
-        if (initial is null) { Log.Add("  ⚠ no initial pseudostate"); Finished = true; return; }
-        var first = Model.Outgoing(initial, ElementKind.Transition).FirstOrDefault();
-        if (first is null) { Log.Add("  ⚠ initial pseudostate has no transition"); Finished = true; return; }
-        Exec(first.Get(FieldKeys.Effect), "effect");
-        Enter(first.Target);
-    }
-
-    private void Enter(Element state)
-    {
-        _current = state;
-        if (state.Kind == ElementKind.FinalState) { Log.Add("■ Final state reached"); Finished = true; return; }
-        Log.Add($"→ {Label(state)}");
-        Exec(state.Get(FieldKeys.Entry), "entry");
-        Exec(state.Get(FieldKeys.DoActivity), "do");
-        // Composite state: descend through its own initial pseudostate.
-        var initial = state.OwnedElements.FirstOrDefault(e => e.Kind == ElementKind.InitialState);
-        if (initial != null && Model.Outgoing(initial, ElementKind.Transition).FirstOrDefault() is { } t)
-        {
-            Exec(t.Get(FieldKeys.Effect), "effect");
-            Enter(t.Target);
-        }
-    }
-
-    private void Fire(Relationship t)
-    {
-        Steps++;
-        // Exit from the current state up to (not including) the transition's source's owner.
-        for (var s = _current; s != null && !ReferenceEquals(s, t.Source.Owner) && !ReferenceEquals(s, Behavior); s = s.Owner)
-            Exec(s.Get(FieldKeys.Exit), $"exit {Label(s)}");
-        Log.Add($"  ⇢ {(string.IsNullOrEmpty(t.Name) ? "completion" : t.Name)}{(t.Get(FieldKeys.Guard) is { Length: > 0 } g ? $" [{g}]" : "")}");
-        Exec(t.Get(FieldKeys.Effect), "effect");
-        Enter(t.Target);
+        _engine.Start();
+        Finished = _engine.Finished;
     }
 
     /// <summary>Fires the first enabled completion (event-less) transition.</summary>
     public override bool Step()
     {
-        if (Finished || _current is null) return false;
-        var t = TransitionsFrom(_current).FirstOrDefault(x => string.IsNullOrEmpty(x.Name) && Guard(x));
-        if (t is null) { Log.Add($"  waiting in {Label(_current)} — send an event or change a variable"); return false; }
-        Fire(t);
+        if (Finished) return false;
+        if (!_engine.FireFirst(t => string.IsNullOrEmpty(t.Name), completion: true, _ => "completion"))
+        {
+            Finished = _engine.Finished;
+            if (!Finished) Log.Add($"  waiting in {Configuration} — send an event or change a variable");
+            return false;
+        }
+        Steps++;
+        Finished = _engine.Finished;
         return true;
     }
 
+    /// <summary>Dispatches an event to every active region. False when no transition took it.</summary>
     public bool Send(string eventName)
     {
-        if (Finished || _current is null) return false;
-        var t = TransitionsFrom(_current).FirstOrDefault(x => x.Name == eventName && Guard(x));
-        if (t is null) { Log.Add($"  event '{eventName}' ignored in {Label(_current)}"); return false; }
-        Fire(t);
+        if (Finished) return false;
+        var n = _engine.Dispatch(t => t.Name == eventName, t => t.Name);
+        Finished = _engine.Finished;
+        if (n == 0) { Log.Add($"  event '{eventName}' ignored in {Configuration}"); return false; }
+        Steps++;
         return true;
     }
+
+    void IStateMachineHost.Exec(string? statements, string what) => Exec(statements, what);
+    bool IStateMachineHost.Guard(Relationship transition) => Guard(transition);
+    void IStateMachineHost.Log(MachineEventKind kind, Element? element, string text) => Log.Add(text);
 }
