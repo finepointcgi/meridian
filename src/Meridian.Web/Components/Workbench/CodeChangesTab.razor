@@ -292,7 +292,9 @@
         var e = Ws.Model.Find(c.ElementId);
         Diagram? d = null;
         if (e is not null)
-            d = Ws.Active?.Diagram is { } a && Shows(a, c.ElementId) ? a : Ws.Model.Diagrams.FirstOrDefault(x => Shows(x, c.ElementId)) ?? e as Diagram;
+            d = Ws.Active?.Diagram is { } a && Shows(a, c.ElementId) ? a : Ws.Model.Diagrams.FirstOrDefault(x => Shows(x, c.ElementId)) ?? e as Diagram
+                // An activity or interaction from code is shown by its own diagram.
+                ?? (e.Kind is ElementKind.Activity or ElementKind.Interaction ? e.OwnedElements.OfType<Diagram>().FirstOrDefault() : null);
         else
             d = review.Main.Diagrams.Where(md => Shows(md, c.ElementId)).Select(md => Ws.Model.Find(md.Id) as Diagram).FirstOrDefault(x => x is not null);
         if (d is null)
