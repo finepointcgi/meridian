@@ -31,7 +31,7 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
     private LibraryService _service = default!;
     private UserAccount _alice = default!, _bob = default!, _carol = default!;
     private Guid _parts, _vehicle;
-    private string _pkgId = "", _wheelId = "", _secretId = "", _libDiagramId = "";
+    private string _pkgId = "", _wheelId = "", _secretId = "", _libDiagramId = "", _xj9Id = "";
 
     public LibraryGapsWebTests()
     {
@@ -54,7 +54,7 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
         var wheel = lib.Create(pkg, ElementKind.Block, "Wheel");
         lib.Set(wheel, FieldKeys.Documentation, "18 inch");
         var secret = lib.Create(pkg, ElementKind.Package, "Prototypes");
-        lib.Create(secret, ElementKind.Block, "XJ9 Hubmotor");
+        _xj9Id = lib.Create(secret, ElementKind.Block, "XJ9 Hubmotor").Id;
         var d = lib.CreateDiagram(pkg, DiagramType.BlockDefinition, "Parts");
         lib.AddNode(d, wheel, new Bounds(10, 10, 120, 60));
         (_pkgId, _wheelId, _secretId, _libDiagramId) = (pkg.Id, wheel.Id, secret.Id, d.Id);
@@ -111,8 +111,8 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
         Assert.True(condition());
     }
 
-    private static string? MarkIn(string json, string elementId) =>
-        ProjectFile.Deserialize(json).Find(elementId) is { } e ? SuspectLinks.LibraryChangeOf(e) : null;
+    private static LibraryChangeMark? MarkIn(string json, string elementId) =>
+        ProjectFile.Deserialize(json).Find(elementId) is { } e ? LibraryChangeMark.Parse(e.Get(ReqFields.LibraryChange)) : null;
 
     private void AddUi(Workspace ws)
     {
@@ -125,6 +125,9 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
         Services.AddSingleton<MobileUiState>();
         Services.AddSingleton(new MeridianHostInfo(false, Path.GetTempPath(), null));
         Services.AddSingleton<ReviewService>();
+        Services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
+        Services.AddSingleton(new Meridian.Web.Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(),
+            new FakeHttpClientFactory(new FakeHandler((_, _) => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)))));
         RenderComponent<MudPopoverProvider>();
     }
 
@@ -161,12 +164,12 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
         Assert.Equal(1, result.Suspect);
         Assert.NotNull(SuspectLinks.LibraryChangeOf(alice.Model.Find(part.Id)!));
         var devHead = (await _db.LoadBranchAsync(dev))!.HeadJson;
-        Assert.Contains("Wheel changed in Parts Library", MarkIn(devHead, part.Id));
+        Assert.Equal(_wheelId, MarkIn(devHead, part.Id)?.TargetId);
         Assert.DoesNotContain("19 inch", devHead);   // library content is never stored
         var devCommit = (await _db.ListBranchVersionsAsync(_vehicle, dev)).OrderByDescending(v => v.Number).First();
         Assert.StartsWith("Library update: “Parts Library” v1 → v2", devCommit.Message);
         var fleetHead = (await _db.LoadProjectAsync(fleet))!.Value.ModelJson;
-        Assert.Contains("Wheel changed in Parts Library", MarkIn(fleetHead, fleetPart.Id));
+        Assert.Equal(_wheelId, MarkIn(fleetHead, fleetPart.Id)?.TargetId);
         Assert.Contains(await _db.ListBranchVersionsAsync(fleet, null), v => v.Message.StartsWith("Library update"));
         Assert.Equal(3, result.Lines.Count);
         Assert.Contains(result.Lines, l => l.ProjectId == _vehicle && l.BranchId == null && l.Version is null);   // live
@@ -204,6 +207,95 @@ public sealed class LibraryGapsWebTests : TestContext, IAsyncLifetime
         await _service.ApplyUpdateAsync(plan, _alice.Id, null);
         Assert.Null(SuspectLinks.LibraryChangeOf(_hub.Find(_vehicle)!.ReadMaster(m => m.Find(_wheelId)!)));
         Assert.Equal("Wheel", _hub.Find(_vehicle)!.ReadMaster(m => m.Find(_wheelId)!.Name));
+    }
+
+    /// <summary>Everything Carol can get at for the vehicle: her snapshot, her model's exports and validation messages.</summary>
+    private string CarolSees(Workspace carol)
+    {
+        var xmi = Path.Combine(Path.GetTempPath(), $"meridian-libgaps-{Guid.NewGuid():N}.xmi");
+        try
+        {
+            XmiExchange.Export(carol.Model, xmi);
+            return string.Join("\n",
+                _hub.Find(_vehicle)!.SnapshotFor(carol.ParticipantId),
+                ProjectFile.Serialize(carol.Model, includeLibraries: true),
+                HtmlReport.Generate(carol.Model),
+                HtmlReport.Generate(LibraryExport.Prepare(carol.Model, LibraryExportMode.Inline)),
+                HtmlReport.Generate(LibraryExport.Prepare(carol.Model, LibraryExportMode.Reference)),
+                SysMLv2Text.Export(carol.Model),
+                File.ReadAllText(xmi),
+                string.Join("\n", new Core.Validation.ModelValidator().Validate(carol.Model).Select(i => i.Message)));
+        }
+        finally { File.Delete(xmi); }
+    }
+
+    /// <summary>
+    /// Alice sees everything; "Prototypes" is hidden from Carol in the library. Alice accepts an update that changed the hidden
+    /// "XJ9 Hubmotor", which a part of the vehicle is typed by: Carol's inspector, snapshot, exports and validation say "a restricted
+    /// library element", never the name; Alice's say "XJ9 Hubmotor".
+    /// </summary>
+    [Fact]
+    public async Task A_Suspect_Mark_Never_Names_A_Library_Element_Hidden_From_The_Viewer()
+    {
+        await UseParts();
+        var alice = await Open(_alice);
+        var carol = await Open(_carol);
+        var bob = await Open(_bob);
+        var motor = TypePart(alice.Model, _xj9Id, "motor");
+        await Eventually(() => carol.Model.Find(motor.Id) is not null && bob.Model.Find(motor.Id) is not null);
+        Assert.DoesNotContain("XJ9", CarolSees(carol));
+
+        var lib = ProjectFile.Deserialize((await _db.LoadProjectAsync(_parts))!.Value.ModelJson);
+        lib.Set(lib.Find(_xj9Id)!, FieldKeys.Documentation, "48 V");
+        var json = ProjectFile.Serialize(lib);
+        await _db.SaveProjectAsync(_parts, json, _alice.Id);
+        await _db.CommitVersionAsync(_parts, "motor voltage", json, _alice.Id);
+        var state = new LibraryState(alice, _service);
+        var offer = Assert.Single(await state.CheckAsync());
+        await state.ApplyAsync(await _service.PrepareUpdateAsync(_hub.Find(_vehicle)!, offer.UsageId, offer.Kind, offer.Value, _alice.Id));
+
+        Assert.Equal("XJ9 Hubmotor changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(alice.Model.Find(motor.Id)!, alice.Model));
+        await Eventually(() => carol.Model.Find(motor.Id) is { } m && SuspectLinks.HasLibraryChange(m));
+        Assert.Equal($"{LibraryChangeMark.Restricted} changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(carol.Model.Find(motor.Id)!, carol.Model));
+        await Eventually(() => bob.Model.Find(motor.Id) is { } m && SuspectLinks.HasLibraryChange(m));
+        Assert.Equal($"{LibraryChangeMark.Restricted} changed in {LibraryChangeMark.UnknownLibrary} (v1 → v2)", SuspectLinks.LibraryChangeOf(bob.Model.Find(motor.Id)!, bob.Model));
+
+        var seen = CarolSees(carol);
+        Assert.DoesNotContain("XJ9", seen);
+        Assert.Contains(LibraryChangeMark.Restricted, seen);   // TRC-001 in her validation
+        await _hub.Find(_vehicle)!.PersistAsync();
+        Assert.DoesNotContain("XJ9", (await _db.LoadProjectAsync(_vehicle))!.Value.ModelJson);   // stored: ids only
+
+        AddUi(carol);
+        carol.Select(carol.Model.Find(motor.Id)!);
+        var inspector = RenderComponent<Inspector>();
+        var shown = inspector.Find("[data-testid=inspector-library-suspect]").TextContent;
+        Assert.Contains(LibraryChangeMark.Restricted, shown);
+        Assert.DoesNotContain("XJ9", inspector.Markup);
+    }
+
+    /// <summary>Marks written by the earlier format named the element; a session rewrites them to ids before anyone gets a snapshot.</summary>
+    [Fact]
+    public async Task Older_Named_Marks_Are_Neutralised_Before_They_Reach_A_Viewer()
+    {
+        await UseParts();
+        var stored = ProjectFile.Deserialize((await _db.LoadProjectAsync(_vehicle))!.Value.ModelJson);
+        var motor = TypePart(stored, _xj9Id, "motor");
+        stored.Set(motor, ReqFields.LibraryChange, "XJ9 Hubmotor changed in Parts Library (v1 → v2)");
+        await _db.SaveProjectAsync(_vehicle, ProjectFile.Serialize(stored), _alice.Id);
+        await _db.CommitVersionAsync(_vehicle, "with an old mark", ProjectFile.Serialize(stored), _alice.Id);
+
+        var carol = await Open(_carol);
+        var alice = await Open(_alice);
+        Assert.DoesNotContain("XJ9", CarolSees(carol));
+        Assert.Equal($"{LibraryChangeMark.Restricted} changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(carol.Model.Find(motor.Id)!, carol.Model));
+        Assert.Equal("XJ9 Hubmotor changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(alice.Model.Find(motor.Id)!, alice.Model));
+        await _hub.Find(_vehicle)!.PersistAsync();
+        Assert.DoesNotContain("XJ9", (await _db.LoadProjectAsync(_vehicle))!.Value.ModelJson);   // saved again without the name
+
+        // A stored version from before is rewritten when shown from history, too.
+        var old = (await _db.ListVersionsAsync(_vehicle)).Single(v => v.Message == "with an old mark");
+        Assert.DoesNotContain("XJ9", PackagePermissions.RedactJson((await _db.LoadVersionAsync(_vehicle, old.Id))!, carol.Access));
     }
 
     [Fact]

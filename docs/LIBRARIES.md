@@ -100,8 +100,19 @@ Warnings are shown in the **Used projects** dialog.
   with their view; hidden packages stay hidden). A version or baseline pin opens as a *viewer* (the session refuses edits too),
   whatever the user's role.
 - **Suspect marks** are written by the system on the project's own elements only (never on library content, which stays
-  read-only and unsaved). Their text names library elements as the *accepting* user's review showed them, so a package hidden
-  from that user is never named. Accepting needs an editor or owner role on the using project, as before.
+  read-only and unsaved). A mark (field `suspectLib`, `LibraryChangeMark`) stores **only ids and the kind of change**: the
+  library element's id, changed or removed, the source project's id and the pins before and after (`version:3`,
+  `baseline:17`, `branch:dev`). Names are rendered when the mark is shown, through the viewer's own filtered model
+  (`SuspectLinks.LibraryChangeOf(e, viewerModel)`, also used by validation TRC-001, the inspector and the traceability views):
+  an element in a package hidden from the viewer reads **"a restricted library element"**, a library they can't read
+  **"a used project"**, a baseline pin's name only shows to those whose library is pinned to it, and a removed element is never
+  named. Snapshots, saved documents, history views and exports therefore carry no hidden name.
+- **Older marks.** Marks written before this format held a sentence with names. They are rewritten to ids
+  (`LibraryChangeMark.UpgradeLegacy`: target from the element's own reference, kind and pins from the sentence) when a session
+  loads or rebuilds its model (so no snapshot, filtered or not, carries them, and the next save drops them), when the stored
+  head of a closed line is changed, and by `ModelRedactor.Redact` / `PackagePermissions.Redact(Json)` — history, baselines and
+  reviews — whatever the viewer may see.
+- Accepting needs an editor or owner role on the using project, as before.
 - **Upstream notices** go only to owners and editors of the using project who have a role on the source project and can see
   the used package there; the text names projects and versions, never elements.
 

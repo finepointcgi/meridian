@@ -71,8 +71,22 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>The authoritative model rebuilt from a project document with the session's libraries mounted.</summary>
-    private ModelRepository Materialize(string modelJson) =>
-        _libraries.Payloads.Count == 0 ? ProjectFile.Deserialize(modelJson) : ProjectFile.Deserialize(modelJson, _libraries.Payloads);
+    private ModelRepository Materialize(string modelJson)
+    {
+        var model = _libraries.Payloads.Count == 0 ? ProjectFile.Deserialize(modelJson) : ProjectFile.Deserialize(modelJson, _libraries.Payloads);
+        UpgradeMarks(model);
+        return model;
+    }
+
+    /// <summary>
+    /// Library-update suspect marks of the earlier format named library elements (possibly hidden from some participants):
+    /// the authoritative model only keeps ids (<see cref="LibraryChangeMark.UpgradeLegacy"/>), so every snapshot, filtered or
+    /// not, and what is saved next are free of them. Names are rendered per viewer when a mark is shown.
+    /// </summary>
+    internal void UpgradeMarks(ModelRepository model)
+    {
+        if (LibraryChangeMark.UpgradeLegacy(model) > 0) MarkDirty();
+    }
 
     /// <summary>
     /// Replaces the libraries (a usage was added, removed or re-pinned): the model is rebuilt with them, <paramref name="afterMount"/>

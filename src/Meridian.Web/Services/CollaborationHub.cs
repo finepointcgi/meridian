@@ -160,6 +160,7 @@ public sealed partial class ProjectSession : IDisposable
         _log = log;
         _onEmpty = onEmpty;
         _persistTimer = new Timer(_ => _ = PersistIfDueAsync(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        UpgradeMarks(_master);   // earlier library-update marks named library elements: ids only from here on (ProjectSession.Libraries.cs)
     }
 
     public Guid ProjectId { get; }

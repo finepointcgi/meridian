@@ -89,7 +89,7 @@
                     <div class="link" @onclick="() => Shell.Navigate(r)">
                         «@(Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind))» @(other != null ? TraceabilityTable.Label(other) : $"{TraceabilityTable.Label(r.Source)} → {TraceabilityTable.Label(r.Target)}")
                     </div>
-                    <div class="why">@SuspectLinks.Describe(r)</div>
+                    <div class="why">@SuspectLinks.Describe(r, Ws.Model)</div>
                 </div>
                 @if (!Ws.ReadOnly)
                 {

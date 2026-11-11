@@ -99,7 +99,7 @@
                                     @foreach (var l in row[col])
                                     {
                                         var link = l;
-                                        <span class="pill tt-pill @(link.Suspect ? "suspect" : "")" title="@(link.Suspect ? SuspectLinks.Describe(link.Relationship) : link.Other.QualifiedName)"
+                                        <span class="pill tt-pill @(link.Suspect ? "suspect" : "")" title="@(link.Suspect ? SuspectLinks.Describe(link.Relationship, Ws.Model) : link.Other.QualifiedName)"
                                               @onclick="() => Shell.Navigate(link.Other)" @onclick:stopPropagation="true">
                                             @if (link.Suspect)
                                             {

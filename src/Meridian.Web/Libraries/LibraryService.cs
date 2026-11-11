@@ -204,6 +204,7 @@ public sealed class LibraryService(IMeridianStore db, CollaborationHub hub)
             {
                 var resolution = await LibraryLoader.ResolveAsync(db, hub, projectId);
                 var model = resolution.Payloads.Count == 0 ? ProjectFile.Deserialize(json) : ProjectFile.Deserialize(json, resolution.Payloads);
+                LibraryChangeMark.UpgradeLegacy(model);   // older marks named library elements: ids only
                 IReadOnlyList<LibraryMark> marks = change(line.BranchId, model).Where(m => m.Before != m.After).ToList();   // already marked: nothing to commit
                 return marks.Count == 0 ? null : (ProjectFile.Serialize(model), marks);   // library content is never written
             });
@@ -315,10 +316,12 @@ public sealed class LibraryService(IMeridianStore db, CollaborationHub hub)
         if (usage.PinKind != plan.Usage.PinKind || usage.PinValue != plan.Usage.PinValue)
             throw new InvalidOperationException("Someone changed this usage while you were reviewing the update. Review it again.");
         await db.UpdateProjectUsageAsync(usage.Id, plan.ToKind, plan.ToValue, usage.MountPointId);
-        var names = plan.Before.AllElements.Concat(plan.After.AllElements).GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.Last().DisplayName, StringComparer.Ordinal);
-        // The one choke point for the marks, open or not: references to what the reviewer saw change (the plan is their view of
-        // the library, so hidden packages are never named), on the project's own elements only (library content is read-only).
-        IReadOnlyList<LibraryMark> Mark(ModelRepository m) => LibraryUpdates.MarkSuspects(m, plan.LibraryName, plan.FromLabel, plan.ToLabel, plan.Changed, plan.Removed, names);
+        // The one choke point for the marks, open or not: references to what the reviewer saw change, on the project's own
+        // elements only (library content is read-only). A mark stores ids and the kind of change, never a name: each viewer's
+        // own model names the element when the mark is shown (LibraryChangeMark), so a hidden element is never named.
+        var fromPin = LibraryChangeMark.Pin(usage.PinKind, usage.PinValue);
+        var toPin = LibraryChangeMark.Pin(plan.ToKind, plan.ToValue);
+        IReadOnlyList<LibraryMark> Mark(ModelRepository m) => LibraryUpdates.MarkSuspects(m, usage.UsedProjectId, fromPin, toPin, plan.Changed, plan.Removed);
 
         // Suspect marks belong to the project that accepts the update — every line of it, since the pin is the project's — and to
         // the projects that use it (they load its libraries transitively, so they move to the new pin as well).
@@ -368,6 +371,7 @@ public sealed class LibraryService(IMeridianStore db, CollaborationHub hub)
                 {
                     var resolution = await LibraryLoader.ResolveAsync(db, hub, project);
                     var model = resolution.Payloads.Count == 0 ? ProjectFile.Deserialize(head) : ProjectFile.Deserialize(head, resolution.Payloads);
+                    LibraryChangeMark.UpgradeLegacy(model);
                     var before = ProjectFile.Serialize(model);
                     LibraryUpdates.UnmarkSuspects(model, line.Marks);
                     var after = ProjectFile.Serialize(model);

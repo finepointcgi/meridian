@@ -55,11 +55,26 @@ public static class SuspectLinks
     public static IEnumerable<Element> SuspectElements(ModelRepository model) =>
         model.OwnElements.Where(e => !e.IsRelationship && e.Fields.Count > 0 && e.Get(ReqFields.LibraryChange).Length > 0);
 
-    /// <summary>Why a library update made <paramref name="e"/> suspect, or null.</summary>
-    public static string? LibraryChangeOf(Element e) => e.Get(ReqFields.LibraryChange) is { Length: > 0 } why ? why : null;
+    /// <summary>True when a library update made <paramref name="e"/> suspect.</summary>
+    public static bool HasLibraryChange(Element e) => e.Get(ReqFields.LibraryChange).Length > 0;
+
+    /// <summary>
+    /// Why a library update made <paramref name="e"/> suspect, or null — rendered through <paramref name="viewer"/>, the model
+    /// of whoever looks at it (their filtered replica), so library elements hidden from them are not named
+    /// (<see cref="Libraries.LibraryChangeMark.Describe"/>). Without a model nothing is named.
+    /// </summary>
+    public static string? LibraryChangeOf(Element e, ModelRepository? viewer = null)
+    {
+        var raw = e.Get(ReqFields.LibraryChange);
+        if (raw.Length == 0) return null;
+        return (Libraries.LibraryChangeMark.Parse(raw) ?? LegacyMark).Describe(viewer);
+    }
+
+    /// <summary>A mark of the earlier, named format that wasn't upgraded: shown without its names.</summary>
+    private static readonly Libraries.LibraryChangeMark LegacyMark = new("", false, Guid.Empty, "", "");
 
     /// <summary>Marks a project element or relationship as suspect because the library element it refers to changed (undoable).</summary>
-    public static void MarkLibraryChange(ModelRepository model, Element e, string why) => model.Set(e, ReqFields.LibraryChange, why);
+    public static void MarkLibraryChange(ModelRepository model, Element e, Libraries.LibraryChangeMark mark) => model.Set(e, ReqFields.LibraryChange, mark.Encode());
 
     /// <summary>Marks an element whose library reference changed as reviewed (undoable).</summary>
     public static void ClearLibraryChange(ModelRepository model, Element e) => model.Set(e, ReqFields.LibraryChange, null);
@@ -106,10 +121,11 @@ public static class SuspectLinks
     }
 
     /// <summary>Human readable reason, e.g. "REQ-002 Acceleration changed since this satisfy link was reviewed".</summary>
-    public static string Describe(Relationship r)
+    /// <param name="viewer">The viewer's model, to name the library element of a library-update mark (see <see cref="LibraryChangeOf"/>).</param>
+    public static string Describe(Relationship r, ModelRepository? viewer = null)
     {
         var ends = ChangedEnds(r).Select(e => $"{e.Get(FieldKeys.RequirementId)} {e.Name}".Trim()).ToList();
-        if (ends.Count == 0) return LibraryChangeOf(r) ?? "Not suspect";
+        if (ends.Count == 0) return LibraryChangeOf(r, viewer) ?? "Not suspect";
         var kw = Metamodel.Style(r.Kind).Keyword ?? Metamodel.DisplayName(r.Kind);
         return $"{string.Join(" and ", ends)} changed since this «{kw}» link was reviewed";
     }
@@ -123,7 +139,7 @@ public sealed class SuspectLinkRule : IValidationRule
 
     public IEnumerable<ValidationIssue> Check(ModelRepository model) =>
         SuspectLinks.All(model).Select(r => new ValidationIssue(Severity.Warning, Id,
-            $"Suspect link: {r.Source.DisplayName} → {r.Target.DisplayName} — {SuspectLinks.Describe(r)}", r))
+            $"Suspect link: {r.Source.DisplayName} → {r.Target.DisplayName} — {SuspectLinks.Describe(r, model)}", r))
         .Concat(SuspectLinks.SuspectElements(model).Select(e => new ValidationIssue(Severity.Warning, Id,
-            $"Suspect: {e.DisplayName} — {SuspectLinks.LibraryChangeOf(e)}", e)));
+            $"Suspect: {e.DisplayName} — {SuspectLinks.LibraryChangeOf(e, model)}", e)));
 }

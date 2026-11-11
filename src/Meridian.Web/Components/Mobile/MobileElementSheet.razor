@@ -93,7 +93,7 @@
     public sealed record TraceRow(bool Outgoing, string Label, Element Other);
 
     private static readonly HashSet<string> Hidden =
-        [FieldKeys.Name, FieldKeys.Documentation, FieldKeys.Text, FieldKeys.RequirementId, FieldKeys.Stereotypes];
+        [FieldKeys.Name, FieldKeys.Documentation, FieldKeys.Text, FieldKeys.RequirementId, FieldKeys.Stereotypes, ReqFields.LibraryChange];
 
     private static string Title(Element e) =>
         e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } id ? $"{id} {e.Name}" : e.DisplayName;

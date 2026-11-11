@@ -47,7 +47,8 @@ elements with their details, and the library's diagrams with the changes highlig
 that use what changed. **Update** moves the pin:
 
 - your elements that refer to changed library elements become **suspect** (shown in the inspector, the traceability table and
-  validation) until you mark them reviewed;
+  validation) until you mark them reviewed. The note names the library element only for people who may see it: for someone
+  from whom its package is hidden in the library project it reads *a restricted library element*;
 - references to library elements that were **removed** stay, as **missing references**: a dashed shape on diagrams and a
   validation error (LIB-001), never silently dropped;
 - the pin belongs to the whole project, so **every branch** gets the suspect marks — also branches nobody has open, and
