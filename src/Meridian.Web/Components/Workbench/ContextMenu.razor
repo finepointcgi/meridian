@@ -1,20 +1,11 @@
-@* Lightweight floating menu used for right-click on the tree and the diagram canvas. *@
+@inject IJSRuntime JS
+@* Lightweight floating menu used for right-click on the tree and the diagram canvas. It stays inside the window (moved up or
+   left when it would run off it), closes with Escape, and an entry with Children opens a submenu (hover, click or →). *@
 @if (Entries is { Count: > 0 })
 {
     <div class="ctx-backdrop" @onclick="Close" @oncontextmenu="Close" @oncontextmenu:preventDefault="true"></div>
-    <div class="ctx-menu" style="left:@(Px(X))px; top:@(Px(Y))px">
-        @foreach (var e in Entries)
-        {
-            if (e.Separator) { <div class="ctx-sep"></div> }
-            else if (e.Header) { <div class="ctx-header">@e.Label</div> }
-            else
-            {
-                <div class="ctx-item" @onclick="() => Run(e)">
-                    <span>@e.Label</span>
-                    @if (e.Shortcut != null) { <span class="key">@e.Shortcut</span> }
-                </div>
-            }
-        }
+    <div class="ctx-menu" role="menu" tabindex="-1" style="left:@(Px(X))px; top:@(Px(Y))px" @ref="_root" @onkeydown="Key">
+        @Items(Entries, true)
     </div>
 }
 
@@ -24,7 +15,68 @@
     [Parameter] public double Y { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
+    private ElementReference _root;
+    private IReadOnlyList<MenuEntry>? _shown;
+    private MenuEntry? _openSub;
+
     private static string Px(double v) => Math.Max(4, v).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private RenderFragment Items(IReadOnlyList<MenuEntry> entries, bool top) => __builder =>
+    {
+        foreach (var e in entries)
+        {
+            var entry = e;
+            if (entry.Separator) { <div class="ctx-sep" role="separator"></div> }
+            else if (entry.Header) { <div class="ctx-header" role="presentation">@entry.Label</div> }
+            else if (entry.Children is { Count: > 0 } children)
+            {
+                var open = ReferenceEquals(_openSub, entry);
+                <div class="ctx-sub @(open ? "open" : "")" @onmouseenter="() => OpenSub(entry)">
+                    <div class="ctx-item ctx-parent" role="menuitem" tabindex="-1" aria-haspopup="menu" aria-expanded="@(open ? "true" : "false")"
+                         @onclick="() => ToggleSub(entry)">
+                        <span>@entry.Label</span><span class="key" aria-hidden="true">▸</span>
+                    </div>
+                    <div class="ctx-menu ctx-submenu" role="menu">@Items(children, false)</div>
+                </div>
+            }
+            else
+            {
+                <div class="ctx-item" role="menuitem" tabindex="-1" @onclick="() => Run(entry)" @onmouseenter="() => { if (top) _openSub = null; }">
+                    <span>@entry.Label</span>
+                    @if (entry.Shortcut != null) { <span class="key">@entry.Shortcut</span> }
+                </div>
+            }
+        }
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Entries is not { Count: > 0 }) { _shown = null; _openSub = null; return; }
+        if (ReferenceEquals(_shown, Entries)) return;
+        _shown = Entries;
+        _openSub = null;
+        // Keep the menu (and its submenus) inside the window, and take the keyboard focus for Escape and the arrow keys.
+        try { await JS.InvokeVoidAsync("meridian.fitMenu", _root); }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException) { }
+    }
+
+    private void OpenSub(MenuEntry e) => _openSub = e;
+
+    private void ToggleSub(MenuEntry e) => _openSub = ReferenceEquals(_openSub, e) ? null : e;
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            if (_openSub != null) _openSub = null;
+            else await Close();
+        }
+        else if (e.Key is "ArrowDown" or "ArrowUp" or "ArrowRight" or "ArrowLeft" or "Enter" or " ")
+        {
+            try { await JS.InvokeVoidAsync("meridian.menuKey", _root, e.Key); }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { }
+        }
+    }
 
     private Task Close() => OnClose.InvokeAsync();
 

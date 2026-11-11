@@ -64,7 +64,7 @@ else
                                     <input class="cell-input" value="@c.Utility" placeholder="x:u, x:u  e.g. 100:0, 300:1" @onchange="e => Update(idx, x => x.Utility = S(e))" />
                                 }
                             </td>
-                            <td><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="Ws.ReadOnly" OnClick="() => Remove(idx)" /></td>
+                            <td><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="Ws.ReadOnly" OnClick="() => Remove(idx)" aria-label="Delete" title="Delete" /></td>
                         </tr>
                     }
                 </tbody>

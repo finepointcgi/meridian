@@ -106,25 +106,27 @@ public sealed partial class ProjectSession
     private bool AllowEdit(string participantId, Guid userId, ModelOp op)
     {
         if (_rejecting.Contains(participantId)) return false;
-        // Only known participants with an editing role may change the model (viewers are read-only server-side too).
-        if (!_participants.TryGetValue(participantId, out var me) || !me.Presence.CanEdit)
-        {
-            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(SnapshotLocked(participantId), "This project is view-only for you — your change was not applied."); }
-            return false;
-        }
-        // Package permissions (ProjectSession.Permissions.cs): the one server-side check every model edit passes.
-        if (PermissionProblem(participantId, op) is { } denied)
+        if (EditProblem(participantId, userId, op) is not { } why) return true;
+        if (_participants.TryGetValue(participantId, out var me))
         {
             _rejecting.Add(participantId);
-            me.Client.Replaced(SnapshotLocked(participantId), denied);
-            return false;
+            me.Client.Replaced(ModelForLocked(participantId), why);
         }
-        if (_locks.Count == 0 || Blocks(userId, op) is not { } l) return true;
-        _rejecting.Add(participantId);
-        var what = _master.Find(l.ElementId)?.DisplayName ?? "That element";
-        if (_participants.TryGetValue(participantId, out var p))
-            p.Client.Replaced(SnapshotLocked(participantId), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
         return false;
+    }
+
+    /// <summary>Why <paramref name="op"/> may not be applied for this participant (role, package permissions, element locks), or null.</summary>
+    private string? EditProblem(string participantId, Guid userId, ModelOp op)
+    {
+        // Only known participants with an editing role may change the model (viewers are read-only server-side too).
+        if (!_participants.TryGetValue(participantId, out var me) || !me.Presence.CanEdit)
+            return "This project is view-only for you — your change was not applied.";
+        // Package permissions (ProjectSession.Permissions.cs): the one server-side check every model edit passes.
+        if (PermissionProblem(participantId, op) is { } denied) return denied;
+        // Element locks are an optional check-out: edits converge without them, a lock keeps others out.
+        if (_locks.Count == 0 || Blocks(userId, op) is not { } l) return null;
+        var what = _master.Find(l.ElementId)?.DisplayName ?? "That element";
+        return $"{what} is locked by {l.User.DisplayName} — your change was not applied.";
     }
 
     /// <summary>Called by a tab once it has installed the model it was sent after a rejection.</summary>
@@ -148,16 +150,17 @@ public sealed partial class ProjectSession
     {
         lock (_gate)
         {
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             _master = Materialize(modelJson);   // used projects stay mounted (ProjectSession.Libraries.cs)
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
             _stale.Clear();
+            ForgetUncommitted();   // element history (ProjectSession.History.cs)
             foreach (var (id, p) in _participants)
             {
                 _rejecting.Remove(id);
-                p.Client.Replaced(SnapshotLocked(id, modelJson), message);
+                p.Client.Replaced(ModelForLocked(id, modelJson), message);
             }
         }
     }

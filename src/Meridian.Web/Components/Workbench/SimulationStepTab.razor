@@ -11,9 +11,10 @@
     </MudSelect>
     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="_behaviorId == null" OnClick="Start">@(_sim == null ? "Start" : "Restart")</MudButton>
     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SkipNext" Disabled="@(_sim == null || _sim.Finished)" OnClick="Step">Step</MudButton>
-    @if (_sim is ActivitySimulator)
+    @if (_sim != null)
     {
-        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FastForward" Disabled="_sim.Finished" OnClick="Run">Run to end</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FastForward" Disabled="_sim.Finished" OnClick="Run"
+                   title="@(_sim is StateMachineSimulator ? "Take completion transitions until the machine waits for an event" : "Move tokens until the activity ends")">@(_sim is StateMachineSimulator ? "Run until waiting" : "Run to end")</MudButton>
     }
     @if (_sim is StateMachineSimulator sm)
     {
@@ -26,9 +27,31 @@
     <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Stop" Disabled="_sim == null" OnClick="Stop">Stop</MudButton>
     @if (_sim != null)
     {
-        <MudChip T="string" Size="Size.Small" Color="@(_sim.Finished ? Color.Success : Color.Info)" Variant="Variant.Outlined">@(_sim.Finished ? "finished" : "running") · @_sim.Steps steps</MudChip>
+        var smErr = (_sim as StateMachineSimulator)?.Error;
+        <MudChip T="string" Size="Size.Small" Color="@(smErr != null ? Color.Error : _sim.Finished ? Color.Success : Color.Info)" Variant="Variant.Outlined" data-testid="sim-status">
+            @(smErr != null ? "stopped on an error" : _sim is StateMachineSimulator { Terminated: true } ? "terminated" : _sim.Finished ? "finished" : "running") · @_sim.Steps steps
+        </MudChip>
     }
 </div>
+@if (_sim is StateMachineSimulator smc)
+{
+    <div class="px-3 pb-2" style="font-size:12.5px" data-testid="sim-configuration">
+        <span style="color:var(--text-3)">Active configuration:</span>
+        @if (smc.ActiveLeaves.Count == 0) { <span style="color:var(--text-3)"> (none)</span> }
+        @foreach (var leaf in smc.ActiveLeaves)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" title="@leaf.QualifiedName">@PathOf(smc, leaf)</MudChip>
+        }
+        @foreach (var j in smc.Engine.WaitingJoins)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">join @StateMachineEngine.Label(j) waiting</MudChip>
+        }
+        @if (smc.Error is { } err)
+        {
+            <div style="color:var(--danger); margin-top:4px" data-testid="sim-error">✖ @err</div>
+        }
+    </div>
+}
 @if (_sim != null)
 {
     <div style="display:grid; grid-template-columns: 260px 1fr; gap:12px; padding:0 12px 12px">
@@ -78,6 +101,14 @@ else
     private void Step() { _sim?.Step(); Sync(); }
     private void Run() { _sim?.Run(); Sync(); }
     private void Send(string e) { (_sim as StateMachineSimulator)?.Send(e); Sync(); }
+
+    private static string PathOf(StateMachineSimulator sm, Element leaf)
+    {
+        var parts = new List<string>();
+        for (var e = leaf; e != null && !ReferenceEquals(e, sm.Behavior); e = e.Owner) parts.Add(StateMachineEngine.Label(e));
+        parts.Reverse();
+        return string.Join(" › ", parts);
+    }
 
     private void Stop()
     {

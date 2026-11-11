@@ -43,6 +43,17 @@ public sealed partial class ProjectSession
 
     private void ForgetLibraries(string participantId) => _libraryAccess.Remove(participantId);
 
+    /// <summary>The libraries a participant may read (what their snapshot carries), for a historical view of this project.</summary>
+    internal IReadOnlyList<LibraryPayload> LibrariesFor(string participantId)
+    {
+        lock (_gate)
+        {
+            if (!_libraryAccess.TryGetValue(participantId, out var mine)) return [];
+            var view = _access.TryGetValue(participantId, out var a) ? a.View : AccessView.ReadAll;
+            return mine.Where(p => MountVisible(view, p.Info)).ToList();
+        }
+    }
+
     /// <summary>Adds a participant's libraries to their (possibly filtered) project document.</summary>
     private string WithLibrariesFor(string participantId, AccessView view, string json)
     {
@@ -60,8 +71,22 @@ public sealed partial class ProjectSession
     }
 
     /// <summary>The authoritative model rebuilt from a project document with the session's libraries mounted.</summary>
-    private ModelRepository Materialize(string modelJson) =>
-        _libraries.Payloads.Count == 0 ? ProjectFile.Deserialize(modelJson) : ProjectFile.Deserialize(modelJson, _libraries.Payloads);
+    private ModelRepository Materialize(string modelJson)
+    {
+        var model = _libraries.Payloads.Count == 0 ? ProjectFile.Deserialize(modelJson) : ProjectFile.Deserialize(modelJson, _libraries.Payloads);
+        UpgradeMarks(model);
+        return model;
+    }
+
+    /// <summary>
+    /// Library-update suspect marks of the earlier format named library elements (possibly hidden from some participants):
+    /// the authoritative model only keeps ids (<see cref="LibraryChangeMark.UpgradeLegacy"/>), so every snapshot, filtered or
+    /// not, and what is saved next are free of them. Names are rendered per viewer when a mark is shown.
+    /// </summary>
+    internal void UpgradeMarks(ModelRepository model)
+    {
+        if (LibraryChangeMark.UpgradeLegacy(model) > 0) MarkDirty();
+    }
 
     /// <summary>
     /// Replaces the libraries (a usage was added, removed or re-pinned): the model is rebuilt with them, <paramref name="afterMount"/>
@@ -77,7 +102,7 @@ public sealed partial class ProjectSession
             _libraries = libraries;
             _master = Materialize(projectJson);
             var result = afterMount(_master);
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
@@ -89,7 +114,7 @@ public sealed partial class ProjectSession
             {
                 _rejecting.Remove(id);
                 if (id == initiator) mine = SnapshotLocked(id);
-                else p.Client.Replaced(SnapshotLocked(id), message);
+                else p.Client.Replaced(ModelForLocked(id), message);
             }
             return (mine, result);
         }

@@ -31,6 +31,7 @@ public static class Templates
         new("cubesat", "CubeSat mission", "Aerospace sample: 3U Earth-observation CubeSat with mission requirements, EPS/ADCS/COMMS/OBC/payload, power and data IBD, power and mass budgets, mode state machine and test cases.", "Aerospace", CubeSatSample.Create),
         new("acc", "Adaptive cruise control", "Automotive sample: ISO 26262-style safety goals and safety requirements with ASIL tags, functional architecture with swimlane allocation to ECUs, ECU network IBD and ACC modes.", "Automotive", AdaptiveCruiseSample.Create),
         new("infusion-pump", "Infusion pump", "Medical sample: ISO 14971 hazard analysis table, risk controls, IEC 62304 software items and safety classes, pump state machine and traceability to tests.", "Medical", InfusionPumpSample.Create),
+        new("parking-brake", "Electric parking brake (safety)", "Safety & reliability sample: FMEA with RPN and action priority on the controller, actuator, sensors and supply; mitigating requirements and tests; a fault tree with AND, OR and 2-of-3 gates and minimal cut sets.", "Safety", ParkingBrakeSample.Create),
     ];
 
     public static readonly IReadOnlyList<DiagramTemplate> Diagrams =

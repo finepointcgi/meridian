@@ -1,0 +1,60 @@
+/* Element history (docs-site version control, "Element history"): the inspector section, the timeline and field diffs. */
+
+.hist-toggle { all: unset; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.hist-toggle:hover, .hist-toggle:focus-visible { color: var(--text); }
+
+.hist { font-size: 12.5px; }
+.hist-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; color: var(--text-2); flex-wrap: wrap; }
+.hist-bar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.hist-bar .grow { flex: 1; }
+.hist-icon { all: unset; cursor: pointer; padding: 0 4px; color: var(--text-3); font-size: 14px; }
+.hist-icon:hover { color: var(--text); }
+
+.hist-indexing { color: var(--text-2); margin: 4px 0 8px; }
+.hist-bar-track { height: 3px; background: var(--panel-3); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.hist-bar-track > div { height: 100%; background: var(--accent); transition: width .3s; }
+
+/* The timeline: a line at x = 4..6 px with a dot per entry (drawn inside the scrolling list, so nothing is clipped). */
+.hist-list { list-style: none; margin: 0; padding: 0 0 0 10px; max-height: 440px; overflow: auto;
+             background: linear-gradient(var(--border), var(--border)) 4px 0 / 2px 100% no-repeat; }
+.hist.compact .hist-list { max-height: 300px; }
+.hist-entry { position: relative; padding: 5px 6px 6px 12px; cursor: pointer; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.hist-entry::before { content: ""; position: absolute; left: -11px; top: 7px; width: 8px; height: 8px; border-radius: 50%;
+                      background: var(--panel-solid); border: 2px solid var(--text-3); }
+.hist-entry:hover { background: var(--hover); }
+.hist-entry.on { background: var(--sel); }
+.hist-entry.uncommitted::before { border-style: dashed; border-color: var(--warn); }
+.hist-entry.connected .hist-head { opacity: .9; }
+.hist-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.hist-v { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
+.hist-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.hist-kind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--chg-changed); white-space: nowrap; }
+.hist-kind.k-added, .hist-kind.k-addedtodiagram { color: var(--chg-added); }
+.hist-kind.k-removed, .hist-kind.k-removedfromdiagram { color: var(--chg-removed); }
+.hist-kind.k-moved { color: var(--accent-2); }
+.hist-meta { color: var(--text-3); font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.hist-tag { display: inline-block; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); font-size: 10.5px; color: var(--text-2); }
+.hist-tag.merge { border-color: var(--accent-2); color: var(--accent-2); }
+.hist-tag.branch { font-family: Menlo, Consolas, monospace; }
+.hist-fields, .hist-rel { color: var(--text-2); font-size: 11.5px; margin-top: 1px; overflow-wrap: anywhere; }
+.hist-rel::before { content: "↔ "; color: var(--text-3); }
+.hist-empty { color: var(--text-3); padding: 8px 10px; list-style: none; }
+.hist-note { color: var(--text-2); padding: 6px 0; }
+
+.hist-diff { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.hist-diff-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.hist-diff-head .grow { flex: 1; }
+.hist-btn { all: unset; cursor: pointer; padding: 1px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); }
+.hist-btn:hover, .hist-btn:focus-visible { border-color: var(--sel-border); color: var(--text); }
+.hist-btn.on { background: var(--sel); color: var(--text); }
+.hist-table { width: 100%; border-collapse: collapse; }
+.hist-table th { text-align: left; font-weight: 600; color: var(--text-2); vertical-align: top; padding: 4px 8px 4px 0; white-space: nowrap; width: 1%; }
+.hist-table td { padding: 4px 0; vertical-align: top; overflow-wrap: anywhere; border-top: 1px solid var(--border); }
+.hist-table th { border-top: 1px solid var(--border); }
+.hist-table .hist-act { width: 1%; padding-left: 6px; white-space: nowrap; }
+.hist-before { text-decoration: line-through; opacity: .6; }
+.hist-arrow { color: var(--text-3); }
+.hist-words { white-space: pre-wrap; }
+.hist-words .w-removed { background: color-mix(in srgb, var(--chg-removed) 22%, transparent); text-decoration: line-through; }
+.hist-words .w-added { background: color-mix(in srgb, var(--chg-added) 25%, transparent); }
+.hist.compact .hist-table th { white-space: normal; }

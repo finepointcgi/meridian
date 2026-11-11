@@ -1,0 +1,477 @@
+@using Meridian.Serialization.Printing
+@using Meridian.Serialization
+@implements IDisposable
+@inject Workspace Ws
+@inject IServiceProvider Services
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+@* Print / PDF… (one diagram) and Print diagrams… (a package): page setup with a live preview, page boundaries and page
+   thumbnails, like Cameo's and EA's Print Preview. Output runs as a report job (Services/DiagramPrinting.cs). *@
+<MudDialog Class="print-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Outlined.Print" /><MudText Typo="Typo.h6">@Title</MudText></div>
+    </TitleContent>
+    <DialogContent>
+        <div class="print-dlg">
+            <div class="print-setup">
+                @if (Container != null)
+                {
+                    <fieldset class="print-group print-batch">
+                        <legend>Diagrams <span class="hint">@_chosen.Count of @_all.Count</span></legend>
+                        <div class="print-batch-tools">
+                            <button type="button" class="link" @onclick="() => ChooseAll(true)">All</button>
+                            <button type="button" class="link" @onclick="() => ChooseAll(false)">None</button>
+                            <label class="chk"><input type="checkbox" @bind="_contents" /> Contents page</label>
+                        </div>
+                        <div class="print-batch-list">
+                            @foreach (var d in _all)
+                            {
+                                var diagram = d;
+                                <div class="print-batch-row @(ReferenceEquals(diagram, _previewDiagram) ? "on" : "")">
+                                    <input type="checkbox" aria-label="Print @diagram.Name" checked="@_chosen.Contains(diagram.Id)" @onchange="e => Choose(diagram, e.Value is true)" />
+                                    <button type="button" class="name" title="Preview" @onclick="() => PreviewOf(diagram)">@diagram.Name</button>
+                                    <span class="hint">@Meridian.Core.Language.Metamodel.DiagramAbbreviation(diagram.DiagramType)</span>
+                                </div>
+                            }
+                        </div>
+                    </fieldset>
+                }
+                <fieldset class="print-group">
+                    <legend>Paper</legend>
+                    <div class="print-row">
+                        <select class="print-paper" aria-label="Paper size" value="@_setup.Paper" @onchange="e => Set(s => s.Paper = Enum.Parse<PaperSize>((string)e.Value!))">
+                            @foreach (var p in Enum.GetValues<PaperSize>())
+                            {
+                                <option value="@p">@PageSetup.PaperLabel(p)</option>
+                            }
+                        </select>
+                        <div class="seg print-orientation">
+                            <button type="button" class="@(_setup.Landscape ? "" : "on")" @onclick="() => Set(s => s.Landscape = false)">Portrait</button>
+                            <button type="button" class="@(_setup.Landscape ? "on" : "")" @onclick="() => Set(s => s.Landscape = true)">Landscape</button>
+                        </div>
+                    </div>
+                    @if (_setup.Paper == PaperSize.Custom)
+                    {
+                        <div class="print-row">
+                            <label class="num">Width <input type="number" min="50" max="5000" step="1" aria-label="Custom width (mm)" value="@N(_setup.CustomWidthMm)" @onchange="e => SetNumber(e, (s, v) => s.CustomWidthMm = v)" /> mm</label>
+                            <label class="num">Height <input type="number" min="50" max="5000" step="1" aria-label="Custom height (mm)" value="@N(_setup.CustomHeightMm)" @onchange="e => SetNumber(e, (s, v) => s.CustomHeightMm = v)" /> mm</label>
+                        </div>
+                    }
+                    <div class="print-row print-margins">
+                        <span class="lbl">Margins (mm)</span>
+                        <label class="num">Top <input type="number" min="0" step="1" aria-label="Top margin (mm)" value="@N(_setup.MarginTopMm)" @onchange="e => SetNumber(e, (s, v) => s.MarginTopMm = v)" /></label>
+                        <label class="num">Right <input type="number" min="0" step="1" aria-label="Right margin (mm)" value="@N(_setup.MarginRightMm)" @onchange="e => SetNumber(e, (s, v) => s.MarginRightMm = v)" /></label>
+                        <label class="num">Bottom <input type="number" min="0" step="1" aria-label="Bottom margin (mm)" value="@N(_setup.MarginBottomMm)" @onchange="e => SetNumber(e, (s, v) => s.MarginBottomMm = v)" /></label>
+                        <label class="num">Left <input type="number" min="0" step="1" aria-label="Left margin (mm)" value="@N(_setup.MarginLeftMm)" @onchange="e => SetNumber(e, (s, v) => s.MarginLeftMm = v)" /></label>
+                    </div>
+                </fieldset>
+
+                <fieldset class="print-group">
+                    <legend>Scaling</legend>
+                    <div class="seg print-scale">
+                        <button type="button" class="@(_setup.Scale == PrintScaleMode.FitToPage ? "on" : "")" @onclick="() => Set(s => s.Scale = PrintScaleMode.FitToPage)">Fit to one page</button>
+                        <button type="button" class="@(_setup.Scale == PrintScaleMode.FitToPages ? "on" : "")" @onclick="() => Set(s => s.Scale = PrintScaleMode.FitToPages)">Fit to pages</button>
+                        <button type="button" class="@(_setup.Scale == PrintScaleMode.Fixed ? "on" : "")" @onclick="() => Set(s => s.Scale = PrintScaleMode.Fixed)">Scale</button>
+                    </div>
+                    @if (_setup.Scale == PrintScaleMode.FitToPages)
+                    {
+                        <div class="print-row">
+                            <label class="num"><input type="number" min="1" max="@PageSetup.MaxPagesAcross" step="1" aria-label="Pages across" value="@_setup.PagesAcross" @onchange="e => SetNumber(e, (s, v) => s.PagesAcross = (int)v)" /> across</label>
+                            <span>×</span>
+                            <label class="num"><input type="number" min="1" max="@PageSetup.MaxPagesAcross" step="1" aria-label="Pages down" value="@_setup.PagesDown" @onchange="e => SetNumber(e, (s, v) => s.PagesDown = (int)v)" /> down</label>
+                        </div>
+                    }
+                    else if (_setup.Scale == PrintScaleMode.Fixed)
+                    {
+                        <div class="print-row">
+                            <label class="num"><input type="number" min="1" max="1000" step="5" aria-label="Scale (%)" value="@N(_setup.ScalePercent)" @onchange="e => SetNumber(e, (s, v) => s.ScalePercent = v)" /> %</label>
+                            @foreach (var pct in new[] { 50, 75, 100, 150, 200 })
+                            {
+                                var p = pct;
+                                <button type="button" class="chip @(Math.Abs(_setup.ScalePercent - p) < 0.01 ? "on" : "")" @onclick="() => Set(s => s.ScalePercent = p)">@p%</button>
+                            }
+                        </div>
+                    }
+                    <div class="print-row">
+                        <label class="num">Overlap <input type="number" min="0" max="50" step="1" aria-label="Overlap (mm)" value="@N(_setup.OverlapMm)" @onchange="e => SetNumber(e, (s, v) => s.OverlapMm = v)" /> mm</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.RegistrationMarks" @onchange="e => Set(s => s.RegistrationMarks = e.Value is true)" /> Registration marks</label>
+                    </div>
+                    @if (_layout != null)
+                    {
+                        <div class="print-summary @(_layout.TooManyPages ? "warn" : "")">
+                            @if (_layout.TooManyPages)
+                            {
+                                <span>@_layout.Columns × @_layout.Rows = @_layout.TotalPages.ToString("N0") pages: at most @PrintTiling.MaxPages. Choose a smaller scale.</span>
+                            }
+                            else
+                            {
+                                <span>@_layout.Columns × @_layout.Rows = @Plural.Of(_layout.PageCount, "page") at @_layout.ScalePercent.ToString("0")%</span>
+                            }
+                        </div>
+                    }
+                </fieldset>
+
+                <fieldset class="print-group">
+                    <legend>Header &amp; footer</legend>
+                    <div class="print-checks">
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowProject" @onchange="e => Set(s => s.ShowProject = e.Value is true)" /> Project</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowDiagramName" @onchange="e => Set(s => s.ShowDiagramName = e.Value is true)" /> Diagram name</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowDiagramType" @onchange="e => Set(s => s.ShowDiagramType = e.Value is true)" /> Diagram type</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowPackagePath" @onchange="e => Set(s => s.ShowPackagePath = e.Value is true)" /> Package path</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowVersion" @onchange="e => Set(s => s.ShowVersion = e.Value is true)" /> Version / branch</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowDate" @onchange="e => Set(s => s.ShowDate = e.Value is true)" /> Date</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowPageNumbers" @onchange="e => Set(s => s.ShowPageNumbers = e.Value is true)" /> Page n of N</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ShowClassification" @onchange="e => Set(s => s.ShowClassification = e.Value is true)" /> Classification</label>
+                    </div>
+                    @if (_setup.ShowClassification)
+                    {
+                        <input class="print-text" type="text" maxlength="80" placeholder="Classification marking" aria-label="Classification marking" value="@_setup.Classification" @onchange="e => SetText(e, (s, v) => s.Classification = v)" />
+                    }
+                    <input class="print-text" type="text" maxlength="200" placeholder="Custom text (footer)" aria-label="Custom text" value="@_setup.CustomText" @onchange="e => SetText(e, (s, v) => s.CustomText = v)" />
+                </fieldset>
+
+                <fieldset class="print-group">
+                    <legend>Content</legend>
+                    @if (Diagram != null)
+                    {
+                        <div class="seg print-region">
+                            <button type="button" class="@(_setup.Region == PrintRegion.WholeDiagram ? "on" : "")" @onclick="() => Set(s => s.Region = PrintRegion.WholeDiagram)">Whole diagram</button>
+                            <button type="button" class="@(_setup.Region == PrintRegion.CurrentView ? "on" : "")" disabled="@(View == null)" @onclick="() => Set(s => s.Region = PrintRegion.CurrentView)">Current view</button>
+                            <button type="button" class="@(_setup.Region == PrintRegion.Selection ? "on" : "")" disabled="@(Selection is not { Count: > 0 })" @onclick="() => Set(s => s.Region = PrintRegion.Selection)">Selection only</button>
+                        </div>
+                    }
+                    <div class="print-checks">
+                        <label class="chk"><input type="checkbox" checked="@_setup.Frame" @onchange="e => Set(s => s.Frame = e.Value is true)" /> Diagram frame</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.Legend" @onchange="e => Set(s => s.Legend = e.Value is true)" /> Legend</label>
+                        <label class="chk"><input type="checkbox" checked="@_setup.ForceLight" @onchange="e => Set(s => s.ForceLight = e.Value is true)" /> Light theme for print</label>
+                    </div>
+                    @if (Diagram != null)
+                    {
+                        <label class="chk print-save"><input type="checkbox" @bind="_saveWithDiagram" disabled="@Ws.IsReadOnly(Diagram)" /> Save this page setup with the diagram</label>
+                    }
+                </fieldset>
+            </div>
+
+            <div class="print-preview-pane">
+                @if (_previewUri != null && _layout != null)
+                {
+                    <div class="print-preview" aria-label="Print preview">
+                        <img src="@_previewUri" alt="Print preview of @_previewDiagram?.Name with page boundaries" />
+                    </div>
+                    <div class="print-thumbs" style="--print-src: url('@_contentUri')">
+                        @foreach (var t in _layout.Tiles.Take(MaxThumbnails))
+                        {
+                            <div class="print-thumb" title="Page @(t.Index + 1): @t.Label" style="@ThumbStyle()">
+                                @if (_layout.HeaderHeight > 0) { <i class="band h" style="@BandStyle(true)"></i> }
+                                <div class="area" style="@AreaStyle(t)"></div>
+                                @if (_layout.FooterHeight > 0) { <i class="band f" style="@BandStyle(false)"></i> }
+                                <span class="no">@(t.Index + 1)</span>
+                            </div>
+                        }
+                        @if (_layout.PageCount > MaxThumbnails)
+                        {
+                            <div class="print-thumb more">+@(_layout.PageCount - MaxThumbnails) more</div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="print-preview empty">Choose a diagram to preview.</div>
+                }
+                @if (_busy)
+                {
+                    <div class="print-progress">
+                        <MudProgressLinear Value="@(_progress * 100)" Color="Color.Primary" />
+                        <span>@_progressText</span>
+                    </div>
+                }
+                @if (_error != null) { <div class="export-error">@_error</div> }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        @if (_busy)
+        {
+            <MudButton OnClick="CancelJob" StartIcon="@Icons.Material.Outlined.Cancel">Cancel</MudButton>
+            <MudSpacer />
+        }
+        else
+        {
+            <MudButton OnClick="() => MudDialog.Cancel()">Close</MudButton>
+            <MudSpacer />
+            @if (Diagram != null)
+            {
+                <MudButton StartIcon="@Icons.Material.Outlined.Image" Disabled="@CannotPrint" OnClick="() => Output(PrintOutput.PngZip)">PNG pages (zip)</MudButton>
+                <MudButton StartIcon="@Icons.Material.Outlined.Print" Disabled="@CannotPrint" OnClick="PrintInBrowser">Print…</MudButton>
+            }
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Outlined.PictureAsPdf" Disabled="@(CannotPrint || _busy)" OnClick="() => Output(PrintOutput.Pdf)">@(Container != null ? "Generate PDF" : "Save PDF")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The diagram to print (Print / PDF…).</summary>
+    [Parameter] public Diagram? Diagram { get; set; }
+    /// <summary>A package whose diagrams to print into one PDF (Print diagrams…).</summary>
+    [Parameter] public Element? Container { get; set; }
+    /// <summary>The canvas's visible area (diagram units), for "Current view".</summary>
+    [Parameter] public Bounds? View { get; set; }
+    /// <summary>Ids of the shapes selected on the canvas, for "Selection only".</summary>
+    [Parameter] public IReadOnlyCollection<string>? Selection { get; set; }
+
+    public const int MaxThumbnails = 24;
+    private const double ThumbWidth = 104;
+
+    private PageSetup _setup = new();
+    private bool _saveWithDiagram;
+    private bool _contents = true;
+    private List<Diagram> _all = new();
+    private readonly HashSet<string> _chosen = new(StringComparer.Ordinal);
+    private Diagram? _previewDiagram;
+
+    private PrintSource? _source;
+    private string? _sourceKey;
+    private PrintLayout? _layout;
+    private string? _previewUri, _contentUri;
+
+    private ReportJobService _jobs = default!;
+    private ReportJob? _job;
+    private bool _busy, _disposed;
+    private double _progress;
+    private string _progressText = "";
+    private string? _error;
+
+    private Meridian.Web.Settings.ThemeService? Theme => Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) as Meridian.Web.Settings.ThemeService;
+
+    private string Title => Container != null ? $"Print diagrams of “{Container.DisplayName}”" : $"Print “{Diagram?.Name}”";
+
+    private bool CannotPrint => (Container != null ? _chosen.Count == 0 : Diagram == null) || _layout?.TooManyPages == true;
+
+    /// <summary>The page setup being edited (for tests).</summary>
+    internal PageSetup Setup => _setup;
+    internal PrintLayout? Layout => _layout;
+
+    protected override void OnInitialized()
+    {
+        _jobs = ReportJobService.From(Services);
+        _jobs.Changed += OnJobChanged;
+        _setup = DiagramPrinting.InitialSetup(Ws.Model, Diagram, Theme?.Prefs.PrintSetup);
+        if (Diagram != null)
+        {
+            _saveWithDiagram = Diagram.Get(PageSetup.DiagramField).Length > 0;
+            if (_setup.Region == PrintRegion.Selection && Selection is not { Count: > 0 }) _setup.Region = PrintRegion.WholeDiagram;
+            if (_setup.Region == PrintRegion.CurrentView && View == null) _setup.Region = PrintRegion.WholeDiagram;
+            _previewDiagram = Diagram;
+        }
+        else if (Container != null)
+        {
+            _setup.Region = PrintRegion.WholeDiagram;
+            _all = DiagramImageExport.DiagramsIn(Container).ToList();
+            foreach (var d in _all) _chosen.Add(d.Id);
+            _previewDiagram = _all.FirstOrDefault();
+        }
+        Recompute();
+    }
+
+    private void SetText(ChangeEventArgs e, Action<PageSetup, string> change) => Set(s => change(s, e.Value?.ToString() ?? ""));
+
+    private static string N(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private void Set(Action<PageSetup> change)
+    {
+        change(_setup);
+        _setup.Normalize();
+        Recompute();
+    }
+
+    private void SetNumber(ChangeEventArgs e, Action<PageSetup, double> change)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+            Set(s => change(s, v));
+        else Recompute();
+    }
+
+    private void ChooseAll(bool on)
+    {
+        _chosen.Clear();
+        if (on) foreach (var d in _all) _chosen.Add(d.Id);
+    }
+
+    private void Choose(Diagram d, bool on)
+    {
+        if (on) _chosen.Add(d.Id); else _chosen.Remove(d.Id);
+    }
+
+    private void PreviewOf(Diagram d)
+    {
+        _previewDiagram = d;
+        Recompute();
+    }
+
+    private SvgTheme CanvasTheme => Theme?.SvgTheme ?? (Ws.DarkMode ? SvgTheme.Dark : SvgTheme.Light);
+
+    /// <summary>Draws the preview again: the diagram only when what it shows changed, the page grid every time.</summary>
+    private void Recompute()
+    {
+        if (_previewDiagram is not { } d || !Ws.Model.Contains(d)) { _source = null; _layout = null; _previewUri = null; return; }
+        var single = Diagram != null;
+        var key = string.Join("|", d.Id, Ws.Version, _setup.Frame, _setup.Legend, _setup.ForceLight, _setup.ForceLight ? "" : CanvasTheme.Background,
+                              single ? _setup.Region : PrintRegion.WholeDiagram);
+        if (key != _sourceKey)
+        {
+            _sourceKey = key;
+            _source = PrintSource.Create(Ws.Model, d, _setup, CanvasTheme, single ? View : null, single ? Selection : null);
+            _contentUri = DataUri(_source.Svg());
+        }
+        _layout = PrintTiling.Compute(_setup, _source!.Content);
+        _previewUri = DataUri(DiagramPrint.PreviewSvg(_source, _layout));
+    }
+
+    private static string DataUri(string svg) => "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg));
+
+    private static string Px(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "px";
+
+    private double K => _layout is { } l ? ThumbWidth / l.PageWidth : 1;
+
+    private string ThumbStyle() => _layout is { } l ? $"width:{Px(ThumbWidth)};height:{Px(l.PageHeight * K)}" : "";
+
+    private string BandStyle(bool header)
+    {
+        if (_layout is not { } l) return "";
+        var a = l.ImageArea;
+        var y = header ? a.Y - l.HeaderHeight + 3 : a.Bottom + PrintTiling.BandGap + 3;
+        return $"left:{Px(a.X * K)};top:{Px(y * K)};width:{Px(a.Width * K)}";
+    }
+
+    /// <summary>The tile's part of the diagram, cut from the one shared picture (a CSS background), in the page's image area.</summary>
+    private string AreaStyle(PrintTile t)
+    {
+        if (_layout is not { } l || _source is not { } src) return "";
+        var a = l.ImageArea;
+        var ppu = a.Width * K / t.Region.Width;
+        var c = src.Content;
+        return $"left:{Px(a.X * K)};top:{Px(a.Y * K)};width:{Px(a.Width * K)};height:{Px(a.Height * K)};" +
+               $"background-size:{Px(c.Width * ppu)} {Px(c.Height * ppu)};background-position:{Px((c.X - t.Region.X) * ppu)} {Px((c.Y - t.Region.Y) * ppu)}";
+    }
+
+    // ================================================================ output
+
+    private IReadOnlyList<string> ChosenIds => Container != null ? _all.Where(d => _chosen.Contains(d.Id)).Select(d => d.Id).ToList() : [Diagram!.Id];
+
+    private string JobTitle => Container != null ? $"{Container.DisplayName} diagrams" : Diagram!.Name;
+
+    private async Task Remember()
+    {
+        var json = _setup.ToJson();
+        if (Theme is { } theme)
+        {
+            try { await theme.UpdateAsync(p => p.PrintSetup = json); }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Data.Common.DbException) { /* remembered for this session only */ }
+        }
+        if (Diagram is { } d && !Ws.IsReadOnly(d) && Ws.Model.Contains(d))
+        {
+            try
+            {
+                if (_saveWithDiagram) Ws.Model.Set(d, PageSetup.DiagramField, json);
+                else if (d.Get(PageSetup.DiagramField).Length > 0) Ws.Model.Set(d, PageSetup.DiagramField, null);
+            }
+            catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+        }
+    }
+
+    private PrintRequest Request() => new(ChosenIds, _setup.Clone(), _contents, View, Selection, CanvasTheme);
+
+    /// <summary>Runs a print job; small ones are awaited here, a big batch keeps running in the background (status bar).</summary>
+    private async Task<ReportJob?> Run(PrintOutput output)
+    {
+        _error = null;
+        _busy = true;
+        _progress = 0.02;
+        _progressText = output == PrintOutput.PngZip ? "Rasterising pages…" : "Laying out pages…";
+        StateHasChanged();
+        try
+        {
+            await Remember();
+            _job = DiagramPrinting.Start(Ws, _jobs, Request(), output, JobTitle);
+            _job.Watched = true;
+            if (_job.Background) Ws.SetStatus($"Printing {_job.FileName} in the background");
+            await _jobs.WhenDone(_job);
+            if (_disposed) return null;
+            switch (_job.State)
+            {
+                case ReportJobState.Completed:
+                    _job.Dismissed = true;   // handed over from here: the status bar needn't offer it again
+                    return _job;
+                case ReportJobState.Cancelled:
+                    _progressText = "Printing cancelled.";
+                    return null;
+                default:
+                    _error = $"Could not print: {_job.Error}";
+                    return null;
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = FriendlyError.Describe(ex);
+            return null;
+        }
+        finally
+        {
+            _busy = false;
+            if (!_disposed) StateHasChanged();
+        }
+    }
+
+    private async Task Output(PrintOutput output)
+    {
+        if (await Run(output) is not { } job) return;
+        await DiagramPrinting.DownloadAsync(JS, _jobs, job);
+        Ws.Log($"Printed {JobTitle} to {job.FileName}");
+        Snackbar.Add($"Saved {job.FileName}", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(job.FileName));
+    }
+
+    /// <summary>
+    /// The browser's print dialog, from a print-optimised HTML page (<c>@@page</c> CSS) in a hidden frame. The desktop app's
+    /// web view has no print dialog: it saves the PDF and opens it in the system's PDF viewer instead.
+    /// </summary>
+    private async Task PrintInBrowser()
+    {
+        if (await DiagramPrinting.IsDesktopAsync(JS))
+        {
+            if (await Run(PrintOutput.Pdf) is not { } pdf) return;
+            await DiagramPrinting.DownloadAsync(JS, _jobs, pdf, open: true);
+            MudDialog.Close(DialogResult.Ok(pdf.FileName));
+            return;
+        }
+        if (await Run(PrintOutput.Html) is not { } job || _jobs.FileOf(job) is not { } path) return;
+        if (job.Length <= DiagramPrinting.InlineHtmlLimit)
+            await JS.InvokeVoidAsync("meridian.printHtml", await File.ReadAllTextAsync(path));
+        else
+            await ReportDownloads.OpenAsync(JS, _jobs, job);   // too big for the bridge: open it in a tab, print from there
+        Ws.Log($"Sent {JobTitle} to the print dialog");
+        MudDialog.Close(DialogResult.Ok(job.FileName));
+    }
+
+    private void CancelJob()
+    {
+        if (_job != null) _jobs.Cancel(_job);
+        _progressText = "Cancelling…";
+    }
+
+    private void OnJobChanged(ReportJob job)
+    {
+        if (!ReferenceEquals(job, _job) || _disposed) return;
+        _progress = Math.Max(_progress, job.Fraction);
+        if (!job.IsDone) _progressText = job.Phase + (job.Sections > 1 ? $" (diagram {Math.Max(1, job.Section)} of {job.Sections})" : "");
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _jobs.Changed -= OnJobChanged;
+    }
+}

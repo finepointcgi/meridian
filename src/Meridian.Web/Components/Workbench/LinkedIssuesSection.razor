@@ -15,7 +15,7 @@
         @if (links.Count > 0)
         {
             <MudTooltip Text="Refresh status from the tracker">
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => Refresh(e)" Class="issue-refresh" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => Refresh(e)" Class="issue-refresh" aria-label="Refresh status from the tracker" />
             </MudTooltip>
         }
     </div>
@@ -34,7 +34,7 @@
                 @if (!Ws.ReadOnly)
                 {
                     <MudTooltip Text="Unlink">
-                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Unlink(e, link)" />
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Unlink(e, link)" aria-label="Unlink" />
                     </MudTooltip>
                 }
             </div>

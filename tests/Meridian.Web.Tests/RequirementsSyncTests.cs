@@ -196,7 +196,9 @@ public class RequirementsSyncTests
     public void Config_Validation_And_Schedule()
     {
         var c = new RequirementsToolConfig { Type = RequirementsToolKinds.DoorsNext, BaseUrl = "http://jazz.example.test/rm", User = "ann", Project = "p" };
-        Assert.Contains("https", c.Validate());
+        Assert.Null(c.Validate());   // plain http is allowed (internal servers)
+        c.BaseUrl = "ftp://jazz.example.test/rm";
+        Assert.Contains("http", c.Validate());
         c.BaseUrl = "https://jazz.example.test/rm";
         Assert.Null(c.Validate());
         c.User = null;

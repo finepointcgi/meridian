@@ -34,7 +34,16 @@ public sealed class ArchitectureTests(ServerFixture f) : E2ETest(f)
         var path = $"src/{Guid.NewGuid():N}/Engine.cs";
         CodeSyncE2E.Code[path] = new CodeModel("C#",
         [
-            new CodeType("Car.Engine", "Engine", "Car", CodeTypeKind.Class, path, 7, null, [], [], [], ["Car.BrakeSystem", "Car.FuelTank"]),
+            new CodeType("Car.Engine", "Engine", "Car", CodeTypeKind.Class, path, 7, null, [], [], [], ["Car.BrakeSystem", "Car.FuelTank"])
+            {
+                // Engine creates a BrakeSystem on line 15 and calls it on line 22.
+                DependencyLocations =
+                [
+                    new CodeDependencyUse("Car.BrakeSystem", path, 15, CodeDependencyKind.New),
+                    new CodeDependencyUse("Car.BrakeSystem", path, 22, CodeDependencyKind.Call),
+                    new CodeDependencyUse("Car.FuelTank", path, 30, CodeDependencyKind.Field),
+                ],
+            },
             new CodeType("Car.BrakeSystem", "BrakeSystem", "Car", CodeTypeKind.Class, "src/BrakeSystem.cs", 3, null, [], [], [], []),
             new CodeType("Car.FuelTank", "FuelTank", "Car", CodeTypeKind.Class, "src/FuelTank.cs", 3, null, [], [], [], []),
         ], []);
@@ -60,6 +69,12 @@ public sealed class ArchitectureTests(ServerFixture f) : E2ETest(f)
         await Expect(row).ToHaveCountAsync(1);
         await Expect(row).ToContainTextAsync("Engine uses BrakeSystem");
         await Expect(row.Locator("a.loc")).ToHaveAttributeAsync("href", $"https://github.com/acme/car/blob/89abcdef0123456789abcdef0123456789abcdef/{path}#L7");
+        // The violation links the exact lines that break the rule.
+        var uses = row.Locator(".arch-uses a.use");
+        await Expect(uses).ToHaveCountAsync(2);
+        await Expect(uses.First).ToHaveAttributeAsync("href", $"https://github.com/acme/car/blob/89abcdef0123456789abcdef0123456789abcdef/{path}#L15");
+        await Expect(uses.First).ToHaveTextAsync("line 15 (new)");
+        await Expect(uses.Nth(1)).ToHaveAttributeAsync("href", $"https://github.com/acme/car/blob/89abcdef0123456789abcdef0123456789abcdef/{path}#L22");
         await Expect(tab.Locator("h3.arch-rule")).ToContainTextAsync("Dependency not allowed");
         await p.RibbonTabAsync("code");
         await Expect(p.Locator("nav.ribbon button.arch-ribbon")).ToBeVisibleAsync();

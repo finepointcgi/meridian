@@ -34,20 +34,21 @@ public static class PackagePermissions
     }
 
     /// <summary>The model as <paramref name="view"/> may see it: <paramref name="model"/> itself when nothing is hidden, else a redacted copy.</summary>
+    /// <remarks>Library-update suspect marks of the earlier, named format are rewritten to ids only in any case (<see cref="Core.Libraries.LibraryChangeMark"/>).</remarks>
     public static ModelRepository Redact(ModelRepository model, AccessView view)
     {
-        if (!view.HidesAnything) return model;
+        if (!view.HidesAnything && !model.AllElements.Any(e => e.Fields.Count > 0 && Core.Libraries.LibraryChangeMark.IsLegacy(e.Get(ReqFields.LibraryChange)))) return model;
         var copy = ProjectFile.Copy(model);
         ModelRedactor.Redact(copy, view);
         return copy;
     }
 
-    /// <summary>A project document as <paramref name="view"/> may see it.</summary>
+    /// <summary>A project document as <paramref name="view"/> may see it (older, named library-update marks rewritten to ids only).</summary>
     public static string RedactJson(string modelJson, AccessView view)
     {
-        if (!view.HidesAnything) return modelJson;
+        if (!view.HidesAnything && !modelJson.Contains($"\"{ReqFields.LibraryChange}\"", StringComparison.Ordinal)) return modelJson;
         var copy = ProjectFile.Deserialize(modelJson);
-        ModelRedactor.Redact(copy, view);
+        ModelRedactor.Redact(copy, view);   // also rewrites named marks of the earlier format
         return ProjectFile.Serialize(copy);
     }
 

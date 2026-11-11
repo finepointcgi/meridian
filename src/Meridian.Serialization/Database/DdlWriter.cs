@@ -19,8 +19,8 @@ public sealed class DdlOptions
 /// <summary>
 /// DDL from a <see cref="DbCatalog"/> for PostgreSQL, SQL Server, MySQL, SQLite or Oracle: schemas, types, sequences, tables
 /// in dependency order, indexes, then foreign keys last (inline for SQLite, which can't add them later), views and comments.
-/// Routines and triggers are listed as comments (Meridian models their signatures only). The script is for review; Meridian
-/// never runs it.
+/// Routines and triggers follow with their bodies (in the dialect they were written in: a body from another dialect is listed
+/// as a comment instead). The script is for review; Meridian never runs it.
 /// </summary>
 public static partial class DdlWriter
 {
@@ -110,11 +110,12 @@ public static partial class DdlWriter
                 var fks = ordered.SelectMany(x => x.Table.ForeignKeys.Select(fk => (x.Schema, x.Table, fk))).ToList();
                 if (fks.Count > 0) _sb.AppendLine("-- Foreign keys");
                 foreach (var (s, t, fk) in fks) _sb.AppendLine($"ALTER TABLE {Name(s.Name, t.Name)} ADD {ForeignKey(s, fk)};");
-                if (fks.Count > 0) _sb.AppendLine();
+                if (fks.Count > 0) _sb.Append(Go).AppendLine();   // T-SQL: CREATE VIEW must start a batch
             }
             foreach (var s in c.Schemas)
                 foreach (var v in s.Tables.Where(t => t.IsView)) View(s, v);
             Routines();
+            Triggers(ordered);
             return _sb.ToString();
         }
 
@@ -235,8 +236,6 @@ public static partial class DdlWriter
             if (d == "mysql" && o.Comments && t.Comment is { Length: > 0 } mc) _sb.Append($" COMMENT={Literal(mc)}");
             _sb.AppendLine(";");
             Comments(s, t);
-            foreach (var tg in t.Triggers)
-                _sb.AppendLine($"-- Trigger {tg.Name}: {tg.Timing} {tg.Events}{(tg.Level is { Length: > 0 } lv ? $" FOR EACH {lv}" : "")}{(tg.Action is { Length: > 0 } a ? $" — {OneLine(a)}" : "")} (not generated)");
             _sb.Append(Go).AppendLine();
         }
 
@@ -315,14 +314,53 @@ public static partial class DdlWriter
             _sb.Append(Go).AppendLine();
         }
 
+        /// <summary>SQL Server: CREATE OR ALTER of a routine or trigger must start a batch.</summary>
+        private void NewBatch()
+        {
+            if (d == "sqlserver" && !_sb.ToString().TrimEnd().EndsWith("GO", StringComparison.Ordinal)) _sb.AppendLine("GO");
+        }
+
+        /// <summary>Bodies are only written for the dialect they came from (or when the catalog's dialect is unknown).</summary>
+        private bool SameDialect => c.Dialect.Length == 0 || c.Dialect == d;
+
         private void Routines()
         {
             var all = c.Schemas.SelectMany(s => s.Routines.Select(r => (s, r))).ToList();
             if (all.Count == 0) return;
-            _sb.AppendLine("-- Routines (signatures only; bodies are not modelled):");
-            foreach (var (s, r) in all)
-                _sb.AppendLine($"--   {r.Kind} {(s.Name.Length > 0 ? s.Name + "." : "")}{r.Name}{r.Signature}{(r.Returns is { Length: > 0 } ret ? " RETURNS " + ret : "")}");
-            _sb.AppendLine();
+            var listed = all.Where(x => !SameDialect || !DbModuleSql.CanCreate(x.r, d)).ToList();
+            if (listed.Count > 0)
+            {
+                _sb.AppendLine(SameDialect ? "-- Routines without a body in the model (signatures only):" : $"-- Routines written for {DbReservedWords.DialectName(c.Dialect)} (bodies are not translated):");
+                foreach (var (s, r) in listed)
+                    _sb.AppendLine($"--   {r.Kind} {(s.Name.Length > 0 ? s.Name + "." : "")}{r.Name}{r.Signature}{(r.Returns is { Length: > 0 } ret ? " RETURNS " + ret : "")}");
+                _sb.AppendLine();
+            }
+            if (all.Count > listed.Count) NewBatch();
+            foreach (var (s, r) in all.Except(listed))
+            {
+                _sb.Append(DbModuleSql.CreateRoutine(Name(s.Name, r.Name), r, d, replace: false));
+                if (d != "sqlserver") _sb.AppendLine();
+            }
+        }
+
+        private void Triggers(List<(DbSchemaDef Schema, DbTableDef Table)> ordered)
+        {
+            var all = ordered.Concat(c.Schemas.SelectMany(s => s.Tables.Where(t => t.IsView).Select(t => (s, t))))
+                .SelectMany(x => x.Item2.Triggers.Select(tg => (Schema: x.Item1, Table: x.Item2, Trigger: tg))).ToList();
+            if (all.Count == 0) return;
+            NewBatch();
+            _sb.AppendLine("-- Triggers");
+            foreach (var (s, t, tg) in all)
+            {
+                if (!SameDialect)
+                {
+                    _sb.AppendLine($"-- Trigger {tg.Name} on {t.Name}: {tg.Timing} {tg.Events}{(tg.Level is { Length: > 0 } lv ? $" FOR EACH {lv}" : "")} (written for {DbReservedWords.DialectName(c.Dialect)}; not generated)");
+                    continue;
+                }
+                var name = d is "sqlserver" or "oracle" or "mysql" ? Name(s.Name, tg.Name) : Q(tg.Name);
+                _sb.Append(DbModuleSql.CreateTrigger(name, Name(s.Name, t.Name), tg, d, replace: false));
+                if (d != "sqlserver") _sb.AppendLine();
+            }
         }
     }
 }

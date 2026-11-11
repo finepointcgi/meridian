@@ -31,7 +31,7 @@
             var parts = new List<string>();
             if (State.OpenRuns > 0) parts.Add($"{State.OpenRuns} push{(State.OpenRuns == 1 ? "" : "es")} from code waiting for review");
             if (State.Previews.Count > 0) parts.Add($"{State.Previews.Count} pull request preview{(State.Previews.Count == 1 ? "" : "s")}");
-            return string.Join(", ", parts) + " — open “What changed”";
+            return string.Join(", ", parts) + " — review them";
         }
     }
 

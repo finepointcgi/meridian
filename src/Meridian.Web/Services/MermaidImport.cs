@@ -42,8 +42,8 @@ public static class MermaidImport
 
     public static void Report(Workspace ws, MermaidImportResult result, string source)
     {
-        ws.Log($"Imported Mermaid from {source}: {result.Diagrams.Count} diagrams ({string.Join(", ", result.Diagrams.Select(d => d.Name))}), " +
-               $"{result.Elements} elements, {result.Relationships} relationships, {result.Warnings.Count} warnings.");
+        ws.Log($"Imported Mermaid from {source}: {Plural.Of(result.Diagrams.Count, "diagram")} ({string.Join(", ", result.Diagrams.Select(d => d.Name))}), " +
+               $"{Plural.Of(result.Elements, "element")}, {Plural.Of(result.Relationships, "relationship")}, {Plural.Of(result.Warnings.Count, "warning")}.");
         foreach (var w in result.Warnings.Take(200)) ws.Log("  warning: " + w);
         if (result.Warnings.Count > 200) ws.Log($"  … and {result.Warnings.Count - 200} more warnings.");
         ws.SetStatus(result.Summary + (result.Diagrams.Count > 0 ? " — ⌘Z undoes it" : ""));

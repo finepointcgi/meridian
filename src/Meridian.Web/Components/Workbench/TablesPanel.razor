@@ -33,6 +33,10 @@
                 }
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.NoteAdd" OnClick="NewView">New @(_mode == Mode.Table ? "table" : "query")</MudMenuItem>
+                @if (_mode == Mode.Table)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Dns" OnClick="NewDeploymentTable" data-testid="gt-new-deployment">New deployment table</MudMenuItem>
+                }
             </ChildContent>
         </MudMenu>
         <span class="gt-sep"></span>

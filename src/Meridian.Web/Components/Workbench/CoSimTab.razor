@@ -242,6 +242,14 @@ else
         else if (CoSimulation.SystemOf(Ws.Model, Ws.Selected) is { } sys && targets.Any(t => t.Id == sys.Id)) _targetId = sys.Id;
         else _targetId = targets.FirstOrDefault().Id;
         Replan();
+        UseSuggestedTimes();
+    }
+
+    /// <summary>Start from the FMUs' default experiment (step size and end time) when they declare one.</summary>
+    private void UseSuggestedTimes()
+    {
+        if (_plan?.SuggestedStep is { } step) _step = step;
+        if (_plan?.SuggestedStop is { } stop && stop > _start) _stop = stop;
     }
 
     protected override void OnWorkspaceChanged()
@@ -262,6 +270,7 @@ else
         _targetId = id;
         _altId = null; _altValues.Clear(); _overrides.Clear();
         Replan();
+        UseSuggestedTimes();
     }
 
     private IEnumerable<Element> Alternatives(CoSimPlan plan) =>
@@ -306,7 +315,7 @@ else
         }
         catch (Exception ex) when (ex is FormatException or IOException or System.Xml.XmlException or InvalidDataException or InvalidOperationException)
         {
-            Ws.SetStatus($"Could not attach {e.File.Name}: {ex.Message}");
+            Ws.SetStatus($"Could not attach {e.File.Name}: {FriendlyError.Describe(ex)}. Choose the .fmu this block was imported from.");
         }
     }
 

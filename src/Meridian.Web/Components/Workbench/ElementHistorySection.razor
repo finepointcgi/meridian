@@ -1,0 +1,25 @@
+@inherits WorkspaceComponent
+
+@* The "History" section of the inspector: collapsed until asked for, so selecting elements never reads history. *@
+@if (Ws.Session != null && Element != null && Ws.Pinned == null && Element.Kind != ElementKind.Model && Ws.LibraryOf(Element) is null)
+{
+    <div class="section-title">
+        <button class="hist-toggle" @onclick="Toggle" aria-expanded="@(_open ? "true" : "false")" data-testid="history-section-toggle">
+            @(_open ? "▾" : "▸") History
+        </button>
+        <span class="grow"></span>
+    </div>
+    @if (_open)
+    {
+        <ElementHistoryPanel Element="Element" Compact="true" Host="Shell" />
+    }
+}
+
+@code {
+    [Parameter] public Element? Element { get; set; }
+
+    // Stays open while moving between elements (it is per tab).
+    private bool _open;
+
+    private void Toggle() => _open = !_open;
+}

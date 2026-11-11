@@ -2,9 +2,11 @@ using System.Data.Common;
 using System.Text.RegularExpressions;
 using Meridian.Core.DataModeling;
 using Meridian.Serialization.Database;
+using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
+using Oracle.ManagedDataAccess.Client;
 
 namespace Meridian.Data.Databases;
 
@@ -14,13 +16,15 @@ public static class LiveProviders
     public const string PostgreSql = "postgresql";
     public const string MySql = "mysql";
     public const string Sqlite = "sqlite";
+    public const string SqlServer = "sqlserver";
+    public const string Oracle = "oracle";
 
-    public static readonly IReadOnlyList<string> All = [PostgreSql, MySql, Sqlite];
+    public static readonly IReadOnlyList<string> All = [PostgreSql, SqlServer, MySql, Oracle, Sqlite];
 
-    public static string Display(string p) => p switch { MySql => "MySQL / MariaDB", Sqlite => "SQLite (file)", _ => "PostgreSQL" };
-
-    /// <summary>Engines whose schema can only be imported from DDL scripts (or a .dacpac): their drivers are not shipped.</summary>
-    public static readonly IReadOnlyList<string> ScriptOnly = ["sqlserver", "oracle"];
+    public static string Display(string p) => p switch
+    {
+        MySql => "MySQL / MariaDB", Sqlite => "SQLite (file)", SqlServer => "SQL Server / Azure SQL", Oracle => "Oracle", _ => "PostgreSQL",
+    };
 }
 
 /// <summary>Where a connection string points: a host and port to check against the outbound guard, or a local file.</summary>
@@ -28,11 +32,12 @@ public sealed record DatabaseEndpoint(string Provider, string? Host, int Port, s
 
 /// <summary>
 /// Reads a live database's schema into a <see cref="DbCatalog"/> from its catalog views (pg_catalog for PostgreSQL,
-/// information_schema for MySQL / MariaDB, sqlite_master for SQLite). Read-only: every query runs in a read-only
-/// transaction (SQLite opens the file read-only), and nothing is ever written. Timeouts apply to the connection and to
+/// sys.* for SQL Server, information_schema for MySQL / MariaDB, ALL_* for Oracle, sqlite_master for SQLite). Read-only:
+/// every query runs in a read-only transaction where the engine has one (SQL Server: only SELECTs, in a transaction that
+/// is rolled back; SQLite opens the file read-only), and nothing is ever written. Timeouts apply to the connection and to
 /// every command, and the whole read honours the cancellation token.
 /// </summary>
-public static class LiveSchemaReader
+public static partial class LiveSchemaReader
 {
     /// <summary>Parses the endpoint out of a connection string (for the outbound guard and for display).</summary>
     public static DatabaseEndpoint Endpoint(string provider, string connectionString)
@@ -53,6 +58,20 @@ public static class LiveSchemaReader
             {
                 var b = new SqliteConnectionStringBuilder(connectionString);
                 return new DatabaseEndpoint(provider, null, 0, b.DataSource, Path.GetFileNameWithoutExtension(b.DataSource));
+            }
+            case LiveProviders.SqlServer:
+            {
+                var b = new SqlConnectionStringBuilder(connectionString);
+                var (host, port, _) = SqlServerSource(b.DataSource);
+                // A failover partner is a second host: listed with the first, so a team server refuses it like any multi-host string.
+                if (b.FailoverPartner is { Length: > 0 } partner) host = $"{host},{SqlServerSource(partner).Host}";
+                return new DatabaseEndpoint(provider, host, port, null, b.InitialCatalog ?? "");
+            }
+            case LiveProviders.Oracle:
+            {
+                var b = new OracleConnectionStringBuilder(connectionString);
+                var (host, port, service) = OracleSource(b.DataSource);
+                return new DatabaseEndpoint(provider, host, port, null, service ?? b.DataSource ?? "");
             }
             default:
                 throw new NotSupportedException($"Live connections to {provider} are not supported; import a DDL script instead.");
@@ -89,6 +108,34 @@ public static class LiveSchemaReader
                     await c.OpenAsync(cts.Token);
                     return await new MySqlSchema(c, seconds).ReadAsync(b.Database ?? "", schemas, cts.Token);
                 }
+                case LiveProviders.SqlServer:
+                {
+                    // Managed networking on every platform (the native Windows SNI library is not shipped).
+                    AppContext.SetSwitch("Switch.Microsoft.Data.SqlClient.UseManagedNetworkingOnWindows", true);
+                    var b = new SqlConnectionStringBuilder(connectionString)
+                    {
+                        ConnectTimeout = seconds, CommandTimeout = seconds, Pooling = false, ApplicationName = "Meridian schema import", ApplicationIntent = ApplicationIntent.ReadOnly,
+                        ConnectRetryCount = 0,
+                    };
+                    if (pinHost != null)
+                    {
+                        var (host, port, instance) = SqlServerSource(b.DataSource);
+                        // The certificate is still checked against the name the user gave (the address was checked just now).
+                        if (string.IsNullOrEmpty(b.HostNameInCertificate) && host != null && !System.Net.IPAddress.TryParse(host.Trim('[', ']'), out _)) b.HostNameInCertificate = host;
+                        b.DataSource = $"tcp:{(pinHost.Contains(':') ? $"[{pinHost}]" : pinHost)}{(instance != null ? "\\" + instance : "")}{(port > 0 && instance == null ? $",{port}" : "")}";
+                    }
+                    await using var c = new SqlConnection(b.ConnectionString);
+                    await c.OpenAsync(cts.Token);
+                    return await new SqlServerSchema(c, seconds).ReadAsync(schemas, cts.Token);
+                }
+                case LiveProviders.Oracle:
+                {
+                    var b = new OracleConnectionStringBuilder(connectionString) { ConnectionTimeout = seconds, Pooling = false };
+                    if (pinHost != null) b.DataSource = OracleWithHost(b.DataSource, pinHost);
+                    await using var c = new OracleConnection(b.ConnectionString);
+                    await c.OpenAsync(cts.Token);
+                    return await new OracleSchema(c, seconds).ReadAsync(schemas, cts.Token);
+                }
                 case LiveProviders.Sqlite:
                 {
                     var b = new SqliteConnectionStringBuilder(connectionString) { Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = seconds };
@@ -112,6 +159,73 @@ public static class LiveSchemaReader
         }
     }
 
+    /// <summary>
+    /// SQL Server's Data Source: "host", "host,port", "tcp:host,port" or "host\instance". Named pipes, shared memory and
+    /// LocalDB have no host (a team server refuses them).
+    /// </summary>
+    internal static (string? Host, int Port, string? Instance) SqlServerSource(string? dataSource)
+    {
+        var ds = (dataSource ?? "").Trim();
+        if (ds.Length == 0 || ds.StartsWith("np:", StringComparison.OrdinalIgnoreCase) || ds.StartsWith("lpc:", StringComparison.OrdinalIgnoreCase)
+            || ds.StartsWith("(localdb)", StringComparison.OrdinalIgnoreCase) || ds.StartsWith(@"\\", StringComparison.Ordinal)) return (null, 0, null);
+        if (ds.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase)) ds = ds[4..];
+        var port = 1433;
+        var comma = ds.LastIndexOf(',');
+        if (comma > 0 && int.TryParse(ds[(comma + 1)..].Trim(), out var p)) { port = p; ds = ds[..comma]; }
+        string? instance = null;
+        var slash = ds.IndexOf('\\');
+        if (slash > 0) { instance = ds[(slash + 1)..]; ds = ds[..slash]; if (comma < 0) port = 0; }
+        if (ds is "." or "(local)") ds = "localhost";
+        return (ds.Trim(), port, instance);
+    }
+
+    [GeneratedRegex(@"\(\s*HOST\s*=\s*([^)\s]+)\s*\)", RegexOptions.IgnoreCase)]
+    private static partial Regex OracleHost();
+
+    [GeneratedRegex(@"\(\s*PORT\s*=\s*(\d+)\s*\)", RegexOptions.IgnoreCase)]
+    private static partial Regex OraclePort();
+
+    [GeneratedRegex(@"\(\s*(?:SERVICE_NAME|SID)\s*=\s*([^)\s]+)\s*\)", RegexOptions.IgnoreCase)]
+    private static partial Regex OracleService();
+
+    [GeneratedRegex(@"^(?:(?:tcps?)://)?(?<host>\[[^\]]+\]|[^:/\s(]+)(?::(?<port>\d+))?(?:/(?<svc>[^\s:/?]+))?(?:[:/?].*)?$", RegexOptions.IgnoreCase)]
+    private static partial Regex OracleEasyConnect();
+
+    /// <summary>
+    /// Oracle's Data Source: an Easy Connect string ("host[:port]/service") or a connect descriptor ("(DESCRIPTION=(ADDRESS=
+    /// (HOST=…)(PORT=…))…)"); several ADDRESS entries come back as a comma separated host list. A TNS alias has no host here
+    /// (it is resolved from tnsnames.ora or a directory, which a team server refuses).
+    /// </summary>
+    internal static (string? Host, int Port, string? Service) OracleSource(string? dataSource)
+    {
+        var ds = (dataSource ?? "").Trim();
+        if (ds.StartsWith('('))
+        {
+            var hosts = OracleHost().Matches(ds).Select(m => m.Groups[1].Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var port = OraclePort().Match(ds) is { Success: true } pm ? int.Parse(pm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 1521;
+            return (hosts.Count == 0 ? null : string.Join(",", hosts), port, OracleService().Match(ds) is { Success: true } sm ? sm.Groups[1].Value : null);
+        }
+        if (ds.Contains('/') || ds.Contains(':') || ds.Contains("://", StringComparison.Ordinal))
+        {
+            var m = OracleEasyConnect().Match(ds);
+            if (m.Success)
+                return (m.Groups["host"].Value.Trim('[', ']'), m.Groups["port"].Success ? int.Parse(m.Groups["port"].Value, System.Globalization.CultureInfo.InvariantCulture) : 1521,
+                    m.Groups["svc"].Success ? m.Groups["svc"].Value : null);
+        }
+        return (null, 0, null);   // a TNS alias
+    }
+
+    /// <summary>The Data Source with its host replaced by the checked address.</summary>
+    internal static string OracleWithHost(string dataSource, string address)
+    {
+        var a = address.Contains(':') ? $"[{address}]" : address;
+        if (dataSource.TrimStart().StartsWith('(')) return OracleHost().Replace(dataSource, $"(HOST={a})");
+        var m = OracleEasyConnect().Match(dataSource.Trim());
+        if (!m.Success) return dataSource;
+        var g = m.Groups["host"];
+        return dataSource.Trim()[..g.Index] + a + dataSource.Trim()[(g.Index + g.Length)..];
+    }
+
     /// <summary>A message for the user without connection-string details.</summary>
     private static string Describe(Exception ex)
     {
@@ -127,6 +241,8 @@ public static class LiveSchemaReader
         cmd.CommandText = sql;
         cmd.CommandTimeout = timeout;
         cmd.Transaction = tx;
+        // Drivers whose async calls don't watch the token still stop when the command is cancelled.
+        await using var reg = ct.Register(() => { try { cmd.Cancel(); } catch (Exception ex) when (ex is DbException or InvalidOperationException) { } });
         foreach (var (name, value) in args)
         {
             var p = cmd.CreateParameter();
@@ -273,19 +389,13 @@ internal sealed class PostgresSchema(NpgsqlConnection c, int timeout)
             t.Indexes.Add(idx);
         }
 
-        // Triggers.
+        // Triggers: pg_get_triggerdef's CREATE TRIGGER, read by the DDL parser (WHEN condition and EXECUTE FUNCTION kept).
         foreach (var r in await Q("select tgrelid, tgname, pg_get_triggerdef(oid, true) from pg_trigger where tgrelid = any(@o) and not tgisinternal order by tgname", ("o", oids)))
         {
             var (_, t) = tables[Convert.ToUInt32(r[0])];
-            var def = (string)r[2]!;
-            var m = Regex.Match(def, @"\b(BEFORE|AFTER|INSTEAD OF)\s+(.+?)\s+ON\s+.+?(?:FOR EACH\s+(ROW|STATEMENT))?\s*(EXECUTE\s+.*)?$", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-            t.Triggers.Add(new DbTriggerDef
-            {
-                Name = (string)r[1]!, Timing = m.Success ? m.Groups[1].Value.ToUpperInvariant() : "AFTER",
-                Events = m.Success ? string.Join(", ", Regex.Split(m.Groups[2].Value, @"\s+OR\s+", RegexOptions.IgnoreCase).Select(e => e.Split(' ')[0].ToUpperInvariant())) : "INSERT",
-                Level = m.Success && m.Groups[3].Success ? m.Groups[3].Value.ToUpperInvariant() : null,
-                Action = m.Success && m.Groups[4].Success ? m.Groups[4].Value : null,
-            });
+            var tg = DdlParser.ParseModule((string)r[2]!, "postgresql").Trigger ?? new DbTriggerDef();
+            tg.Name = (string)r[1]!;
+            t.Triggers.Add(tg);
         }
         return await Rest(catalog, names, Q);
     }
@@ -315,14 +425,19 @@ internal sealed class PostgresSchema(NpgsqlConnection c, int timeout)
                                   "(select pg_get_expr(k.conbin, 0, true) from pg_constraint k where k.contypid = t.oid limit 1), obj_description(t.oid, 'pg_type') " +
                                   "from pg_type t join pg_namespace n on n.oid = t.typnamespace where t.typtype = 'd' and n.nspname = any(@s) order by 1, 2", [("s", names)]))
             catalog.Schema((string)r[0]!).Types.Add(new DbTypeDef { Name = (string)r[1]!, Kind = "domain", BaseType = (string)r[2]!, NotNull = r[3] is true, Check = LiveSchemaReader.S(r[4]), Comment = LiveSchemaReader.S(r[5]) });
-        foreach (var r in await q("select n.nspname, p.proname, p.prokind::text, pg_get_function_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, obj_description(p.oid, 'pg_proc') " +
+        // Functions and procedures: pg_get_functiondef's CREATE OR REPLACE, read by the DDL parser for the body and options.
+        foreach (var r in await q("select n.nspname, p.proname, p.prokind::text, pg_get_function_arguments(p.oid), pg_get_function_result(p.oid), l.lanname, obj_description(p.oid, 'pg_proc'), " +
+                                  "case when l.lanname <> 'c' then pg_get_functiondef(p.oid) end " +
                                   "from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang " +
                                   "where n.nspname = any(@s) and p.prokind in ('f','p') and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e') order by 1, 2", [("s", names)]))
+        {
+            var parsed = LiveSchemaReader.S(r[7]) is { } def ? DdlParser.ParseModule(def, "postgresql").Routine : null;
             catalog.Schema((string)r[0]!).Routines.Add(new DbRoutineDef
             {
                 Name = (string)r[1]!, Kind = (string)r[2]! == "p" ? DbFields.Procedure : DbFields.Function, Signature = $"({r[3]})", Returns = LiveSchemaReader.S(r[4]),
-                Language = LiveSchemaReader.S(r[5]), Comment = LiveSchemaReader.S(r[6]),
+                Language = LiveSchemaReader.S(r[5]), Comment = LiveSchemaReader.S(r[6]), Body = parsed?.Body, Options = parsed?.Options,
             });
+        }
         return catalog;
     }
 
@@ -435,18 +550,27 @@ internal sealed class MySqlSchema(MySqlConnection c, int timeout)
                     t.Constraints.Add(new DbConstraintDef { Name = (string)r[2]!, Type = DbFields.CheckConstraint, Expression = LiveSchemaReader.S(r[3]) });
         }
         catch (MySqlException) { /* MySQL before 8.0.16 / MariaDB before 10.2 have no CHECK_CONSTRAINTS view */ }
-        foreach (var r in await Q($"select TRIGGER_SCHEMA, EVENT_OBJECT_TABLE, TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION from information_schema.TRIGGERS where TRIGGER_SCHEMA in ({list})"))
+        foreach (var r in await Q($"select TRIGGER_SCHEMA, EVENT_OBJECT_TABLE, TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION, ACTION_STATEMENT from information_schema.TRIGGERS where TRIGGER_SCHEMA in ({list})"))
             if (catalog.FindSchema((string)r[0]!)?.FindTable((string)r[1]!) is { } t)
-                t.Triggers.Add(new DbTriggerDef { Name = (string)r[2]!, Timing = (string)r[3]!, Events = (string)r[4]!, Level = LiveSchemaReader.S(r[5]) });
+                t.Triggers.Add(new DbTriggerDef { Name = (string)r[2]!, Timing = (string)r[3]!, Events = (string)r[4]!, Level = LiveSchemaReader.S(r[5]), Action = LiveSchemaReader.S(r[6])?.Trim() });
         var pars = (await Q($"select SPECIFIC_SCHEMA, SPECIFIC_NAME, PARAMETER_MODE, PARAMETER_NAME, DTD_IDENTIFIER from information_schema.PARAMETERS where SPECIFIC_SCHEMA in ({list}) and ORDINAL_POSITION > 0 order by ORDINAL_POSITION"))
             .GroupBy(r => ((string)r[0]!, (string)r[1]!)).ToDictionary(g => g.Key, g => g.Select(r => $"{(LiveSchemaReader.S(r[2]) is { } mode && mode != "IN" ? mode + " " : "")}{r[3]} {r[4]}").ToList());
-        foreach (var r in await Q($"select ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE, DTD_IDENTIFIER, ROUTINE_COMMENT from information_schema.ROUTINES where ROUTINE_SCHEMA in ({list}) order by 1, 2"))
+        // Routines: the body from ROUTINE_DEFINITION (empty without the privilege to see it), characteristics from their columns.
+        foreach (var r in await Q($"select ROUTINE_SCHEMA, ROUTINE_NAME, ROUTINE_TYPE, DTD_IDENTIFIER, ROUTINE_COMMENT, ROUTINE_DEFINITION, IS_DETERMINISTIC, SQL_DATA_ACCESS, SECURITY_TYPE " +
+                                  $"from information_schema.ROUTINES where ROUTINE_SCHEMA in ({list}) order by 1, 2"))
+        {
+            var options = new List<string>();
+            if (LiveSchemaReader.S(r[6]) == "YES") options.Add("DETERMINISTIC");
+            if (LiveSchemaReader.S(r[7]) is { Length: > 0 } access && access != "CONTAINS SQL") options.Add(access);
+            if (LiveSchemaReader.S(r[8]) == "INVOKER") options.Add("SQL SECURITY INVOKER");
             catalog.Schema((string)r[0]!).Routines.Add(new DbRoutineDef
             {
                 Name = (string)r[1]!, Kind = (string)r[2]! == "PROCEDURE" ? DbFields.Procedure : DbFields.Function,
                 Signature = "(" + string.Join(", ", pars.GetValueOrDefault(((string)r[0]!, (string)r[1]!)) ?? []) + ")",
-                Returns = LiveSchemaReader.S(r[3]), Language = "sql", Comment = LiveSchemaReader.S(r[4]) is { Length: > 0 } rc ? rc : null,
+                Returns = (string)r[2]! == "PROCEDURE" ? null : LiveSchemaReader.S(r[3]), Comment = LiveSchemaReader.S(r[4]) is { Length: > 0 } rc ? rc : null,
+                Body = LiveSchemaReader.S(r[5]) is { Length: > 0 } body ? body.Trim() : null, Options = options.Count > 0 ? string.Join(" ", options) : null,
             });
+        }
         return catalog;
     }
 

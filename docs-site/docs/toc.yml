@@ -1,58 +1,88 @@
-- name: Getting started
-  href: getting-started.md
-- name: Drawing basics
-  href: drawing.md
-- name: Multi-select and bulk editing
-  href: multi-select.md
-- name: Diagram types
-  href: diagrams.md
-- name: Creating diagrams from diagrams
-  href: derivation.md
-- name: Requirements and traceability
-  href: requirements.md
-- name: Tables and queries
-  href: tables-queries.md
-- name: Branches, merge and baselines
-  href: version-control.md
-- name: Used projects (shared libraries)
-  href: libraries.md
-- name: Reviews and comments
-  href: reviews.md
-- name: SysML v2 text
-  href: sysml-v2.md
-- name: Variants and trade studies
-  href: variants-trade-studies.md
-- name: Simulation
-  href: simulation.md
-- name: Reports and documents
-  href: document-generation.md
-- name: Import and export
-  href: import-export.md
-- name: Mermaid
-  href: mermaid.md
-- name: Database modelling
-  href: database.md
-- name: Scripting
-  href: scripting.md
-- name: Plugins
-  href: plugins.md
-- name: Administration
-  href: administration.md
-- name: Integrations
-  href: integrations.md
-- name: Code sync
-  href: code-sync.md
-- name: AI assistant
-  href: ai-assistant.md
-- name: AI assistants (MCP)
-  href: mcp.md
-- name: Settings and theming
-  href: settings.md
-- name: Keyboard shortcuts
-  href: keyboard-shortcuts.md
-- name: Sample projects
-  href: samples.md
-- name: Coming from Cameo / EA
-  href: migration.md
-- name: FAQ
-  href: faq.md
+- name: Start here
+  items:
+  - name: Getting started
+    href: getting-started.md
+  - name: Coming from Cameo / EA
+    href: migration.md
+  - name: Keyboard shortcuts
+    href: keyboard-shortcuts.md
+  - name: Settings and theming
+    href: settings.md
+  - name: Sample projects
+    href: samples.md
+  - name: FAQ
+    href: faq.md
+- name: Modelling
+  items:
+  - name: Drawing basics
+    href: drawing.md
+  - name: Diagram types
+    href: diagrams.md
+  - name: Multi-select and bulk editing
+    href: multi-select.md
+  - name: Instances and object diagrams
+    href: instances.md
+  - name: Creating diagrams from diagrams
+    href: derivation.md
+  - name: SysML v2 text
+    href: sysml-v2.md
+  - name: Database modelling
+    href: database.md
+  - name: Deployment diagrams
+    href: deployment-diagrams.md
+  - name: Mermaid
+    href: mermaid.md
+  - name: AI assistant
+    href: ai-assistant.md
+- name: Requirements and analysis
+  items:
+  - name: Requirements and traceability
+    href: requirements.md
+  - name: Verifying requirements
+    href: verification.md
+  - name: Relation map
+    href: relation-map.md
+  - name: Tables and queries
+    href: tables-queries.md
+  - name: Find and replace
+    href: find-replace.md
+  - name: Simulation
+    href: simulation.md
+  - name: Variants and trade studies
+    href: variants-trade-studies.md
+  - name: Safety and reliability (FMEA, fault trees)
+    href: safety.md
+  - name: Reports and documents
+    href: document-generation.md
+  - name: Printing diagrams
+    href: printing.md
+- name: Working as a team
+  items:
+  - name: Branches, merge and baselines
+    href: version-control.md
+  - name: Used projects (shared libraries)
+    href: libraries.md
+  - name: Reviews and comments
+    href: reviews.md
+  - name: Package permissions
+    href: permissions.md
+- name: Connecting other tools
+  items:
+  - name: Import and export
+    href: import-export.md
+  - name: Spreadsheet import (Excel / CSV)
+    href: spreadsheet-import.md
+  - name: Integrations (Jira, DOORS, Polarion, webhooks)
+    href: integrations.md
+  - name: AI assistants (MCP)
+    href: mcp.md
+  - name: Code sync and architecture checks
+    href: code-sync.md
+- name: Extending and running Meridian
+  items:
+  - name: Scripting
+    href: scripting.md
+  - name: Plugins
+    href: plugins.md
+  - name: Administration
+    href: administration.md

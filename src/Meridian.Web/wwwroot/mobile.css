@@ -197,6 +197,14 @@
   .m-pill.bad { color: var(--danger); background: rgba(255, 107, 107, .12); }
   .m-pill.warn { color: var(--warn); background: rgba(240, 180, 41, .12); }
 
+  /* read-only verification results and code changes (account menu): cards, a filter count and a larger-screen note */
+  .m-chip-n { margin-left: 4px; opacity: .65; font-variant-numeric: tabular-nums; }
+  .m-note { padding: 8px 4px 0; font-size: 12.5px; color: var(--text-3); text-align: center; }
+  .m-note-top { padding: 0 16px 8px; text-align: left; }
+  .m-section-title { display: flex; flex-direction: column; gap: 2px; padding: 8px 2px 0; font-size: 13px; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+  .m-vfy .m-card-text code, .m-chg .m-card-text code { font-size: 12.5px; overflow-wrap: anywhere; white-space: normal; }
+  .m-chg .m-card-main { cursor: default; }
+
   /* reviews: list above detail, big vote buttons */
   .m-reviews { min-height: 100%; background: var(--panel-solid); }
   .m-reviews .rv { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; }

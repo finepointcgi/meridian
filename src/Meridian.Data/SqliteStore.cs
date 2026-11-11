@@ -112,6 +112,7 @@ public sealed partial class SqliteStore : IMeridianStore
         await MigrateCodeSyncRunsAsync();   // code-sync review runs (SqliteStore.CodeSync.cs)
         await MigratePermissionsAsync();   // per-package permissions (SqliteStore.Permissions.cs)
         await MigrateUsagesAsync();   // used projects / shared model libraries (SqliteStore.Usages.cs)
+        await MigrateElementChangesAsync();   // element history change index (SqliteStore.ElementChanges.cs)
     }
 
     // =============================================================== users
@@ -290,4 +291,7 @@ public sealed partial class SqliteStore : IMeridianStore
         ExecAsync("update comments set resolved = $2 where id = $1", commentId, resolved ? 1 : 0);
 
     public Task DeleteCommentAsync(long commentId) => ExecAsync("delete from comments where id = $1", commentId);
+
+    public async Task<bool> UpdateCommentBodyAsync(long commentId, Guid author, string body) =>
+        await ScalarAsync("update comments set body = $3 where id = $1 and author = $2 returning id", commentId, S(author), body) is not null;
 }

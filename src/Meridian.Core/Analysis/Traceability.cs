@@ -81,6 +81,9 @@ public static class Traceability
             // Typed usages: properties typed by e are impacted
             foreach (var p in model.AllElements.Where(x => Metamodel.IsTypedFeature(x.Kind) && x.TypeRef == e.Id))
                 if (seen.Add(p)) { result.Add((p, depth + 1, null)); queue.Enqueue((p, depth + 1)); }
+            // Safety: failure modes of a changed item, fault tree events that represent it (Safety/SafetyAnalysis.cs)
+            foreach (var s in Safety.SafetyTrace.ImpactedBy(model, e))
+                if (seen.Add(s)) { result.Add((s, depth + 1, null)); queue.Enqueue((s, depth + 1)); }
         }
         return result;
     }

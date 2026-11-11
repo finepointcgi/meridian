@@ -33,7 +33,7 @@
                     <span class="d-flex gap-1 justify-end">
                         @Actions(line)
                         <MudTooltip Text="Delete branch">
-                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="@(Ws.ReadOnly || Ws.BranchId == b.Id)" OnClick="() => Delete(b)" />
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" Disabled="@(Ws.ReadOnly || Ws.BranchId == b.Id)" OnClick="() => Delete(b)" aria-label="Delete branch" />
                         </MudTooltip>
                     </span>
                 </div>

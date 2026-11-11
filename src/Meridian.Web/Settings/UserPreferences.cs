@@ -35,9 +35,13 @@ public sealed class UserPreferences
     public bool OpenDiagramsAsTabs { get; set; } = true;
     public bool ShowShapesPanel { get; set; } = true;
     public DefaultZoom DefaultZoom { get; set; } = DefaultZoom.Fit;
+    /// <summary>The last diagram page setup (Print / PDF…), as PageSetup JSON (Meridian.Serialization.Printing).</summary>
+    public string? PrintSetup { get; set; }
 
     // ---------------------------------------------------------------- editor
     public bool ConfirmDeleteFromModel { get; set; }
+    /// <summary>Notify me when a project I edit uses a library whose source moved ahead of the pin (docs/LIBRARIES.md).</summary>
+    public bool LibraryUpstreamNotices { get; set; } = true;
     public bool TourSeen { get; set; }
     /// <summary>The release whose "What's new" card the user has seen (or skipped by taking the tour), e.g. "0.5".</summary>
     public string? WhatsNewSeen { get; set; }
@@ -86,6 +90,7 @@ public sealed class UserPreferences
         if (!Enum.IsDefined(DefaultZoom)) DefaultZoom = DefaultZoom.Fit;
         if (!AssistantModels.All.Any(m => m.Id == AssistantModel)) AssistantModel = AssistantModels.Default;
         if (WhatsNewSeen is { Length: > 16 }) WhatsNewSeen = null;
+        if (PrintSetup is { Length: > 8000 }) PrintSetup = null;
         Favorites = (Favorites ?? new()).Where(f => !string.IsNullOrEmpty(f) && f.Length <= 64).Distinct().Take(500).ToList();
         return this;
     }
@@ -106,6 +111,7 @@ public sealed class UserPreferences
                 break;
             case SettingsSection.Editor:
                 ConfirmDeleteFromModel = d.ConfirmDeleteFromModel;
+                LibraryUpstreamNotices = d.LibraryUpstreamNotices;
                 break;
             case SettingsSection.Assistant:
                 AssistantEnabled = d.AssistantEnabled; AssistantModel = d.AssistantModel;

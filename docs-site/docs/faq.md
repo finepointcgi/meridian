@@ -69,7 +69,7 @@ can run scripts.
 
 **I installed a plugin but it does not show up.**
 Plugins load when Meridian starts, so restart it. On a server, plugins load only from `Meridian:Plugins:Path`.
-**Extend ▸ Plugins ▸ Loaded plugins…** shows load errors.
+**Generate ▸ Plugins ▸ Loaded plugins…** shows load errors.
 
 ## Exchange
 

@@ -18,7 +18,7 @@
             }
             <span style="flex:1"></span>
             <MudTooltip Text="@(Host.LocalMode ? "New review checklist for the selection" : "Request review of the selection")">
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.AddComment" OnClick="() => Shell.RequestReview()" Disabled="Ws.Session == null" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.AddComment" OnClick="() => Shell.RequestReview()" Disabled="Ws.Session == null" aria-label="Request a review" title="Request a review" />
             </MudTooltip>
         </div>
         <div class="rv-items">
@@ -91,7 +91,7 @@
                         <button class="rbtn" @onclick="() => SetClosed(!cur.IsClosed)">
                             <MudIcon Icon="@(cur.IsClosed ? Icons.Material.Outlined.LockOpen : Icons.Material.Outlined.Lock)" /><span class="t">@(cur.IsClosed ? "Reopen" : "Close")</span>
                         </button>
-                        <MudTooltip Text="Delete review"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="Delete" /></MudTooltip>
+                        <MudTooltip Text="Delete review"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="Delete" aria-label="Delete review" /></MudTooltip>
                     }
                 </div>
             </div>
@@ -241,11 +241,11 @@
                 <span style="flex:1"></span>
                 @if (!reply)
                 {
-                    <MudTooltip Text="Reply"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => { _replyTo = _replyTo == c.Id ? null : c.Id; _replyDraft = null; }" /></MudTooltip>
+                    <MudTooltip Text="Reply"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Reply" OnClick="() => { _replyTo = _replyTo == c.Id ? null : c.Id; _replyDraft = null; }" aria-label="Reply" /></MudTooltip>
                 }
                 @if (c.Author.Id == Ws.User?.Id)
                 {
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveComment(c)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveComment(c)" aria-label="Delete" title="Delete" />
                 }
             </div>
             <div class="body"><MentionText Text="@c.Body" People="_people" /></div>

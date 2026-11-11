@@ -48,8 +48,32 @@ public static class ConnectorRules
             foreach (var l in Metamodel.PaletteLinks(diagram).Where(l => l.Kind != ElementKind.Allocate))
                 Add(l.Kind, false, l.Subtype);
 
+        // Instances: a link (typed afterwards by the one matching association, or the user's pick when several fit).
+        if (source == ElementKind.InstanceSpecification && target == ElementKind.InstanceSpecification) Add(ElementKind.Link);
+        // Deployment: node ↔ node communication path, artifact → node «deploy», artifact → block / component / package «manifest»
+        // (a database or schema package → node is a «deploy» first on deployment diagrams).
+        static bool Node(ElementKind k) => Deployment.DeploymentModel.IsNode(k);
+        static bool Artifact(ElementKind k) => Deployment.DeploymentModel.IsArtifact(k);
+        if (Node(source) && Node(target)) Add(ElementKind.CommunicationPath);
+        if ((Artifact(source) || source == ElementKind.Package && diagram == DiagramType.Deployment) && Node(target)) Add(ElementKind.Deployment);
+        if (Node(source) && (Artifact(target) || target == ElementKind.Package && diagram == DiagramType.Deployment)) Add(ElementKind.Deployment, reverse: true);
+        if (Artifact(source) && !Node(target)) Add(ElementKind.Manifestation);
+        if (Artifact(target) && !Node(source)) Add(ElementKind.Manifestation, reverse: true);
+
         // Packages: dependency.
         if (source == ElementKind.Package || target == ElementKind.Package) Add(ElementKind.Dependency);
+        if (source == ElementKind.Package && Node(target)) Add(ElementKind.Deployment);
+        if (Node(source) && target == ElementKind.Package) Add(ElementKind.Deployment, reverse: true);
+
+        // Safety: requirements mitigate failure modes (whichever way the line was drawn); test cases verify them; fault tree links.
+        if (target == ElementKind.FailureMode && source != ElementKind.FailureMode) { if (source == ElementKind.TestCase) Add(ElementKind.Verify); Add(ElementKind.Mitigate); }
+        if (source == ElementKind.FailureMode && target != ElementKind.FailureMode)
+        {
+            if (target == ElementKind.TestCase) Add(ElementKind.Verify, reverse: true);
+            if (Req(target)) Add(ElementKind.Mitigate, reverse: true);
+            if (Structure(target) || Behavior(target)) Add(ElementKind.Allocate);
+        }
+        Add(ElementKind.FaultTreeLink);
 
         // Requirements.
         if (Req(source) && Req(target)) { Add(ElementKind.DeriveReqt); Add(ElementKind.Refine); Add(ElementKind.Copy); Add(ElementKind.Trace); }
@@ -103,6 +127,7 @@ public static class ConnectorRules
             Add(ElementKind.Realization);
         }
 
+
         // Other notations with one connector kind.
         Add(ElementKind.ForeignKey);
         Add(ElementKind.FeatureDecomposition);
@@ -125,6 +150,6 @@ public static class ConnectorRules
 
     /// <summary>Elements whose notation has its own connectors only (no generic dependency/trace lines).</summary>
     private static bool IsSpecialized(ElementKind k) => k is ElementKind.BpmnNode or ElementKind.BpmnPool or ElementKind.BpmnLane or ElementKind.ArchiElement
-        or ElementKind.Feature or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
+        or ElementKind.Feature or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
         or ElementKind.InitialNode or ElementKind.ActivityFinalNode or ElementKind.DecisionNode or ElementKind.ForkNode or ElementKind.InitialState or ElementKind.FinalState;
 }

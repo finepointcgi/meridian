@@ -41,8 +41,9 @@ public partial class Workbench
         try { result = AutoDiagrammer.Apply(Ws.Model, plan); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
         {
-            Ws.SetStatus("Auto-diagram failed: " + ex.Message);
-            Snackbar.Add("Auto-diagram failed: " + ex.Message, Severity.Error);
+            var why = $"Auto-diagram could not finish: {FriendlyError.Describe(ex)}. Nothing was changed; try one package at a time.";
+            Ws.SetStatus(why);
+            Snackbar.Add(why, Severity.Error);
             return null;
         }
         if (openTabs && result.Count > 0)

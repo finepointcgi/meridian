@@ -136,7 +136,8 @@ public class CodeSyncArchiveTests
         Assert.True(CodeRepoConfig.InPaths("src/a.cs", c.Paths));
         Assert.False(CodeRepoConfig.InPaths("srcx/a.cs", c.Paths));
 
-        Assert.NotNull(new CodeRepoConfig { Owner = "a", Repo = "b", BaseUrl = "http://example.com" }.Validate());
+        Assert.Null(new CodeRepoConfig { Owner = "a", Repo = "b", BaseUrl = "http://example.com" }.Validate());
+        Assert.NotNull(new CodeRepoConfig { Owner = "a", Repo = "b", BaseUrl = "ftp://example.com" }.Validate());
         Assert.NotNull(new CodeRepoConfig { Owner = "a", Repo = "b", Paths = ["../x"] }.Validate());
         Assert.NotNull(new CodeRepoConfig { Owner = "a", Repo = "b", Branch = "a..b" }.Validate());
         Assert.NotNull(new CodeRepoConfig { Host = GitHostKind.GitLab, BaseUrl = "https://gitlab.com", Project = "g/../p" }.Validate());
@@ -400,7 +401,11 @@ public sealed class CodeSyncHostServiceTests : IAsyncLifetime
         var handler = new FakeHandler((req, _) =>
         {
             var url = req.RequestUri!.ToString();
-            if (url == $"https://api.github.com/repos/acme/sat/tarball/{Sha}") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(tgz) };
+            // Like GitHub: /tarball answers 415 Unsupported Media Type unless the API's own media type is accepted.
+            if (url == $"https://api.github.com/repos/acme/sat/tarball/{Sha}")
+                return req.Headers.Accept.Any(a => a.MediaType == "application/x-gzip") || !req.Headers.Accept.Any(a => a.MediaType == "application/vnd.github+json")
+                    ? new HttpResponseMessage(HttpStatusCode.UnsupportedMediaType)
+                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(tgz) };
             if (url == "https://api.github.com/repos/acme/sat/commits/main") return FakeHandler.Json(new JsonObject
             {
                 ["sha"] = Sha, ["html_url"] = "https://github.com/acme/sat/commit/a1b2",

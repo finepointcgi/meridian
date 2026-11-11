@@ -3,6 +3,7 @@
 @attribute [ExcludeFromInteractiveRouting]
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @inject Meridian.Web.Admin.AdminSettings Settings
+@inject IServiceProvider Services
 
 <PageTitle>Sign in — Meridian</PageTitle>
 
@@ -72,6 +73,11 @@
         else if (Register)
         {
             <div class="auth-switch"><a href="/login">Back to sign in</a></div>
+        }
+        @if (Services.GetService(typeof(Meridian.Web.Hosting.UserGuide.Files)) is Meridian.Web.Hosting.UserGuide.Files { Available: true })
+        {
+            @* The guide is served without signing in (Hosting/UserGuide.cs), so this link works before sign-in. *@
+            <div class="auth-switch auth-guide"><a href="@Meridian.Web.Hosting.UserGuide.Page()" target="_blank" rel="noopener" data-testid="login-guide">User guide</a></div>
         }
     </div>
 </div>

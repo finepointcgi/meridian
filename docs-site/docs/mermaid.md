@@ -59,7 +59,7 @@ Inputs are cut at 4 million characters, and uploads and drops at 8 MB. Each limi
 
 ## Export
 
-**Export diagram as Mermaid (.mmd)** and **Copy diagram as Mermaid** (project menu ▸ Export, ⌘K, or
+**Export diagram as Mermaid (.mmd)** and **Copy diagram as Mermaid** (project menu ▸ Export ▸, right-click a diagram tab ▸ Export ▸, ⌘K, or
 **Generate ▸ Formats ▸ Mermaid .mmd**) write the active diagram:
 
 | Meridian | Mermaid |

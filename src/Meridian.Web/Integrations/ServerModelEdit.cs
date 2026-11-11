@@ -46,17 +46,12 @@ public sealed class ServerModelEdit : IAsyncDisposable
         await _gate.WaitAsync();
         try
         {
-            var model = ProjectFile.Deserialize(_session.SnapshotFor(_participant));
+            var model = _session.ReplicaFor(_participant);
             var ops = new List<ModelOp>();
             model.OpEmitted += ops.Add;
             var result = change(model);
-            _client.Refused = null;
-            if (ops.Count > 0) _session.SubmitAll(_participant, _userId, ops);
-            if (_client.Refused is { } why)
-            {
-                _session.Resynced(_participant);
+            if (ops.Count > 0 && _session.SubmitBatch(_participant, _userId, ops) is { Refused: { } why })
                 throw new PermissionDeniedException(why);
-            }
             return result;
         }
         finally { _gate.Release(); }
@@ -72,12 +67,10 @@ public sealed class ServerModelEdit : IAsyncDisposable
     // Each edit starts from a fresh snapshot, so other participants' operations need no handling here.
     private sealed class Relay : ISessionClient
     {
-        /// <summary>Why the session refused the last edit (it resynchronises a refused participant with a message).</summary>
-        public string? Refused;
-        public void Replaced(string modelJson, string message) => Refused = message;
+        public void Replaced(SessionModel model, string message) { }
         public void RemoteOp(ModelOp op) { }
         public void PresenceChanged() { }
-        public void Reset(string modelJson) { }
+        public void Reset(SessionModel model) { }
         public void CommentsChanged() { }
     }
 }

@@ -22,33 +22,46 @@ public static class DocPdf
 
     public static byte[] Write(ResolvedDocument doc, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
     {
+        using var ms = new MemoryStream();
+        Write(doc, doc.Nodes, ms, progress, ct);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Lays the document out and writes the PDF to <paramref name="output"/>. <paramref name="nodes"/> are enumerated once,
+    /// while QuestPDF composes the document, so a streamed node sequence (<see cref="DocResolver.Stream"/>) is never held
+    /// as a list; diagrams are parsed once per diagram and drawn when their page is laid out.
+    /// </summary>
+    public static void Write(ResolvedDocument doc, IEnumerable<DocNode> nodes, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
+    {
         progress?.Report(new ReportProgress("Composing PDF", 0));
-        var document = Compose(doc, ct);
+        var document = Compose(doc, nodes, ct, progress);
         progress?.Report(new ReportProgress("Laying out pages", 0.5));
-        var bytes = document.GeneratePdf();
+        document.GeneratePdf(output);
         progress?.Report(new ReportProgress("PDF written", 1));
-        return bytes;
     }
 
     /// <summary>The QuestPDF document (also usable for page images).</summary>
-    public static IDocument Compose(ResolvedDocument doc, CancellationToken ct = default)
+    public static IDocument Compose(ResolvedDocument doc, CancellationToken ct = default) => Compose(doc, doc.Nodes, ct);
+
+    private static IDocument Compose(ResolvedDocument doc, IEnumerable<DocNode> nodes, CancellationToken ct, IProgress<ReportProgress>? progress = null)
     {
         var size = string.Equals(doc.Template.PageSize, "A4", StringComparison.OrdinalIgnoreCase) ? PageSizes.A4 : PageSizes.Letter;
         var svgs = new Dictionary<string, SvgImage>();
-
-        // Split into page runs at orientation changes.
-        var runs = new List<(bool Landscape, List<DocNode> Nodes)> { (false, new()) };
-        foreach (var n in doc.Nodes)
-        {
-            if (n is OrientationNode o) { runs.Add((o.Landscape, new())); continue; }
-            runs[^1].Nodes.Add(n);
-        }
-        runs.RemoveAll(r => r.Nodes.Count == 0);
+        var total = Math.Max(1, doc.Stats.Nodes);
+        var composed = false;
 
         return Document.Create(container =>
         {
-            foreach (var (landscape, nodes) in runs)
+            if (composed) throw new InvalidOperationException("A streamed PDF document can only be composed once.");
+            composed = true;
+            // Page runs split at orientation changes; nodes are pulled one at a time.
+            using var it = new Lookahead<DocNode>(nodes);
+            var landscape = false;
+            while (true)
             {
+                while (it.Peek(out var o) && o is OrientationNode on) { landscape = on.Landscape; it.Next(out _); }
+                if (!it.Peek(out _)) break;
                 ct.ThrowIfCancellationRequested();
                 var pageSize = landscape ? size.Landscape() : size;
                 var contentWidth = pageSize.Width - 2 * Margin;
@@ -64,18 +77,23 @@ public static class DocPdf
                     page.Content().PaddingVertical(10).Column(col =>
                     {
                         col.Spacing(6);
-                        for (var i = 0; i < nodes.Count; i++)
+                        DocNode? prev = null;
+                        while (it.Peek(out var peek) && peek is not OrientationNode)
                         {
-                            ct.ThrowIfCancellationRequested();
-                            var n = nodes[i];
-                            if (n is PageBreakNode) { col.Item().PageBreak(); continue; }
+                            it.Next(out var n);
+                            if (it.Index % 200 == 0)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                progress?.Report(new ReportProgress("Composing PDF", 0.5 * it.Index / total));
+                            }
+                            if (n is PageBreakNode) { col.Item().PageBreak(); prev = n; continue; }
                             if (n is HeadingNode h)
                             {
-                                if (h.PageBreakBefore && i > 0 && nodes[i - 1] is not PageBreakNode) col.Item().PageBreak();
+                                if (h.PageBreakBefore && prev != null && prev is not PageBreakNode) col.Item().PageBreak();
                                 // Keep a heading with the content that follows it.
                                 var group = new List<DocNode> { h };
-                                while (i + 1 < nodes.Count && nodes[i + 1] is HeadingNode { PageBreakBefore: false } next) { group.Add(next); i++; }
-                                if (i + 1 < nodes.Count && nodes[i + 1] is ParagraphNode or TableNode or FigureNode) group.Add(nodes[++i]);
+                                while (it.Peek(out var next) && next is HeadingNode { PageBreakBefore: false }) { it.Next(out next); group.Add(next); }
+                                if (it.Peek(out var body) && body is ParagraphNode or TableNode or FigureNode) { it.Next(out body); group.Add(body); }
                                 // A figure always fits one page: keep it whole with its heading; otherwise demand some room.
                                 var item = group[^1] is FigureNode ? col.Item().PreventPageBreak() : col.Item().EnsureSpace(110);
                                 item.Column(g =>
@@ -83,9 +101,11 @@ public static class DocPdf
                                     g.Spacing(6);
                                     foreach (var x in group) Node(g.Item(), x, doc, contentWidth, contentHeight, svgs);
                                 });
+                                prev = group[^1];
                                 continue;
                             }
                             Node(col.Item(), n, doc, contentWidth, contentHeight, svgs);
+                            prev = n;
                         }
                     });
                 });

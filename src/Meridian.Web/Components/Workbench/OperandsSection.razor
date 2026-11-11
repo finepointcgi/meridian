@@ -21,7 +21,7 @@
                 @if (!Ws.ReadOnly && ops.Count > 1)
                 {
                     <MudTooltip Text="Remove operand">
-                        <MudIconButton Class="op-remove" Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Remove(op)" />
+                        <MudIconButton Class="op-remove" Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Remove(op)" aria-label="Remove operand" />
                     </MudTooltip>
                 }
             </div>

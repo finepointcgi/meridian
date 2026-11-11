@@ -151,7 +151,8 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Equal("self check", ById(m, "_idle").Get(FieldKeys.Entry));
         Assert.Equal("hover()", ById(m, "_flying").Get(FieldKeys.DoActivity));
         Assert.Equal(ElementKind.FinalState, ById(m, "_fs").Kind);
-        Assert.Contains("choice", ById(m, "_ch").Stereotypes);
+        Assert.Equal(ElementKind.Pseudostate, ById(m, "_ch").Kind);
+        Assert.Equal(Pseudostates.Choice, Pseudostates.KindOf(ById(m, "_ch")));
         var t2 = (Relationship)ById(m, "_t2");
         Assert.Equal(ElementKind.Transition, t2.Kind);
         Assert.Equal("Start", t2.Name);
@@ -175,7 +176,8 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Equal(1, report.Skipped["Lost / found messages and messages to gates"]);
         var frag = ById(m, "_cfrag");
         Assert.Equal("alt", frag.Get(FieldKeys.Operator));
-        Assert.Equal("ok | else", frag.Get(FieldKeys.Guard));
+        Assert.Equal(["ok", "else"], InteractionOperands.Guards(frag));   // one operand per uml:InteractionOperand
+        Assert.Equal("", frag.Get(FieldKeys.Guard));
 
         Assert.Equal(ElementKind.Actor, ById(m, "_actor").Kind);
         Assert.Equal(ElementKind.Include, ById(m, "_inc1").Kind);
@@ -250,6 +252,23 @@ public sealed class MagicDrawImportTests : IDisposable
     }
 
     [Fact]
+    public void Instance_Specifications_Import_With_Slots_And_Links()
+    {
+        var (m, _) = ImportFixture();
+        var drone1 = ById(m, "_inst");
+        Assert.Equal(ElementKind.InstanceSpecification, drone1.Kind);
+        Assert.Equal(["_drone"], Meridian.Core.Instances.InstanceModel.ClassifierIds(drone1));
+        var lines = Meridian.Core.Instances.InstanceModel.Slots(drone1).Select(s => Meridian.Core.Instances.InstanceModel.SlotLine(m, s)).Order().ToList();
+        Assert.Equal(["controller = fc1", "mass = 1.4"], lines);
+        Assert.Equal(["_ctrl"], Meridian.Core.Instances.InstanceModel.ClassifierIds(ById(m, "_inst2")));   // classifier as a child reference
+        var link = Assert.IsType<Relationship>(ById(m, "_lnk"));
+        Assert.Equal(ElementKind.Link, link.Kind);
+        Assert.Same(drone1, link.Source);
+        Assert.Same(ById(m, "_inst3"), link.Target);
+        Assert.Same(ById(m, "_assoc1"), Meridian.Core.Instances.InstanceModel.AssociationOf(m, link));
+    }
+
+    [Fact]
     public void Report_Counts_Kinds_And_Lists_Skipped_Constructs()
     {
         var (_, report) = ImportFixture();
@@ -257,10 +276,15 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Equal(2, report.Imported["Requirement"]);
         Assert.Equal(1, report.Imported["Satisfy"]);
         Assert.Equal(1, report.Imported["Composition"]);
-        Assert.Equal(1, report.Skipped["Instance specifications"]);
+        Assert.Equal(3, report.Imported["Instance"]);
+        Assert.Equal(1, report.Imported["Link"]);
+        Assert.False(report.Skipped.ContainsKey("Instance specifications"));
         Assert.Equal(1, report.Skipped["uml:Frobnicator"]);
         Assert.True(report.Skipped["Project resources (options, proxies, used-project backups)"] >= 3);
-        Assert.Contains(report.Warnings, w => w.Contains("choice"));
+        Assert.Equal(1, report.Imported["Pseudostate"]);
+        Assert.Equal(2, report.Imported[Metamodel.DisplayName(ElementKind.InteractionOperand)]);
+        // The fixture's alt fragment has no operand shapes: its separator is spread evenly, and the report says so.
+        Assert.Single(report.Approximated[MagicDrawImportReport.OperandGeometryGuessed]);
         var lines = report.Lines("drone.mdzip").ToList();
         Assert.StartsWith("Imported MagicDraw/Cameo project drone.mdzip", lines[0]);
         Assert.Contains(lines, l => l.Contains("Proxy port: 2"));

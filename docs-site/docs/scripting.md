@@ -1,7 +1,7 @@
 # Scripting
 
 The script console runs C# against the open model: query it, bulk-edit it, check it or export it. Open it from the
-**Script** dock tab, **Extend ▸ Script** on the ribbon, or **⌘K** → "Script console".
+**Script** dock tab, **Generate ▸ Script** on the ribbon, or **⌘K** → "Script console".
 
 > [!WARNING]
 > **A script is arbitrary .NET code** running inside the Meridian process (the desktop app or the web server) with

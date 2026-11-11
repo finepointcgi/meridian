@@ -111,8 +111,8 @@ public sealed class DocsScreenshotTests(ServerFixture f) : E2ETest(f)
         await ShotAsync(p, "workbench");
 
         // Help ▸ Tour.
-        await p.ProjectMenuAsync("Tour…");
-        await Expect(p.Locator(".tour-chapter")).ToHaveCountAsync(8);
+        await p.HelpMenuAsync("Tour…");
+        await Expect(p.Locator(".tour-chapter")).ToHaveCountAsync(Meridian.Web.Components.Workbench.TourChapters.All.Length);
         await ShotAsync(p, "tour-chapters");
         await p.Locator(".tour-chapter[data-chapter=derive]").ClickAsync();
         await Expect(p.Locator(".tour-spot")).ToHaveCountAsync(1);

@@ -1,7 +1,7 @@
 # Scripting
 
 Meridian has a C# script console for querying and bulk-editing models. Open it from the **Script** dock tab,
-from the **Extend ▸ Script** ribbon button, or with ⌘K → "Script console".
+from the **Generate ▸ Script** ribbon button, or with ⌘K → "Script console".
 
 ## Security: read this first
 

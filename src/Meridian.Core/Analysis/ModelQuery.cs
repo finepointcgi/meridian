@@ -146,7 +146,7 @@ public sealed class ModelQuery
     private bool MatchesFilters(Element e)
     {
         if (e.Kind == ElementKind.Model) return false;
-        if (Kinds.Count > 0 ? !Kinds.Contains(e.Kind) : e.IsRelationship || e.Kind is ElementKind.Diagram or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule)
+        if (Kinds.Count > 0 ? !Kinds.Contains(e.Kind) : e.IsRelationship || e.Kind is ElementKind.Diagram or ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule or ElementKind.RelationMap)
             return false;
         return string.IsNullOrWhiteSpace(Stereotype) || e.Stereotypes.Contains(Stereotype.Trim(), StringComparer.OrdinalIgnoreCase);
     }

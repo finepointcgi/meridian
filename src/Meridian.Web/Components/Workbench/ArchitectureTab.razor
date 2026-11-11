@@ -99,6 +99,31 @@
                                     <button class="arch-link arch-show" @onclick="() => ShowOnDiagram(v)">Show on diagram</button>
                                 }
                             </span>
+                            @if (v.Locations.Count > 0)
+                            {
+                                @* The lines that break the rule, each linked to the file at the synced commit. *@
+                                <span class="arch-uses">
+                                    <span class="dim">@(v.Locations.Count + v.MoreLocations == 1 ? "Line:" : "Lines:")</span>
+                                    @foreach (var use in v.Locations)
+                                    {
+                                        var u = use;
+                                        var label = UseLabel(v, u);
+                                        var title = $"{u.Location} ({u.KindName})";
+                                        @if (r.Record is { } ur && ArchitectureCheckService.FileUrl(ur.CommitUrl, ur.Commit, u.File, u.Line) is { } useUrl)
+                                        {
+                                            <a class="use" href="@useUrl" target="_blank" rel="noopener noreferrer" title="@title" data-kind="@u.KindName" data-line="@u.Line">@label</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="use" title="@title" data-kind="@u.KindName" data-line="@u.Line">@label</span>
+                                        }
+                                    }
+                                    @if (v.MoreLocations > 0)
+                                    {
+                                        <span class="dim more">+@v.MoreLocations more</span>
+                                    }
+                                </span>
+                            }
                             <span class="hint">@v.FixHint</span>
                         </div>
                     }
@@ -174,6 +199,10 @@
 
     private static bool Shows(Diagram d, string id) =>
         d.Nodes.Any(n => n.Element.Id == id || (n.Element.Kind == ElementKind.Property && n.Element.TypeRef == id));
+
+    /// <summary>"line 42 (new)" in the type's own file, "battery.ts:12 (call)" in another one.</summary>
+    private static string UseLabel(ArchitectureViolation v, Meridian.Core.CodeSync.CodeDependencyUse u) =>
+        (u.File == v.File ? $"line {u.Line}" : $"{u.File[(u.File.LastIndexOf('/') + 1)..]}:{u.Line}") + $" ({u.KindName})";
 
     private static string? Safe(string? url) => Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "https" or "http" ? url : null;
     private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;

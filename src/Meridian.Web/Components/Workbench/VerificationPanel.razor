@@ -74,7 +74,7 @@
     <div class="vfy-empty">
         No requirement has a verification criterion yet. Give a requirement a criterion such as <code>mass &lt;= 1500 kg</code>,
         <code>mc: p95(accelTime) &lt; 8 s</code> or <code>timed: final(speed) &gt;= 25 m/s</code> (in the Requirements table or the
-        Inspector), then verify. See docs/VERIFICATION.md.
+        Inspector), then verify. The user guide's <GuideLink Page="verification">Verification page</GuideLink> explains the criteria.
     </div>
 }
 else
@@ -85,15 +85,35 @@ else
             @foreach (var (req, res) in results.Where(x => Matches(x.Res)))
             {
                 var r = req;
-                var crit = Verification.Criterion(r);
-                var err = crit.Length > 0 ? VerificationCriterion.Check(crit) : null;
+                var criteria = Verification.Criteria(r);
+                var crit = criteria.Count == 1 ? criteria[0] : Verification.Criterion(r);
+                var err = crit.Length > 0 && criteria.Count <= 1 ? VerificationCriterion.Check(crit) : null;
                 var open = _open.Contains(r.Id);
-                <tr class="row" @key="r.Id" data-req="@r.Id" @onclick="() => Toggle(r)">
+                var expanded = _expanded.Contains(r.Id);
+                var checks = res?.Checks ?? Verification.StoredChecks(Ws.Model, r);
+                <tr class="row @(expanded ? "expanded" : "")" @key="r.Id" data-req="@r.Id" @onclick="() => Toggle(r)">
                     <td>@r.Get(FieldKeys.RequirementId)</td>
                     <td>@r.DisplayName</td>
                     <td @onclick:stopPropagation="true">
-                        <input class="vfy-crit cell-input @(err != null ? "bad" : "")" value="@crit" placeholder="e.g. mass <= 1500 kg" title="@(err ?? "Criterion")" disabled="@Ws.ReadOnly"
-                               @onchange="e => SetCriterion(r, e.Value?.ToString())" />
+                        <div class="vfy-crit-cell">
+                            @if (criteria.Count > 1 || expanded)
+                            {
+                                <button class="vfy-expand" data-testid="criteria-toggle" aria-expanded="@(expanded ? "true" : "false")" title="Show or hide each criterion and its result"
+                                        @onclick="() => ToggleCriteria(r)">
+                                    <span class="chev">@(expanded ? "▾" : "▸")</span> @criteria.Count criteri@(criteria.Count == 1 ? "on" : "a")
+                                    @foreach (var c in checks) { <span class="dot @(c.NotRun ? "none" : c.Status)" title="@($"{c.Criterion}: {c.Label}")"></span> }
+                                </button>
+                            }
+                            else
+                            {
+                                <input class="vfy-crit cell-input @(err != null ? "bad" : "")" value="@crit" placeholder="e.g. mass <= 1500 kg" title="@(err ?? "Criterion")" disabled="@Ws.ReadOnly"
+                                       @onchange="e => SetCriterion(r, e.Value?.ToString())" />
+                            }
+                            @if (!Ws.ReadOnly && criteria.Count > 0)
+                            {
+                                <button class="vfy-add" data-testid="criterion-add" title="Add another criterion" @onclick="() => _expanded.Add(r.Id)">+</button>
+                            }
+                        </div>
                         @if (err != null) { <div class="vfy-err">@err</div> }
                     </td>
                     <td>@Badge(res)</td>
@@ -103,6 +123,46 @@ else
                     <td>@res?.Variant</td>
                     <td>@res?.At.Replace('T', ' ').TrimEnd('Z')</td>
                 </tr>
+                @if (expanded)
+                {
+                    @foreach (var c in checks)
+                    {
+                        var i = c.Index;
+                        var cerr = VerificationCriterion.Check(c.Criterion);
+                        <tr class="crit-row" @key="@($"{r.Id}-c{i}-{c.Criterion}")" data-req="@r.Id" data-index="@i">
+                            <td></td>
+                            <td class="crit-no">criterion @(i + 1)</td>
+                            <td>
+                                <div class="vfy-crit-cell">
+                                    <input class="vfy-crit-item cell-input @(cerr != null ? "bad" : "")" value="@c.Criterion" title="@(cerr ?? "Criterion")" disabled="@Ws.ReadOnly"
+                                           @onchange="e => SetCriterionAt(r, i, e.Value?.ToString())" />
+                                    @if (!Ws.ReadOnly)
+                                    {
+                                        <button class="vfy-remove" data-testid="criterion-remove" title="Remove this criterion" @onclick="() => RemoveCriterion(r, i)">✕</button>
+                                    }
+                                </div>
+                                @if (cerr != null) { <div class="vfy-err">@cerr</div> }
+                            </td>
+                            <td>@CheckBadge(c)</td>
+                            <td>@c.Value</td>
+                            <td>@c.Bound</td>
+                            <td style="color:@(c.Margin.StartsWith('-') ? "var(--danger)" : "inherit")">@c.Margin</td>
+                            <td colspan="2" class="crit-analysis" title="@c.Message">@c.Analysis</td>
+                        </tr>
+                    }
+                    @if (!Ws.ReadOnly)
+                    {
+                        <tr class="crit-row new" @key="@(r.Id + "-new")">
+                            <td></td>
+                            <td class="crit-no">new</td>
+                            <td>
+                                <input @key="_newKey" class="vfy-crit-new cell-input" placeholder="Add a criterion, e.g. mass <= 1500 kg" data-testid="criterion-new"
+                                       @onchange="e => AddCriterion(r, e.Value?.ToString())" />
+                            </td>
+                            <td colspan="6" class="crit-hint">Each criterion is checked on its own; the requirement fails if any fails.</td>
+                        </tr>
+                    }
+                }
                 @if (open)
                 {
                     <tr class="detail" @key="@(r.Id + "-d")">
@@ -112,6 +172,13 @@ else
                                 else
                                 {
                                     <b>Result</b><span>@res.Label — @res.Message</span>
+                                    @if (res.Checks.Count > 1)
+                                    {
+                                        <b>Criteria</b>
+                                        <span>
+                                            @foreach (var c in res.Checks) { <div>@(c.Index + 1). <code>@c.Criterion</code> — @c.Label@(c.Message.Length > 0 ? $": {c.Message}" : "")</div> }
+                                        </span>
+                                    }
                                     <b>Analysis</b><span>@res.Analysis</span>
                                     <b>Model version</b><span>@res.ModelVersion</span>
                                     <b>Variant</b><span>@res.Variant</span>
@@ -133,6 +200,8 @@ else
     private string? _runId;
     private string? _filter;
     private readonly HashSet<string> _open = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);   // requirements showing one row per criterion
+    private int _newKey;
 
     private Element? Run => Ws.Model.Find(_runId) is { } r && Verification.IsRun(r) ? r : null;
 
@@ -176,6 +245,41 @@ else
         }
     };
 
+    /// <summary>One criterion's last result: pass / fail / inconclusive (stale), or "not run" for a criterion added or edited since.</summary>
+    internal static RenderFragment CheckBadge(StoredCheck c) => __builder =>
+    {
+        if (c.NotRun) { <span class="verdict none">not run</span> }
+        else
+        {
+            <span class="verdict @c.Status" title="@c.Message">@c.Status</span>
+            if (c.Stale) { <span class="verdict stale" title="The model changed since this result">stale</span> }
+        }
+    };
+
+    private void ToggleCriteria(Element r)
+    {
+        if (!_expanded.Remove(r.Id)) _expanded.Add(r.Id);
+    }
+
+    private void SetCriterionAt(Element r, int index, string? value)
+    {
+        if (Ws.ReadOnly) return;
+        Verification.SetCriterionAt(Ws.Model, r, index, value);
+    }
+
+    private void RemoveCriterion(Element r, int index)
+    {
+        if (Ws.ReadOnly) return;
+        Verification.RemoveCriterion(Ws.Model, r, index);
+    }
+
+    private void AddCriterion(Element r, string? value)
+    {
+        if (Ws.ReadOnly || string.IsNullOrWhiteSpace(value)) return;
+        Verification.AddCriterion(Ws.Model, r, value);
+        _newKey++;
+    }
+
     private void Toggle(Element r)
     {
         if (!_open.Remove(r.Id)) _open.Add(r.Id);
@@ -205,7 +309,8 @@ else
     }
 
     private IEnumerable<Element> Subjects() => Ws.Model.AllElements
-        .Where(e => e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Activity or ElementKind.StateMachine)
+        .Where(e => e.Kind is ElementKind.Block or ElementKind.Class or ElementKind.Activity or ElementKind.StateMachine
+                    || e.Kind == ElementKind.InstanceSpecification && e.Owner?.Kind != ElementKind.InstanceSpecification)   // an instance: its slots override defaults
         .OrderBy(e => e.Kind).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
 
     private void NewRun()

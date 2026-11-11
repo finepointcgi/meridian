@@ -5,17 +5,17 @@
 @if (Shell.ShowDatabaseTools)
 {
     var diagram = Ws.Active is { Diagram.DiagramType: DiagramType.Database } a ? a.Diagram : null;
-    <div class="rgroup compact @(Active ? "active" : "")" data-tab="database" data-testid="ribbon-database">
+    <div class="rgroup compact @(Active ? "active" : "")" data-tab="database" data-testid="ribbon-database" data-tour="database">
         <div class="rlabel">Database</div>
         <div class="ritems">
             <MudTooltip Text="New table in the selected schema (shown on the active database diagram)">
                 <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => Shell.NewTable()" data-testid="ribbon-new-table"><MudIcon Icon="@Icons.Material.Outlined.TableChart" Style="color:#4ec9d6" /><span class="t">New table</span></button>
             </MudTooltip>
             <MudTooltip Text="Add the selected tables to a subject area">
-                <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="Shell.AddSelectionToGroup" data-testid="ribbon-add-to-group"><MudIcon Icon="@Icons.Material.Outlined.Workspaces" /><span class="t">Add to group</span></button>
+                <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="Shell.AddSelectionToGroup" data-testid="ribbon-add-to-group"><MudIcon Icon="@Icons.Material.Outlined.Workspaces" /><span class="t">Add to subject area</span></button>
             </MudTooltip>
             <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" Dense="true">
-                <ActivatorContent><button title="Subject areas: manage them, filter the diagram" class="rbtn" data-testid="ribbon-groups"><MudIcon Icon="@Icons.Material.Outlined.FilterAlt" /><span class="t">Groups</span></button></ActivatorContent>
+                <ActivatorContent><button title="Subject areas: manage them, filter the diagram, choose which columns show" class="rbtn" data-testid="ribbon-groups"><MudIcon Icon="@Icons.Material.Outlined.FilterAlt" /><span class="t">Subject areas</span></button></ActivatorContent>
                 <ChildContent>
                     <MudMenuItem Icon="@Icons.Material.Outlined.Workspaces" OnClick="Shell.ManageGroups">Subject areas…</MudMenuItem>
                     @if (diagram != null)
@@ -47,6 +47,14 @@
             <MudTooltip Text="Compare with the database (or a new script) and review the changes">
                 <button class="rbtn" disabled="@Ws.ReadOnly" @onclick="() => Shell.RefreshFromDatabase()" data-testid="ribbon-db-refresh"><MudIcon Icon="@Icons.Material.Outlined.Sync" /><span class="t">Refresh…</span></button>
             </MudTooltip>
+            <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+                <ActivatorContent><button title="Data dictionary: every table and column as a spreadsheet or a document" class="rbtn" data-testid="ribbon-data-dictionary"><MudIcon Icon="@Icons.Material.Outlined.ListAlt" /><span class="t">Data dictionary</span></button></ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="() => Shell.ExportDataDictionary(true)">Excel (.xlsx)</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.ListAlt" OnClick="() => Shell.ExportDataDictionary(false)">CSV</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Description" OnClick="Shell.DataDictionaryReport">Document (PDF / Word / HTML)…</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
         </div>
     </div>
 }

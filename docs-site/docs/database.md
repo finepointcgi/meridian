@@ -34,13 +34,24 @@ with a `.sql`, `.ddl` or `.dacpac` file imports directly, and the desktop app op
 
 ### From a live database
 
-Project menu ▸ **Connect to a database…** opens Integrations ▸ **Databases**. Add a connection (PostgreSQL or
-MySQL / MariaDB; SQLite files in the desktop app), test it, then **Import**. The connection string is stored encrypted
-and never shown again. **Use a read-only account**: Meridian only reads the catalog, in read-only transactions.
+Project menu ▸ **Connect to a database…** opens Integrations ▸ **Databases**. Add a connection (PostgreSQL, SQL Server /
+Azure SQL, MySQL / MariaDB or Oracle; SQLite files in the desktop app), test it, then **Import**. The connection string
+is stored encrypted and never shown again. **Use a read-only account**: Meridian only reads the catalog (`pg_catalog`,
+`sys.*`, `information_schema`, `ALL_*`), in read-only transactions where the database has them. Procedures, functions
+and triggers come with their bodies.
+
+| Database | Example connection string |
+| --- | --- |
+| PostgreSQL | `Host=db.example.com;Database=shop;Username=reader;Password=…;SSL Mode=Require` |
+| SQL Server | `Server=db.example.com,1433;Database=shop;User ID=reader;Password=…;Encrypt=True` |
+| MySQL / MariaDB | `Server=db.example.com;Database=shop;User ID=reader;Password=…` |
+| Oracle | `Data Source=db.example.com:1521/FREEPDB1;User Id=reader;Password=…` (the user's own schema unless you list schemas) |
 
 On a team server only server administrators can add connections, and hosts on private networks are refused unless
-an administrator allows them (`Meridian:Integrations:AllowPrivateNetworks`). SQL Server and Oracle have no live
-connection — import their DDL (or a `.dacpac`) instead.
+an administrator allows them (`Meridian:Integrations:AllowPrivateNetworks`). Connections the server can't check —
+SQL Server named pipes or LocalDB, Oracle TNS aliases, several hosts — are refused there; the desktop app connects to
+anything. SQL Server signs in with SQL logins (or an access token); Windows authentication over named pipes is not
+available.
 
 ## Database diagrams
 
@@ -54,7 +65,7 @@ unique ones and `*` after mandatory columns; the type is on the right. Views hav
 crow's-foot ends — many at the referencing table, one (bar) or zero-or-one (circle, when the column is nullable) at
 the referenced table — and run from column to column when the tables sit side by side.
 
-* Ribbon **Database ▸ Groups ▸ Columns**: show all columns, **keys only**, or none.
+* Ribbon **Database ▸ Subject areas ▸ Columns**: show all columns, **keys only**, or none.
 * **New table** adds a table to the selected schema and the open diagram. The shapes panel also has views,
   materialized views and logical **entities** (a table *realizes* the entity it implements).
 * Draw a **Foreign Key** from a **column row** to another table: that column references the other table's primary
@@ -71,6 +82,10 @@ Add indexes, unique or check constraints and triggers below it. Columns have ide
 collation fields; foreign keys their *on delete* / *on update* actions; the database its dialect and naming
 convention.
 
+Procedures, functions and triggers keep their **body** exactly as the script or the database had it — select one to
+see and edit it in a monospace field (with the routine's parameters, return type, language and options such as
+`STABLE` or `DETERMINISTIC`). Bodies are generated in DDL and migration scripts for the dialect they were written in.
+
 Renaming a column updates the foreign keys, indexes and constraints that use it. **Validate** (F7) checks tables
 without a primary key, foreign keys whose types don't match, duplicate names, reserved words of the database's
 dialect, the naming convention (snake_case, PascalCase or camelCase) and tables in no subject area.
@@ -81,14 +96,14 @@ and allocate blocks or data items to them.
 ## Subject areas
 
 A subject area groups tables by topic, independently of schemas — a table can be in several. Select tables and use
-ribbon **Database ▸ Add to group**, or **Groups ▸ Subject areas…** to create, rename, colour and fill them.
+ribbon **Database ▸ Add to subject area**, or **Subject areas ▸ Subject areas…** to create, rename, colour and fill them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/database-groups-dark.png">
   <img src="../images/database-groups-light.png" alt="The Subject areas dialog with the Customers and Ordering areas, colours and the tables of Ordering">
 </picture>
 
-Areas appear as coloured frames on database diagrams. **Groups ▸ Show on this diagram** filters a diagram to one
+Areas appear as coloured frames on database diagrams. **Subject areas ▸ Show on this diagram** filters a diagram to one
 area, the model explorer has a chip per area, and DDL and the data dictionary can be generated for an area. Areas
 are packages, so **package permissions** set on an area apply to its tables.
 
@@ -116,7 +131,8 @@ areas and diagram layout are never overwritten.
 
 **Generate DDL…** writes the CREATE script for a database, schema, subject area or the selected tables, for
 PostgreSQL, SQL Server, MySQL, SQLite or Oracle: schemas and types first, tables in dependency order, indexes, then
-foreign keys, views and comments. Copy it or download a `.sql` file.
+foreign keys, views, comments, routines and triggers (with each dialect's batch syntax: `GO`, `DELIMITER $$`, `/`).
+Copy it or download a `.sql` file.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/database-ddl-dark.png">
@@ -126,7 +142,17 @@ foreign keys, views and comments. Copy it or download a `.sql` file.
 **Migration script…** writes the ALTER statements that turn what a database has now into the model: choose an empty
 database, a committed version, a baseline, another branch, a live connection or a pasted script as the starting
 point. Steps that can lose data or fail on existing rows — drops, type changes, `SET NOT NULL` — are marked
-`-- WARNING:` and listed above the script.
+`-- WARNING:` and listed above the script. Changed procedures, functions and triggers are replaced
+(`CREATE OR REPLACE`, `CREATE OR ALTER`, or drop and create, per dialect).
+
+**Renames keep your data.** Against a committed version, a baseline or another branch, Meridian knows which table or
+column you renamed and writes a rename (`ALTER TABLE … RENAME COLUMN`, `sp_rename` …) instead of dropping and adding
+it. A live database or a pasted script can't tell, so the dialog lists **Possible renames** — a column that disappeared
+and one of the same type that appeared, a table with mostly the same columns under a new name — each with a check
+box: tick the ones that really are renames.
+
+Constraints the database named itself (a foreign key declared without a name, SQL Server defaults) are dropped by a
+short script that looks the generated name up in the database's catalog, so the script runs as is.
 
 ## Data dictionary
 

@@ -80,7 +80,7 @@ public partial class Workbench
         }
         catch (InvalidOperationException ex)
         {
-            Snackbar.Add("Import failed: " + ex.Message, Severity.Error);
+            Snackbar.Add($"Could not import the schema: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
             return null;
         }
     }
@@ -119,7 +119,7 @@ public partial class Workbench
         catch (InvalidOperationException ex)
         {
             Ws.SetCodeChanges(null);
-            Snackbar.Add("Refresh failed: " + ex.Message, Severity.Error);
+            Snackbar.Add($"Could not refresh from the database: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
             return null;
         }
     }
@@ -269,7 +269,7 @@ public partial class Workbench
         else await DownloadText(name + ".csv", "text/csv", DataDictionary.Csv(Ws.Model, scope));
     }
 
-    private async Task DataDictionaryReport() =>
+    public async Task DataDictionaryReport() =>
         await Dialogs.ShowAsync<ReportDialog>("Generate document",
             new DialogParameters<ReportDialog> { { x => x.Preselect, Meridian.Serialization.Reports.ReportTemplates.DataDictionary().Name } },
             new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false });

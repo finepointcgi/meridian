@@ -34,6 +34,9 @@ public static class ModelRedactor
     /// </summary>
     public static int Redact(ModelRepository model, AccessView view)
     {
+        // Library-update suspect marks of the earlier format name library elements: rewrite them to ids only, whatever is hidden
+        // (the current format never names anything; see LibraryChangeMark).
+        Libraries.LibraryChangeMark.UpgradeLegacy(model);
         if (!view.HidesAnything) return 0;
         var hidden = new HashSet<Element>(model.AllElements.Where(view.IsHidden), ReferenceEqualityComparer.Instance);
         if (hidden.Count == 0) return 0;

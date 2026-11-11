@@ -8,6 +8,13 @@ namespace Meridian.Web.Services;
 /// <summary>A tab in a session. <paramref name="CanEdit"/> is false for viewers: their operations are refused by the session, not only by their own replica.</summary>
 public sealed record Presence(string ParticipantId, UserAccount User, string? SelectedId, string? DiagramId, bool CanEdit = true);
 
+/// <summary>What the session did with a batch (<see cref="ProjectSession.SubmitBatch"/>): accepted as operations up to
+/// <paramref name="Sequence"/>, or refused for the reason in <paramref name="Refused"/>.</summary>
+public sealed record SubmitResult(long Sequence, string? Refused)
+{
+    public bool Accepted => Refused is null;
+}
+
 /// <summary>
 /// Live collaboration. One <see cref="ProjectSession"/> per open project holds the authoritative model; every
 /// browser tab keeps a replica, submits its operations here, and receives everyone else's in a single global order.
@@ -45,6 +52,7 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
                     BranchId = branchId,
                     BranchName = branchName ?? Branching.MainBranch,
                     Events = events,
+                    Hub = this,
                 };
                 session.InitRules(await LoadRulesAsync(projectId));
                 session.InitLibraries(libraries);
@@ -90,6 +98,39 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
 
     /// <summary>Every live session of a project (main and branches).</summary>
     public IEnumerable<ProjectSession> SessionsOf(Guid projectId) => _sessions.Where(kv => kv.Key.Project == projectId).Select(kv => kv.Value);
+
+    /// <summary>"Library changed upstream" notices after a commit (<see cref="Libraries.LibraryNotices"/>); a failure is logged, never thrown.</summary>
+    public async Task LibraryNoticesAsync(Guid projectId, Guid? branchId, int number, string modelJson)
+    {
+        try { await Libraries.LibraryNotices.VersionCommittedAsync(db, this, projectId, branchId, number, modelJson); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException or System.Text.Json.JsonException)
+        {
+            log.LogWarning(ex, "Library update notices for project {Project} v{Number} failed", projectId, number);
+        }
+    }
+
+    /// <summary>
+    /// Changes the stored head of a line (null branch = main) that nobody has open, as the system: <paramref name="change"/> gets
+    /// the stored document and returns the new one (or null to leave it), which is saved as the head and committed as a version
+    /// with <paramref name="message"/> (no author). No session can open the line meanwhile. Returns null when the line is open
+    /// (change it through its live session), gone, or unchanged.
+    /// </summary>
+    internal async Task<(int Version, T Result)?> ChangeClosedLineAsync<T>(Guid projectId, Guid? branchId, string message,
+                                                                          Func<string, Task<(string Json, T Result)?>> change)
+    {
+        await _openGate.WaitAsync();
+        try
+        {
+            if (_sessions.ContainsKey((projectId, branchId))) return null;
+            string? head = branchId is { } b ? (await db.LoadBranchAsync(b))?.HeadJson : (await db.LoadProjectAsync(projectId))?.ModelJson;
+            if (head is null || await change(head) is not { } changed) return null;
+            if (branchId is { } branch) await db.SaveBranchAsync(branch, changed.Json, null);
+            else await db.SaveProjectAsync(projectId, changed.Json, null);
+            var version = await db.CommitBranchVersionAsync(projectId, branchId, message, changed.Json, null);
+            return (version.Number, changed.Result);
+        }
+        finally { _openGate.Release(); }
+    }
 }
 
 /// <summary>What a session needs from a connected browser tab. Calls are made while the session lock is held, so
@@ -97,12 +138,44 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
 public interface ISessionClient
 {
     void RemoteOp(ModelOp op);
+
+    /// <summary>
+    /// Someone else's operation, number <paramref name="sequence"/> in the session's order. Operations, acknowledgements and
+    /// replacements reach a client in that order (one FIFO channel), which is what lets it rebase (docs/COLLABORATION.md).
+    /// </summary>
+    void RemoteOp(ModelOp op, long sequence) => RemoteOp(op);
+
+    /// <summary>
+    /// The session applied this client's batch (<see cref="ProjectSession.SubmitBatch"/>); its last operation is number
+    /// <paramref name="sequence"/>. Everything ordered before it has been sent to this client already.
+    /// </summary>
+    void Acked(long sequence) { }
+
     void PresenceChanged();
-    void Reset(string modelJson);
+    void Reset(SessionModel model);
     void CommentsChanged();
 
     /// <summary>The whole model was replaced (merge, or an edit rejected by an element lock); <paramref name="message"/> explains why.</summary>
-    void Replaced(string modelJson, string message) => Reset(modelJson);
+    void Replaced(SessionModel model, string message) => Reset(model);
+}
+
+/// <summary>
+/// The model a session sends a tab that must start over (version restore, merge, a rejected edit, changed permissions). The tab
+/// calls <see cref="CreateReplica"/> on its own thread, outside the session lock: either a copy of a frozen replica of the
+/// authoritative model that every recipient shares (<see cref="ModelRepository.CreateReplica"/>), or, for a filtered view, its
+/// own snapshot document parsed.
+/// </summary>
+public sealed class SessionModel
+{
+    private readonly ModelRepository? _frozen;
+    private readonly string? _json;
+
+    /// <param name="frozen">A replica nobody edits (only copied).</param>
+    internal SessionModel(ModelRepository frozen) => _frozen = frozen;
+    internal SessionModel(string json) => _json = json;
+
+    /// <summary>A model for the receiving tab to edit (a new one on every call; any thread).</summary>
+    public ModelRepository CreateReplica() => _frozen?.CreateReplica() ?? ProjectFile.Deserialize(_json!);
 }
 
 public sealed partial class ProjectSession : IDisposable
@@ -126,6 +199,7 @@ public sealed partial class ProjectSession : IDisposable
         _log = log;
         _onEmpty = onEmpty;
         _persistTimer = new Timer(_ => _ = PersistIfDueAsync(), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        UpgradeMarks(_master);   // earlier library-update marks named library elements: ids only from here on (ProjectSession.Libraries.cs)
     }
 
     public Guid ProjectId { get; }
@@ -208,19 +282,42 @@ public sealed partial class ProjectSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Applies one user action's operations as a batch — the path every tab uses (docs/COLLABORATION.md). The batch is checked
+    /// first (role, package permissions, element locks, ownership cycles against the current model) and then applied and
+    /// relayed all or nothing, in the session's single order; the author gets an acknowledgement through its ordered channel
+    /// (<see cref="ISessionClient.Acked"/>). A refused batch changes nothing here and is not relayed: the result says why, and
+    /// the author's replica takes the batch back itself (no resynchronisation, no lost history).
+    /// </summary>
+    public SubmitResult SubmitBatch(string participantId, Guid userId, IReadOnlyList<ModelOp> ops)
+    {
+        lock (_gate)
+        {
+            if (!_participants.TryGetValue(participantId, out var me)) return new SubmitResult(Sequence, "You are not connected to this project.");
+            if (_rejecting.Contains(participantId)) return new SubmitResult(Sequence, "Your view of the model is being refreshed — try again in a moment.");
+            foreach (var op in ops)
+                if (EditProblem(participantId, userId, op) is { } why) return new SubmitResult(Sequence, why);
+            if (Core.Collaboration.BatchCheck.MoveCycle(_master, ops) is { } cycle) return new SubmitResult(Sequence, cycle);
+            foreach (var op in ops) ApplyLocked(participantId, userId, op);
+            me.Client.Acked(Sequence);
+            return new SubmitResult(Sequence, null);
+        }
+    }
+
     /// <summary>Applies an allowed operation and relays it (under the session lock).</summary>
     private void ApplyLocked(string participantId, Guid userId, ModelOp op, bool events = true)
     {
         var probes = ProbeFiltered(participantId, op);       // what participants with hidden packages may receive (ProjectSession.Permissions.cs)
-        _snapshotSequence = -1;   // the cached snapshot (ProjectSession.Snapshot.cs) is stale from here on
+        InvalidateSnapshots();   // the cached snapshot and frozen replica (ProjectSession.Snapshot.cs) are stale from here on
         _master.ApplyRemote(op);
         ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
         if (events) Events?.OperationApplied(ProjectId, Name, userId, op, _master);
         Sequence++;
         MarkDirty();
         _lastEditor = userId;
+        TrackUncommitted(participantId, userId, op);   // who edited what since the last commit (ProjectSession.History.cs)
         foreach (var (id, p) in _participants)
-            if (id != participantId) Relay(id, p.Client, op, probes);
+            if (id != participantId) Relay(id, p.Client, op, Sequence, probes);
     }
 
     public void UpdatePresence(string participantId, string? selectedId, string? diagramId)
@@ -249,19 +346,33 @@ public sealed partial class ProjectSession : IDisposable
                 var view = ViewOfUser(userId) ?? throw new PermissionDeniedException("Open the project before restoring a version.");
                 if (Core.Permissions.PermissionCheck.CheckReplace(_master, restored, view) is { } why) throw new PermissionDeniedException(why);
             }
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             _master = restored;
             ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
             _stale.Clear();
-            foreach (var (id, p) in _participants) p.Client.Reset(SnapshotLocked(id, modelJson));   // filtered per participant
+            ForgetUncommitted();   // a restore replaces everything: element history compares with the last commit instead
+            foreach (var (id, p) in _participants) p.Client.Reset(ModelForLocked(id, modelJson));   // filtered per participant
         }
     }
 
     /// <summary>Tells integrations (webhooks) that a version was committed.</summary>
     public void NotifyVersionCommitted(int number, string message, UserAccount? author) => Events?.VersionCommitted(ProjectId, Name, number, message, author);
+
+    /// <summary>The hub this session belongs to (null in tests that build sessions directly).</summary>
+    internal CollaborationHub? Hub { get; init; }
+
+    /// <summary>
+    /// After a version was committed: webhooks, and "library changed upstream" notices for the projects that use this one
+    /// (<see cref="CollaborationHub.LibraryNoticesAsync"/>). A failed notice is logged; it never fails the commit.
+    /// </summary>
+    public async Task VersionCommittedAsync(int number, string message, string modelJson, UserAccount? author)
+    {
+        NotifyVersionCommitted(number, message, author);
+        if (Hub is not null) await Hub.LibraryNoticesAsync(ProjectId, BranchId, number, modelJson);
+    }
 
     public void NotifyComments()
     {
