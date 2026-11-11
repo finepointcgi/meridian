@@ -121,6 +121,16 @@ internal static class Program
             case "save":
                 _ = SaveFileAsync((string?)msg!["name"] ?? "download", (string?)msg["data"] ?? "");
                 break;
+            // Large files arrive in base64 chunks (the page streams them from a one-time download URL).
+            case "saveBegin":
+                BeginChunkedSave((string?)msg!["id"], (string?)msg["name"] ?? "download");
+                break;
+            case "saveChunk":
+                AppendChunk((string?)msg!["id"], (string?)msg["data"] ?? "");
+                break;
+            case "saveEnd":
+                _ = EndChunkedSaveAsync((string?)msg!["id"], (bool?)msg["ok"] ?? true);
+                break;
             case "openFile":
                 _ = PickAndOpenAsync();
                 break;
@@ -653,6 +663,19 @@ internal static class Program
     {
         byte[] bytes;
         try { bytes = Convert.FromBase64String(base64); } catch (FormatException) { return; }
+        try
+        {
+            var target = await ChooseSavePathAsync(name);
+            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
+            if (target == null) return;
+            await File.WriteAllBytesAsync(target, bytes);
+        }
+        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
+    }
+
+    /// <summary>Shows the save dialog pre-filled with <paramref name="name"/>; null when cancelled.</summary>
+    private static async Task<string?> ChooseSavePathAsync(string name)
+    {
         var ext = Path.GetExtension(name).TrimStart('.');
         var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
         var tcs = new TaskCompletionSource<string?>();
@@ -670,14 +693,75 @@ internal static class Program
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         }));
+        var target = await tcs.Task;
+        if (string.IsNullOrEmpty(target)) return null;
+        if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
+        return target;
+    }
+
+    // Chunked saves: the page sends saveBegin, any number of saveChunk (base64) and saveEnd. Chunks go to a temp file, so a
+    // multi-gigabyte document never sits in memory; the save dialog comes up at the end and the file is moved into place.
+    private sealed record ChunkedSave(string Name, string TempPath, FileStream Stream);
+    private static readonly Dictionary<string, ChunkedSave> _saves = new(StringComparer.Ordinal);
+    private const int MaxConcurrentSaves = 4;
+    private const long MaxChunkedSaveBytes = 16L * 1024 * 1024 * 1024;
+
+    private static void BeginChunkedSave(string? id, string name)
+    {
+        if (id is not { Length: > 0 and <= 64 }) return;
+        lock (_saves)
+        {
+            if (_saves.ContainsKey(id) || _saves.Count >= MaxConcurrentSaves) return;
+            var temp = Path.Combine(Path.GetTempPath(), "meridian-save-" + Guid.NewGuid().ToString("N") + ".part");
+            try { _saves[id] = new ChunkedSave(name, temp, new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16)); }
+            catch (IOException ex) { Log($"Save {name}: cannot create a temp file: {ex.Message}"); }
+        }
+    }
+
+    private static void AppendChunk(string? id, string base64)
+    {
+        if (id == null) return;
+        lock (_saves)
+        {
+            if (!_saves.TryGetValue(id, out var save)) return;
+            try
+            {
+                var bytes = Convert.FromBase64String(base64);
+                if (save.Stream.Length + bytes.Length > MaxChunkedSaveBytes) throw new IOException("the file is larger than 16 GB");
+                save.Stream.Write(bytes);
+            }
+            catch (Exception ex) when (ex is FormatException or IOException)
+            {
+                Log($"Save {save.Name} failed: {ex.Message}");
+                _saves.Remove(id);
+                save.Stream.Dispose();
+                TryDelete(save.TempPath);
+            }
+        }
+    }
+
+    private static async Task EndChunkedSaveAsync(string? id, bool ok)
+    {
+        ChunkedSave? save;
+        lock (_saves)
+        {
+            if (id == null || !_saves.Remove(id, out save)) return;
+            save.Stream.Dispose();
+        }
         try
         {
-            var target = await tcs.Task;
-            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
-            if (string.IsNullOrEmpty(target)) return;
-            if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
-            await File.WriteAllBytesAsync(target, bytes);
+            if (!ok) return;
+            var target = await ChooseSavePathAsync(save.Name);
+            Log($"Save {save.Name} ({new FileInfo(save.TempPath).Length} bytes, chunked): dialog returned '{target}'.");
+            if (target == null) return;
+            File.Move(save.TempPath, target, overwrite: true);
         }
-        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
+        catch (Exception ex) { Log($"Save {save.Name} failed: {ex}"); }
+        finally { TryDelete(save.TempPath); }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 }

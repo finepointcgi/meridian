@@ -19,6 +19,9 @@ public sealed class ResolveOptions
     public int MaxIterations { get; init; } = 1_000_000;
     /// <summary>Upper bound on the number of paragraphs, headings, tables and figures produced.</summary>
     public int MaxNodes { get; init; } = 500_000;
+    /// <summary>A traceability matrix with more cells than this lists only the rows and columns that have a relationship
+    /// (a whole-model requirement × block matrix would otherwise be hundreds of millions of mostly empty cells).</summary>
+    public int MaxMatrixCells { get; init; } = 250_000;
 }
 
 /// <summary>
@@ -459,6 +462,20 @@ public sealed class DocResolver
         var caption = Sub(Default(x.Caption, "Traceability matrix"), sc, count: rows.Count);
         var per = Math.Clamp(x.MaxColumns, 3, 60);
         if (cols.Count == 0) cols = [];
+        // Too big to read (or lay out): keep the related rows / columns only, and per continuation table the rows it marks.
+        var sparse = (long)rows.Count * cols.Count > _o.MaxMatrixCells;
+        if (sparse)
+        {
+            var (allRows, allCols) = (rows.Count, cols.Count);
+            var rowSet = rows.ToHashSet();
+            bool Related(Element e, HashSet<Element> others) => _m.RelationshipsOf(e).Any(rel =>
+                (kinds == null || kinds.Contains(rel.Kind)) && others.Contains(ReferenceEquals(rel.Source, e) ? rel.Target : rel.Source));
+            cols = cols.Where(c => Related(c, rowSet)).ToList();
+            var colSet = cols.ToHashSet();
+            rows = rows.Where(r => Related(r, colSet)).ToList();
+            Emit(ParagraphNode.Plain($"The full matrix would have {allRows:N0} rows × {allCols:N0} columns; only the {rows.Count:N0} rows and " +
+                                     $"{cols.Count:N0} columns with a relationship are shown, and each part lists only the rows it marks.", italic: true));
+        }
         var chunks = cols.Count == 0 ? 1 : (cols.Count + per - 1) / per;
         Caption? first = null;
         for (var c = 0; c < chunks; c++)
@@ -466,7 +483,7 @@ public sealed class DocResolver
             var part = cols.Skip(c * per).Take(per).ToList();
             var headers = new List<string> { "" };
             headers.AddRange(part.Select(Short));
-            var body = rows.Select(r =>
+            var body = (sparse ? rows.Where(r => part.Any(col => links.Contains((r, col)))) : rows).Select(r =>
             {
                 var row = new List<string> { Short(r) };
                 row.AddRange(part.Select(col => links.Contains((r, col)) ? "X" : ""));

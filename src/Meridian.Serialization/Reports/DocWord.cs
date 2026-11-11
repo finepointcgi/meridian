@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -25,7 +26,7 @@ public sealed class DocWord
     private readonly IProgress<ReportProgress>? _progress;
     private readonly CancellationToken _ct;
     private MainDocumentPart _main = null!;
-    private Body _body = null!;
+    private BodySink _body = null!;
     private string _headerId = "", _footerId = "";
     private int _bookmarkId, _drawingId = 1, _nextNumId = 3;
     private readonly int _pageW, _pageH;
@@ -42,34 +43,96 @@ public sealed class DocWord
     public static byte[] Write(ResolvedDocument doc, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
     {
         using var ms = new MemoryStream();
-        using (var w = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
-            new DocWord(doc, progress, ct).Build(w);
+        Write(doc, ms, progress, ct);
         return ms.ToArray();
     }
 
-    private void Build(WordprocessingDocument w)
+    /// <summary>
+    /// Writes the package into <paramref name="output"/> (any writable stream; left open). The body — nearly all of a big
+    /// document — is streamed element by element to a temporary file instead of being held as an Open XML DOM; the small
+    /// parts (styles, numbering, header / footer, images) are built with the SDK, and the two are zipped together at the end.
+    /// </summary>
+    public static void Write(ResolvedDocument doc, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
+    {
+        var bodyPath = Path.Combine(Path.GetTempPath(), "meridian-docx-" + Guid.NewGuid().ToString("N") + ".xml");
+        try
+        {
+            using var scratch = new MemoryStream();
+            string mainPart;
+            using (var w = WordprocessingDocument.Create(scratch, WordprocessingDocumentType.Document))
+            using (var body = new FileStream(bodyPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
+                mainPart = new DocWord(doc, progress, ct).Build(w, body);
+
+            scratch.Position = 0;
+            using var package = new ZipArchive(scratch, ZipArchiveMode.Read);
+            using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var entry in package.Entries)
+            {
+                ct.ThrowIfCancellationRequested();
+                var isMain = entry.FullName == mainPart;
+                using var to = zip.CreateEntry(entry.FullName, isMain ? CompressionLevel.Fastest : CompressionLevel.Optimal).Open();
+                using var from = isMain ? new FileStream(bodyPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan) : entry.Open();
+                from.CopyTo(to);
+            }
+        }
+        finally
+        {
+            try { File.Delete(bodyPath); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>Namespaces declared once on the streamed document element, so body elements don't repeat them.</summary>
+    private static readonly KeyValuePair<string, string>[] BodyNamespaces =
+    [
+        new("w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main"),
+        new("r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships"),
+        new("wp", "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"),
+        new("a", "http://schemas.openxmlformats.org/drawingml/2006/main"),
+        new("pic", "http://schemas.openxmlformats.org/drawingml/2006/picture"),
+        new("asvg", "http://schemas.microsoft.com/office/drawing/2016/SVG/main"),
+    ];
+
+    /// <summary>Body elements go straight to the streamed document.xml.</summary>
+    private sealed class BodySink(OpenXmlWriter writer)
+    {
+        public void Append(OpenXmlElement element) => writer.WriteElement(element);
+    }
+
+    /// <summary>Builds the package parts in <paramref name="w"/> and streams document.xml into <paramref name="bodyXml"/>;
+    /// returns the zip entry name of the main part, which the streamed XML replaces.</summary>
+    private string Build(WordprocessingDocument w, Stream bodyXml)
     {
         _main = w.AddMainDocumentPart();
-        _main.Document = new Document(new Body());
-        _body = _main.Document.Body!;
+        _main.Document = new Document(new Body());   // placeholder: replaced by the streamed document.xml
         AddStyles();
         AddNumbering();
         var settings = _main.AddNewPart<DocumentSettingsPart>();
         settings.Settings = new Settings(new UpdateFieldsOnOpen { Val = true });
         AddHeaderFooter();
 
-        var nodes = _doc.Nodes;
-        for (var i = 0; i < nodes.Count; i++)
+        using (var writer = OpenXmlWriter.Create(bodyXml))
         {
-            if (i % 50 == 0)
+            writer.WriteStartDocument(true);
+            writer.WriteStartElement(new Document(), [], BodyNamespaces);
+            writer.WriteStartElement(new Body());
+            _body = new BodySink(writer);
+            var nodes = _doc.Nodes;
+            for (var i = 0; i < nodes.Count; i++)
             {
-                _ct.ThrowIfCancellationRequested();
-                _progress?.Report(new ReportProgress("Writing Word document", (double)i / nodes.Count));
+                if (i % 50 == 0)
+                {
+                    _ct.ThrowIfCancellationRequested();
+                    _progress?.Report(new ReportProgress("Writing Word document", (double)i / nodes.Count));
+                }
+                Node(nodes[i], i > 0 ? nodes[i - 1] : null);
             }
-            Node(nodes[i], i > 0 ? nodes[i - 1] : null);
+            _body.Append(SectionProps(_landscape));
+            writer.WriteEndElement();
+            writer.WriteEndElement();
+            writer.Close();
         }
-        _body.Append(SectionProps(_landscape));
         _main.Document.Save();
+        return _main.Uri.OriginalString.TrimStart('/');
     }
 
     // ================================================================== nodes

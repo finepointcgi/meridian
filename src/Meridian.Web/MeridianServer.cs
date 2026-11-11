@@ -57,6 +57,8 @@ public static class MeridianServer
                 ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database.")));
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddSingleton<ImageCache>();
+        // One-time URLs for large generated documents; smaller files go inline (Meridian:Downloads:InlineLimitBytes).
+        builder.Services.AddSingleton(_ => new FileDownloads { InlineLimit = builder.Configuration.GetValue("Meridian:Downloads:InlineLimitBytes", 4 * 1024 * 1024) });
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddScoped<ReviewService>();
         builder.Services.AddScoped<MobileUiState>();   // phone / tablet shell state (Components/Mobile)
@@ -149,6 +151,7 @@ public static class MeridianServer
         app.MapStaticAssets();
         Hosting.OperationsHosting.MapMeridianHealth(app);
         ImageCache.Map(app);
+        FileDownloads.Map(app);
         app.MapDesktopUpdates(host);   // GET /api/desktop/latest + files when Meridian:Desktop:UpdatesPath is set (docs/RELEASING.md)
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();

@@ -64,12 +64,21 @@ public static class CameoScenarios
         time("Derivation stale check (all diagrams)", () => m.Diagrams.Count(d => DiagramDerivation.IsStale(m, d)));
 
         // ---------------------------------------------------------------- reports, auto diagrams, code sync
-        time("HTML report (HtmlReport)", () => HtmlReport.Generate(m).Length);
-        time("SRS template report (HTML)", () =>
+        time("HTML report (HtmlReport)", () => (int)Bench.HtmlReport(m));
+        time("SRS template report (HTML)", () => (int)Bench.Template(m, ReportTemplates.Srs(), ReportFormat.Html));
+        // Single runs with peak managed heap (above the pre-run baseline) and total allocations.
+        if (!skip("report"))
         {
-            try { return ReportEngine.Generate(m, ReportTemplates.Srs(), ReportFormat.Html).Length; }
-            catch (OverflowException) { Console.WriteLine("  (SRS report: the document exceeds the 2 GB string limit)"); return -1; }
-        });
+            Measure("Report peak: HTML report", () => Bench.HtmlReport(m));
+            foreach (var (label, t) in new[] { ("SRS", ReportTemplates.Srs()), ("SDD", ReportTemplates.Sdd()) })
+                foreach (var f in new[] { ReportFormat.Html, ReportFormat.Docx, ReportFormat.Pdf })
+                {
+                    if (label == "SRS" && f != ReportFormat.Html) continue;
+                    Measure($"Report peak: {label} ({f})", () => Bench.Template(m, t, f));
+                }
+            // The whole 16k × blocks matrix, cell by cell (what the 2 GB string limit used to stop): streaming alone.
+            Measure("Report peak: SDD (Html, full matrix)", () => Bench.Template(m, ReportTemplates.Sdd(), ReportFormat.Html, new ResolveOptions { MaxMatrixCells = int.MaxValue }));
+        }
         time("AutoDiagrammer plan (whole model)", () => AutoDiagrammer.Plan(m).Diagrams.Count);
         timeOnce("Code-sync apply (300 types)", copy => CodeModelMapper.Apply(copy, SyntheticCode(300), new CodeSyncOptions { RepoId = "gh:bench", Commit = "c1", RootPackage = "Flight Software" }).Added.Count);
 
@@ -92,6 +101,40 @@ public static class CameoScenarios
             SqliteConnection.ClearAllPools();
             foreach (var f in new[] { path, path + "-wal", path + "-shm" }) try { File.Delete(f); } catch (IOException) { }
         });
+    }
+
+    /// <summary>Runs <paramref name="work"/> once and prints wall time, peak managed heap above the starting heap
+    /// (sampled every 2 ms) and bytes allocated. Exceptions are printed instead of thrown.</summary>
+    private static void Measure(string name, Func<long> work)
+    {
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        var baseline = GC.GetTotalMemory(true);
+        var alloc0 = GC.GetTotalAllocatedBytes(true);
+        long peak = baseline;
+        using var stop = new CancellationTokenSource();
+        var sampler = new Thread(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var now = GC.GetTotalMemory(false);
+                if (now > Interlocked.Read(ref peak)) Interlocked.Exchange(ref peak, now);
+                Thread.Sleep(2);
+            }
+        }) { IsBackground = true };
+        sampler.Start();
+        var t = Stopwatch.StartNew();
+        string note;
+        try
+        {
+            var bytes = work();
+            note = $"output {bytes / 1024.0 / 1024:N1} MB";
+        }
+        catch (Exception ex) { note = $"FAILED {ex.GetType().Name}: {ex.Message}"; }
+        var ms = t.Elapsed.TotalMilliseconds;
+        stop.Cancel();
+        sampler.Join();
+        var alloc = GC.GetTotalAllocatedBytes(true) - alloc0;
+        Line(name, ms, $"(peak heap +{(peak - baseline) / 1024.0 / 1024:N0} MB, allocated {alloc / 1024.0 / 1024:N0} MB, {note})");
     }
 
     private static void Line(string name, double ms, string note = "") => Console.WriteLine($"{name,-40} {ms,10:0.0}   {note}");

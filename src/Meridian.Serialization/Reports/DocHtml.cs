@@ -11,7 +11,22 @@ public static class DocHtml
 
     public static string Write(ResolvedDocument doc, IProgress<ReportProgress>? progress = null, CancellationToken ct = default, bool preview = false)
     {
-        var sb = new StringBuilder(64 * 1024);
+        using var sw = new StringWriter(new StringBuilder(64 * 1024), System.Globalization.CultureInfo.InvariantCulture);
+        Write(doc, sw, progress, ct, preview);
+        return sw.ToString();
+    }
+
+    /// <summary>Streams the document to <paramref name="output"/> (flushed, not closed).</summary>
+    public static void Write(ResolvedDocument doc, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default, bool preview = false)
+    {
+        using var w = HtmlSink.Utf8(output);
+        Write(doc, w, progress, ct, preview);
+    }
+
+    /// <summary>Streams the document to <paramref name="writer"/>; nothing is buffered beyond the writer's own buffer.</summary>
+    public static void Write(ResolvedDocument doc, TextWriter writer, IProgress<ReportProgress>? progress = null, CancellationToken ct = default, bool preview = false)
+    {
+        var sb = new HtmlSink(writer);
         sb.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>").Append(E(doc.Title)).Append("</title><style>").Append(Css).Append("</style></head><body>");
         if (doc.Classification.Length > 0) sb.Append("<div class=\"banner top\">").Append(E(doc.Classification)).Append("</div>");
@@ -65,12 +80,12 @@ public static class DocHtml
             sb.Append("</ul></aside>");
         }
         sb.Append("</body></html>");
-        return sb.ToString();
+        writer.Flush();
     }
 
     private static string StripXmlDecl(string svg) => svg.StartsWith("<?xml", StringComparison.Ordinal) ? svg[(svg.IndexOf("?>", StringComparison.Ordinal) + 2)..] : svg;
 
-    private static void TitlePage(StringBuilder sb, ResolvedDocument doc)
+    private static void TitlePage(HtmlSink sb, ResolvedDocument doc)
     {
         sb.Append("<section class=\"title\">");
         if (doc.Organization.Length > 0) sb.Append("<div class=\"org\">").Append(E(doc.Organization)).Append("</div>");
@@ -89,7 +104,7 @@ public static class DocHtml
         sb.Append("</section>");
     }
 
-    private static void Listing(StringBuilder sb, ListingKind kind, ResolvedDocument doc)
+    private static void Listing(HtmlSink sb, ListingKind kind, ResolvedDocument doc)
     {
         sb.Append("<nav class=\"front ").Append(kind.ToString().ToLowerInvariant()).Append("\"><h2 class=\"front\">")
           .Append(kind switch { ListingKind.Contents => "Table of Contents", ListingKind.Figures => "List of Figures", _ => "List of Tables" }).Append("</h2>");
@@ -109,7 +124,7 @@ public static class DocHtml
         sb.Append("</nav>");
     }
 
-    private static void Inlines(StringBuilder sb, IEnumerable<Inline> inlines, ResolvedDocument doc)
+    private static void Inlines(HtmlSink sb, IEnumerable<Inline> inlines, ResolvedDocument doc)
     {
         foreach (var i in inlines)
         {
@@ -133,7 +148,7 @@ public static class DocHtml
         }
     }
 
-    private static void Paragraph(StringBuilder sb, ParagraphNode p, ResolvedDocument doc, IReadOnlyList<DocNode> list, ref int index)
+    private static void Paragraph(HtmlSink sb, ParagraphNode p, ResolvedDocument doc, IReadOnlyList<DocNode> list, ref int index)
     {
         if (p.Kind is ParaKind.Bullet or ParaKind.Numbered)
         {
@@ -165,14 +180,14 @@ public static class DocHtml
         sb.Append(close);
     }
 
-    private static void Caption(StringBuilder sb, Caption c, string tag)
+    private static void Caption(HtmlSink sb, Caption c, string tag)
     {
         sb.Append('<').Append(tag).Append(" class=\"caption\"><b>").Append(E(c.Label)).Append("</b>");
         if (c.Text.Length > 0) sb.Append(": ").Append(E(c.Text));
         sb.Append("</").Append(tag).Append('>');
     }
 
-    private static void Table(StringBuilder sb, TableNode t, ResolvedDocument doc)
+    private static void Table(HtmlSink sb, TableNode t, ResolvedDocument doc)
     {
         sb.Append("<div class=\"tablewrap\"").Append(t.Caption != null ? $" id=\"{t.Caption.Anchor}\"" : "").Append('>');
         sb.Append("<table").Append(t.KeyValue ? " class=\"kv\"" : t.Compact ? " class=\"compact\"" : "").Append('>');

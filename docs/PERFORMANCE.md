@@ -74,6 +74,35 @@ Unchanged (already fine): load 450–550 ms, save 80–180 ms, apply 2,600 remot
 validation 130 ms, traceability table 90–160 ms, ModelDiff 140–160 ms, model search 8 ms, ⌘K element list 3 ms,
 derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–85 ms, AutoDiagrammer plan 530–620 ms.
 
+### Document generation (streamed output)
+
+Reports and template documents are written straight to a `Stream` (`ReportEngine.Generate(…, Stream)`,
+`HtmlReport.Generate(model, Stream)`): HTML through a 64 KB `StreamWriter`, the Word body element by element with an
+`OpenXmlWriter` into a temp file (only styles, numbering, header / footer and images are built as SDK parts), PDF via
+QuestPDF's `GeneratePdf(Stream)`. In the web app the dialog writes into a temp file; files over 4 MB
+(`Meridian:Downloads:InlineLimitBytes`) are handed to the browser as a one-time `/_dl/<token>` URL (signed-in users,
+deleted after one fetch or 10 minutes) instead of one base64 interop string, and the desktop app receives them as 4 MB
+base64 chunks (`saveBegin` / `saveChunk` / `saveEnd`) spooled to a temp file.
+
+A traceability matrix above 250,000 cells (`ResolveOptions.MaxMatrixCells`) lists only the rows and columns that have a
+relationship, and each 20-column part only the rows it marks; a note in the document says so. The SDD's requirement × block
+matrix at 200k is 16k rows × thousands of columns; in full it alone is ~2 GB of HTML and cannot be laid out as Word or PDF.
+
+Single runs, `--quick --elements 200000 --only report`; peak = managed heap above the starting heap, sampled every 2 ms.
+
+| Scenario (200k) | Before | After |
+|---|---|---|
+| HTML report (`HtmlReport`) | 2,127 ms, peak +441 MB, 1,943 MB allocated | 2,164 ms, peak +118 MB, 1,673 MB allocated (80 MB file) |
+| SRS template (HTML) | 507 ms, peak +317 MB, 865 MB allocated | 499 ms, peak +120 MB, 660 MB allocated (41 MB) |
+| SDD template (HTML) | `OverflowException` after 12.2 s, peak +6,330 MB | 4.4 s, peak +187 MB, 1,970 MB allocated (80 MB) |
+| SDD template (Word) | not finished after 15 min (7–9 GB RSS), stopped | 79 s, peak +1,387 MB (278 MB file) |
+| SDD template (PDF) | not run (same 10⁸-cell matrix as Word) | 46 s, peak +1,068 MB (124 MB file) |
+| SDD template (HTML, full matrix, `MaxMatrixCells = int.MaxValue`) | `OverflowException` (above) | 11.2 s, peak +2,172 MB (2,044 MB file) |
+
+The full-matrix row shows streaming alone: the 2 GB document is written, with memory bounded by the resolved
+document rather than the output. Word and PDF are slower (they
+lay out ~1,000 diagrams, and Word rasterizes a PNG fallback for each); where that time goes has not been profiled yet.
+
 ### Other numbers after the changes
 
 | Scenario | 200k | 500k |
@@ -130,8 +159,8 @@ Delivery maxima are the rogue tabs' full resynchronisations (a whole-model snaps
   transformed, and a tab applies its own edit before relayed earlier ones; two tabs writing the same field at the same
   moment can end up with different values until the next resync or reload. Element locks prevent it (the load test edits
   shared elements only under a lock), and a tab should process its inbox after taking a lock before editing.
-- **Template reports of the whole model** can exceed .NET's 2 GB string limit: the SDD template over the 200k project
-  throws `OverflowException` while writing HTML. Scope such reports to a package.
+- **Whole-model Word / PDF documents take tens of seconds** (SDD at 200k: 79 s Word, 46 s PDF) and ~1–1.4 GB of heap,
+  not yet profiled; the resolved document is held in memory before it is written.
 - **Merge** is linear but allocation-heavy (three flat snapshots of the model): ~1.6 s at 200k, ~5.7 s at 500k.
 - **Every open tab holds a full replica** (~130 MB at 200k, ~400 MB at 500k). 25 tabs on a 500k project need ~10 GB of
   server memory; size the server accordingly.

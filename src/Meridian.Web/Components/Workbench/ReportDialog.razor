@@ -231,13 +231,16 @@
                 _ = InvokeAsync(StateHasChanged);
             });
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var bytes = await ReportEngine.GenerateAsync(snapshot, template, format, progress, ct);
-            ct.ThrowIfCancellationRequested();
             var title = DocResolverTitle(template, snapshot);
             var name = string.Join("_", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)) + "." + ReportEngine.Extension(format);
-            await JS.InvokeVoidAsync("meridian.download", name, ReportEngine.MimeType(format), Convert.ToBase64String(bytes));
+            // Streamed into a temp file and delivered by URL when large: whole-model documents can run to gigabytes.
+            var length = await GeneratedDownload.DeliverAsync(Services, JS, name, ReportEngine.MimeType(format), async output =>
+            {
+                await ReportEngine.GenerateAsync(snapshot, template, format, output, progress, ct);
+                ct.ThrowIfCancellationRequested();
+            });
             _progress = 1;
-            _progressText = $"Generated {name} ({bytes.Length / 1024:N0} KB) in {sw.Elapsed.TotalSeconds:0.0} s";
+            _progressText = $"Generated {name} ({length / 1024:N0} KB) in {sw.Elapsed.TotalSeconds:0.0} s";
             Snackbar.Add($"Generated {name}", Severity.Success);
         }
         catch (OperationCanceledException)

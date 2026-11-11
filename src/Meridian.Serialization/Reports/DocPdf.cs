@@ -30,6 +30,16 @@ public static class DocPdf
         return bytes;
     }
 
+    /// <summary>Writes the PDF into <paramref name="output"/> (left open).</summary>
+    public static void Write(ResolvedDocument doc, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
+    {
+        progress?.Report(new ReportProgress("Composing PDF", 0));
+        var document = Compose(doc, ct);
+        progress?.Report(new ReportProgress("Laying out pages", 0.5));
+        document.GeneratePdf(output);
+        progress?.Report(new ReportProgress("PDF written", 1));
+    }
+
     /// <summary>The QuestPDF document (also usable for page images).</summary>
     public static IDocument Compose(ResolvedDocument doc, CancellationToken ct = default)
     {

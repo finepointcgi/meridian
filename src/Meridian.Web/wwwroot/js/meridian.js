@@ -53,6 +53,41 @@ window.meridian = (() => {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     },
+    // A large generated file the server staged behind a one-time URL (FileDownloads): the browser downloads it directly;
+    // the desktop host gets it in base64 chunks (saveBegin / saveChunk / saveEnd), so no single message holds the whole file.
+    downloadUrl: async (name, url) => {
+      const ext = window.external;
+      if (typeof ext?.sendMessage !== "function") {
+        const a = Object.assign(document.createElement("a"), { href: url, download: name });
+        document.body.appendChild(a); a.click(); a.remove();
+        return;
+      }
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`);
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const send = (command, extra) => ext.sendMessage(JSON.stringify({ command, id, ...extra }));
+      const base64 = bytes => new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result.slice(r.result.indexOf(",") + 1));
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(new Blob([bytes]));
+      });
+      send("saveBegin", { name });
+      const reader = res.body.getReader();
+      const limit = 4 * 1024 * 1024;
+      let parts = [], size = 0, ok = false;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (value) { parts.push(value); size += value.length; }
+          if (size >= limit || (done && size > 0)) { send("saveChunk", { data: await base64(new Blob(parts)) }); parts = []; size = 0; }
+          if (done) break;
+        }
+        ok = true;
+      } finally {
+        send("saveEnd", { ok });
+      }
+    },
     openHtml: html => {
       const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
       window.open(url, "_blank");

@@ -22,23 +22,51 @@ public static class ReportEngine
         _ => "text/html",
     };
 
+    /// <summary>Generates into memory. Prefer the <see cref="Stream"/> overload for whole-model documents.</summary>
     public static byte[] Generate(ModelRepository m, DocTemplate t, ReportFormat format, IProgress<ReportProgress>? progress = null,
                                   CancellationToken ct = default, ResolveOptions? options = null)
+    {
+        using var ms = new MemoryStream();
+        Generate(m, t, format, ms, progress, ct, options);
+        return ms.ToArray();
+    }
+
+    /// <summary>Generates straight into <paramref name="output"/> (flushed, left open): HTML is written as it is laid out,
+    /// so a document is not bounded by the 2 GB string / array limits; the Word body is streamed through a temporary file.
+    /// <paramref name="output"/> may be forward-only (an HTTP response).</summary>
+    public static void Generate(ModelRepository m, DocTemplate t, ReportFormat format, Stream output, IProgress<ReportProgress>? progress = null,
+                                CancellationToken ct = default, ResolveOptions? options = null)
     {
         // Resolution is 30 % of the bar, writing the rest.
         var resolveProgress = progress == null ? null : new Scaled(progress, 0, 0.3);
         var doc = DocResolver.Resolve(m, t, options, resolveProgress, ct);
         ct.ThrowIfCancellationRequested();
         var write = progress == null ? null : new Scaled(progress, 0.3, 1);
-        var bytes = format switch
-        {
-            ReportFormat.Pdf => DocPdf.Write(doc, write, ct),
-            ReportFormat.Docx => DocWord.Write(doc, write, ct),
-            _ => System.Text.Encoding.UTF8.GetBytes(DocHtml.Write(doc, write, ct)),
-        };
+        Write(doc, format, output, write, ct);
         progress?.Report(new ReportProgress("Done", 1));
-        return bytes;
     }
+
+    /// <summary>Lays out an already resolved document in <paramref name="format"/>.</summary>
+    public static void Write(ResolvedDocument doc, ReportFormat format, Stream output, IProgress<ReportProgress>? progress = null, CancellationToken ct = default)
+    {
+        switch (format)
+        {
+            case ReportFormat.Pdf: DocPdf.Write(doc, output, progress, ct); break;
+            case ReportFormat.Docx: DocWord.Write(doc, output, progress, ct); break;
+            default: DocHtml.Write(doc, output, progress, ct); break;
+        }
+        output.Flush();
+    }
+
+    /// <summary>A read/write temporary file that is deleted when closed.</summary>
+    public static FileStream TempFile() =>
+        new(Path.Combine(Path.GetTempPath(), "meridian-" + Guid.NewGuid().ToString("N") + ".tmp"), FileMode.CreateNew, FileAccess.ReadWrite,
+            FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
+
+    /// <summary>Generates on a thread-pool thread into <paramref name="output"/>.</summary>
+    public static Task GenerateAsync(ModelRepository m, DocTemplate t, ReportFormat format, Stream output, IProgress<ReportProgress>? progress = null,
+                                     CancellationToken ct = default, ResolveOptions? options = null) =>
+        Task.Run(() => Generate(m, t, format, output, progress, ct, options), ct);
 
     /// <summary>Generates on a thread-pool thread. Pass a <see cref="Snapshot"/> when the live model may change meanwhile.</summary>
     public static Task<byte[]> GenerateAsync(ModelRepository m, DocTemplate t, ReportFormat format, IProgress<ReportProgress>? progress = null,

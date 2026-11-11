@@ -15,7 +15,22 @@ public static class HtmlReport
 
     public static string Generate(ModelRepository model)
     {
-        var sb = new StringBuilder();
+        using var sw = new StringWriter(new StringBuilder(), System.Globalization.CultureInfo.InvariantCulture);
+        Generate(model, sw);
+        return sw.ToString();
+    }
+
+    /// <summary>Streams the report as UTF-8 to <paramref name="output"/> (flushed, not closed).</summary>
+    public static void Generate(ModelRepository model, Stream output)
+    {
+        using var w = HtmlSink.Utf8(output);
+        Generate(model, w);
+    }
+
+    /// <summary>Streams the report to <paramref name="writer"/>, so its size is not bounded by the 2 GB string limit.</summary>
+    public static void Generate(ModelRepository model, TextWriter writer)
+    {
+        var sb = new HtmlSink(writer);
         var cov = Traceability.Coverage(model);
         var issues = new ModelValidator().Validate(model);
         sb.Append($$"""
@@ -81,16 +96,16 @@ public static class HtmlReport
             sb.Append("</table>");
         }
         sb.Append("</main></body></html>");
-        return sb.ToString();
+        writer.Flush();
     }
 
-    private static void Stat(StringBuilder sb, string label, string value) =>
+    private static void Stat(HtmlSink sb, string label, string value) =>
         sb.Append($"<div class=\"stat\"><b>{E(value)}</b><span class=\"muted\">{E(label)}</span></div>");
 
     private static string Links(IEnumerable<Element> els) =>
         string.Join(", ", els.Select(e => $"<a href=\"#{E(e.Id)}\">{E(e.DisplayName)}</a>"));
 
-    private static void ElementSpec(StringBuilder sb, ModelRepository m, Element e)
+    private static void ElementSpec(HtmlSink sb, ModelRepository m, Element e)
     {
         var kw = Metamodel.Keyword(e.Kind) is { } k ? $"«{k}» " : "";
         sb.Append($"<h4 id=\"{E(e.Id)}\"><span class=\"kw\">{E(kw)}{E(Metamodel.DisplayName(e.Kind))}</span> {E(e.DisplayName)}</h4>");

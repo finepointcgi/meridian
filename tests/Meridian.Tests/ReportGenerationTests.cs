@@ -310,6 +310,77 @@ public class ReportGenerationTests
     }
 
     [Fact]
+    public void Oversized_Matrix_Keeps_Only_Related_Rows_And_Columns()
+    {
+        var m = Vehicle();
+        var t = new DocTemplate { Sections = [new DocSection { Title = "M", Blocks = [new TraceMatrixBlock { RowQuery = "kind:Requirement", ColumnQuery = "kind:Block", MaxColumns = 3 }] }] };
+        var full = DocResolver.Resolve(m, t, new ResolveOptions { Date = new DateTime(2026, 1, 2) });
+        var sparse = DocResolver.Resolve(m, t, new ResolveOptions { Date = new DateTime(2026, 1, 2), MaxMatrixCells = 4 });
+
+        var fullTables = full.Nodes.OfType<TableNode>().ToList();
+        var sparseTables = sparse.Nodes.OfType<TableNode>().ToList();
+        Assert.DoesNotContain(full.Nodes.OfType<ParagraphNode>(), p => DocMarkdown.PlainText(p.Inlines, _ => "").Contains("would have"));
+        Assert.Contains(sparse.Nodes.OfType<ParagraphNode>(), p => DocMarkdown.PlainText(p.Inlines, _ => "").Contains("only the"));
+        // Every sparse row marks at least one cell, and no relationship is lost.
+        Assert.All(sparseTables.SelectMany(x => x.Rows), r => Assert.Contains("X", r.Skip(1)));
+        static int Marks(IEnumerable<TableNode> ts) => ts.Sum(x => x.Rows.Sum(r => r.Count(c => c == "X")));
+        Assert.True(Marks(fullTables) > 0);
+        Assert.Equal(Marks(fullTables), Marks(sparseTables));
+        Assert.True(sparseTables.Sum(x => x.Rows.Count * x.Headers.Count) < fullTables.Sum(x => x.Rows.Count * x.Headers.Count));
+    }
+
+    /// <summary>A write-only, non-seekable stream (like an HTTP response body).</summary>
+    private sealed class ForwardOnly(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+    }
+
+    [Fact]
+    public void Streamed_Html_Equals_The_In_Memory_String()
+    {
+        var doc = Resolve(TestTemplate());
+        var html = DocHtml.Write(doc);
+        using var ms = new MemoryStream();
+        ReportEngine.Write(doc, ReportFormat.Html, new ForwardOnly(ms));
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(html), ms.ToArray());   // no BOM, byte for byte
+
+        var m = Vehicle();
+        var report = Meridian.Serialization.HtmlReport.Generate(m);
+        using var rs = new MemoryStream();
+        Meridian.Serialization.HtmlReport.Generate(m, new ForwardOnly(rs));
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(report), rs.ToArray());
+    }
+
+    [Theory]
+    [InlineData(ReportFormat.Docx)]
+    [InlineData(ReportFormat.Pdf)]
+    public void Binary_Formats_Stream_To_Files_And_Forward_Only_Streams(ReportFormat format)
+    {
+        var doc = Resolve(TestTemplate());
+        using var file = ReportEngine.TempFile();
+        ReportEngine.Write(doc, format, file);
+        using var forward = new MemoryStream();
+        ReportEngine.Write(doc, format, new ForwardOnly(forward));
+        foreach (var bytes in new[] { ReadAll(file), forward.ToArray() })
+        {
+            Assert.True(bytes.Length > 1000);
+            if (format == ReportFormat.Pdf) { using var pdf = PdfDocument.Open(bytes); Assert.True(pdf.NumberOfPages > 3); }
+            else { using var w = WordprocessingDocument.Open(new MemoryStream(bytes), false); Assert.Contains("Introduction", w.MainDocumentPart!.Document.InnerText); }
+        }
+
+        static byte[] ReadAll(FileStream f) { f.Position = 0; using var ms = new MemoryStream(); f.CopyTo(ms); return ms.ToArray(); }
+    }
+
+    [Fact]
     public void Html_Is_Single_File_With_Linked_Toc()
     {
         var html = System.Text.Encoding.UTF8.GetString(ReportEngine.Generate(Vehicle(), TestTemplate(), ReportFormat.Html));

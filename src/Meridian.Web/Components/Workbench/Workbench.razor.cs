@@ -980,8 +980,13 @@ public partial class Workbench
     private async Task Download(string fileName, string mime, byte[] bytes)
     {
         await JS.InvokeVoidAsync("meridian.download", fileName, mime, Convert.ToBase64String(bytes));
+        await Downloaded(fileName, mime, bytes.Length);
+    }
+
+    private async Task Downloaded(string fileName, string mime, long length)
+    {
         Ws.Log($"Downloaded {fileName}");
-        if (Ws.Session is { } s) await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectExport, Ws.User, s.ProjectId, s.Name, target: fileName, details: new { mime, bytes = bytes.Length });
+        if (Ws.Session is { } s) await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.ProjectExport, Ws.User, s.ProjectId, s.Name, target: fileName, details: new { mime, bytes = length });
         Ws.SetStatus($"Downloaded {fileName}");
     }
 
@@ -1017,7 +1022,9 @@ public partial class Workbench
     private async Task DownloadReport()
     {
         if (await ModelForExport("HTML report") is not { } model) return;
-        await DownloadText(BaseName + " report.html", "text/html", HtmlReport.Generate(model));
+        var name = BaseName + " report.html";
+        var length = await GeneratedDownload.DeliverAsync(Services, JS, name, "text/html", output => { HtmlReport.Generate(model, output); return Task.CompletedTask; });
+        await Downloaded(name, "text/html", length);
     }
     private async Task OpenReport() => await JS.InvokeVoidAsync("meridian.openHtml", HtmlReport.Generate(Ws.Model));
 
