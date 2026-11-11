@@ -50,6 +50,8 @@ public sealed class JavaCodeReader : HandParsedCodeReader
         public string Package { get; set; } = "";
         public Dictionary<string, string> Single { get; } = new(StringComparer.Ordinal);
         public List<string> OnDemand { get; } = [];
+        /// <summary>Line of each single-type import, by simple name.</summary>
+        public Dictionary<string, int> ImportLines { get; } = new(StringComparer.Ordinal);
     }
 
     private sealed class Session : ParseSession
@@ -66,6 +68,9 @@ public sealed class JavaCodeReader : HandParsedCodeReader
             if (Simple(from, scope, first) is { } head && Index.ContainsKey(head + rest)) return head + rest;
             return Index.ContainsKey(name) ? name : null;
         }
+
+        public override IEnumerable<(string Name, int Line)> Imports(RawType from) =>
+            from.Scope is Scope scope ? scope.ImportLines.Select(kv => (kv.Key, kv.Value)) : [];
 
         private string? Simple(RawType from, Scope scope, string name)
         {
@@ -132,7 +137,12 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                     if (name.Length > 0)
                     {
                         if (star) _scope.OnDemand.Add(name);
-                        else if (!isStatic) _scope.Single[name[(name.LastIndexOf('.') + 1)..]] = name;
+                        else if (!isStatic)
+                        {
+                            var simple = name[(name.LastIndexOf('.') + 1)..];
+                            _scope.Single[simple] = name;
+                            _scope.ImportLines[simple] = t.Line;
+                        }
                         else if (name.Contains('.'))
                         {
                             // import static a.b.Outer.Inner: a nested type can be imported statically.
@@ -339,7 +349,7 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                 {
                     // (static) initializer block
                     var c = TypeExprs.Matching(toks, i, end);
-                    t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, c));
+                    t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, c));
                     i = Math.Min(end, c + 1);
                     continue;
                 }
@@ -365,7 +375,7 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                     if (toks[k].Is("("))
                     {
                         var pc = TypeExprs.Matching(toks, k, end);
-                        foreach (var (par, _) in Params(t, k + 1, pc)) if (par.Type != null) t.BodyRefs.AddRange(par.Type.Names());
+                        foreach (var (par, pline) in Params(t, k + 1, pc)) if (par.Type != null) t.BodyRefs.AddRange(par.Type.Uses(pline, CodeDependencyKind.Param));
                         k = Math.Min(end, pc + 1);
                     }
                     i = SkipThrowsAndBody(t, k, end);
@@ -423,7 +433,7 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                     if (i < end && toks[i].Is("="))
                     {
                         var ie = InitializerEnd(i + 1, end);
-                        t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, ie));
+                        t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, ie));
                         i = ie;
                     }
                     if (i + 1 < end && toks[i].Is(",") && toks[i + 1].Kind == TokKind.Ident)
@@ -461,13 +471,13 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                 if (i < end && toks[i].Is("("))
                 {
                     var c = TypeExprs.Matching(toks, i, end);
-                    t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, c));
+                    t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, c));
                     i = Math.Min(end, c + 1);
                 }
                 if (i < end && toks[i].Is("{"))
                 {
                     var c = TypeExprs.Matching(toks, i, end);
-                    t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, c));
+                    t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, c));
                     i = Math.Min(end, c + 1);
                 }
                 t.Members.Add(new RawMember { Name = nameTok.Text, Kind = CodeMemberKind.EnumValue, Doc = doc ?? nameTok.Doc, Line = nameTok.Line });
@@ -482,13 +492,13 @@ public sealed class JavaCodeReader : HandParsedCodeReader
             while (i < end && !toks[i].Is("{") && !toks[i].Is(";") && !toks[i].Is("}"))
             {
                 if (toks[i].Is("=") || toks[i].Is("(")) break;
-                if (toks[i].Kind == TokKind.Ident && toks[i].Text is not ("throws" or "default")) t.BodyRefs.Add(toks[i].Text);
+                if (toks[i].Kind == TokKind.Ident && toks[i].Text is not ("throws" or "default")) t.BodyRefs.Add(new NameRef(toks[i].Text, toks[i].Line, CodeDependencyKind.Use));
                 i++;
             }
             if (i < end && toks[i].Is("{"))
             {
                 var c = TypeExprs.Matching(toks, i, end);
-                t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, c));
+                t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, c));
                 return Math.Min(end, c + 1);
             }
             if (i < end && toks[i].Is(";")) return i + 1;

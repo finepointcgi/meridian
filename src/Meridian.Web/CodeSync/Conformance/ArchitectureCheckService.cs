@@ -117,15 +117,38 @@ public sealed class ArchitectureCheckService(
         catch (Exception) { /* a closed circuit must not fail a check */ }
     }
 
+    /// <summary>Longest status description the hosts keep (GitHub and GitLab: 140 characters).</summary>
+    public const int MaxDescription = 140;
+
     /// <summary>The status to post: failure with "N violations" only when the repository fails pull requests on them;
-    /// otherwise success with a summary (warnings never fail).</summary>
+    /// otherwise success with a summary (warnings never fail). With violations it cites the first line that breaks the
+    /// architecture ("…, first at src/Thermal/ThermalControl.cs:42"), shortening the path to fit the hosts' limit.</summary>
     public static (CommitState State, string Description) StatusFor(ConformanceResult result, bool failPullRequests)
     {
         if (result.Errors == 0) return (CommitState.Success, result.Warnings == 0 ? "No architecture violations" : $"No architecture violations ({result.Summary})");
         var n = $"{result.Errors} violation{(result.Errors == 1 ? "" : "s")}";
-        return failPullRequests
+        var (state, text) = failPullRequests
             ? (CommitState.Failure, n + (result.Warnings > 0 ? $" ({result.Warnings} warning{(result.Warnings == 1 ? "" : "s")})" : ""))
             : (CommitState.Success, $"{result.Summary} (not enforced)");
+        var first = result.Violations.FirstOrDefault(v => v.Severity == ViolationSeverity.Error && v.FirstLocation.Length > 0);
+        return (state, first is null ? text : Cite(text, first.FirstLocation));
+    }
+
+    /// <summary>"text, first at path:line"; a long path keeps its last folders ("…/Thermal/ThermalControl.cs:42").</summary>
+    private static string Cite(string text, string location)
+    {
+        const string sep = ", first at ";
+        var room = MaxDescription - text.Length - sep.Length;
+        if (room <= 0) return text;
+        if (location.Length > room)
+        {
+            var parts = location.Split('/');
+            var tail = parts[^1];
+            for (var i = parts.Length - 2; i >= 0 && ("…/" + parts[i] + "/" + tail).Length <= room; i--) tail = parts[i] + "/" + tail;
+            location = "…/" + tail;
+            if (location.Length > room) return text;
+        }
+        return text + sep + location;
     }
 
     private async Task<ArchitectureReport> PostAsync(Guid projectId, Guid connectionId, ArchitectureRecord rec, ConformanceResult result, CancellationToken ct)
@@ -152,14 +175,24 @@ public sealed class ArchitectureCheckService(
         return baseUrl is { Length: > 0 } b ? $"{b.TrimEnd('/')}/?project={projectId}&panel={Panel}" : null;
     }
 
-    /// <summary>A link to a file at the synced commit: the commit URL with <c>/commit/</c> → <c>/blob/</c> plus the path
-    /// and line (GitHub, GitLab and Bitbucket shapes); the commit URL itself when it has another shape.</summary>
+    /// <summary>A link to a file and line at the synced commit, from the commit URL:
+    /// GitHub <c>/commit/sha</c> → <c>/blob/sha/path#L12</c>; GitLab <c>/-/commit/sha</c> → <c>/-/blob/sha/path#L12</c>;
+    /// Bitbucket Cloud <c>/commits/sha</c> → <c>/src/sha/path#lines-12</c>; Bitbucket Data Center
+    /// <c>/projects/K/repos/r/commits/sha</c> → <c>/projects/K/repos/r/browse/path?at=sha#12</c>. The commit URL itself when
+    /// it has another shape; null when it is not an http(s) URL.</summary>
     public static string? FileUrl(string? commitUrl, string commit, string? path, int line)
     {
         if (!Uri.TryCreate(commitUrl, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp)) return null;
         if (string.IsNullOrEmpty(path)) return u.ToString();
         var url = u.GetLeftPart(UriPartial.Path).TrimEnd('/');
         var encoded = string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
+        var dc = url.LastIndexOf("/commits/", StringComparison.Ordinal);
+        if (dc > 0 && url.IndexOf("/projects/", StringComparison.Ordinal) is var pi and >= 0 && pi < dc && url.IndexOf("/repos/", pi, StringComparison.Ordinal) is var ri and > 0 && ri < dc)
+        {
+            var sha = url[(dc + "/commits/".Length)..];
+            if (sha.Length == 0) sha = commit;
+            return $"{url[..dc]}/browse/{encoded}?at={Uri.EscapeDataString(sha)}{(line > 0 ? $"#{line}" : "")}";
+        }
         foreach (var (marker, replacement, anchor) in new[] { ("/-/commit/", "/-/blob/", "#L"), ("/commit/", "/blob/", "#L"), ("/commits/", "/src/", "#lines-") })
         {
             var i = url.LastIndexOf(marker, StringComparison.Ordinal);

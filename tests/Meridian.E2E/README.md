@@ -56,6 +56,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `PermissionsTests` | Alice makes a package read-only for Bob (his edit is refused), then hidden (tree, diagrams and REST API lose it at once) |
 | `LibraryTests` | a parts library is used from the Vehicle sample, a part is typed by a library block, a new library version shows the update badge and review, and the part becomes suspect |
 | `LibraryGapsTests` | accepting a library update keeps both open diagram tabs and the active one; *Open in source project* shows the pinned version read-only with *Go to latest*; on a 390×844 phone the model list shows the library (read-only, pin badge) and the update review is a full-screen sheet without horizontal scrolling |
+| `CameoImportTests` | a Cameo `.mdzip` whose sequence diagram has an alt fragment with two operands opens as a new project with the separator where Cameo drew it and both guards |
 | `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
 | `UxTests` | every tour spotlight target is on screen, dialogs fit a 1280×800 window, the tree context menu nests long lists, fits the window and closes with Escape |

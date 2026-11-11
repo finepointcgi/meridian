@@ -82,6 +82,8 @@ different pins it uses the first and tells you.
 
 When you open a Cameo `.mdzip` that uses other Cameo projects (modules), and those projects already exist in Meridian (same
 Cameo project id or the same name), Meridian offers to **use them instead of copying** their content. Copying stays the
-default.
+default. Meridian reads the used projects from the `.mdzip`'s project metadata — local files and Teamwork Cloud projects
+alike — and the import report lists each one as found (only referenced), copied (its shared packages were in the file) or
+linked (used from a Meridian project), with the standard SysML and UML profiles listed apart.
 
 Technical details: [docs/LIBRARIES.md](https://github.com/finepointcgi/meridian/blob/main/docs/LIBRARIES.md).

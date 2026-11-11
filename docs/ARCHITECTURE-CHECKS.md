@@ -32,6 +32,14 @@ Code in which `ThermalControl` calls `PowerBus` directly is reported:
 Every finding has a severity, the code location (`file:line` of the type, linked to the file at the synced commit),
 the model element (and the target element for pairs), a message and a fix hint.
 
+**The lines that break the rule.** A `dependency` or `layering` finding also lists where the source type uses the
+target (`ArchitectureViolation.Locations`, from the reader's `CodeType.DependencyLocations`, see
+[CODE-SYNC.md](CODE-SYNC.md#where-dependencies-are-used)): the first 5 uses in file and line order
+(`ConformanceOptions.MaxLocationsPerViolation`), each with its kind (`new`, `call`, `field`, `param`, `return`,
+`inherit`, `import`, `use`), and `MoreLocations`, the number of further uses (including those the reader only counted).
+`FirstLocation` is the first of them, or the type's location when the code has none recorded (older stored code). Other
+rules have no use locations.
+
 ### How code maps to the model
 
 Each code type maps to:
@@ -139,7 +147,11 @@ to code sync's `meridian/model`. Its link opens the project with the Architectur
 | Result | Default | “Fail pull requests on architecture violations” on |
 |---|---|---|
 | no violations | success “No architecture violations” (+ warnings count) | same |
-| violations | success “2 violations, 1 warning (not enforced)” | **failure** “2 violations” |
+| violations | success “2 violations, 1 warning (not enforced), first at src/Thermal/ThermalControl.cs:42” | **failure** “2 violations, first at src/Thermal/ThermalControl.cs:42” |
+
+With violations the description cites the first location of the first error (in the sorted order: rule, file, line). The
+hosts keep 140 characters, so a long path is shortened from the left to its last folders
+(“…/control/ThermalControlLoop.cs:42”).
 
 The setting is per repository, in the Architecture tab (owners and editors). Make the status a required check on the
 branch to block merging.
@@ -148,7 +160,18 @@ branch to block merging.
 
 *Architecture* (a view tab next to the diagrams) shows, per connected repository: the last synced commit, the last
 result on main, the *Fail pull requests* setting, and the violations of the last check **grouped by rule**. Each row
-links the file at the synced commit (`file:line`) and has **Show on diagram**, which opens a diagram showing the element
+links the file at the synced commit (`file:line` of the type). Below the message, **Lines:** lists the lines that break
+the rule (`line 42 (new)` in the type's file, `Heating.cs:23 (call)` in another one, the full path and kind on hover),
+each linked to that line at the synced commit, then “+N more”. The links use each host's line anchors:
+
+| Host | Link |
+|---|---|
+| GitHub (and GitHub Enterprise) | `…/blob/<sha>/<path>#L42` |
+| GitLab (also self-managed) | `…/-/blob/<sha>/<path>#L42` |
+| Bitbucket Cloud | `…/src/<sha>/<path>#lines-42` |
+| Bitbucket Data Center | `…/projects/<KEY>/repos/<repo>/browse/<path>?at=<sha>#42` |
+
+Without a commit link the lines are plain text. Each row also has **Show on diagram**, which opens a diagram showing the element
 (both ends when one does) and selects it. Violations between two elements are drawn on diagrams as a **red dashed
 edge** between the blocks (or between parts typed by them, on internal block diagrams). *Hide on diagrams* turns that
 off.
@@ -157,7 +180,13 @@ off.
 
 - Core: `Meridian.Core.CodeSync.Conformance.ArchitectureConformance.Check(model, codeModel, options)` returns a
   `ConformanceResult` (violations and suppressed findings, sorted, deterministic). `ConformanceOptions.FromModel` reads
-  the model-root fields above. `CodeModelJson.Pack/Unpack` store a `CodeModel` compactly (gzip + base64 JSON).
+  the model-root fields above. `CodeModelJson.Pack/Unpack` store a `CodeModel` compactly (gzip + base64 JSON), use
+  locations included. Additive contract: `CodeType.DependencyLocations` (`CodeDependencyUse(Symbol, File, Line, Kind)`,
+  `CodeDependencyKind`), `CodeType.OmittedDependencyLocations`, `CodeDependencyUses.Cap`, and on
+  `ArchitectureViolation` the `Locations`, `MoreLocations` and `FirstLocation`; all default to empty, so other readers
+  and stored code keep working.
+- Web: `ArchitectureCheckService.FileUrl(commitUrl, sha, path, line)` builds the per-host line links;
+  `StatusFor(result, failPullRequests)` the status text with the first location.
 - Web: `CodeSyncEvents.RunCompleted(request, outcome)` is raised by the runner after each run that did not fail;
   `ArchitectureCheckService` subscribes (through a hosted service), reads the files with the same reader, stores the
   code and the result (an integration row of kind `code-architecture` per connection) and posts the status through
@@ -166,8 +195,13 @@ off.
 
 ## Limits
 
-- The location is the line of the type's declaration; the reader does not record where in the type a dependency is.
-- Only C# is read today (whatever `ICodeReader`s are registered).
+- Use locations are capped at 8 per (type, target) by the reader and 5 per violation in the report; the rest are only
+  counted. C# records no `import` locations (its `using` directives name namespaces, not types).
+- The hand-written readers (TypeScript, Java, Python) find uses from tokens, not with a type checker: any name that
+  resolves to a scanned type counts, and the parts of a type written over several lines count at the line where the
+  type starts.
+- The code is read with the first registered `ICodeReader` that handles the pushed files (the "auto" reader: C#,
+  TypeScript, Java and Python).
 - Rule (c) compares operation names, not signatures.
 - The run-completed check uses main's model, so architecture drawn only on a branch counts once merged (or with an
   on-demand check on that branch, which does not post a status).

@@ -32,7 +32,44 @@ round trip loses nothing that matters.
 **Import** reads XMI from Cameo Systems Modeler / MagicDraw, Enterprise Architect and Papyrus, including their
 different XMI namespace versions and SysML profile prefixes (`SysML1.4:Block`, `sysml:Requirement`, …). Requirement ids
 and text, satisfy / verify / derive / refine / trace, blocks, parts, ports, value types, multiplicities and primitive
-types are mapped. Elements that cannot be placed or are not supported are skipped and listed in the import report.
+types are mapped. Combined fragments keep one **operand** per `uml:InteractionOperand`, guarded by its
+`InteractionConstraint`; pseudostates keep their `kind` (choice, junction, fork, join, shallow / deep history, entry / exit
+point, terminate); `DataStoreNode` and `CentralBufferNode` become datastore and central buffer nodes; an association keeps the
+multiplicities of both member ends. Operand separators come from Meridian's own diagram data or, in XMI from other tools,
+from the operands' own shapes. Elements that cannot be placed or are not supported are skipped and listed in the import report;
+what was approximated (an unknown pseudostate kind read as a choice, operand separators spread evenly because the file has
+none) is listed with the warnings, each starting with "Approximated".
+
+## Cameo Systems Modeler / MagicDraw (.mdzip / .mdxml)
+
+**Open a file as a new project** reads `.mdzip` projects (model parts named `…uml_model.model` / `…uml_model.shared_model` or,
+in later versions, `…uml_umodel.model` / `…uml_umodel.shared_umodel`) and `.mdxml` exports, including diagram layouts.
+
+| Cameo | Meridian |
+| --- | --- |
+| `uml:CombinedFragment` with `uml:InteractionOperand`s | fragment with one **operand** each, in order; the guard is the operand's `InteractionConstraint` specification |
+| operand shapes inside the fragment's shape on a sequence diagram | the **separators**: each later operand starts where Cameo drew its shape; operands without a readable shape share the rest of the fragment evenly (listed as *Operand separators guessed*) |
+| `uml:Pseudostate` `kind` = initial (or no kind) | initial state |
+| `kind` = choice, junction, fork, join, shallowHistory, deepHistory, entryPoint, exitPoint, terminate | **pseudostate** of that kind; entry / exit points (`connectionPoint`) stay on their state's border |
+| any other `kind` | choice pseudostate, listed as *Unknown pseudostate kinds* |
+| `uml:DataStoreNode`, `uml:CentralBufferNode` | object node with the «datastore» / «centralBuffer» kind |
+| association `memberEnd`s | the target end's multiplicity, and the other end's as the **source multiplicity** (when the file states one) |
+
+**Used projects.** Meridian reads the project metadata (`com.nomagic.ci.metamodel.project`, or `project.xmi` where present):
+the project's own id, the packages it shares, and each **project usage** with its `usedProjectURI`, project id and mount
+points (the ids of the shared packages mounted from it). `local:/Standard%20Parts.mdzip` and `file:` paths are shown by file
+name; `twcloud:/…` (Teamwork Cloud) usages by the `projectName` the URI carries, else as "Teamwork Cloud project" and the
+first characters of the project id. Used-project proxy entries and `href`s into other projects are recognised too. The
+standard profiles and libraries (SysML, UML Standard Profile, MD Customization for SysML, QUDV, ISO 80000 …) are listed apart:
+Meridian has them built in. The import report says for each used project whether it was **found** (referenced only: types
+are kept by name), **copied** (its shared packages were in the file and imported with it) or **linked** (an existing Meridian
+project is used instead — see [Used projects](libraries.md#coming-from-cameo)).
+
+> [!NOTE]
+> Cameo does not publish the format of its project metadata. The element and attribute names Meridian reads
+> (`projectUsages`, `usedProjectURI`, `mountPoints`, `sharePoints`, `properties key="LOCAL_PROJECT_ID"`) follow Cameo's
+> project model as seen in exported projects; anything not found there falls back to the references in the model itself,
+> so a project is never refused because of its metadata.
 
 ## SysML v2 text (.sysml)
 
@@ -43,7 +80,35 @@ See [SysML v2 text](sysml-v2.md).
 
 Meridian imports EA 16+ repositories stored as SQLite (`.qea`, `.qeax`; `.eapx` files that are SQLite also work): packages, elements, attributes, operations,
 connectors (including SysML stereotypes such as satisfy and verify), tagged values and diagram layouts. Older `.eap`
-(Access) files must be converted to `.qea` in EA first, or exported from EA as XMI.
+(Access) and `.feap` (Firebird) files must be converted to `.qea` in EA first, or exported from EA as XMI.
+
+State machine nodes, fragments and object nodes are read from `t_object` (`Object_Type`, and `NType`, which EA's automation
+interface calls *Subtype*):
+
+| EA | Meridian | Source |
+| --- | --- | --- |
+| `StateNode` NType 3 / 4 | initial state / final state | confirmed |
+| `StateNode` NType 5 / 15 | shallow / deep history | confirmed |
+| `StateNode` NType 11 / 12 | choice / terminate | confirmed |
+| `StateNode` NType 13 / 14, `EntryPoint`, `ExitPoint` | entry / exit point | confirmed |
+| `StateNode` NType 100 / 101 / 102 | activity initial / activity final / flow final (as activity final) | confirmed |
+| `StateNode` NType 10 | junction — reported as approximated | not confirmed |
+| `StateNode`, any other NType | choice — reported as approximated | — |
+| `Synchronization` in a state machine | fork or join pseudostate: by its «Fork» / «Join» stereotype, else a fork when it has more than one outgoing transition (reported) | confirmed / inferred |
+| `Synchronization` in an activity | fork node | confirmed |
+| `CentralBufferNode`; `DataStore` / `DataStoreNode`; `Object` «datastore» | central buffer node; datastore node | confirmed |
+| `Interaction`, `Sequence` (lifeline), `Sequence` connectors (messages) | interaction, lifeline, message (in sequence-number order) | confirmed |
+| `InteractionFragment` NType 0 / 1 / 3 / 4 | alt / opt / par / loop fragment | confirmed |
+| `InteractionFragment` NType 2, 5–11 | break, critical, neg, assert, strict, seq, ignore, consider — reported as approximated | EA toolbox order, not confirmed |
+
+A fragment's **operands** are EA's *partitions*: the `t_xref` row named `Partitions` whose client is the fragment, with one
+`@PAR;Name=<guard>;Size=<height>;…;@ENDPAR;` entry per operand, top first. Each becomes an operand guarded by its name (brackets
+around a guard are removed), and the heights place the separators. When the heights do not fit the fragment's shape the
+separators are spread evenly and the import report says so. Association ends keep `DestCard` as the target multiplicity and
+`SourceCard` as the source multiplicity (swapped for compositions and aggregations, which EA draws from the part).
+
+"Confirmed" codes match Sparx's EA object model as used by the open-source EA tools of the OpenMBEE MTIP project and Geert
+Bellekens' EA toolpack; the others are listed so you can check them after an import.
 
 ## Requirements
 
