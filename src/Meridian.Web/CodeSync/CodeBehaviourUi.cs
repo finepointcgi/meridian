@@ -36,9 +36,11 @@ public static class CodeBehaviourUi
 
     /// <summary>
     /// Generates (or brings up to date) the operation's activity or sequence in <paramref name="model"/> from the stored
-    /// code of its repository, as one undo step. Returns the diagram, or null and why not.
+    /// code of its repository, as one undo step. Returns the diagram, or null and why not. A sequence follows calls
+    /// <paramref name="depth"/> levels deep (1–4; null keeps the depth it was made with, else the default).
     /// </summary>
-    public static async Task<(Diagram? Diagram, string Message)> GenerateAsync(IMeridianStore db, Guid projectId, ModelRepository model, Element operation, bool sequence)
+    public static async Task<(Diagram? Diagram, string Message)> GenerateAsync(IMeridianStore db, Guid projectId, ModelRepository model, Element operation, bool sequence,
+                                                                               int? depth = null)
     {
         if (!IsCodeOperation(operation)) return (null, $"{operation.DisplayName} did not come from code.");
         var connectionId = Guid.Parse(operation.Get(CodeFieldKeys.Repo));
@@ -51,6 +53,6 @@ public static class CodeBehaviourUi
         var rec = await new ArchitectureStore(db).FindAsync(projectId, connectionId);
         if (rec?.Code() is not { } code) return (null, $"No code of {config.Display} is stored yet; sync the repository first.");
         var options = new CodeSyncOptions { RepoId = connectionId.ToString(), Commit = rec.Commit, Behaviour = config.EffectiveBehaviour };
-        return CodeBehaviourMapper.Generate(model, code, operation, sequence, options);
+        return CodeBehaviourMapper.Generate(model, code, operation, sequence, options, depth);
     }
 }

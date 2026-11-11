@@ -236,14 +236,32 @@ public enum CodeBehaviourMode
 /// <summary>Limits of behaviour diagrams from code.</summary>
 public sealed record CodeBehaviourLimits
 {
-    /// <summary>How deep a sequence follows calls into scanned types.</summary>
-    public int SequenceDepth { get; init; } = 3;
-    /// <summary>Messages per sequence; the rest are left out with a note.</summary>
-    public int MaxMessages { get; init; } = 60;
+    /// <summary>Deepest sequence depth "Generate sequence from code" offers.</summary>
+    public const int MaxSequenceDepth = 4;
+    /// <summary>Message cap of a sequence generated on demand (the user picked its depth, so it may be longer).</summary>
+    public const int OnDemandMaxMessages = 60;
+
+    /// <summary>How deep a sequence follows calls into scanned types (1 = only the method's own calls).</summary>
+    public int SequenceDepth { get; init; } = 2;
+    /// <summary>Messages per sequence; the rest are left out and counted in a "… N more calls" note.</summary>
+    public int MaxMessages { get; init; } = 25;
     public int ActivitiesPerNamespace { get; init; } = 20;
     public int SequencesPerNamespace { get; init; } = 10;
     /// <summary>New activities and sequences per sync, together ("Entry points" and "All public methods").</summary>
     public int MaxTotal { get; init; } = 300;
-    /// <summary>"Entry points": an activity needs at least this many calls when it has no branch or loop.</summary>
+    /// <summary>"Entry points": an activity without a branch or loop needs at least this many calls, and blocks (try,
+    /// using, lock) that give it shape; a plain run of calls folds into one action and is not worth a diagram.</summary>
     public int MinCallsForActivity { get; init; } = 5;
+    /// <summary>Activities: this many consecutive plain statements (calls, assignments, creations) or more fold into one
+    /// summary action ("12 calls: AddBlock, Connect, …"), the list in its documentation.</summary>
+    public int FoldRun { get; init; } = 4;
+    /// <summary>Activities: shapes and flows drawn at most (about). Beyond it the control flow stays and leaf blocks fold.</summary>
+    public int MaxActivityShapes { get; init; } = 60;
+    /// <summary>"Entry points": a method with no branch or loop and at least this many plain statements is a builder
+    /// (sample data, wiring) and gets no activity or sequence of its own.</summary>
+    public int BuilderStatements { get; init; } = 8;
+
+    /// <summary>The limits of "Generate sequence from code" at <paramref name="depth"/> (1 to <see cref="MaxSequenceDepth"/>).</summary>
+    public CodeBehaviourLimits ForDemand(int depth) =>
+        this with { SequenceDepth = Math.Clamp(depth, 1, MaxSequenceDepth), MaxMessages = Math.Max(MaxMessages, OnDemandMaxMessages) };
 }

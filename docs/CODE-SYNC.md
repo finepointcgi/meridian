@@ -253,6 +253,7 @@ the keys of all the others.
 | method start / end | initial node / activity final node |
 | call (statement, assignment of a call) | action named `receiver.Method()`; field `operation` = the called operation when it resolves to a scanned type (a CallOperationAction) |
 | run of other simple statements (assignments, creations, `++`) | one action named after the first, "… (+N)" |
+| run of **4 or more** plain statements in a row (calls, assignments, creations; `CodeBehaviourLimits.FoldRun`) | one summary action "12 calls: AddBlock, Connect, …" (or "5 statements: …"); its documentation lists them, one per line |
 | `if` / `else if` / `else` | one decision node, a branch per condition guarded by its text, `[else]`; a merge node (decision node) when more than one path continues |
 | `switch` | decision with a branch per case (`[1, 2]`, `[default]`, `[else]` when there is no default) and a merge |
 | `for`, `foreach`, `while` | decision guarded by the loop header into the body, a back edge to the decision, `[else]` out; `break` leaves, `continue` goes back |
@@ -265,19 +266,34 @@ the keys of all the others.
 The diagram is laid out top to bottom: a decision's branches side by side below it, the merge below the longest branch,
 loop bodies under their decision.
 
+**Shape cap.** An activity draws at most about **60 shapes and flows** (`CodeBehaviourLimits.MaxActivityShapes`). A method
+that would draw more is simplified step by step until it fits: runs of 2 or more plain statements fold; then blocks nested
+3, 2 and 1 levels deep become one action each (`if n > 2 … (7 statements)`, `loop b in batteries (5 statements)`,
+`switch mode (4 cases, 9 statements)`, `try … (6 statements)`), then the top-level ones; last, the rest of the method is
+one action "… N more statements". The decisions, loops and try blocks that remain keep the control flow. Every summary
+action lists what it holds in its documentation, and the activity's documentation and a note on the diagram say what was
+folded ("Simplified to fit about 60 shapes: …").
+
 **Sequence** (`CodeSequencePlanner`): a `caller` lifeline sends the entry call (`Balance(rounds)`) to a lifeline of the
-method's type. The body is followed depth first into the scanned types it calls, up to **3 levels** and **60 messages**
-(`CodeSyncOptions.BehaviourLimits`); calls of an interface method follow its only scanned implementation.
+method's type. The body is followed depth first into the scanned types it calls, up to **2 levels** and **25 messages**
+(`CodeSyncOptions.BehaviourLimits`: `SequenceDepth`, `MaxMessages`); calls of an interface method follow its only scanned
+implementation. *Generate sequence from code* asks for the depth (1–4, a small dialog that starts at the depth the
+sequence was made with, else 2) and allows up to 60 messages; the depth is kept on the interaction (`code.depth`), so later
+syncs keep it.
 
 | Code | Sequence |
 |---|---|
 | object called | a lifeline per receiver: named after the field, property, parameter or local (`charger : ICharger`), typed by its block; `this` calls are self messages; static calls go to a lifeline of the type |
 | call | synchronous message `Method(args)`; an awaited call is an asynchronous message |
-| non-void method (other object) | reply message named after the return type |
+| non-void method (other object) whose result is used (assigned, returned, in a condition or argument) | reply message named after the return type; no reply for void calls or results thrown away |
+| getter, setter, one-line forwarding method (one statement, no control flow) | the call's message only; what it does inside is not followed |
+| the same call again inside a loop | one message in the `loop` fragment |
+| the same call several times in a row | one message `Method(…) ×3` |
 | `if` / `else if` / `else`, `switch` | `alt` fragment with an operand per branch, guarded (`opt` for a lone `if`); fragments without messages are left out |
 | loop | `loop` fragment guarded by the header |
 | `catch` | `break` fragment guarded `catch IOException`; the try and finally blocks are inline |
-| deeper calls, recursion, the message cap | not followed; a comment on the diagram says so |
+| deeper calls, recursion | not followed; a comment on the diagram says so |
+| the message cap | the sequence ends with one note "… N more calls (stopped at 25 messages)". A fragment the cap would cut goes into that count whole (unless nothing came before it, then it keeps what fits) |
 
 Calls to types that are not scanned (framework, packages) are not messages.
 
@@ -289,7 +305,7 @@ Each repository connection has a **Behaviour diagrams** setting (under *Model*, 
 |---|---|
 | **Off** | nothing; existing behaviours are left alone |
 | **On demand** (the default for connections made before the setting existed) | no automatic diagrams. *Generate activity from code* and *Generate sequence from code* on an operation that came from code (its context menu on the tree and the canvas, the Inspector's *Behaviour from code* section, and ⌘K with the operation selected) build one from the code the last sync stored for the connection (the architecture check keeps it, `ArchitectureStore`) |
-| **Entry points** (the default for new connections) | activities for public methods with real control flow (at least one branch or loop, or at least 5 calls); sequences for entry points: endpoint methods (`[HttpGet]`, `[Route]`, `@GetMapping` …, or a body that calls `MapGet` / `MapPost` …), controllers and handlers (by attribute `[ApiController]`, by base type such as `ControllerBase`, `BackgroundService`, `IHostedService`, `IRequestHandler`, or by a name ending in Controller, Handler, Endpoint(s), Consumer, Worker, HostedService or Job), `ExecuteAsync` / `StartAsync` / `StopAsync` of hosted services, `static Main`, and public methods of types nothing else in their namespace calls that call into other scanned types. Tests are left out (`[Fact]`, `[Theory]`, `[Test]`, `[TestMethod]`, `test_…`, types named …Test(s)). At most **20 activities and 10 sequences per namespace and 300 in total** per sync; the busiest methods (branches and loops count three times as much as calls) come first, and a warning in the run says how many were skipped |
+| **Entry points** (the default for new connections) | activities for public methods with real control flow (at least one branch or loop, or at least 5 calls inside try / using / lock blocks; a plain run of calls folds into one action and is not worth a diagram); sequences for entry points: endpoint methods (`[HttpGet]`, `[Route]`, `@GetMapping` …, or a body that calls `MapGet` / `MapPost` …), controllers and handlers (by attribute `[ApiController]`, by base type such as `ControllerBase`, `BackgroundService`, `IHostedService`, `IRequestHandler`, or by a name ending in Controller, Handler, Endpoint(s), Consumer, Worker, HostedService or Job), `ExecuteAsync` / `StartAsync` / `StopAsync` of hosted services, `static Main`, and public methods of types nothing else in their namespace calls that call into other scanned types. Tests are left out (`[Fact]`, `[Theory]`, `[Test]`, `[TestMethod]`, `test_…`, types named …Test(s)). So are **generated and sample code**: files in a `Samples`, `Sample`, `Generated` or `obj` folder, `*.Designer.cs`, `*.g.cs`, `*.generated.*`, types and methods marked `[GeneratedCode]` / `[CompilerGenerated]` / `@Generated`, and **builders**: methods with no branch or loop and 8 or more plain statements (sample data, wiring, registrations). All of them stay available on demand. At most **20 activities and 10 sequences per namespace and 300 in total** per sync; the busiest methods (branches and loops count three times as much as calls) come first, and a warning in the run says how many were skipped |
 | **All public methods** | an activity for every public method with a body and a sequence for every one that calls a scanned type, at most 300 new ones per sync |
 
 Every behaviour that exists is brought up to date on each sync, in any setting but Off, whether it was generated
@@ -307,8 +323,13 @@ automatically or on demand. The caps only limit new ones.
 - Layout: when nobody moved anything on a generated diagram since the last sync (`code.layout` holds a hash of the shapes'
   places), it is laid out afresh. Otherwise shapes keep the places people gave them; new shapes go to their planned place.
   Fragments and message heights of sequences are always recomputed.
+- Once someone moves a shape on a generated diagram, `code.layout` reads `moved` and the diagram keeps their layout for good.
 - When the method disappears (on a full snapshot), its behaviours are deleted, or marked `code.removed` when someone added
-  their own elements to them. Behaviour elements never appear on the structure diagrams code sync refreshes.
+  their own elements to them.
+- With *Entry points*, behaviours an earlier sync made for methods the rules no longer pick (sample code, builders, straight
+  runs of calls) are **removed when untouched**: only generated elements, the one diagram exactly where code sync last put
+  it, and nothing in the model referring to it. Otherwise they stay and are kept up to date. Behaviours made with
+  *Generate … from code* carry `code.origin = demand` and are never removed this way. Behaviour elements never appear on the structure diagrams code sync refreshes.
 - The architecture checks ignore behaviours; they read only structure.
 
 ### Limits per language
@@ -324,10 +345,13 @@ The hand parsers never fail on a body they do not understand: what they cannot p
 
 ### Performance
 
-Reading Meridian's own `src` (452 files, 1,419 types, 5,522 method bodies with 58,377 statements) took 4.0 s without
-bodies and 5.9 s with them (1.45×); mapping with *Entry points* (217 activities, 83 sequences) took 0.6 s instead of
-0.2 s, so a whole sync took 1.52× as long. A re-sync of the same code took 0.4 s and changed nothing. The packed code the
-architecture check stores grew from 837 KB to 2.5 MB. Measure it with
+Reading Meridian's own `src` (452 files, 1,421 types, 5,550 method bodies with 58,704 statements) took 3.8 s without
+bodies and 5.3 s with them (1.39×); mapping with *Entry points* (223 activities, 77 sequences) took 0.4 s instead of
+0.2 s, so a whole sync took 1.42× as long. A re-sync of the same code took 0.4 s and changed nothing. The packed code the
+architecture check stores grew from 844 KB to 2.5 MB. The behaviours stay readable: activities have a median of 48 shapes
+and flows (p95 60, largest 61, 130 of 223 simplified to fit; before the folding and the cap: median 76, p95 244, largest
+522), and sequences a median of 23 messages (p95 and largest 25; before: median 61, nearly all at the old 60 cap). The
+benchmark prints these sizes (`MERIDIAN_BENCH_DUMP=<name>` also lists the messages of matching sequences). Measure it with
 `dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --code-sync src`.
 
 ## Reviewing code changes
@@ -349,15 +373,26 @@ Each push that is applied:
 - creates diagrams for new namespaces and blocks with the auto-diagrammer (a structure diagram per new package, an IBD per new
   block with at least two parts typed by scanned classes: a block whose only part is one class, or whose members are all
   framework, collection-of-value or interface typed, gets none, as its package's structure diagram already shows it. On
-  Meridian's own repository this cut the IBDs from 377 to 171). The first sync, and any sync that adds namespaces while
-  there is none, also makes one **package overview** (`<root> – package overview`, under the root package): the top-level
+  Meridian's own repository this cut the IBDs from 377 to 171). Diagrams code sync makes carry `code.layout`, a short hash
+  per shape of where it put them. A sync also **removes the trivial internal-structure diagrams of earlier syncs**: an IBD
+  code sync made (stamped, or listed in an earlier run of the repository) for a block that no longer has two parts, when it
+  is untouched: every shape a code-sync element where code sync put it (for diagrams from before the stamp, where the
+  auto-diagrammer puts it), no hand-made element, comment or relationship, name and purpose as made, and no report
+  template, relation map, link or other diagram referring to it by id or name. Those removals are listed in *Code changes*
+  like any other and can be rejected (the diagram comes back with its shapes). Any sync, even one that brings no code
+  change, also makes one **package overview** when there is none yet, *Create diagrams for new packages and classes* is
+  on and there are at least two namespace packages, so projects synced before the overview existed get one; the root
+  package then carries `code.overview = true`, and an overview someone deleted (or rejected) is not made again (`<root> – package overview`, under the root package): the top-level
   namespaces, and the level below while that stays at 40 packages or fewer, with the derived «use» dependencies; those in a
   cycle are drawn red. Later syncs keep it in step in place (packages added and removed, dependencies drawn) without
   moving shapes, and a later Auto-diagram run updates it rather than adding another. Each repository connection has a **Create diagrams for new packages and classes** switch (on by
   default, under *Model* in its settings). The model root's `codeSync.autoDiagrams` field (`true` or `false`) overrides the
   switch when it is set, and the settings say so;
 - commits the result on the branch as `Code sync: <short sha> <first line of the commit message>` (authored by the system);
-- records a **sync run**: commit, link, author, message, status, summary, counts and the list of changed elements.
+- records a **sync run**: commit, link, author, message, status, summary, counts and the list of changed elements. The
+  summary counts every diagram the run made on the branch, by kind, and the trivial ones it removed: "29 added, 9 changed,
+  1 removed; 3 structure, 217 activity, 83 sequence diagrams; 380 trivial diagrams removed". The pull request comment of a
+  preview has the same line ("Diagrams: … ; N diagrams removed").
 
 Anyone with the branch open sees the update at once. A push that only carries the changed files (not a full snapshot)
 never deletes elements.

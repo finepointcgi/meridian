@@ -327,7 +327,7 @@ public class CodeSyncImportFixesTests
     }
 
     [Fact]
-    public void No_package_overview_when_diagrams_are_off_or_without_namespace_changes()
+    public void No_package_overview_when_diagrams_are_off_an_existing_project_gets_one_later_and_a_deleted_one_stays_gone()
     {
         var m = new ModelRepository("Project");
         var changes = Sync(m, MeridianLike, Options());
@@ -335,12 +335,121 @@ public class CodeSyncImportFixesTests
         CodeSyncDiagrams.Refresh(m, changes, createDiagrams: false, codeRoot: root);
         Assert.DoesNotContain(m.Diagrams, d => d.DiagramType == DiagramType.Package);
 
-        // A sync that only changes a class does not bring an overview back (someone may have deleted it).
+        // A project synced before the overview existed: the next sync makes it, even one that adds no namespace (or
+        // changes nothing at all), and only once.
         var edited = MeridianLike.Select(f => f.Path == "src/Meridian.cs" ? f with { Content = f.Content.Replace("public string Text { get; set; }", "public string Text { get; set; } public int Major { get; set; }") } : f).ToList();
         var later = Sync(m, edited, Options(commit: "c2"));
-        Assert.NotEmpty(later.Added);
-        CodeSyncDiagrams.Refresh(m, later, createDiagrams: true, codeRoot: root);
+        Assert.DoesNotContain(later.Added, id => m.Find(id) is { } e && CodeModelMapper.IsNamespacePackage(e));
+        var made = CodeSyncDiagrams.Refresh(m, later, createDiagrams: true, codeRoot: root);
+        var overview = Assert.Single(m.Diagrams, d => d.DiagramType == DiagramType.Package);
+        Assert.Contains(overview, made.Created);
+        Assert.Equal("true", root.Get(CodeSyncDiagrams.OverviewMadeKey));
+        var again = Sync(m, edited, Options(commit: "c3"));
+        Assert.True(again.IsEmpty);
+        Assert.Empty(CodeSyncDiagrams.Refresh(m, again, createDiagrams: true, codeRoot: root).Created);
+        Assert.Single(m.Diagrams, d => d.DiagramType == DiagramType.Package);
+
+        // Someone deletes it: it is not made again.
+        m.Delete(overview);
+        Assert.Empty(CodeSyncDiagrams.Refresh(m, Sync(m, MeridianLike, Options(commit: "c4")), createDiagrams: true, codeRoot: root).Created);
         Assert.DoesNotContain(m.Diagrams, d => d.DiagramType == DiagramType.Package);
+    }
+
+    [Fact]
+    public void A_single_namespace_project_gets_no_overview()
+    {
+        var m = new ModelRepository("Project");
+        var files = new List<CodeFile> { new("src/A.cs", "namespace Solo { public class A { } public class B { public A Part { get; set; } } }") };
+        var changes = Sync(m, files, Options("Code"));
+        CodeSyncDiagrams.Refresh(m, changes, createDiagrams: true, codeRoot: CodeModelMapper.FindRootPackage(m, "Code"));
+        Assert.DoesNotContain(m.Diagrams, d => d.DiagramType == DiagramType.Package);
+    }
+
+    // ================================================================ trivial internal-structure diagrams of earlier syncs
+
+    private static readonly IReadOnlyList<CodeFile> Eps =
+    [
+        new("src/Sat.cs", """
+            namespace Sat.Power
+            {
+                public class Battery { public double Charge { get; set; } }
+                public class Panel { public double Watts { get; set; } }
+                public class Eps { public Battery Main { get; set; } public Panel Wing { get; set; } }
+                public class Pcu { public Battery Main { get; set; } public Panel Wing { get; set; } }
+                public class Bus { public Battery Main { get; set; } public Panel Wing { get; set; } }
+            }
+            """),
+    ];
+
+    /// <summary>Eps, Pcu and Bus lose a part each: their IBDs no longer meet the rule.</summary>
+    private static IReadOnlyList<CodeFile> EpsWithOnePart =>
+        [new("src/Sat.cs", Eps[0].Content.Replace(" public Panel Wing { get; set; } }", " }"))];
+
+    private static Diagram Ibd(ModelRepository m, string block) => m.Diagrams.Single(d => d.DiagramType == DiagramType.InternalBlock && d.Owner == S(m, block));
+
+    [Fact]
+    public void Trivial_internal_structure_diagrams_of_earlier_syncs_are_removed_unless_someone_touched_them()
+    {
+        var m = new ModelRepository("Project");
+        var first = Sync(m, Eps, Options("Code"));
+        CodeSyncDiagrams.Refresh(m, first, createDiagrams: true, codeRoot: CodeModelMapper.FindRootPackage(m, "Code"));
+        var (eps, pcu, bus) = (Ibd(m, "Sat.Power.Eps"), Ibd(m, "Sat.Power.Pcu"), Ibd(m, "Sat.Power.Bus"));
+        Assert.All([eps, pcu, bus], d => Assert.True(CodeSyncDiagrams.IsUntouched(d)));   // stamped when made
+
+        // Pcu: someone moves a shape. Bus: someone adds a comment to it. Eps: untouched.
+        var shape = pcu.Nodes[0];
+        m.SetBounds(pcu, new Dictionary<DiagramNode, Bounds> { [shape] = shape.Bounds with { X = shape.Bounds.X + 50 } });
+        var note = m.Create(S(m, "Sat.Power.Bus"), ElementKind.Comment);
+        m.AddNode(bus, note, new Bounds(400, 40, 160, 60));
+
+        var later = Sync(m, EpsWithOnePart, Options("Code", "c2"));
+        Assert.False(m.Contains(eps));
+        Assert.Contains(eps.Id, later.Removed);   // reviewable like any removal
+        Assert.True(m.Contains(pcu));
+        Assert.True(m.Contains(bus));
+        Assert.Equal(1, later.TrivialDiagramsRemoved);
+    }
+
+    [Fact]
+    public void Trivial_internal_structure_diagrams_referenced_elsewhere_or_made_by_hand_stay()
+    {
+        var m = new ModelRepository("Project");
+        var first = Sync(m, Eps, Options("Code"));
+        CodeSyncDiagrams.Refresh(m, first, createDiagrams: true, codeRoot: CodeModelMapper.FindRootPackage(m, "Code"));
+        var (eps, pcu) = (Ibd(m, "Sat.Power.Eps"), Ibd(m, "Sat.Power.Pcu"));
+        // A report template names the Eps diagram; a relation map's settings carry the Pcu diagram's id.
+        var templates = m.Create(m.Root, ElementKind.Package, "Report Templates");
+        var template = m.Create(templates, ElementKind.Comment);
+        m.Set(template, FieldKeys.Body, $"{{{{diagram \"{eps.Name}\"}}}}");
+        var map = m.Create(m.Root, ElementKind.RelationMap, "Power");
+        m.Set(map, "relationMap", $"{{\"RootId\":\"{pcu.Id}\"}}");
+        // Bus's IBD was made by hand with Auto-diagram (not stamped, not in an earlier run): code sync leaves it alone.
+        var bus = Ibd(m, "Sat.Power.Bus");
+        m.Set(bus, CodeBehaviourMapper.LayoutKey, null);
+
+        var later = Sync(m, EpsWithOnePart, Options("Code", "c2"));
+        Assert.True(m.Contains(eps));
+        Assert.True(m.Contains(pcu));
+        Assert.True(m.Contains(bus));
+        Assert.Equal(0, later.TrivialDiagramsRemoved);
+    }
+
+    [Fact]
+    public void Unstamped_internal_structure_diagrams_from_an_earlier_run_are_judged_by_the_auto_diagrammer_layout()
+    {
+        var m = new ModelRepository("Project");
+        var first = Sync(m, Eps, Options("Code"));
+        CodeSyncDiagrams.Refresh(m, first, createDiagrams: true, codeRoot: CodeModelMapper.FindRootPackage(m, "Code"));
+        var (eps, pcu) = (Ibd(m, "Sat.Power.Eps"), Ibd(m, "Sat.Power.Pcu"));
+        // As the first sync of a project left them: no stamp; the run record lists them.
+        foreach (var d in new[] { eps, pcu }) m.Set(d, CodeBehaviourMapper.LayoutKey, null);
+        var shape = pcu.Nodes[0];
+        m.SetBounds(pcu, new Dictionary<DiagramNode, Bounds> { [shape] = shape.Bounds with { Y = shape.Bounds.Y + 80 } });
+
+        var later = Sync(m, EpsWithOnePart, Options("Code", "c2") with { SyncedDiagrams = new HashSet<string> { eps.Id, pcu.Id } });
+        Assert.False(m.Contains(eps));   // where the auto-diagrammer puts it
+        Assert.True(m.Contains(pcu));    // moved by someone
+        Assert.Equal(2, later.TrivialDiagramsRemoved);   // and Bus's, stamped and untouched
     }
 
     [Fact]

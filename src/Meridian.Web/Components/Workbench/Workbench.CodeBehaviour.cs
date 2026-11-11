@@ -1,3 +1,4 @@
+using Meridian.Core.CodeSync;
 using Meridian.Core.Model;
 using Meridian.Web.CodeSync;
 using MudBlazor;
@@ -15,8 +16,16 @@ public partial class Workbench
     {
         if (Ws.ReadOnly) { Ws.SetStatus("View-only: you can't generate diagrams in this project"); return; }
         if (Ws.Session is not { } s || !Ws.Model.Contains(operation)) return;
+        int? depth = null;
+        if (sequence)
+        {
+            // How deep to follow calls: the depth the sequence was made with, else the default.
+            var current = CodeBehaviourMapper.StoredDepth(CodeBehaviourMapper.Find(Ws.Model, operation, sequence: true)) ?? new CodeBehaviourLimits().SequenceDepth;
+            depth = await SequenceDepthDialog.AskAsync(Dialogs, operation.DisplayName, current);
+            if (depth is null) return;
+        }
         (Diagram? Diagram, string Message) result;
-        try { result = await CodeBehaviourUi.GenerateAsync(Db, s.ProjectId, Ws.Model, operation, sequence); }
+        try { result = await CodeBehaviourUi.GenerateAsync(Db, s.ProjectId, Ws.Model, operation, sequence, depth); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
             result = (null, "Generating from code failed: " + ex.Message);

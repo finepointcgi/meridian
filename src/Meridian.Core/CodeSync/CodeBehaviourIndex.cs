@@ -100,6 +100,37 @@ public sealed class CodeBehaviourIndex
         || t.Members.Any(x => x.Attributes.Any(a => TestAttributes.Contains(a)))
         || t.Name.EndsWith("Tests", StringComparison.Ordinal) || t.Name.EndsWith("Test", StringComparison.Ordinal) && t.Name.Length > 4;
 
+    private static readonly string[] SampleFolders = ["samples", "sample", "generated", "obj"];
+    private static readonly string[] GeneratedSuffixes = [".designer.cs", ".g.cs", ".g.i.cs", ".generated.cs", ".generated.ts", "_pb2.py", ".pb.go"];
+    private static readonly string[] GeneratedAttributes = ["GeneratedCode", "CompilerGenerated", "Generated", "DebuggerNonUserCode"];
+
+    /// <summary>
+    /// Generated or sample code, which "Entry points" leaves to "Generate … from code": files in a Samples, Sample,
+    /// Generated or obj folder, designer and generated files (*.Designer.cs, *.g.cs, *.generated.*), and types or methods
+    /// marked [GeneratedCode], [CompilerGenerated] or @Generated.
+    /// </summary>
+    public static bool IsGeneratedOrSample(CodeType t, CodeMember? m = null)
+    {
+        var path = t.File.Replace('\\', '/');
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Take(Math.Max(0, segments.Length - 1)).Any(s => SampleFolders.Contains(s.ToLowerInvariant()))) return true;
+        var file = segments.LastOrDefault()?.ToLowerInvariant() ?? "";
+        if (GeneratedSuffixes.Any(x => file.EndsWith(x, StringComparison.Ordinal))) return true;
+        return t.Attributes.Any(a => GeneratedAttributes.Contains(a)) || m != null && m.Attributes.Any(a => GeneratedAttributes.Contains(a));
+    }
+
+    /// <summary>
+    /// A builder: no branch or loop, just a long run of calls and assignments (sample data, wiring, registrations): at least
+    /// <see cref="CodeBehaviourLimits.BuilderStatements"/> of them, or a body too long to read whole.
+    /// </summary>
+    public static bool IsBuilder(CodeBody body, CodeBehaviourLimits limits)
+    {
+        var (branches, loops, _) = CodeBodies.Shape(body.Statements);
+        if (branches + loops > 0) return false;
+        return body.Omitted > 0 || CodeBodies.Walk(body.Statements).Count(s => s.HasCall || s.Kind is CodeStatementKind.Call or CodeStatementKind.Assign
+            or CodeStatementKind.Create or CodeStatementKind.Other) >= limits.BuilderStatements;
+    }
+
     /// <summary>Why <paramref name="m"/> is an entry point ("endpoint", "controller", "hosted service", "handler", "API of its
     /// namespace"); null when it is not one.</summary>
     public string? EntryReason(CodeMethod m)

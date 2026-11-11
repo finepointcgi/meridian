@@ -30,11 +30,12 @@ public static class CodeSyncRevert
             .SelectMany(e => e.Descendants().Prepend(e)).Where(e => target.Find(e.Id) is null)
             .Distinct().OrderBy(e => e is Relationship ? 1 : 0).ThenBy(e => e.AncestorsAndSelf().Count()).ToList();
         var restored = new List<Element>();
-        foreach (var x in missing.Where(x => x is not Diagram))
+        foreach (var x in missing.OrderBy(x => x is Diagram ? 1 : 0))
         {
             if (target.Find(x.Id) is not null || target.Find(x.Owner!.Id) is not { } owner) continue;
             Element copy;
-            if (x is Relationship r)
+            if (x is Diagram xd) copy = new Diagram(xd.DiagramType, xd.Id);   // its shapes follow in RestoreShapes
+            else if (x is Relationship r)
             {
                 if (target.Find(r.Source.Id) is not { } s || target.Find(r.Target.Id) is not { } t) continue;
                 copy = new Relationship(r.Kind, s, t, r.Id);
@@ -80,7 +81,9 @@ public static class CodeSyncRevert
         foreach (var rd in reference.Diagrams)
         {
             if (target.Find(rd.Id) is not Diagram td) continue;
-            foreach (var rn in rd.Nodes.Where(n => ids.Contains(n.Element.Id)))
+            // A re-created diagram gets all its shapes back (of elements that exist); others only those of re-created elements.
+            var whole = ids.Contains(rd.Id);
+            foreach (var rn in rd.Nodes.Where(n => whole || ids.Contains(n.Element.Id)))
             {
                 if (td.FindNode(rn.Id) is not null || target.Find(rn.Element.Id) is not { } e) continue;
                 if (rn.ParentId is { } pid && td.FindNode(pid) is null) continue;
@@ -92,7 +95,7 @@ public static class CodeSyncRevert
             foreach (var re in rd.Edges)
             {
                 if (td.FindNode(re.Id) is not null || td.Edges.Any(x => x.Id == re.Id)) continue;
-                if (!ids.Contains(re.Relationship.Id) && !ids.Contains(re.Source.Element.Id) && !ids.Contains(re.Target.Element.Id)) continue;
+                if (!whole && !ids.Contains(re.Relationship.Id) && !ids.Contains(re.Source.Element.Id) && !ids.Contains(re.Target.Element.Id)) continue;
                 if (target.Find(re.Relationship.Id) is not Relationship r || td.FindNode(re.Source.Id) is not { } s || td.FindNode(re.Target.Id) is not { } t) continue;
                 if (td.EdgeFor(r) is not null) continue;
                 var edge = new DiagramEdge(r, s, t, re.Id);

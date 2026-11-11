@@ -260,7 +260,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
             new CodeFile("src/Comms/Radio.cs", "namespace Sat.Comms;\npublic class Radio { public Sat.Power.Battery Supply { get; set; } }"),
         };
         var outcome = await runner.RunAsync(Request() with { ConnectionId = conn.Id, Files = files, IsFullSnapshot = true });
-        Assert.Contains("new diagram", outcome.Summary);
+        Assert.Contains(" structure, 0 activity, 0 sequence diagram", outcome.Summary);
 
         var branch = Assert.Single(await _db.ListBranchesAsync(_project), b => b.Name == CodeSyncRunner.BranchNameFor("acme/sat"));
         var model = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(_db, _hub, _project, branch.Id));
@@ -345,7 +345,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         };
         _applier.Script.Enqueue(NewNamespace("Power"));
         var outcome = await Runner().RunAsync(Request());
-        Assert.Contains("new diagram", outcome.Summary);
+        Assert.Contains(" structure, 0 activity, 0 sequence diagram", outcome.Summary);
         var head = await BranchAsync(Assert.Single(await _db.ListBranchesAsync(_project)).Id);
         var created = head.Diagrams.Single(d => d.Owner?.Name == "Power");
         Assert.Equal(DiagramType.BlockDefinition, created.DiagramType);
@@ -609,7 +609,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
             return new CodeSyncChanges([pkg.Id, a.Id], [], [], []);
         });
         var outcome = await Runner().RunAsync(Request() with { ConnectionId = conn.Id });
-        Assert.DoesNotContain("new diagram", outcome.Summary);
+        Assert.DoesNotContain("structure", outcome.Summary);
         Assert.Equal("sat", _applier.LastOptions!.RootPackage);   // the connection's model package (the repository name)
     }
 
@@ -1276,6 +1276,88 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         await hosts.SaveAsync(_project, connection, null, cfg, null);
         Assert.Contains("off", (await CodeBehaviourUi.GenerateAsync(_db, _project, ws.Model, op, false)).Message);
         ws.Dispose();
+    }
+
+    private const string PowerCode = """
+        namespace Sat.Power
+        {
+            public class Battery { public double Level { get; set; } public bool IsLow() => Level < 0.2; public void Charge(double w) { Level += w; } public void Drain() { Level = 0; } }
+            public class Panel { public double Watts { get; set; } }
+            public class Eps { public Battery Main { get; set; } public Panel Wing { get; set; } }
+        }
+        namespace Sat.Control
+        {
+            using Sat.Power;
+            public class PowerController
+            {
+                private readonly Battery _battery = new();
+                public void Balance(int rounds) { for (var i = 0; i < rounds; i++) { if (_battery.IsLow()) _battery.Charge(5); else _battery.Drain(); } }
+            }
+        }
+        """;
+
+    private Func<ModelRepository, CodeSyncChanges> RealSync(string source, CodeBehaviourMode mode = CodeBehaviourMode.EntryPoints) => m =>
+        CodeModelMapper.Apply(m, new Serialization.CodeSync.CSharpCodeReader().Read([new CodeFile("src/Power.cs", source)]),
+            new CodeSyncOptions { RootPackage = "Code", RepoId = _connection.ToString(), Commit = "c0ffee", Behaviour = mode });
+
+    [Fact]
+    public async Task Run_Summary_Counts_Every_Diagram_Made_Structure_Activity_And_Sequence()
+    {
+        _applier.Script.Enqueue(RealSync(PowerCode));
+        var outcome = await Runner().RunAsync(Request());
+        var run = Assert.Single(await _db.ListCodeSyncRunsAsync(_project));
+        var diagrams = run.Changes.Where(c => c.Kind == CodeSyncChangeKind.Added && c.ElementKind == nameof(ElementKind.Diagram)).ToList();
+        var head = await BranchAsync(run.BranchId!.Value);
+        var (structure, activity, sequence) = CodeSyncRunner.DiagramCounts(diagrams.Select(c => (Diagram)head.Find(c.ElementId)!));
+        Assert.True(activity >= 1 && sequence >= 1 && structure >= 2, outcome.Summary);   // the overview and the Eps IBD at least
+        Assert.Contains($"; {structure} structure, {activity} activity, {sequence} sequence diagrams", outcome.Summary);
+        Assert.Contains(head.Diagrams, d => d.DiagramType == DiagramType.Sequence && d.Name == "PowerController.Balance sequence");
+
+        Assert.Equal("3 structure, 217 activity, 83 sequence diagrams; 380 trivial diagrams removed", CodeSyncRunner.DiagramSummary(3, 217, 83, 380));
+        Assert.Equal("1 structure, 0 activity, 0 sequence diagram", CodeSyncRunner.DiagramSummary(1, 0, 0, 0));
+        Assert.Equal("", CodeSyncRunner.DiagramSummary(0, 0, 0, 0));
+    }
+
+    [Fact]
+    public async Task A_Run_Without_Code_Changes_Still_Adds_The_Missing_Package_Overview_And_Reports_Trivial_Removals()
+    {
+        _applier.Script.Enqueue(RealSync(PowerCode, CodeBehaviourMode.OnDemand));
+        await Runner().RunAsync(Request());
+        var branchId = Assert.Single(await _db.ListBranchesAsync(_project)).Id;
+        Assert.Single((await BranchAsync(branchId)).Diagrams, d => d.DiagramType == DiagramType.Package);
+
+        // As a project synced before the overview existed: no overview and no marker. The same code again changes nothing,
+        // yet the run adds the overview, and says it removed two trivial diagrams.
+        _applier.Script.Enqueue(m =>
+        {
+            var root = CodeModelMapper.FindRootPackage(m, "Code")!;
+            m.Delete(m.Diagrams.Single(d => d.DiagramType == DiagramType.Package));
+            m.Set(root, CodeSyncDiagrams.OverviewMadeKey, null);
+            return new CodeSyncChanges([], [], [], []) { TrivialDiagramsRemoved = 2 };
+        });
+        var outcome = await Runner().RunAsync(Request("Nothing new"));
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+        Assert.Contains("1 structure, 0 activity, 0 sequence diagram", outcome.Summary);
+        Assert.Contains("2 trivial diagrams removed", outcome.Summary);
+        Assert.Single((await BranchAsync(branchId)).Diagrams, d => d.DiagramType == DiagramType.Package);
+    }
+
+    [Fact]
+    public void Rejecting_A_Removed_Diagram_Brings_It_Back_With_Its_Shapes()
+    {
+        var reference = SampleModels.Vehicle();
+        var block = reference.OfKind(ElementKind.Block).First();
+        var d = reference.CreateDiagram(block.Owner!, DiagramType.BlockDefinition, "Kept");
+        var node = reference.AddNode(d, block, new Bounds(10, 20, 160, 80));
+        var target = ProjectFile.Deserialize(ProjectFile.Serialize(reference));
+        target.Delete(target.Find(d.Id)!);
+        Assert.Null(target.Find(d.Id));
+
+        CodeSyncRevert.Revert(target, reference, [d.Id]);
+        var back = Assert.IsType<Diagram>(target.Find(d.Id));
+        Assert.Equal(("Kept", DiagramType.BlockDefinition), (back.Name, back.DiagramType));
+        var shape = Assert.Single(back.Nodes);
+        Assert.Equal((node.Id, block.Id, new Bounds(10, 20, 160, 80)), (shape.Id, shape.Element.Id, shape.Bounds));
     }
 
     [Fact]

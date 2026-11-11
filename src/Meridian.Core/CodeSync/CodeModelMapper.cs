@@ -145,6 +145,7 @@ public static class CodeModelMapper
         private readonly Dictionary<string, Element> _types = new(StringComparer.Ordinal);
         private readonly Dictionary<string, CodeType> _codeTypes = new(StringComparer.Ordinal);
         private Element _root = null!;
+        private int _trivialRemoved;
         /// <summary>The root namespace left out of the package tree (<see cref="CodeSyncOptions.CollapseRootNamespace"/>), or null.</summary>
         private string? _collapsed;
 
@@ -202,6 +203,7 @@ public static class CodeModelMapper
             RemoveGone();
             ReleaseCollapsedPackage();
             RemoveEmptyPackages();
+            _trivialRemoved += CodeSyncDiagrams.RemoveTrivialIbds(m, o.RepoId, o.SyncedDiagrams);
         }
 
         /// <summary>
@@ -415,7 +417,7 @@ public static class CodeModelMapper
             var added = _added.Where(after.Contains).Distinct().ToList();
             var addedSet = added.ToHashSet(StringComparer.Ordinal);
             var changed = _changed.Where(id => after.Contains(id) && !addedSet.Contains(id)).Distinct().ToList();
-            return new CodeSyncChanges(added, changed, removed, _warnings);
+            return new CodeSyncChanges(added, changed, removed, _warnings) { TrivialDiagramsRemoved = _trivialRemoved };
         }
 
         // ------------------------------------------------------------------ lookup
@@ -664,6 +666,7 @@ public static class CodeModelMapper
         private void EnsureBehaviour()
         {
             var b = CodeBehaviourMapper.Sync(m, code, o);
+            _trivialRemoved += b.TrivialRemoved;
             _added.AddRange(b.Added);
             foreach (var id in b.Changed)
                 if (m.Find(id) is { } e) Changed(e);

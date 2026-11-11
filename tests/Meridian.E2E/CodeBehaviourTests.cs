@@ -1,7 +1,10 @@
 using Meridian.Core.CodeSync;
+using Meridian.Core.CodeSync.Conformance;
 using Meridian.Core.Model;
 using Meridian.Data;
 using Meridian.Serialization.CodeSync;
+using Meridian.Web.CodeSync.Conformance;
+using Meridian.Web.CodeSync.Hosts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using static Microsoft.Playwright.Assertions;
@@ -83,5 +86,54 @@ public sealed class CodeBehaviourTests(ServerFixture f) : E2ETest(f)
         await Expect(p.Canvas()).ToContainTextAsync("Charge(5)");
         if (Environment.GetEnvironmentVariable("MERIDIAN_E2E_SCREENSHOTS") is { Length: > 0 } shots)
             await p.ScreenshotAsync(new() { Path = Path.Combine(shots, "code-sync-sequence.png") });
+    }
+
+    [E2EFact]
+    public async Task Generate_sequence_from_code_asks_for_the_depth()
+    {
+        var s = await OpenAsync(F.Alice);
+        var p = s.Page;
+        var name = "Depth " + Guid.NewGuid().ToString("N")[..6];
+        await p.NewProjectAsync("Vehicle sample", name);
+        var db = F.App.Services.GetRequiredService<IMeridianStore>();
+        var alice = (await db.FindUserAsync(F.Alice.Username))!;
+        var project = (await db.ListProjectsAsync(alice.Id)).Single(x => x.Name == name).Id;
+        var connection = Guid.NewGuid();
+        var config = new CodeRepoConfig { Host = GitHostKind.GitHub, Owner = "acme", Repo = "sat", PostStatus = false, PreviewPullRequests = false, BehaviourDiagrams = CodeBehaviourMode.OnDemand };
+        await db.SaveIntegrationAsync(new IntegrationConnection(connection, project, CodeRepoKinds.CodeRepo, "acme/sat", config.ToJson(), null, DateTime.UtcNow));
+        var files = new[] { new CodeFile("src/PowerDepth.cs", Source) };
+        var code = new CSharpCodeReader().Read(files);
+        CodeSyncE2E.Code["src/PowerDepth.cs"] = code;   // what the architecture check stores after the run
+
+        // On demand: the sync makes no behaviour; the operation's inspector offers it.
+        CodeSyncE2E.Script.Enqueue(m => CodeModelMapper.Apply(m, code,
+            new CodeSyncOptions { RootPackage = "sat", RepoId = connection.ToString(), Commit = "c0ffee", Behaviour = CodeBehaviourMode.OnDemand }));
+        var outcome = await F.App.Services.GetRequiredService<ICodeSyncRunner>().RunAsync(new CodeSyncRequest(
+            project, connection, "acme/sat", "main", "c0ffee0123456789c0ffee0123456789c0ffee01", null, "Dana Dev", "Power", files, IsFullSnapshot: true));
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+        Assert.Contains("0 activity, 0 sequence diagrams", outcome.Summary);
+        await new ArchitectureStore(db).UpdateAsync(project, connection, r => { r.Commit = "c0ffee"; r.PackedCode = CodeModelJson.Pack(code); });
+
+        // To the review branch, where the operation is.
+        var badge = p.Locator("[data-testid=code-changes-badge]");
+        await Expect(badge).ToBeVisibleAsync();
+        await badge.ClickAsync();
+        var row = p.ViewTab().Locator(".chg-row[data-kind=added]").Filter(new() { HasTextString = "PowerController" }).First;
+        await row.GetByRole(AriaRole.Button, new() { Name = "Show on diagram" }).ClickAsync();
+        await Expect(p.Locator(".vc-branch .name")).ToHaveTextAsync("code-sync/acme/sat");
+
+        await p.GetByPlaceholder("Search elements…").FillAsync("Balance");
+        await p.Tree().GetByText("Balance").First.ClickAsync();
+        await p.Inspector().Locator(".code-behaviour-sequence").ClickAsync();
+        var dialog = p.MudDialog();
+        await Expect(dialog).ToContainTextAsync("How deep should the sequence");
+        await Expect(dialog.Locator("input[data-testid=sequence-depth-2]")).ToBeCheckedAsync();
+        await dialog.Locator("input[data-testid=sequence-depth-1]").ClickAsync();
+        await dialog.Locator("button.sequence-depth-ok").ClickAsync();
+
+        await Expect(p.Tabs().Filter(new() { HasTextString = "PowerController.Balance sequence" })).ToHaveCountAsync(1);
+        await Expect(p.Canvas()).ToContainTextAsync("Charge(5)");
+        await Expect(p.Canvas()).ToContainTextAsync("loop");
+        await Expect(p.Inspector()).ToContainTextAsync("Sequence: PowerController.Balance sequence");
     }
 }
