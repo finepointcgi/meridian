@@ -109,21 +109,21 @@ public sealed partial class ProjectSession
         // Only known participants with an editing role may change the model (viewers are read-only server-side too).
         if (!_participants.TryGetValue(participantId, out var me) || !me.Presence.CanEdit)
         {
-            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(SnapshotLocked(participantId), "This project is view-only for you — your change was not applied."); }
+            if (me.Client is { } c) { _rejecting.Add(participantId); c.Replaced(ModelForLocked(participantId), "This project is view-only for you — your change was not applied."); }
             return false;
         }
         // Package permissions (ProjectSession.Permissions.cs): the one server-side check every model edit passes.
         if (PermissionProblem(participantId, op) is { } denied)
         {
             _rejecting.Add(participantId);
-            me.Client.Replaced(SnapshotLocked(participantId), denied);
+            me.Client.Replaced(ModelForLocked(participantId), denied);
             return false;
         }
         if (_locks.Count == 0 || Blocks(userId, op) is not { } l) return true;
         _rejecting.Add(participantId);
         var what = _master.Find(l.ElementId)?.DisplayName ?? "That element";
         if (_participants.TryGetValue(participantId, out var p))
-            p.Client.Replaced(SnapshotLocked(participantId), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
+            p.Client.Replaced(ModelForLocked(participantId), $"{what} is locked by {l.User.DisplayName} — your change was not applied.");
         return false;
     }
 
@@ -148,7 +148,7 @@ public sealed partial class ProjectSession
     {
         lock (_gate)
         {
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             _master = Materialize(modelJson);   // used projects stay mounted (ProjectSession.Libraries.cs)
             Sequence++;
             MarkDirty();
@@ -157,7 +157,7 @@ public sealed partial class ProjectSession
             foreach (var (id, p) in _participants)
             {
                 _rejecting.Remove(id);
-                p.Client.Replaced(SnapshotLocked(id, modelJson), message);
+                p.Client.Replaced(ModelForLocked(id, modelJson), message);
             }
         }
     }

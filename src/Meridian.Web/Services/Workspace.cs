@@ -158,10 +158,10 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 
     void ISessionClient.PresenceChanged() => _ = Dispatch(Bump);
 
-    void ISessionClient.Reset(string modelJson) => _ = Dispatch(() =>
+    void ISessionClient.Reset(SessionModel model) => _ = Dispatch(() =>
     {
         var activeId = Active?.Diagram.Id;
-        Install(ProjectFile.Deserialize(modelJson));
+        Install(model.CreateReplica());
         if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
         else OpenDefaultDiagrams();
         SetStatus("The model was restored to an earlier version");
@@ -169,13 +169,13 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 
     void ISessionClient.CommentsChanged() => _ = Dispatch(() => { CommentsVersion++; Bump(); });
 
-    void ISessionClient.Replaced(string modelJson, string message) => _ = Dispatch(() =>
+    void ISessionClient.Replaced(SessionModel model, string message) => _ = Dispatch(() =>
     {
         var activeId = Active?.Diagram.Id;
         var selectedId = Selected?.Id;
         // The code-change review stays open across a merge (accepting code changes replaces main's model).
         var review = _views.FirstOrDefault(v => v.Kind == ViewTabKind.CodeChanges) is { } rv ? (Active: ReferenceEquals(ActiveView, rv), View: rv) : default;
-        Install(ProjectFile.Deserialize(modelJson));
+        Install(model.CreateReplica());
         Session?.Resynced(ParticipantId);
         if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
         else OpenDefaultDiagrams();

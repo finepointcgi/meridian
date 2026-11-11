@@ -74,10 +74,10 @@ public sealed class ServerModelEdit : IAsyncDisposable
     {
         /// <summary>Why the session refused the last edit (it resynchronises a refused participant with a message).</summary>
         public string? Refused;
-        public void Replaced(string modelJson, string message) => Refused = message;
+        public void Replaced(SessionModel model, string message) => Refused = message;
         public void RemoteOp(ModelOp op) { }
         public void PresenceChanged() { }
-        public void Reset(string modelJson) { }
+        public void Reset(SessionModel model) { }
         public void CommentsChanged() { }
     }
 }

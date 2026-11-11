@@ -70,6 +70,35 @@ PostgreSQL runs always start their own container on a random port.
 | Session: snapshot for a joining tab / lock resync / autosave | 137 ms each | once per model change | cached by sequence, held weakly |
 | Session: 25 tabs, managed heap | 5,353 MB | 4,701 MB | replica sharing above |
 
+### Shared replicas (200,000 elements)
+
+A tab used to get its replica by parsing a JSON snapshot of the session's model. It now gets an in-memory copy
+(`ModelRepository.CreateReplica`) that shares everything immutable with the session's model: ids, field keys and values
+(strings) outright, and each element's field dictionary copy-on-write — whichever side writes an element first takes its own
+copy, so a tab's memory grows only by the elements it (or a collaborator) changes. Only the skeleton is per tab: element
+objects with owner and children, diagram shapes and paths, and the id / kind / incidence indexes. Child lists are created
+with the first child (94 % of elements are leaves), which also shrinks the session's own model. Tabs that must start over
+(merge, version restore, a rejected edit, changed permissions) receive one frozen replica per model state, made once under the
+session lock and copied by each tab on its own thread. Participants with hidden packages, or reading a different set of used
+projects than the session has mounted, still parse their filtered snapshot.
+
+`--quick --elements 200000 --repeat 1 --only Session`, same machine, back to back:
+
+| Scenario | Before | After | Change |
+|---|---:|---:|---|
+| First tab join (store load + session model + replica) | 981–1,247 ms | 573–717 ms | the tab copies instead of parsing |
+| Each further tab join (median of 24) | 452–498 ms | 63–76 ms | 6–7× faster |
+| Managed heap per further tab (replica + the tab's UI state) | 117 MB | 38 MB | 3× less |
+| Replica alone (`CreateReplica` vs parsing, measured in isolation) | 175 MB, ~500 ms | 17 MB, ~85 ms | 10× less |
+| Each further tab join at 500k (median of 24) | 1,362 ms | 180 ms | 7.5× faster; ~100 MB per tab (was ~400 MB) |
+| Managed heap with 25 tabs (includes ~1.4 GB of benchmark fixtures) | 4,083–4,094 MB | 2,305–2,319 MB | −1.8 GB |
+| Submit + relay 2,600 ops to 24 replicas: total / p95 / max | 156–171 ms / 0.04 / 37–39 ms | 210–226 ms / 0.04 / 38–41 ms | first write to a shared element copies its fields |
+| Snapshot (serialize the session model, warm) | 67–78 ms | 87 ms | unchanged (within run noise) |
+
+The concurrency load test (Debug build, SQLite, 25 tabs, 30 s, 5 runs each) shows the same effect on resynchronisation:
+delivery p95 82–84 ms → 34–38 ms, delivery max (the rogue tabs' full resyncs) 2.5 s → 0.6 s, managed heap
+start / peak / end 590 / 2,400–3,300 / 1,030–1,180 MB → 434 / 630–730 / 396 MB.
+
 Unchanged (already fine): load 450–550 ms, save 80–180 ms, apply 2,600 remote ops 4–8 ms, 500 edits + undo + redo 5–7 ms,
 validation 130 ms, traceability table 90–160 ms, ModelDiff 140–160 ms, model search 8 ms, ⌘K element list 3 ms,
 derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–85 ms, AutoDiagrammer plan 530–620 ms.
@@ -95,8 +124,9 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | PostgreSQL: load + deserialize (cold) | 693 ms | – |
 | PostgreSQL: autosave (`jsonb`) | 930 ms | – |
 | PostgreSQL: commit version | 953 ms (+17.1 MB, TOAST) | – |
-| Session: first tab (load + replica) | 1,610 ms | 2,954 ms |
-| Session: each further tab | 541 ms | 1,362 ms |
+| Session: first tab (load + replica) | 573–717 ms | 1,771 ms |
+| Session: each further tab | 63–76 ms | 180 ms |
+| Session: managed heap per further tab | 38 MB | 102 MB |
 | Session: op apply + relay to 24 tabs, p95 | 0.06 ms | 0.34 ms |
 | Model tree first render / reveal deepest element | 55 / 14 ms | – |
 
@@ -115,7 +145,8 @@ rejected and resynchronised), comments and edits of a shared SysML v2 text. It a
 - **p95 of a local edit (including the server's apply and relay) < 50 ms** and **p95 inbox wait before a tab applies a
   relayed operation < 250 ms**.
 
-Results on the machine above (Debug test build, ~18,600-element project):
+Results on the machine above (Debug test build, ~18,600-element project; recorded before shared replicas — see
+"Shared replicas" above for the current delivery and heap figures):
 
 | Store | Editing | Accepted ops | Submit p50 / p95 / max | Delivery p50 / p95 / max | Heap start → peak → end |
 |---|---|---|---|---|---|
@@ -133,9 +164,14 @@ Delivery maxima are the rogue tabs' full resynchronisations (a whole-model snaps
 - **Template reports of the whole model** can exceed .NET's 2 GB string limit: the SDD template over the 200k project
   throws `OverflowException` while writing HTML. Scope such reports to a package.
 - **Merge** is linear but allocation-heavy (three flat snapshots of the model): ~1.6 s at 200k, ~5.7 s at 500k.
-- **Every open tab holds a full replica** (~130 MB at 200k, ~400 MB at 500k). 25 tabs on a 500k project need ~10 GB of
-  server memory; size the server accordingly.
-- **Joining a session** deserializes the model in the new tab (0.5 s at 200k, 1.4 s at 500k).
+- **Every open tab holds a replica skeleton** (~40 MB at 200k including the tab's UI state, ~100 MB at 500k): element
+  objects and indexes are per tab, field data is shared with the session until someone changes it. Tabs with hidden packages
+  (package permissions) or a different set of readable used projects still hold a full parsed copy (~175 MB at 200k).
+- **Joining a session** copies the model under the session lock (~70 ms at 200k, ~180 ms at 500k); while the copy is made,
+  other tabs' edits wait. A burst of joins right after a resync copies the shared frozen replica outside the lock instead.
+- **Flaky load test**: `ConcurrencyLoadTests.Many_Editors_On_Sqlite_Converge` fails about one run in five with "only the rogue
+  tabs may be resynchronised" (a non-rogue tab's edit of a shared element is rejected as locked by another editor). It
+  predates shared replicas (reproduced on the release before them).
 - **PostgreSQL autosave** writes the whole model as `jsonb` (~0.9 s at 200k). It runs outside the session lock and is
   batched (at most once per edit burst), so editors don't wait for it.
 - **Version storage**: SQLite versions written by this release are compressed; older releases can't read them (opening an

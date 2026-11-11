@@ -203,7 +203,7 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         public List<ModelOp> Ops { get; } = new();   // appended under the session lock
         public void RemoteOp(ModelOp op) => Ops.Add(op);
         public void PresenceChanged() { }
-        public void Reset(string modelJson) => throw new InvalidOperationException("no resets in this test");
+        public void Reset(SessionModel model) => throw new InvalidOperationException("no resets in this test");
         public void CommentsChanged() { }
     }
 

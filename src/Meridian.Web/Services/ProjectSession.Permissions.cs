@@ -91,7 +91,7 @@ public sealed partial class ProjectSession
                 {
                     _stale.Remove(id);
                     _rejecting.Remove(id);
-                    p.Client.Replaced(SnapshotLocked(id), "Package permissions changed — your view of the model was updated.");
+                    p.Client.Replaced(ModelForLocked(id), "Package permissions changed — your view of the model was updated.");
                 }
             }
             BroadcastPresence();
@@ -141,7 +141,7 @@ public sealed partial class ProjectSession
             _staleTimer = null;
             foreach (var id in _stale)
                 if (_participants.TryGetValue(id, out var p))
-                    p.Client.Replaced(SnapshotLocked(id), "The model changed where parts are hidden from you — your view was refreshed.");
+                    p.Client.Replaced(ModelForLocked(id), "The model changed where parts are hidden from you — your view was refreshed.");
             _stale.Clear();
         }
     }

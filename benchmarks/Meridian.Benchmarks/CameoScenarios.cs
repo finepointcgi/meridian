@@ -189,7 +189,7 @@ public static class CameoScenarios
             var perTab = (Heap() - heapAfterFirst) / (double)(clients - 1);
             Line("Session: first tab join (load + replica)", join[0]);
             Line($"Session: next tab join (median of {clients - 1})", join.Skip(1).Order().ElementAt((clients - 1) / 2));
-            Line("Session: managed heap per further tab", 0, $"({perTab / 1024 / 1024:N1} MB; first {heapAfterFirst/1048576} all {Heap()/1048576})");
+            Line("Session: managed heap per further tab", 0, $"({perTab / 1024 / 1024:N1} MB)");
             var session = tabs[0].Session!;
             var lat = new List<double>();
             var t = Stopwatch.StartNew();
@@ -202,6 +202,7 @@ public static class CameoScenarios
             lat.Sort();
             Line($"Session: submit + relay to {clients - 1} replicas", t.Elapsed.TotalMilliseconds,
                  $"({s.Ops.Count:N0} ops; p50 {lat[lat.Count / 2]:0.000} ms, p95 {lat[lat.Count * 95 / 100]:0.000} ms, max {lat[^1]:0.0} ms)");
+            _ = ProjectFile.Serialize(tabs[0].Model);   // warm-up: joins no longer serialize, so this may be the first serialization
             Line("Session: snapshot", await Ms(() => { _ = session.Snapshot().Length; return Task.CompletedTask; }));
             Line("Session: persist", await Ms(session.PersistAsync));
             GC.Collect();

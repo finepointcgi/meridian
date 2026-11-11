@@ -98,11 +98,30 @@ public interface ISessionClient
 {
     void RemoteOp(ModelOp op);
     void PresenceChanged();
-    void Reset(string modelJson);
+    void Reset(SessionModel model);
     void CommentsChanged();
 
     /// <summary>The whole model was replaced (merge, or an edit rejected by an element lock); <paramref name="message"/> explains why.</summary>
-    void Replaced(string modelJson, string message) => Reset(modelJson);
+    void Replaced(SessionModel model, string message) => Reset(model);
+}
+
+/// <summary>
+/// The model a session sends a tab that must start over (version restore, merge, a rejected edit, changed permissions). The tab
+/// calls <see cref="CreateReplica"/> on its own thread, outside the session lock: either a copy of a frozen replica of the
+/// authoritative model that every recipient shares (<see cref="ModelRepository.CreateReplica"/>), or, for a filtered view, its
+/// own snapshot document parsed.
+/// </summary>
+public sealed class SessionModel
+{
+    private readonly ModelRepository? _frozen;
+    private readonly string? _json;
+
+    /// <param name="frozen">A replica nobody edits (only copied).</param>
+    internal SessionModel(ModelRepository frozen) => _frozen = frozen;
+    internal SessionModel(string json) => _json = json;
+
+    /// <summary>A model for the receiving tab to edit (a new one on every call; any thread).</summary>
+    public ModelRepository CreateReplica() => _frozen?.CreateReplica() ?? ProjectFile.Deserialize(_json!);
 }
 
 public sealed partial class ProjectSession : IDisposable
@@ -212,7 +231,7 @@ public sealed partial class ProjectSession : IDisposable
     private void ApplyLocked(string participantId, Guid userId, ModelOp op, bool events = true)
     {
         var probes = ProbeFiltered(participantId, op);       // what participants with hidden packages may receive (ProjectSession.Permissions.cs)
-        _snapshotSequence = -1;   // the cached snapshot (ProjectSession.Snapshot.cs) is stale from here on
+        InvalidateSnapshots();   // the cached snapshot and frozen replica (ProjectSession.Snapshot.cs) are stale from here on
         _master.ApplyRemote(op);
         ScheduleTextRefresh();   // shared SysML v2 texts follow the model (ProjectSession.SharedText.cs)
         if (events) Events?.OperationApplied(ProjectId, Name, userId, op, _master);
@@ -249,14 +268,14 @@ public sealed partial class ProjectSession : IDisposable
                 var view = ViewOfUser(userId) ?? throw new PermissionDeniedException("Open the project before restoring a version.");
                 if (Core.Permissions.PermissionCheck.CheckReplace(_master, restored, view) is { } why) throw new PermissionDeniedException(why);
             }
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             _master = restored;
             ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
             _lastEditor = userId;
             _stale.Clear();
-            foreach (var (id, p) in _participants) p.Client.Reset(SnapshotLocked(id, modelJson));   // filtered per participant
+            foreach (var (id, p) in _participants) p.Client.Reset(ModelForLocked(id, modelJson));   // filtered per participant
         }
     }
 

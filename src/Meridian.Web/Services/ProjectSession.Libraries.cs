@@ -77,7 +77,7 @@ public sealed partial class ProjectSession
             _libraries = libraries;
             _master = Materialize(projectJson);
             var result = afterMount(_master);
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             ScheduleTextRefresh();
             Sequence++;
             MarkDirty();
@@ -89,7 +89,7 @@ public sealed partial class ProjectSession
             {
                 _rejecting.Remove(id);
                 if (id == initiator) mine = SnapshotLocked(id);
-                else p.Client.Replaced(SnapshotLocked(id), message);
+                else p.Client.Replaced(ModelForLocked(id), message);
             }
             return (mine, result);
         }

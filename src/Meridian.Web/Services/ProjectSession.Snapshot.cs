@@ -13,12 +13,24 @@ namespace Meridian.Web.Services;
 /// (<see cref="ModelRepository.CreateReplica"/>), sharing its strings and field dictionaries copy-on-write, instead of parsing a
 /// snapshot: joining costs tens of milliseconds instead of half a second, and each tab holds a skeleton of the model rather than
 /// a full copy. Participants with hidden packages or a different set of used projects still parse their filtered snapshot.</item>
+/// <item>Tabs that must start over (merge, version restore, a rejected edit) receive a <see cref="SessionModel"/>: one frozen
+/// replica per model state, made under the lock and copied by each tab on its own thread, instead of a document each tab parses.
+/// A tab joining while that frozen replica is current copies it outside the lock too.</item>
 /// </list>
 /// </summary>
 public sealed partial class ProjectSession
 {
     private long _snapshotSequence = -1;
     private readonly WeakReference<string?> _snapshot = new(null);
+    private long _frozenSequence = -1;
+    private readonly WeakReference<ModelRepository?> _frozen = new(null);
+
+    /// <summary>The model changed or was replaced: cached snapshots no longer apply (call under <see cref="_gate"/>).</summary>
+    private void InvalidateSnapshots()
+    {
+        _snapshotSequence = -1;
+        _frozenSequence = -1;
+    }
 
     /// <summary>The current model as JSON (call under <see cref="_gate"/>).</summary>
     private string SnapshotLocked()
@@ -36,13 +48,41 @@ public sealed partial class ProjectSession
     /// </summary>
     public ModelRepository ReplicaFor(string participantId)
     {
-        string json;
+        SessionModel model;
         lock (_gate)
         {
-            if (SeesWholeModelLocked(participantId)) return _master.CreateReplica();
-            json = SnapshotLocked(participantId);
+            if (SeesWholeModelLocked(participantId))
+            {
+                // A frozen replica of this very state (made for a resync) is copied outside the lock; otherwise copy the model.
+                if (!TryFrozenLocked(out var frozen)) return _master.CreateReplica();
+                model = new SessionModel(frozen);
+            }
+            else model = new SessionModel(SnapshotLocked(participantId));
         }
-        return ProjectFile.Deserialize(json);   // filtered (package permissions, used projects): parsed outside the lock
+        return model.CreateReplica();   // filtered (package permissions, used projects): parsed outside the lock
+    }
+
+    /// <summary>
+    /// What a tab that must start over receives (call under <see cref="_gate"/>): a frozen replica shared by every recipient of
+    /// this model state, copied by each tab on its own thread, or its filtered snapshot.
+    /// </summary>
+    /// <param name="fullJson">The authoritative model, already serialized (when the caller has it; used for filtered views).</param>
+    private SessionModel ModelForLocked(string participantId, string? fullJson = null)
+    {
+        if (!SeesWholeModelLocked(participantId)) return new SessionModel(SnapshotLocked(participantId, fullJson));
+        if (!TryFrozenLocked(out var frozen))
+        {
+            frozen = _master.CreateReplica();
+            _frozen.SetTarget(frozen);
+            _frozenSequence = Sequence;
+        }
+        return new SessionModel(frozen);
+    }
+
+    private bool TryFrozenLocked(out ModelRepository frozen)
+    {
+        frozen = null!;
+        return _frozenSequence == Sequence && _frozen.TryGetTarget(out frozen!) && frozen != null;
     }
 
     /// <summary>
