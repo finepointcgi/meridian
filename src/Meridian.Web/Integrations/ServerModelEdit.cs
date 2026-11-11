@@ -46,7 +46,7 @@ public sealed class ServerModelEdit : IAsyncDisposable
         await _gate.WaitAsync();
         try
         {
-            var model = ProjectFile.Deserialize(_session.SnapshotFor(_participant));
+            var model = _session.ReplicaFor(_participant);
             var ops = new List<ModelOp>();
             model.OpEmitted += ops.Add;
             var result = change(model);

@@ -94,6 +94,13 @@ public static class CameoScenarios
         });
     }
 
+    private static long Heap()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        return GC.GetTotalMemory(true);
+    }
+
     private static void Line(string name, double ms, string note = "") => Console.WriteLine($"{name,-40} {ms,10:0.0}   {note}");
 
     private static async Task<double> Ms(Func<Task> work)
@@ -171,14 +178,18 @@ public static class CameoScenarios
             var hub = new CollaborationHub(store, NullLogger<CollaborationHub>.Instance);
             var tabs = new List<Workspace>();
             var join = new List<double>();
+            long heapAfterFirst = 0;
             for (var i = 0; i < clients; i++)
             {
                 var ws = new Workspace { User = user };
                 join.Add(await Ms(() => ws.JoinAsync(hub, project, ProjectRole.Owner)));
                 tabs.Add(ws);
+                if (i == 0) heapAfterFirst = Heap();
             }
+            var perTab = (Heap() - heapAfterFirst) / (double)(clients - 1);
             Line("Session: first tab join (load + replica)", join[0]);
             Line($"Session: next tab join (median of {clients - 1})", join.Skip(1).Order().ElementAt((clients - 1) / 2));
+            Line("Session: managed heap per further tab", 0, $"({perTab / 1024 / 1024:N1} MB; first {heapAfterFirst/1048576} all {Heap()/1048576})");
             var session = tabs[0].Session!;
             var lat = new List<double>();
             var t = Stopwatch.StartNew();

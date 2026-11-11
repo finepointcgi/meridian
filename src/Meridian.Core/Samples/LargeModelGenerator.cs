@@ -416,7 +416,7 @@ public static class LargeModelGenerator
         {
             if (!Metamodel.CanOwn(owner.Kind, e.Kind)) throw new InvalidOperationException($"{owner.Kind} cannot own {e.Kind}");
             e.Owner = owner;
-            owner.Children.Add(e);
+            owner.ChildList.Add(e);
         }
 
         public IReadOnlyList<Relationship> IncidentOf(Element e) => _incident.TryGetValue(e, out var l) ? l : [];

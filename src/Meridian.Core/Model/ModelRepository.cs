@@ -130,8 +130,8 @@ public sealed partial class ModelRepository
     {
         if (_index.ContainsKey(e.Id) || !Contains(owner)) return;
         e.Owner = owner;
-        if (index < 0 || index > owner.Children.Count) owner.Children.Add(e);
-        else owner.Children.Insert(index, e);
+        if (index < 0 || index > owner.Children.Count) owner.ChildList.Add(e);
+        else owner.ChildList.Insert(index, e);
         IndexRecursive(e);
         Raise(ChangeKind.Added, e);
         Emit(() => new AttachOp(owner.Id, owner.Children.IndexOf(e), ElementSnap.Of(e)));
@@ -141,7 +141,7 @@ public sealed partial class ModelRepository
     {
         if (e.Owner is not { } owner || !Contains(e)) return -1;
         var i = owner.Children.IndexOf(e);
-        owner.Children.RemoveAt(i);
+        owner.ChildList.RemoveAt(i);
         UnindexRecursive(e);
         e.Owner = null;
         Raise(ChangeKind.Removed, e);
@@ -153,7 +153,7 @@ public sealed partial class ModelRepository
     internal void DetachForRedaction(Element e)
     {
         if (e.Owner is not { } owner || !Contains(e)) return;
-        owner.Children.Remove(e);
+        owner.ChildList.Remove(e);
         UnindexRecursive(e);
         e.Owner = null;
     }
@@ -169,9 +169,9 @@ public sealed partial class ModelRepository
     private void MoveRaw(Element e, Element newOwner, int index)
     {
         if (!Contains(e) || !Contains(newOwner) || e.Owner == null || ReferenceEquals(e, newOwner) || e.IsAncestorOf(newOwner)) return;
-        e.Owner.Children.Remove(e);
-        if (index < 0 || index > newOwner.Children.Count) newOwner.Children.Add(e);
-        else newOwner.Children.Insert(index, e);
+        e.Owner.ChildList.Remove(e);
+        if (index < 0 || index > newOwner.Children.Count) newOwner.ChildList.Add(e);
+        else newOwner.ChildList.Insert(index, e);
         e.Owner = newOwner;
         Raise(ChangeKind.Moved, e);
         Emit(() => new MoveOp(e.Id, newOwner.Id, newOwner.Children.IndexOf(e)));
@@ -342,7 +342,7 @@ public sealed partial class ModelRepository
             {
                 if (!made.TryGetValue(c.Id, out var ce)) continue;
                 ce.Owner = e;
-                e.Children.Add(ce);
+                e.ChildList.Add(ce);
                 Link(c);
             }
         }
@@ -565,7 +565,7 @@ public sealed partial class ModelRepository
             {
                 var cc = CloneTree(child);
                 cc.Owner = c;
-                c.Children.Add(cc);
+                c.ChildList.Add(cc);
             }
             map[src] = c;
             return c;

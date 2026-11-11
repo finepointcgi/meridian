@@ -14,7 +14,7 @@ public class LibraryTests
     private static readonly Guid PartsProject = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     /// <summary>A "parts library" project: a "Standard parts" package with a block, a requirement, a relationship and a diagram.</summary>
-    private static (ModelRepository Model, Element Package, Element Wheel, Element Load) PartsLibrary(string wheelDoc = "18 inch")
+    internal static (ModelRepository Model, Element Package, Element Wheel, Element Load) PartsLibrary(string wheelDoc = "18 inch")
     {
         var m = new ModelRepository("Parts Library");
         var pkg = m.Create(m.Root, ElementKind.Package, "Standard parts");
@@ -35,11 +35,11 @@ public class LibraryTests
         new(usage, project ?? PartsProject, "Parts Library", package, LibraryPinKind.Version, pin, LibraryPins.Label(LibraryPinKind.Version, pin), mount,
             Resolved: "v" + pin);
 
-    private static LibraryPayload Payload(ModelRepository source, Element package, string pin = "1", string mount = "") =>
+    internal static LibraryPayload Payload(ModelRepository source, Element package, string pin = "1", string mount = "") =>
         new(Info(package.Id, pin, mount), LibraryContent.Extract(source, package.Id)!);
 
     /// <summary>A vehicle project using the parts library: a part typed by Wheel, a satisfy to Max load and Wheel on a BDD.</summary>
-    private static (ModelRepository Model, string Json, Element Part, Relationship Satisfy) UsingProject(LibraryPayload lib)
+    internal static (ModelRepository Model, string Json, Element Part, Relationship Satisfy) UsingProject(LibraryPayload lib)
     {
         var project = SampleModels.Vehicle();
         var m = ProjectFile.Deserialize(ProjectFile.Serialize(project), [lib]);

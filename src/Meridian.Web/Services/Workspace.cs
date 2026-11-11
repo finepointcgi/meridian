@@ -78,7 +78,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
         _buffered.Clear();
         var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
         if (session is null) { _joining = false; return false; }
-        var replica = ProjectFile.Deserialize(session.SnapshotFor(ParticipantId));   // filtered when packages are hidden from me
+        var replica = session.ReplicaFor(ParticipantId);   // shares the session's model; filtered when packages are hidden from me
         Session = session;
         Role = role;
         Install(replica);
