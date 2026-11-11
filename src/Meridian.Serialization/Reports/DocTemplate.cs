@@ -109,10 +109,12 @@ public sealed class DocSection
 [JsonDerivedType(typeof(TraceMatrixBlock), "traceMatrix")]
 [JsonDerivedType(typeof(CoverageBlock), "coverage")]
 [JsonDerivedType(typeof(DiagramBlock), "diagram")]
+[JsonDerivedType(typeof(RelationMapBlock), "relationMap")]
 [JsonDerivedType(typeof(ElementListBlock), "list")]
 [JsonDerivedType(typeof(StatisticsBlock), "statistics")]
 [JsonDerivedType(typeof(ValidationBlock), "validation")]
 [JsonDerivedType(typeof(PageBreakBlock), "pageBreak")]
+[JsonDerivedType(typeof(InstancesBlock), "instances")]
 public abstract class DocBlock
 {
     [JsonIgnore] public abstract string TypeLabel { get; }
@@ -134,10 +136,12 @@ public abstract class DocBlock
         ("traceMatrix", "Traceability matrix", () => new TraceMatrixBlock()),
         ("coverage", "Coverage summary", () => new CoverageBlock()),
         ("diagram", "Diagram(s)", () => new DiagramBlock()),
+        ("relationMap", "Relation map", () => new RelationMapBlock()),
         ("list", "Element list", () => new ElementListBlock()),
         ("statistics", "Model statistics", () => new StatisticsBlock()),
         ("validation", "Validation issues", () => new ValidationBlock()),
         ("pageBreak", "Page break", () => new PageBreakBlock()),
+        ("instances", "Instances (instance table)", () => new InstancesBlock()),
     ];
 }
 
@@ -261,6 +265,9 @@ public sealed class TraceMatrixBlock : CaptionedBlock
     public List<ElementKind> RelationshipKinds { get; set; } = [ElementKind.Satisfy, ElementKind.Verify, ElementKind.Allocate, ElementKind.Refine, ElementKind.Trace];
     /// <summary>Columns per table before the matrix is split into continuation tables.</summary>
     public int MaxColumns { get; set; } = 20;
+    /// <summary>Leave out columns without any link, and rows without a link in a table's columns. A requirement × design
+    /// matrix of a big model is otherwise mostly empty cells: 16,000 requirements × 6,000 blocks is ~5 million rows.</summary>
+    public bool HideEmpty { get; set; }
     public override string TypeLabel => "Matrix";
     public override string Summary => $"Matrix: {RowQuery} × {ColumnQuery}";
 }
@@ -286,6 +293,39 @@ public sealed class DiagramBlock : CaptionedBlock
     public override string Summary => "Diagram: " + (Diagram ?? Query ?? "current element") + (DiagramTypes.Count > 0 ? " [" + string.Join(", ", DiagramTypes) + "]" : "");
 }
 
+/// <summary>
+/// A relation map as a figure: a saved relation map by name, or everything connected to a root element up to a depth,
+/// filtered by relationship kinds (or a preset) and direction.
+/// </summary>
+public sealed class RelationMapBlock : CaptionedBlock
+{
+    /// <summary>A saved relation map (name, qualified name or id); its root and filters are used and the fields below ignored.</summary>
+    public string? Map { get; set; }
+    /// <summary>The root element (name, qualified name, requirement id or element id; placeholders allowed). Empty = the current loop element.</summary>
+    public string? Root { get; set; }
+    public int Depth { get; set; } = 2;
+    /// <summary>"Traceability", "Structure", "Allocation" or "All"; used when <see cref="RelationshipKinds"/> is empty.</summary>
+    public string? Preset { get; set; }
+    public List<ElementKind> RelationshipKinds { get; set; } = new();
+    public RelationDirection Direction { get; set; } = RelationDirection.Both;
+    public RelationMapLayout Layout { get; set; } = RelationMapLayout.TreeRight;
+    public bool IncludeOwned { get; set; }
+    public bool IncludeOwner { get; set; }
+    /// <summary>Most elements on the figure ("+N more" stubs stand for the rest).</summary>
+    public int MaxNodes { get; set; } = 120;
+    public double MaxHeight { get; set; } = 0.75;
+    public override string TypeLabel => "Relation map";
+    public override string Summary => "Relation map: " + (Map ?? (string.IsNullOrWhiteSpace(Root) ? "current element" : Root)) + (Map == null ? $", depth {Depth}" + (Preset is { Length: > 0 } p ? ", " + p : "") : "");
+
+    /// <summary>The map settings for a root (when no saved map is named).</summary>
+    public RelationMapSettings Settings(Element root) => new RelationMapSettings
+    {
+        RootId = root.Id, RootName = root.DisplayName, Depth = Depth, Direction = Direction, Layout = Layout,
+        RelationshipKinds = RelationshipKinds.Count > 0 ? RelationshipKinds.ToList() : RelationMapPresets.Kinds(Preset ?? "All").ToList(),
+        IncludeOwned = IncludeOwned, IncludeOwner = IncludeOwner, MaxNodes = MaxNodes,
+    }.Normalized();
+}
+
 /// <summary>A bullet list of matching elements.</summary>
 public sealed class ElementListBlock : DocBlock
 {
@@ -308,6 +348,23 @@ public sealed class ValidationBlock : CaptionedBlock
     public bool IncludeInfo { get; set; }
     public int Limit { get; set; } = 500;
     public override string TypeLabel => "Validation";
+}
+
+/// <summary>
+/// The instances of a block (Cameo instance table): one row per instance, a column per feature with its slot value; or,
+/// with <see cref="Layout"/> "slots", a feature / value table per instance.
+/// </summary>
+public sealed class InstancesBlock : CaptionedBlock
+{
+    /// <summary>The classifier: name, qualified name or id (placeholders allowed). Empty = the current loop element, else every instance.</summary>
+    public string? Classifier { get; set; }
+    /// <summary>"table" (one row per instance) or "slots" (a table per instance).</summary>
+    public string Layout { get; set; } = "table";
+    /// <summary>Include instances nested in other instances (part instances).</summary>
+    public bool IncludeNested { get; set; } = true;
+    public string EmptyText { get; set; } = "No instances.";
+    public override string TypeLabel => "Instances";
+    public override string Summary => "Instances: " + (string.IsNullOrWhiteSpace(Classifier) ? "current element" : Classifier) + (Layout == "slots" ? " (slots)" : "");
 }
 
 public sealed class PageBreakBlock : DocBlock

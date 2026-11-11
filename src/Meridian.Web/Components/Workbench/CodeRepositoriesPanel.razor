@@ -1,3 +1,4 @@
+@inject IDialogService ConfirmDialogs
 @using Meridian.Data
 @using Meridian.Web.CodeSync
 @using Meridian.Web.CodeSync.Hosts
@@ -88,13 +89,13 @@
             </div>
             @if (CanManage)
             {
-                <MudTooltip Text="Fetch the branch head and sync it now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => SyncNow(conn)" /></MudTooltip>
+                <MudTooltip Text="Fetch the branch head and sync it now"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Sync" Disabled="_busy" OnClick="() => SyncNow(conn)" aria-label="Fetch the branch head and sync it now" /></MudTooltip>
                 @if (!HostInfo.LocalMode)
                 {
-                    <MudTooltip Text="Webhook setup"><MudIconButton Size="Size.Small" Class="code-repo-webhook" Icon="@Icons.Material.Outlined.Webhook" OnClick="() => ShowSetup(conn, null)" /></MudTooltip>
+                    <MudTooltip Text="Webhook setup"><MudIconButton Size="Size.Small" Class="code-repo-webhook" Icon="@Icons.Material.Outlined.Webhook" OnClick="() => ShowSetup(conn, null)" aria-label="Webhook setup" /></MudTooltip>
                 }
                 <MudIconButton Size="Size.Small" Class="code-repo-edit" aria-label="Edit repository" Icon="@Icons.Material.Outlined.Edit" OnClick="() => Edit(conn)" />
-                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" />
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(conn)" aria-label="Delete" title="Delete" />
             }
         </div>
         @if (_setup?.Id == conn.Id)
@@ -108,14 +109,14 @@
                 {
                     var cloud = cfg.IsBitbucketCloud;
                     var url = cloud && _setup.Secret is { } urlSecret ? CodeSyncHostService.WebhookUrlWithToken(BaseUrl, conn.Id, urlSecret) : CodeSyncHostService.WebhookUrl(BaseUrl, conn.Id);
-                    <div class="d-flex align-center gap-1"><b>Payload URL</b>&nbsp;<code style="overflow-wrap:anywhere">@url</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(url)" /></div>
+                    <div class="d-flex align-center gap-1"><b>Payload URL</b>&nbsp;<code style="overflow-wrap:anywhere">@url</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(url)" aria-label="Copy" title="Copy" /></div>
                     @if (cloud && _setup.Secret is null)
                     {
                         <div style="opacity:.75">Bitbucket Cloud: the URL ends with <code>?token=</code> and the secret. Create a new secret to see the whole URL again.</div>
                     }
                     @if (_setup.Secret is { } secret)
                     {
-                        <div class="d-flex align-center gap-1"><b>Secret</b>&nbsp;<code style="overflow-wrap:anywhere">@secret</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(secret)" /></div>
+                        <div class="d-flex align-center gap-1"><b>Secret</b>&nbsp;<code style="overflow-wrap:anywhere">@secret</code><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => Copy(secret)" aria-label="Copy" title="Copy" /></div>
                         <div style="opacity:.75">Copy the secret now. It is stored encrypted and not shown again.</div>
                     }
                     else
@@ -154,7 +155,7 @@
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="New">Add repository</MudButton>
         }
         <span style="flex:1"></span>
-        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" />
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="Reload" aria-label="Refresh" title="Refresh" />
     </div>
 }
 else
@@ -206,6 +207,13 @@ else
             {
                 <div class="integration-sub">This project's model sets <code>@CodeSyncRunner.AutoDiagramsField = @ad</code>, which wins over this switch. Clear the field to use the switch.</div>
             }
+            <MudSelect T="Meridian.Core.CodeSync.CodeArtifactMode" Label="Deployment artifacts" @bind-Value="f.DeploymentArtifacts" Class="code-repo-artifacts"
+                       HelperText="Artifacts that «manifest» the synced code, so you can deploy it to nodes on a deployment diagram."
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.None">None</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.Repository">One for the repository</MudSelectItem>
+                <MudSelectItem Value="Meridian.Core.CodeSync.CodeArtifactMode.TopLevelPackages">One per top-level package</MudSelectItem>
+            </MudSelect>
         </div>
         <MudSwitch T="bool" @bind-Value="f.AutoSync" Label="Sync on every push to the branch" Color="Color.Primary" />
         <MudSwitch T="bool" @bind-Value="f.PostStatus" Label="Post a commit status (meridian/model)" Color="Color.Primary" />
@@ -431,6 +439,7 @@ else
     private async Task Delete(IntegrationConnection c)
     {
         if (!CanManage) return;
+        if (!await Confirm.AskAsync(ConfirmDialogs, $"Disconnect “{c.Name}”?", "Pushes to the repository stop updating this project, and its webhook secret is removed. The model and its review branches stay.", "Disconnect")) return;
         await CodeSync.DeleteAsync(ProjectId, c.Id);
         if (_setup?.Id == c.Id) _setup = null;
         await Reload();

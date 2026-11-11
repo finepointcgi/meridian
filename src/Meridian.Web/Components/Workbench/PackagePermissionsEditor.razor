@@ -74,7 +74,7 @@
                             }
                             else { <span class="perm-level">@LevelName(rule.Level)</span> }
                         </td>
-                        <td>@if (canManage) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove rule" OnClick="() => Remove(rule)" data-testid="perm-remove" /> }</td>
+                        <td>@if (canManage) { <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove rule" OnClick="() => Remove(rule)" data-testid="perm-remove" aria-label="Remove rule" /> }</td>
                     </tr>
                 }
             </tbody>

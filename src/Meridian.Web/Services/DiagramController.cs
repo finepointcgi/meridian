@@ -190,6 +190,28 @@ public sealed partial class DiagramController
         _selEdges.Clear();
     }
 
+    /// <summary>
+    /// Takes over the zoom, scroll position, layer and selection of <paramref name="old"/>, a controller of the same diagram in
+    /// the model this one replaced (a rebuilt model after a library update, merge or resync). Shapes that no longer exist are
+    /// simply not selected.
+    /// </summary>
+    public void TakeViewFrom(DiagramController old)
+    {
+        Zoom = old.Zoom;
+        PanX = old.PanX;
+        PanY = old.PanY;
+        ViewWidth = old.ViewWidth;
+        ViewHeight = old.ViewHeight;
+        LeftInset = old.LeftInset;
+        NeedsFit = old.NeedsFit;
+        ActiveLayerId = old.ActiveLayerId;
+        ClearSelection();
+        foreach (var n in old._selNodes)
+            if (Diagram.Nodes.FirstOrDefault(x => x.Element.Id == n.Element.Id) is { } node && Pickable(node)) _selNodes.Add(node);
+        foreach (var e in old._selEdges)
+            if (Diagram.Edges.FirstOrDefault(x => x.Relationship.Id == e.Relationship.Id) is { } edge && Pickable(edge)) _selEdges.Add(edge);
+    }
+
     public bool IsSelected(DiagramEdge e) => _selEdges.Contains(e);
 
     /// <summary>Adds a shape to the selection, or takes it out if it is already in.</summary>
@@ -1608,6 +1630,7 @@ public sealed partial class DiagramController
         {
             var owner = Model.DefaultOwnerFor(Diagram.Owner ?? Model.Root, kind);
             DiagramNode? container = null;
+            Element? deployTo = null;   // an artifact created inside a node is deployed to it (deployment shown by nesting)
 
             // Creating inside a shape nests the new element: ports/parts on parts (owned by the part's type),
             // pins on actions, substates in states, contents of swimlanes, pools and lanes.
@@ -1618,6 +1641,7 @@ public sealed partial class DiagramController
                 if (Metamodel.CanOwn(host.Kind, kind) && host.Kind is not (ElementKind.Package or ElementKind.Model)) { owner = host; container = hit; }
                 else if (kind is ElementKind.Port or ElementKind.Property && typeOfHost != null && Metamodel.CanOwn(typeOfHost.Kind, kind)) { owner = typeOfHost; container = hit; }
                 else if (Notation.ShapeOf(host) is NodeShape.Swimlane or NodeShape.Pool && kind != ElementKind.Comment) container = hit;
+                else if (Meridian.Core.Deployment.DeploymentModel.IsArtifact(kind) && Meridian.Core.Deployment.DeploymentModel.IsNode(host.Kind)) { container = hit; deployTo = host; }
             }
             if (kind is ElementKind.InputPin or ElementKind.OutputPin && container?.Element.Kind != ElementKind.Action)
                 throw new InvalidOperationException("Pins go on actions: click on an action with the pin tool.");
@@ -1649,6 +1673,7 @@ public sealed partial class DiagramController
                 var bounds = new Bounds(Snap(p.X - w / 2), Snap(p.Y - h / 3), w, h);
                 if (Notation.IsBorderShape(e) && container != null) bounds = Notation.SnapToBorder(new Bounds(p.X - w / 2, p.Y - h / 2, w, h), BoundsOf(container));
                 node = Model.AddNode(Diagram, e, bounds, parent: container);
+                if (deployTo != null) Model.Connect(ElementKind.Deployment, e, deployTo);
                 PutOnActiveLayer(node);
                 if (container != null) GrowContainers([node]);
             }
@@ -1723,6 +1748,9 @@ public sealed partial class DiagramController
             if (Notation.IsBorderShape(from.Element) && Diagram.ParentOf(from) is { } fp) Model.Set(r, FieldKeys.SourcePart, fp.Element.Id);
             if (Notation.IsBorderShape(to.Element) && Diagram.ParentOf(to) is { } tp) Model.Set(r, FieldKeys.TargetPart, tp.Element.Id);
             edge = Model.AddEdge(Diagram, r);
+            // Links: typed by the one association between the instances' classifiers; with several, the user picks (after this step).
+            if (kind == ElementKind.Link && Meridian.Core.Instances.InstanceModel.TypeLink(Model, r) is { Count: > 1 } choices && _ws.AskLinkAssociation != null)
+                _pendingLinkChoice = (r, choices);
             // Foreign keys: from the column the drag started on to the one it ended on; the referencing column is created when needed.
             if (kind == ElementKind.ForeignKey && from.Element.Kind == ElementKind.Table && to.Element.Kind == ElementKind.Table && r is Relationship fk)
                 Meridian.Core.DataModeling.DbModel.CompleteForeignKey(Model, fk,
@@ -1731,12 +1759,23 @@ public sealed partial class DiagramController
             // A message's vertical position is its place in time: use where the user started dragging.
             if (edge != null && kind == ElementKind.Message)
                 Model.SetWaypoints(Diagram, edge, [new Pt(0, Snap(Math.Max(_pressModel.Y, from.Bounds.Y + Notation.LifelineHeader + 20)))]);
-            if (!select) return edge;
+            if (!select) { AskPendingLinkType(); return edge; }
             _selNodes.Clear();
             SelectedEdge = edge;
         }
         Notify();
+        AskPendingLinkType();
         return edge;
+    }
+
+    private (Relationship Link, IReadOnlyList<Relationship> Choices)? _pendingLinkChoice;
+
+    /// <summary>Asks which association a link just drawn is an instance of, once the step that created it is over.</summary>
+    private void AskPendingLinkType()
+    {
+        if (_pendingLinkChoice is not var (link, choices) || _ws.AskLinkAssociation is not { } ask) return;
+        _pendingLinkChoice = null;
+        _ = ask(link, choices);
     }
 
     private void InsertWaypoint(DiagramEdge edge, Pt at)

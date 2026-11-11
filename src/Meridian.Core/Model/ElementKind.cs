@@ -140,6 +140,22 @@ public enum ElementKind
     Sequence,               // sequence generator in a schema
     Routine,                // stored procedure (subtype "procedure") or function (subtype "function"): signature only
     Trigger,                // trigger on its owning table: db.timing, db.events
+    // Saved relation maps (appended: keep existing ordinals stable): root, depth and filters in the "relationMap" field
+    RelationMap,
+    // Instance specifications (appended: keep existing ordinals stable). See Instances/InstanceModel.cs.
+    InstanceSpecification,  // an object: classified by blocks / value types / signals, owns its slots and nested part instances
+    Slot,                   // one value of an instance for a structural feature of its classifier
+    Link,                   // instance-level association / connector between two instances, typed by an association
+    // Deployment (appended: keep existing ordinals stable). Nodes, devices and execution environments nest inside each other;
+    // artifacts are deployed to them («deploy») and manifest model elements («manifest»). See Deployment.DeploymentModel.
+    Node,
+    Device,
+    ExecutionEnvironment,
+    Artifact,
+    DeploymentSpecification,
+    Deployment,             // artifact (deployment specification, database / schema) -> node, device or execution environment: «deploy»
+    Manifestation,          // artifact -> the block, component, package or code element it manifests: «manifest»
+    CommunicationPath,      // node <-> node; field "protocol"
 }
 
 public enum DiagramType
@@ -172,6 +188,9 @@ public enum DiagramType
     UafProjects,
     UafStandards,
     UafActualResources,
+    // Appended: keep existing ordinals stable
+    Object,                 // object diagram: instance specifications, their slots and links
+    Deployment,
 }
 
 public static class FieldKeys

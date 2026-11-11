@@ -38,6 +38,10 @@
                         }
                         <div class="notif-main">
                             <div class="notif-text">@item.Text</div>
+                            @if (item.Kind == NotificationKinds.LibraryUpdate)
+                            {
+                                <button class="notif-link" data-testid="notif-review-update" @onclick="() => Go(item)" @onclick:stopPropagation="true">Review update</button>
+                            }
                             <div class="notif-meta">
                                 <MudIcon Icon="@KindIcon(item.Kind)" />
                                 @if (item.ProjectName != null) { <span>@item.ProjectName</span><span>·</span> }
@@ -57,7 +61,7 @@
                     <div class="notif-empty">
                         <MudIcon Icon="@Icons.Material.Outlined.NotificationsNone" Style="font-size:30px; opacity:.5" />
                         <div>You're all caught up.</div>
-                        <div style="font-size:11.5px">Mentions, review requests, votes and replies show up here.</div>
+                        <div style="font-size:11.5px">Mentions, review requests, votes, replies and library updates show up here.</div>
                     </div>
                 }
             </div>
@@ -142,6 +146,7 @@
         NotificationKinds.ReviewRequested => Icons.Material.Outlined.RateReview,
         NotificationKinds.ReviewVote => Icons.Material.Outlined.HowToVote,
         NotificationKinds.ReviewState => Icons.Material.Outlined.Flag,
+        NotificationKinds.LibraryUpdate => Icons.Material.Outlined.LibraryBooks,
         _ => Icons.Material.Outlined.ChatBubbleOutline,
     };
 

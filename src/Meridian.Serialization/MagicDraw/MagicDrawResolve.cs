@@ -113,13 +113,14 @@ public static partial class MagicDrawImporter
             var kind = p.Kind;
             var src = p.Src;
             var tgt = p.Tgt;
-            string? mult = null, srcPart = null, tgtPart = null;
+            string? mult = null, srcMult = null, srcPart = null, tgtPart = null;
             var x = p.X;
 
-            if (kind == ElementKind.Association)
+            var communicationPath = kind == ElementKind.CommunicationPath;   // an association between nodes: its ends are read the same way
+            if (kind is ElementKind.Association or ElementKind.CommunicationPath)
             {
                 var ends = Refs(x, "memberEnd").Select(id => _props.GetValueOrDefault(id)).ToList();
-                if (ends.Count != 2 || ends.Any(e => e == null)) { _report.Warn($"Association {p.Id} skipped: it needs two resolvable member ends"); _report.Skip("Associations with unresolved ends"); return; }
+                if (ends.Count != 2 || ends.Any(e => e == null)) { _report.Warn($"{p.Label} {p.Id} skipped: it needs two resolvable member ends"); _report.Skip("Associations with unresolved ends"); return; }
                 var whole = ends.FindIndex(e => e!.Aggregation is "composite" or "shared");
                 // Plain associations read in memberEnd order; aggregations go from the whole to the part.
                 var partEnd = ends[whole >= 0 ? whole : 1]!;
@@ -132,9 +133,13 @@ public static partial class MagicDrawImporter
                     // An end owned by a class (a reference property) is navigable from that class.
                     src = classOwned.OwnerId;
                     tgt = classOwned.TypeId;
+                    otherEnd = ends.First(e => !ReferenceEquals(e, classOwned))!;
                     partEnd = classOwned;
                 }
                 mult = partEnd.Multiplicity;
+                // The other member end's multiplicity is drawn at the source end (only when the file states one).
+                srcMult = otherEnd.ExplicitMultiplicity;
+                if (communicationPath) { kind = ElementKind.CommunicationPath; mult = srcMult = null; }
             }
             else if (kind == ElementKind.Message)
             {
@@ -183,6 +188,7 @@ public static partial class MagicDrawImporter
             var r = new Relationship(kind, s, t, p.Id != null && !_map.ContainsKey(p.Id) && _model.Find(p.Id) == null ? p.Id : null);
             ModelRepository.SetFieldForLoad(r, FieldKeys.Name, Attr(x, "name"));
             ModelRepository.SetFieldForLoad(r, FieldKeys.Multiplicity, mult);
+            ModelRepository.SetFieldForLoad(r, FieldKeys.SourceMultiplicity, srcMult);
             ModelRepository.SetFieldForLoad(r, FieldKeys.SourcePart, srcPart != null && _map.TryGetValue(srcPart, out var sp) ? sp.Id : null);
             ModelRepository.SetFieldForLoad(r, FieldKeys.TargetPart, tgtPart != null && _map.TryGetValue(tgtPart, out var tp) ? tp.Id : null);
             switch (kind)

@@ -32,4 +32,10 @@
     <ProjectReference Include="..\Meridian.Web\Meridian.Web.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- SQL Server: managed networking on every platform; the native Windows SNI library (Microsoft license terms, not MIT) is not shipped. -->
+    <PackageReference Include="Microsoft.Data.SqlClient.SNI.runtime" Version="7.1.0" ExcludeAssets="all" />
+    <RuntimeHostConfigurationOption Include="Switch.Microsoft.Data.SqlClient.UseManagedNetworkingOnWindows" Value="true" />
+  </ItemGroup>
+
 </Project>

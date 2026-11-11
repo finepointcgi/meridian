@@ -41,6 +41,7 @@ public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
         await MigrateCodeSyncRunsAsync(conn);   // code-sync review runs (PostgresStore.CodeSync.cs)
         await MigratePermissionsAsync(conn);   // per-package permissions (PostgresStore.Permissions.cs)
         await MigrateUsagesAsync(conn);   // used projects / shared model libraries (PostgresStore.Usages.cs)
+        await MigrateElementChangesAsync(conn);   // element history change index (PostgresStore.ElementChanges.cs)
         await tx.CommitAsync();
     }
 
@@ -296,6 +297,15 @@ public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
         ExecAsync("update comments set resolved = $2 where id = $1", commentId, resolved);
 
     public Task DeleteCommentAsync(long commentId) => ExecAsync("delete from comments where id = $1", commentId);
+
+    public async Task<bool> UpdateCommentBodyAsync(long commentId, Guid author, string body)
+    {
+        await using var cmd = _ds.CreateCommand("update comments set body = $3 where id = $1 and author = $2");
+        cmd.Parameters.Add(new() { Value = commentId });
+        cmd.Parameters.Add(new() { Value = author });
+        cmd.Parameters.Add(new() { Value = body });
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
 
     // =============================================================== helpers
 

@@ -42,4 +42,45 @@ public sealed record ElementSnap(
         foreach (var c in Children)
             foreach (var d in c.SelfAndDescendants()) yield return d;
     }
+
+    /// <summary>True when <paramref name="e"/>'s subtree holds exactly what this snapshot does (ids, fields, ends, shapes, order).</summary>
+    public bool Describes(Element e)
+    {
+        if (e.Id != Id || e.Kind != Kind || e.Fields.Count != Fields.Length || e.Children.Count != Children.Length) return false;
+        foreach (var (k, v) in Fields)
+            if (!e.Fields.TryGetValue(k, out var x) || x != v) return false;
+        if (e is Relationship r ? r.Source.Id != SourceId || r.Target.Id != TargetId : SourceId != null || TargetId != null) return false;
+        if (e is Diagram d)
+        {
+            if (d.DiagramType != DiagramType || d.NodeList.Count != Nodes.Length || d.EdgeList.Count != Edges.Length) return false;
+            for (var i = 0; i < Nodes.Length; i++)
+                if (!Nodes[i].Describes(d.NodeList[i])) return false;
+            for (var i = 0; i < Edges.Length; i++)
+                if (!Edges[i].Describes(d.EdgeList[i])) return false;
+        }
+        else if (DiagramType != null || Nodes.Length > 0 || Edges.Length > 0) return false;
+        for (var i = 0; i < Children.Length; i++)
+            if (!Children[i].Describes(e.Children[i])) return false;
+        return true;
+    }
+
+    internal static bool SameStyle(KeyValuePair<string, string>[]? snap, Dictionary<string, string> style)
+    {
+        if ((snap?.Length ?? 0) != style.Count) return false;
+        foreach (var (k, v) in snap ?? [])
+            if (!style.TryGetValue(k, out var x) || x != v) return false;
+        return true;
+    }
+}
+
+public static class SnapExtensions
+{
+    /// <summary>True when the shape holds exactly what the snapshot does.</summary>
+    public static bool Describes(this NodeSnap s, DiagramNode n) =>
+        n.Id == s.Id && n.Element.Id == s.ElementId && n.Bounds == s.Bounds && n.ParentId == s.ParentId && ElementSnap.SameStyle(s.Style, n.Style);
+
+    /// <summary>True when the path holds exactly what the snapshot does.</summary>
+    public static bool Describes(this EdgeSnap s, DiagramEdge x) =>
+        x.Id == s.Id && x.Relationship.Id == s.RelationshipId && x.Source.Id == s.SourceNodeId && x.Target.Id == s.TargetNodeId
+        && x.Waypoints.SequenceEqual(s.Waypoints) && ElementSnap.SameStyle(s.Style, x.Style);
 }

@@ -76,5 +76,26 @@
 .vcmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 12px 12px; font-size: 12.5px; }
 .vcmp h4 { margin: 6px 0 4px; font-size: 12px; color: var(--text-3); font-weight: 600; }
 .vcmp ul { margin: 0; padding-left: 18px; }
-.vcmp .only-a { color: #2f6fd6; }
-.vcmp .only-b { color: #b25c00; }
+.vcmp .only-a { color: #7aa7ff; }
+.app.light .vcmp .only-a { color: #2f6fd6; }
+.vcmp .only-b { color: #f0a257; }
+.app.light .vcmp .only-b { color: #b25c00; }
+
+/* Several criteria per requirement: expandable rows, one sub-row per criterion. */
+.vfy-crit-cell { display: flex; align-items: center; gap: 4px; }
+.vfy-crit-cell > input { flex: 1; min-width: 0; }
+.vfy-crit-item, .vfy-crit-new { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.vfy-crit-item.bad { border-color: var(--danger) !important; }
+.vfy-expand { display: inline-flex; align-items: center; gap: 5px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; color: var(--text-2); font: inherit; cursor: pointer; }
+.vfy-expand:hover { background: rgba(127, 127, 127, .08); }
+.vfy-expand .chev { font-size: 10px; color: var(--text-3); }
+.vfy-expand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.vfy-expand .dot.pass { background: var(--ok); }
+.vfy-expand .dot.fail { background: var(--danger); }
+.vfy-expand .dot.none { background: transparent; border: 1px dashed var(--text-3); }
+.vfy-add, .vfy-remove { background: none; border: 1px solid transparent; border-radius: 5px; color: var(--text-3); cursor: pointer; font: inherit; padding: 0 6px; line-height: 20px; }
+.vfy-add:hover, .vfy-remove:hover { border-color: var(--border); color: var(--text); }
+.vfy-table tr.crit-row td { background: var(--panel-3); font-size: 12px; }
+.vfy-table tr.crit-row td.crit-no { color: var(--text-3); text-align: right; white-space: nowrap; }
+.vfy-table tr.crit-row td.crit-analysis { color: var(--text-3); }
+.vfy-table tr.crit-row td.crit-hint { color: var(--text-3); font-style: italic; }

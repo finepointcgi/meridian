@@ -71,6 +71,8 @@ public sealed class ResolvedDocument
     /// <summary>Cross-reference targets by name (case-insensitive).</summary>
     public Dictionary<string, RefTarget> Targets { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> Warnings { get; } = new();
+    /// <summary>What resolution produced (filled in both the buffered and the streaming pipeline).</summary>
+    public ReportStats Stats { get; } = new();
 
     /// <summary>Text for a cross-reference when the writer cannot produce a live field ("Figure 3-2", "?" for pages).</summary>
     public string XRefText(XRefRun x, string? page = null)
@@ -82,4 +84,46 @@ public sealed class ResolvedDocument
     public string HeaderLeft => DocumentNumber.Length > 0 ? DocumentNumber + (Revision.Length > 0 ? " Rev " + Revision : "") : Title;
 }
 
-public sealed record ReportProgress(string Phase, double Fraction);
+/// <summary>Progress of a report: a phase text, the fraction done (NaN = "no new fraction"), and, when known, how many
+/// top-level template sections and model elements have been processed.</summary>
+public sealed record ReportProgress(string Phase, double Fraction, int Section = 0, int Sections = 0, long Elements = 0);
+
+/// <summary>Counts of what a template produced. The pass that numbers headings and captions fills them before anything is
+/// written, so they drive progress, the size warning and the decision to run a report in the background.</summary>
+public sealed class ReportStats
+{
+    /// <summary>Paragraphs, headings, tables and figures (what the writers lay out).</summary>
+    public long Nodes { get; internal set; }
+    public long Paragraphs { get; internal set; }
+    public long TableRows { get; internal set; }
+    public long TableCells { get; internal set; }
+    public int FigureCount { get; internal set; }
+    public int TableCount { get; internal set; }
+    public int HeadingCount { get; internal set; }
+    /// <summary>Model elements visited by loops, tables, lists and diagrams (an element in two tables counts twice).</summary>
+    public long Elements { get; internal set; }
+
+    /// <summary>
+    /// Rough page count of the PDF / Word output on Letter or A4 at the default styles: ~38 table rows, ~22 paragraphs or
+    /// ~1.4 diagrams per page, plus room for headings and table headers. Within about ±40 % of QuestPDF's page count for
+    /// the built-in templates; it only has to tell 50 pages from 5,000.
+    /// </summary>
+    public long EstimatedPages =>
+        Math.Max(1, (long)Math.Ceiling(TableRows / 38.0 + Paragraphs / 22.0 + FigureCount / 1.4 + HeadingCount / 12.0 + TableCount * 0.12 + TableCells / 600.0));
+
+    internal void Add(DocNode n)
+    {
+        Nodes++;
+        switch (n)
+        {
+            case ParagraphNode: Paragraphs++; break;
+            case HeadingNode: HeadingCount++; break;
+            case FigureNode: FigureCount++; break;
+            case TableNode t:
+                TableCount++;
+                TableRows += t.Rows.Count;
+                foreach (var r in t.Rows) TableCells += r.Count;
+                break;
+        }
+    }
+}

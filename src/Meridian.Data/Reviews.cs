@@ -45,6 +45,8 @@ public static class NotificationKinds
     public const string ReviewVote = "review_vote";
     public const string ReviewState = "review_state";
     public const string Comment = "comment";
+    /// <summary>A used project's source moved ahead of the pin (docs/LIBRARIES.md); the element id carries the usage id ("N" format).</summary>
+    public const string LibraryUpdate = "library_update";
 }
 
 public sealed record NotificationDraft(Guid UserId, string Kind, string Text, Guid? ProjectId = null, string? ElementId = null, long? ReviewId = null, Guid? ActorId = null);

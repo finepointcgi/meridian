@@ -30,6 +30,18 @@ RUN export VERSION="${VERSION#v}" \
  && find /app/runtimes -mindepth 1 -maxdepth 1 -type d \
       ! -name linux-x64 ! -name linux-arm64 ! -name linux ! -name unix -exec rm -rf {} + \
  && mkdir -p /data/keys /data/backups /data/plugins
+# The user guide (docs-site, DocFX pinned in docs-site/dotnet-tools.json), served by the app at /guide
+# (src/Meridian.Web/Hosting/UserGuide.cs). --build-arg SKIP_GUIDE=1 leaves it out.
+COPY docs-site/ docs-site/
+ARG SKIP_GUIDE=
+RUN if [ "$SKIP_GUIDE" != "1" ]; then \
+      cd docs-site \
+      && dotnet tool restore \
+      && dotnet docfx metadata docfx.json \
+      && dotnet docfx build docfx.json --warningsAsErrors \
+      && cp -R _site /app/guide \
+      && test -f /app/guide/index.html; \
+    fi
 
 # ------------------------------------------------------------------ runtime
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_TAG} AS runtime

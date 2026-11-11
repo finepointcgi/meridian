@@ -132,7 +132,10 @@
     /// <summary>The element's db.* fields (the generic list leaves them out), as fitting editors.</summary>
     private RenderFragment Others(Element e) => __builder =>
     {
-        var fields = Metamodel.EditableFields(e.Kind).Where(k => k.StartsWith("db.", StringComparison.Ordinal) && k != DbFields.QualifiedName).ToList();
+        // The default constraint's name only matters to SQL Server (or when an import set it).
+        var sqlServer = DbModel.DatabaseOf(e)?.Get(DbFields.Dialect) == "sqlserver";
+        var fields = Metamodel.EditableFields(e.Kind).Where(k => k.StartsWith("db.", StringComparison.Ordinal) && k != DbFields.QualifiedName)
+            .Where(k => k != DbFields.DefaultName || sqlServer || e.Get(k).Length > 0).ToList();
         if (fields.Count == 0 && e.Get(DbFields.QualifiedName).Length == 0) return;
         <div class="section-title">Database <span class="grow"></span></div>
         foreach (var key in fields)
@@ -154,6 +157,20 @@
                 case DbFields.Cycle:
                     <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Cycle" />
                     break;
+                case DbFields.Definition when e.Kind is ElementKind.Routine or ElementKind.Trigger:
+                {
+                    // The body as the source wrote it, in a monospace editor (Meridian has no SQL highlighter).
+                    var body = e.Get(key);
+                    var lines = Math.Clamp(body.Count(ch => ch == '\n') + 2, 4, 24);
+                    <div class="db-code-field" style="margin:6px 0 2px">
+                        <label for="@($"db-body-{e.Id}")" style="font-size:12px; color:var(--text-3); display:block; margin:0 2px 2px">@(e.Kind == ElementKind.Trigger ? "Action (as written in the database)" : "Body (as written in the database)")</label>
+                        <textarea id="@($"db-body-{e.Id}")" @key="@(e.Id + key)" class="db-code" spellcheck="false" wrap="off" rows="@lines" data-testid="db-body"
+                                  disabled="@(Ws.ReadOnly || !Ws.CanEdit(e))" value="@body" @onchange="ev => Set(e, key, ev.Value?.ToString())"
+                                  placeholder="@(e.Kind == ElementKind.Trigger ? "EXECUTE FUNCTION audit()  /  BEGIN … END" : "BEGIN … END")"
+                                  style="width:100%; resize:vertical; font-family:var(--mono, ui-monospace, monospace); font-size:12px; line-height:1.45; tab-size:4; white-space:pre; overflow:auto; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--panel-solid); color:var(--text)"></textarea>
+                    </div>
+                    break;
+                }
                 default:
                     var multi = key is DbFields.Definition or DbFields.Expression;
                     <MudTextField @key="@(e.Id + key)" T="string" Label="@(DbFields.Label(key) ?? key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" HelperText="@DbFields.Help(key)"

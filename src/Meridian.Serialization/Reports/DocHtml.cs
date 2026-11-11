@@ -9,22 +9,37 @@ public static class DocHtml
 {
     private static string E(string s) => WebUtility.HtmlEncode(s);
 
+    /// <summary>The whole document as a string (previews and small reports; a whole-model report can pass the 2 GB string limit).</summary>
     public static string Write(ResolvedDocument doc, IProgress<ReportProgress>? progress = null, CancellationToken ct = default, bool preview = false)
     {
-        var sb = new StringBuilder(64 * 1024);
+        var w = new StringWriter(new StringBuilder(64 * 1024), System.Globalization.CultureInfo.InvariantCulture);
+        Write(doc, doc.Nodes, w, progress, ct, preview);
+        return w.ToString();
+    }
+
+    /// <summary>
+    /// Streams the document to <paramref name="writer"/>. <paramref name="nodes"/> are the document's nodes, either
+    /// <see cref="ResolvedDocument.Nodes"/> or <see cref="DocResolver.Stream"/>'s lazily produced ones; <paramref name="doc"/>
+    /// supplies the front matter, headings and cross-reference targets.
+    /// </summary>
+    public static void Write(ResolvedDocument doc, IEnumerable<DocNode> nodes, TextWriter writer, IProgress<ReportProgress>? progress = null,
+                             CancellationToken ct = default, bool preview = false)
+    {
+        var sb = new Out(writer);
+        var total = Math.Max(1, doc.Stats.Nodes);
         sb.Append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>").Append(E(doc.Title)).Append("</title><style>").Append(Css).Append("</style></head><body>");
         if (doc.Classification.Length > 0) sb.Append("<div class=\"banner top\">").Append(E(doc.Classification)).Append("</div>");
         sb.Append("<main>");
         var landscape = false;
-        for (var i = 0; i < doc.Nodes.Count; i++)
+        using var it = new Lookahead<DocNode>(nodes);
+        while (it.Next(out var n))
         {
-            if (i % 200 == 0)
+            if (it.Index % 200 == 0)
             {
                 ct.ThrowIfCancellationRequested();
-                progress?.Report(new ReportProgress("Writing HTML", (double)i / doc.Nodes.Count));
+                progress?.Report(new ReportProgress("Writing HTML", (double)it.Index / total));
             }
-            var n = doc.Nodes[i];
             switch (n)
             {
                 case TitlePageNode: TitlePage(sb, doc); break;
@@ -46,7 +61,7 @@ public static class DocHtml
                     if (h.Number.Length > 0) sb.Append("<span class=\"num\">").Append(E(h.Number)).Append("</span> ");
                     sb.Append(E(h.Text)).Append("</").Append(tag).Append('>');
                     break;
-                case ParagraphNode p: Paragraph(sb, p, doc, doc.Nodes, ref i); break;
+                case ParagraphNode p: Paragraph(sb, p, doc, it); break;
                 case TableNode t: Table(sb, t, doc); break;
                 case FigureNode f:
                     sb.Append("<figure id=\"").Append(f.Caption.Anchor).Append("\"><div class=\"diagram\">").Append(StripXmlDecl(f.Svg)).Append("</div>");
@@ -65,12 +80,20 @@ public static class DocHtml
             sb.Append("</ul></aside>");
         }
         sb.Append("</body></html>");
-        return sb.ToString();
+        writer.Flush();
+    }
+
+    /// <summary>StringBuilder-style chaining over a <see cref="TextWriter"/>.</summary>
+    private readonly struct Out(TextWriter w)
+    {
+        public Out Append(string? s) { w.Write(s); return this; }
+        public Out Append(char c) { w.Write(c); return this; }
+        public Out Append(int i) { w.Write(i.ToString(System.Globalization.CultureInfo.InvariantCulture)); return this; }
     }
 
     private static string StripXmlDecl(string svg) => svg.StartsWith("<?xml", StringComparison.Ordinal) ? svg[(svg.IndexOf("?>", StringComparison.Ordinal) + 2)..] : svg;
 
-    private static void TitlePage(StringBuilder sb, ResolvedDocument doc)
+    private static void TitlePage(Out sb, ResolvedDocument doc)
     {
         sb.Append("<section class=\"title\">");
         if (doc.Organization.Length > 0) sb.Append("<div class=\"org\">").Append(E(doc.Organization)).Append("</div>");
@@ -85,11 +108,12 @@ public static class DocHtml
         Row("Prepared by", doc.Author);
         Row("Model", doc.ModelName);
         sb.Append("</table>");
-        for (var i = 0; i < doc.TitleNotes.Count; i++) if (doc.TitleNotes[i] is ParagraphNode p) Paragraph(sb, p, doc, doc.TitleNotes, ref i);
+        using (var notes = new Lookahead<DocNode>(doc.TitleNotes))
+            while (notes.Next(out var n)) if (n is ParagraphNode p) Paragraph(sb, p, doc, notes);
         sb.Append("</section>");
     }
 
-    private static void Listing(StringBuilder sb, ListingKind kind, ResolvedDocument doc)
+    private static void Listing(Out sb, ListingKind kind, ResolvedDocument doc)
     {
         sb.Append("<nav class=\"front ").Append(kind.ToString().ToLowerInvariant()).Append("\"><h2 class=\"front\">")
           .Append(kind switch { ListingKind.Contents => "Table of Contents", ListingKind.Figures => "List of Figures", _ => "List of Tables" }).Append("</h2>");
@@ -109,7 +133,7 @@ public static class DocHtml
         sb.Append("</nav>");
     }
 
-    private static void Inlines(StringBuilder sb, IEnumerable<Inline> inlines, ResolvedDocument doc)
+    private static void Inlines(Out sb, IEnumerable<Inline> inlines, ResolvedDocument doc)
     {
         foreach (var i in inlines)
         {
@@ -133,7 +157,7 @@ public static class DocHtml
         }
     }
 
-    private static void Paragraph(StringBuilder sb, ParagraphNode p, ResolvedDocument doc, IReadOnlyList<DocNode> list, ref int index)
+    private static void Paragraph(Out sb, ParagraphNode p, ResolvedDocument doc, Lookahead<DocNode> list)
     {
         if (p.Kind is ParaKind.Bullet or ParaKind.Numbered)
         {
@@ -143,9 +167,9 @@ public static class DocHtml
             sb.Append("<li").Append(p.Indent > 0 ? $" style=\"margin-left:{p.Indent * 1.5}em\"" : "").Append('>');
             Inlines(sb, p.Inlines, doc);
             sb.Append("</li>");
-            while (index + 1 < list.Count && list[index + 1] is ParagraphNode next && next.Kind == p.Kind && !(next.Kind == ParaKind.Numbered && next.ListNumber == 1))
+            while (list.Peek(out var peek) && peek is ParagraphNode next && next.Kind == p.Kind && !(next.Kind == ParaKind.Numbered && next.ListNumber == 1))
             {
-                index++;
+                list.Next(out _);
                 sb.Append("<li").Append(next.Indent > 0 ? $" style=\"margin-left:{next.Indent * 1.5}em\"" : "").Append('>');
                 Inlines(sb, next.Inlines, doc);
                 sb.Append("</li>");
@@ -165,14 +189,14 @@ public static class DocHtml
         sb.Append(close);
     }
 
-    private static void Caption(StringBuilder sb, Caption c, string tag)
+    private static void Caption(Out sb, Caption c, string tag)
     {
         sb.Append('<').Append(tag).Append(" class=\"caption\"><b>").Append(E(c.Label)).Append("</b>");
         if (c.Text.Length > 0) sb.Append(": ").Append(E(c.Text));
         sb.Append("</").Append(tag).Append('>');
     }
 
-    private static void Table(StringBuilder sb, TableNode t, ResolvedDocument doc)
+    private static void Table(Out sb, TableNode t, ResolvedDocument doc)
     {
         sb.Append("<div class=\"tablewrap\"").Append(t.Caption != null ? $" id=\"{t.Caption.Anchor}\"" : "").Append('>');
         sb.Append("<table").Append(t.KeyValue ? " class=\"kv\"" : t.Compact ? " class=\"compact\"" : "").Append('>');

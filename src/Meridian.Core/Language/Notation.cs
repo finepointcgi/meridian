@@ -157,7 +157,15 @@ public static class Notation
         {
             AddFeatureCompartments(model, e, comps, diagramType);
         }
+        else if (e.Kind == ElementKind.InstanceSpecification)
+        {
+            // UML instance: "name : Type" (drawn underlined) and a slot compartment "feature = value".
+            name = Instances.InstanceModel.Label(model, e);
+            var slots = Instances.InstanceModel.Slots(e).Select(s => Instances.InstanceModel.SlotLine(model, s)).ToList();
+            if (slots.Count > 0) comps.Add(new Compartment(null, slots));
+        }
 
+        Deployment.DeploymentModel.AddCompartments(model, e, comps);   // nodes and artifacts: value properties, file, manifests
         if (ShapeOf(e) == NodeShape.Rectangle) AddTraceCompartments(model, e, comps);
         VariabilityNotation.Decorate(model, e, ref keyword, comps);
         return new NodeContent(keyword, name, e.IsAbstract, comps);

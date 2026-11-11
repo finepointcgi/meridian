@@ -141,6 +141,7 @@ public static class CodeModelMapper
                     rels.Add(($"dep:{from}->{to}", ElementKind.Dependency, _codeTypes[from], s, tt, null));
                 }
             foreach (var r in rels) EnsureRelationship(r.Symbol, r.Kind, r.From, r.Source, r.Target, r.Multiplicity);
+            EnsureArtifacts();
 
             RemoveGone();
             RemoveEmptyPackages();
@@ -449,7 +450,30 @@ public static class CodeModelMapper
             return created;
         }
 
-        private void EnsureRelationship(string symbol, ElementKind kind, CodeType from, Element source, Element target, string? multiplicity)
+        /// <summary>
+        /// Deployment artifacts (<see cref="CodeSyncOptions.Artifacts"/>): one for the repository, owned by and «manifest»ing
+        /// the root package, or one per top-level namespace package, owned by and «manifest»ing that package. Symbols
+        /// "artifact:" / "artifact:ns:X" and "manifest:artifact:…->…"; switching the option off removes them like any other gone code
+        /// element (kept and marked removed when someone deployed them).
+        /// </summary>
+        private void EnsureArtifacts()
+        {
+            if (o.Artifacts == CodeArtifactMode.None) return;
+            var targets = new List<(string Key, Element Package)>();
+            if (o.Artifacts == CodeArtifactMode.Repository) targets.Add(("", _root));
+            else
+                foreach (var p in _root.OwnedElements.Where(c => c.Kind == ElementKind.Package && IsOurs(c) && _seen.Contains(c.Get(CodeFieldKeys.Symbol)))
+                                                     .OrderBy(c => c.Get(CodeFieldKeys.Symbol), StringComparer.Ordinal).ToList())
+                    targets.Add((p.Get(CodeFieldKeys.Symbol), p));
+            foreach (var (key, pkg) in targets)
+            {
+                var symbol = "artifact:" + key;
+                var artifact = Ensure(symbol, ElementKind.Artifact, pkg, pkg.Name, [], null, null);
+                EnsureRelationship($"manifest:{symbol}->{(key.Length == 0 ? "root" : key)}", ElementKind.Manifestation, null, artifact, pkg, null);
+            }
+        }
+
+        private void EnsureRelationship(string symbol, ElementKind kind, CodeType? from, Element source, Element target, string? multiplicity)
         {
             if (!_seen.Add(symbol)) return;
             if (Metamodel.CheckEnds(kind, source.Kind, target.Kind) is { } problem)
@@ -467,9 +491,12 @@ public static class CodeModelMapper
                     if (!ReferenceEquals(r.Owner, owner)) { m.Move(r, owner); changed = true; }
                     if (multiplicity != null && r.Get(FieldKeys.Multiplicity) != multiplicity) { m.Set(r, FieldKeys.Multiplicity, multiplicity); changed = true; }
                     if (r.Get(RemovedKey).Length > 0) { m.Set(r, RemovedKey, null); changed = true; }
-                    m.Set(r, CodeFieldKeys.File, from.File);
-                    m.Set(r, CodeFieldKeys.Line, from.Line.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                    StampSubmodule(r, from.File);
+                    if (from != null)
+                    {
+                        m.Set(r, CodeFieldKeys.File, from.File);
+                        m.Set(r, CodeFieldKeys.Line, from.Line.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        StampSubmodule(r, from.File);
+                    }
                     if (changed) Changed(r);
                     return;
                 }
@@ -477,7 +504,7 @@ public static class CodeModelMapper
             }
             var created = m.Connect(kind, source, target, owner);
             if (multiplicity != null) m.Set(created, FieldKeys.Multiplicity, multiplicity);
-            Stamp(created, symbol, from.File, from.Line);
+            Stamp(created, symbol, from?.File, from?.Line);
             _existing[symbol] = created;
             _added.Add(created.Id);
         }

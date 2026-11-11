@@ -65,6 +65,17 @@ public sealed record ArchitectureViolation(
 
     /// <summary>"src/Thermal/ThermalControl.cs:12", or "" without a code side.</summary>
     public string Location => File is null ? "" : Line > 0 ? $"{File}:{Line}" : File;
+
+    /// <summary>The lines that break the rule (dependency and layering findings, when the reader recorded them): the first
+    /// <see cref="ConformanceOptions.MaxLocationsPerViolation"/> uses of the target, sorted by file and line. Empty when
+    /// unknown; <see cref="File"/> / <see cref="Line"/> (the type's declaration) still locate the finding.</summary>
+    public IReadOnlyList<CodeDependencyUse> Locations { get; init; } = [];
+
+    /// <summary>Uses of the target beyond <see cref="Locations"/> (shown as "+N more").</summary>
+    public int MoreLocations { get; init; }
+
+    /// <summary>The first line that breaks the rule ("src/A.cs:42"), else the type's <see cref="Location"/>.</summary>
+    public string FirstLocation => Locations.Count > 0 ? Locations[0].Location : Location;
 }
 
 /// <summary>What a check found: the violations to report, and those an «allow» dependency or a suppression entry hid.</summary>
@@ -121,6 +132,9 @@ public sealed record ConformanceOptions
 
     /// <summary>False for a partial push: «implemented» blocks are then not reported as missing in code.</summary>
     public bool CodeIsComplete { get; init; } = true;
+
+    /// <summary>Lines listed per violation (<see cref="ArchitectureViolation.Locations"/>); the rest are counted.</summary>
+    public int MaxLocationsPerViolation { get; init; } = 5;
 
     public static ConformanceOptions FromModel(ModelRepository model, string? repoId = null)
     {

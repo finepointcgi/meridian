@@ -171,6 +171,7 @@ public sealed class FmuHostProcess : IDisposable
         psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         try { _process = Process.Start(psi) ?? throw new CoSimException("Could not start the FMU host"); }
         catch (Win32Exception ex) { throw new CoSimException($"Could not start the FMU host ({file}): {ex.Message}", ex); }
+        ProcessId = _process.Id;
 
         var stdout = _process.StandardOutput;
         new Thread(() =>
@@ -186,7 +187,12 @@ public sealed class FmuHostProcess : IDisposable
             }
             catch (IOException) { }
             catch (ObjectDisposedException) { }
-            finally { _responses.CompleteAdding(); }
+            finally
+            {
+                // The host may be disposed (after a cancel or kill) before this thread sees the end of the stream.
+                try { _responses.CompleteAdding(); }
+                catch (ObjectDisposedException) { }
+            }
         }) { IsBackground = true, Name = "FmuHost stdout" }.Start();
         var stderr = _process.StandardError;
         new Thread(() =>
@@ -223,7 +229,8 @@ public sealed class FmuHostProcess : IDisposable
 
     private static string Clip(string s) => s.Length <= 2000 ? s : s[..2000] + "…";
 
-    public int ProcessId => _process.Id;
+    /// <summary>The host process id (kept after the process has ended, for diagnostics).</summary>
+    public int ProcessId { get; }
     public bool HasExited => _process.HasExited;
 
     public IReadOnlyList<string> DrainLog()
@@ -336,6 +343,8 @@ public sealed class FmuUnit : ICoSimUnit
     private sealed record Group(string Type, uint[] Vrs, int[] Index);
 
     public FmiModelDescription Description { get; }
+    /// <summary>The temporary folder the .fmu was unpacked into (deleted on <see cref="Dispose"/>).</summary>
+    public string ExtractedTo => _dir;
     public bool HasState => true;
     public bool TerminateRequested { get; private set; }
     public int HostProcessId => _host.ProcessId;
@@ -363,8 +372,9 @@ public sealed class FmuUnit : ICoSimUnit
             FmiVariable Var(string name, params string[] causalities) =>
                 byName.TryGetValue(name, out var v) && causalities.Contains(v.Causality) ? v
                     : throw new CoSimException($"{md.ModelName} has no {string.Join(" / ", causalities)} variable '{name}' (was the FMU replaced? re-import it)");
-            _in = Groups(inputs.Select(n => Var(n, "input")).ToList());
-            _out = Groups(outputs.Select(n => Var(n, "output")).ToList());
+            // Strings, binaries and clocks are not exchanged: such inputs keep the FMU's start values, such outputs read as NaN.
+            _in = Groups(inputs.Select((n, i) => (Var(n, "input"), i)).Where(x => FmiImport.IsExchangeable(x.Item1.Type)).ToList());
+            _out = Groups(outputs.Select((n, i) => (Var(n, "output"), i)).Where(x => FmiImport.IsExchangeable(x.Item1.Type)).ToList());
             _outCount = outputs.Count;
             _params = new JsonArray();
             var pars = parameters.Where(p => byName.TryGetValue(p.Key, out var v) && v.Causality is "parameter" && v.Variability != "constant")
@@ -405,8 +415,8 @@ public sealed class FmuUnit : ICoSimUnit
     private static uint Vr(FmiVariable v) =>
         uint.TryParse(v.ValueReference, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r) ? r : throw new CoSimException($"Variable {v.Name} has an invalid valueReference '{v.ValueReference}'");
 
-    private static List<Group> Groups(List<FmiVariable> vars) =>
-        vars.Select((v, i) => (v, i)).GroupBy(x => x.v.Type).Select(g => new Group(g.Key, g.Select(x => Vr(x.v)).ToArray(), g.Select(x => x.i).ToArray())).ToList();
+    private static List<Group> Groups(List<(FmiVariable V, int Index)> vars) =>
+        vars.GroupBy(x => x.V.Type).Select(g => new Group(g.Key, g.Select(x => Vr(x.V)).ToArray(), g.Select(x => x.Index).ToArray())).ToList();
 
     private static JsonNode Value(string type, double v) => type switch
     {
@@ -431,6 +441,7 @@ public sealed class FmuUnit : ICoSimUnit
     private double[] Outputs(JsonObject resp)
     {
         var result = new double[_outCount];
+        Array.Fill(result, double.NaN);
         var groups = resp["values"]?.AsArray() ?? [];
         for (var gi = 0; gi < _out.Count; gi++)
         {

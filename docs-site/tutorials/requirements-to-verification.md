@@ -75,10 +75,10 @@ Back in the traceability table, the *Not verified* filter now shows nothing.
 
 ## 9. Get it reviewed
 
-1. Select the *Requirements* package and click **Review → Request**.
+1. Select the *Requirements* package and click **Traceability → Request review**.
 2. Title it `Requirements review`, choose **Package** as the scope, compare against **Commit a new baseline now**,
    add reviewers (on a server) and tick **When approved, set the in-scope requirements' status to "approved"**.
-3. Reviewers work through **Review → Reviews**: they tick items with **Mark as reviewed**, read the **Changes** tab,
+3. Reviewers work through **Traceability → Reviews**: they tick items with **Mark as reviewed**, read the **Changes** tab,
    discuss in **Discussion** and **Approve**. When everyone has approved, **Mark approved** sets the requirements'
    status to *approved*.
 

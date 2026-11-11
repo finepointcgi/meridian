@@ -3,7 +3,7 @@
 A plugin is a .NET 10 class library that references `Meridian.Scripting` and contains a public class implementing
 `IMeridianPlugin`. A plugin can add:
 
-- **commands**, shown in the command palette (⌘K) and in **Extend ▸ Plugins** on the ribbon;
+- **commands**, shown in the command palette (⌘K) and in **Generate ▸ Plugins** on the ribbon;
 - **validation rules**, run by Validate and by the model-health indicator;
 - **exporters**, which take a model and return the bytes of a file;
 - **importers**, which take a file and edit the model.
@@ -94,7 +94,7 @@ to the host's copies, so the plugin and the host share the API types. If an asse
 constructor throws, or `Initialize` throws, the error is written to the Output dock and the server log, and the app keeps
 running. Anything a plugin registered before its `Initialize` threw is discarded.
 
-**Extend ▸ Plugins ▸ Loaded plugins…** lists each plugin with its version, status, any error, and what it contributes.
+**Generate ▸ Plugins ▸ Loaded plugins…** lists each plugin with its version, status, any error, and what it contributes.
 
 ## Compatibility
 

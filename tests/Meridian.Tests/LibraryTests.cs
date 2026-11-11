@@ -276,10 +276,10 @@ public class LibraryTests
         Assert.Empty(removed);
 
         var m = ProjectFile.Deserialize(json, [v2]);
-        var marks = LibraryUpdates.MarkSuspects(m, "Parts Library", "v1", "v2", changed, removed, new Dictionary<string, string>());
+        var marks = LibraryUpdates.MarkSuspects(m, PartsProject, "version:1", "version:2", changed, removed);
         Assert.Equal(2, marks.Count);
         var p = m.Find(part.Id)!;
-        Assert.Contains("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(p));
+        Assert.Contains("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(p, m));
         Assert.True(SuspectLinks.IsSuspect((Relationship)m.Find(sat.Id)!));
         Assert.Contains(SuspectLinks.All(m), r => r.Id == sat.Id);
         var issues = new ModelValidator().Validate(m);
@@ -289,9 +289,9 @@ public class LibraryTests
         // One undo step; and clearing a suspect link also clears its library mark.
         Assert.StartsWith("Library update", m.History.UndoDescription);
         LibraryUpdates.UnmarkSuspects(m, marks);
-        Assert.Null(SuspectLinks.LibraryChangeOf(p));
+        Assert.Null(SuspectLinks.LibraryChangeOf(p, m));
         Assert.False(SuspectLinks.IsSuspect((Relationship)m.Find(sat.Id)!));
-        LibraryUpdates.MarkSuspects(m, "Parts Library", "v1", "v2", changed, removed, new Dictionary<string, string>());
+        LibraryUpdates.MarkSuspects(m, PartsProject, "version:1", "version:2", changed, removed);
         SuspectLinks.Clear(m, (Relationship)m.Find(sat.Id)!);
         Assert.False(SuspectLinks.IsSuspect((Relationship)m.Find(sat.Id)!));
         SuspectLinks.ClearLibraryChange(m, p);
@@ -358,6 +358,144 @@ public class LibraryTests
         var fromLive = ModelMerge.Merge(@base, ours, live).Model;
         Assert.DoesNotContain("Standard parts", ProjectFile.Serialize(fromLive));
         Assert.Contains(sat.Id, ProjectFile.Serialize(fromLive));
+    }
+
+    // ================================================================= closing the gaps (offline marks, phone, pinned view, tabs)
+
+    /// <summary>
+    /// The stored-head path of a library update: a project document nobody has open is loaded with the new pin, marked by the same
+    /// function the live sessions run, and written back — with the marks, without library content; marking it again changes
+    /// nothing (so no second system commit).
+    /// </summary>
+    [Fact]
+    public void Stored_Head_Is_Marked_By_The_Same_Function_And_Saved_Without_Library_Content()
+    {
+        var (src, pkg, wheel, _) = PartsLibrary();
+        var (_, json, part, _) = UsingProject(Payload(src, pkg));
+        src.Set(src.Find(wheel.Id)!, FieldKeys.Documentation, "19 inch");
+        var v2 = Payload(src, pkg, "2");
+
+        var head = ProjectFile.Deserialize(json, [v2]);
+        var marks = LibraryUpdates.MarkSuspects(head, PartsProject, "version:1", "version:2", new HashSet<string> { wheel.Id }, new HashSet<string>());
+        Assert.Contains(marks, mk => mk.ElementId == part.Id && mk.Before is null);
+        var saved = ProjectFile.Serialize(head);
+        Assert.DoesNotContain("19 inch", saved);                         // library content is never written
+        Assert.DoesNotContain("changed in", saved);                      // the mark keeps ids only …
+        Assert.Contains(wheel.Id, saved);
+        var shown = ProjectFile.Deserialize(saved, [v2]);
+        Assert.Equal("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(shown.Find(part.Id)!, shown));   // … named when shown
+
+        var again = ProjectFile.Deserialize(saved, [v2]);
+        var second = LibraryUpdates.MarkSuspects(again, PartsProject, "version:1", "version:2", new HashSet<string> { wheel.Id }, new HashSet<string>());
+        Assert.All(second, mk => Assert.Equal(mk.Before, mk.After));    // already marked: nothing new to commit
+        Assert.Throws<ReadOnlyElementException>(() => again.Set(again.Find(wheel.Id)!, ReqFields.LibraryChange, "x"));   // library elements are never marked
+    }
+
+    /// <summary>
+    /// A suspect mark stores ids and the kind of change only; each viewer's model names the element. A part typed by a block in a
+    /// package hidden from the viewer reads "a restricted library element"; a viewer who can't read the library at all doesn't
+    /// learn its name either.
+    /// </summary>
+    [Fact]
+    public void Suspect_Marks_Name_Only_What_The_Viewer_May_See()
+    {
+        var (src, pkg, _, _) = PartsLibrary();
+        var secret = src.Create(pkg, ElementKind.Package, "Secret");
+        var prototype = src.Create(secret, ElementKind.Block, "Prototype XJ9");
+        var full = Payload(src, pkg);
+        var (m, json, _, _) = UsingProject(full);
+        var part = m.Create(m.OfKind(ElementKind.Block).Single(b => b.Name == "Vehicle"), ElementKind.Property, "motor");
+        m.Set(part, FieldKeys.Type, prototype.Id);
+        var marks = LibraryUpdates.MarkSuspects(m, PartsProject, "version:1", "version:2", new HashSet<string> { prototype.Id }, new HashSet<string>());
+        Assert.Single(marks);
+        Assert.Equal("Prototype XJ9 changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(m.Find(part.Id)!, m));
+        var saved = ProjectFile.Serialize(m);
+        Assert.DoesNotContain("XJ9", saved);
+
+        // Someone for whom "Secret" is hidden in the source project gets the library without it.
+        var user = Guid.NewGuid();
+        var view = AccessView.For([new PermissionRule(secret.Id, PrincipalKind.User, user, PackageAccess.None)], user, [], PackageAccess.Read, PackageAccess.Read);
+        var mine = ProjectFile.Deserialize(saved, [full with { RootJson = LibraryContent.Extract(src, pkg.Id, view)! }]);
+        var why = SuspectLinks.LibraryChangeOf(mine.Find(part.Id)!, mine)!;
+        Assert.Equal($"{LibraryChangeMark.Restricted} changed in Parts Library (v1 → v2)", why);
+        Assert.Contains(new ModelValidator().Validate(mine), i => i.RuleId == "TRC-001" && i.Message.Contains(LibraryChangeMark.Restricted) && !i.Message.Contains("XJ9"));
+
+        // Someone who can't read the library: neither element nor library is named. Nor is anything without a model.
+        var none = ProjectFile.Deserialize(saved);
+        Assert.Equal($"{LibraryChangeMark.Restricted} changed in {LibraryChangeMark.UnknownLibrary} (v1 → v2)", SuspectLinks.LibraryChangeOf(none.Find(part.Id)!, none));
+        Assert.DoesNotContain("XJ9", SuspectLinks.LibraryChangeOf(none.Find(part.Id)!)!);
+
+        // A removed element is never named (nobody has it any more).
+        var removed = LibraryUpdates.MarkSuspects(m, PartsProject, "version:2", "version:3", new HashSet<string> { prototype.Id }, new HashSet<string> { prototype.Id });
+        Assert.StartsWith("a library element was removed from Parts Library (v2 → v3)", SuspectLinks.LibraryChangeOf(m.Find(part.Id)!, m));
+        Assert.NotEmpty(removed);
+    }
+
+    /// <summary>Marks of the earlier format held a sentence with names: loading or redacting rewrites them to ids only.</summary>
+    [Fact]
+    public void Older_Named_Marks_Are_Rewritten_To_Ids_By_Loading_And_Redaction()
+    {
+        var (src, pkg, wheel, load) = PartsLibrary();
+        var lib = Payload(src, pkg, "2");
+        var (m, _, part, sat) = UsingProject(lib);
+        m.Find(part.Id)!.SetRaw(ReqFields.LibraryChange, "Wheel changed in Parts Library (v1 → v2)");
+        m.Find(sat.Id)!.SetRaw(ReqFields.LibraryChange, "Max load was removed from Parts Library (v1 → v2)");
+        var legacyJson = ProjectFile.Serialize(m);
+        Assert.Contains("Wheel changed", legacyJson);
+
+        // Redaction (filtered snapshots, history views) rewrites them even when nothing is hidden from the viewer.
+        var copy = ProjectFile.Deserialize(legacyJson);
+        ModelRedactor.Redact(copy, AccessView.ReadAll);
+        var redacted = ProjectFile.Serialize(copy);
+        Assert.DoesNotContain("Wheel changed", redacted);
+        Assert.DoesNotContain("Max load was removed", redacted);
+        Assert.Contains(wheel.Id, redacted);
+
+        // A session loads the model with its libraries: the rewritten mark keeps the target, kind and pins and renders as before.
+        var loaded = ProjectFile.Deserialize(legacyJson, [lib]);
+        Assert.Equal(2, LibraryChangeMark.UpgradeLegacy(loaded));
+        Assert.Equal(0, LibraryChangeMark.UpgradeLegacy(loaded));
+        var mark = LibraryChangeMark.Parse(loaded.Find(part.Id)!.Get(ReqFields.LibraryChange))!;
+        Assert.Equal((wheel.Id, false, PartsProject, "version:1", "version:2"), (mark.TargetId, mark.Removed, mark.SourceProjectId, mark.FromPin, mark.ToPin));
+        Assert.Equal("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(loaded.Find(part.Id)!, loaded));
+        Assert.True(LibraryChangeMark.Parse(loaded.Find(sat.Id)!.Get(ReqFields.LibraryChange))!.Removed);
+        Assert.Equal(load.Id, LibraryChangeMark.Parse(loaded.Find(sat.Id)!.Get(ReqFields.LibraryChange))!.TargetId);
+    }
+
+    /// <summary>The phone list shows a badge on a library's root and "read-only" for everything inside it, nested libraries included.</summary>
+    [Fact]
+    public void Library_Root_And_Nested_Content_Are_Recognised_For_The_Phone_List()
+    {
+        var (src, pkg, wheel, _) = PartsLibrary();
+        var (m, _, part, _) = UsingProject(Payload(src, pkg));
+        var root = m.Find(pkg.Id)!;
+        Assert.True(m.IsLibraryRoot(root));
+        Assert.Same(m.LibraryOf(root), m.LibraryOf(m.Find(wheel.Id)));
+        Assert.False(m.IsLibraryRoot(m.Find(wheel.Id)!));
+        Assert.Null(m.LibraryOf(part));
+        Assert.Contains(root, m.Root.OwnedElements);   // listed below its mount point like any package
+    }
+
+    [Theory]
+    [InlineData(LibraryPinKind.Version, "v3", 3, "Viewing version 3 (pinned)")]
+    [InlineData(LibraryPinKind.Baseline, "baseline PDR", 5, "Viewing baseline PDR — version 5 (pinned)")]
+    [InlineData(LibraryPinKind.Branch, "dev (head)", null, "Viewing branch dev (pinned head)")]
+    public void Pinned_View_Labels_Name_The_Pin(LibraryPinKind kind, string label, int? version, string expected) =>
+        Assert.Equal(expected, LibraryPins.ViewLabel(kind, label, version));
+
+    /// <summary>Rebuilding a model with a new pin keeps the project's own diagrams (same ids, same shapes), so their tabs can stay open.</summary>
+    [Fact]
+    public void Rebuilt_Model_Keeps_The_Projects_Diagrams_And_Drops_Removed_Library_Ones()
+    {
+        var (src, pkg, _, _) = PartsLibrary();
+        var (m, json, _, _) = UsingProject(Payload(src, pkg));
+        var own = m.Diagrams.Where(d => !m.IsLibraryElement(d)).Select(d => (d.Id, d.Nodes.Count)).ToList();
+        var libDiagram = m.Diagrams.Single(m.IsLibraryElement).Id;
+
+        src.Delete(src.Diagrams.Single());
+        var rebuilt = ProjectFile.Deserialize(json, [Payload(src, pkg, "2")]);
+        foreach (var (id, nodes) in own) Assert.Equal(nodes, Assert.IsType<Diagram>(rebuilt.Find(id)).Nodes.Count);
+        Assert.Null(rebuilt.Find(libDiagram));
     }
 
     [Fact]

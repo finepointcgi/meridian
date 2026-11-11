@@ -9,7 +9,7 @@
 
 @* "Update used project…": what moving a library's pin changes (ModelDiff between the pins, the library's diagrams with the
    code-sync change highlights), which project elements become suspect or lose their target; Accept moves the pin as one undo step. *@
-<MudDialog ContentStyle="padding-top:0">
+<MudDialog ContentStyle="padding-top:0" Class="lib-sheet">
     <TitleContent>
         <div class="d-flex align-center gap-2">
             <MudIcon Icon="@Icons.Material.Outlined.Difference" />
@@ -74,9 +74,11 @@
     private string? _error;
     private bool _busy;
 
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogs, LibraryUpdateOffer offer) =>
+    /// <param name="phone">On a phone the review is a full-screen sheet (stacked header, diagrams and changes fit the width).</param>
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogs, LibraryUpdateOffer offer, bool phone = false) =>
         dialogs.ShowAsync<LibraryUpdateDialog>("Update used project", new DialogParameters<LibraryUpdateDialog> { { x => x.Offer, offer } },
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true });
+            phone ? new DialogOptions { FullScreen = true, CloseOnEscapeKey = true, CloseButton = false }
+                  : new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true });
 
     protected override async Task OnInitializedAsync()
     {

@@ -121,6 +121,8 @@ public sealed class DatabaseConnectionService(IntegrationService integrations, I
         var pin = host.LocalMode || ep.Host == null ? null : await PinAsync(ep, ct);
         // VerifyFull checks the certificate against the host name: keep the name (the address was checked just now).
         if (pin != null && ep.Provider == LiveProviders.PostgreSql && new Npgsql.NpgsqlConnectionStringBuilder(connectionString).SslMode == Npgsql.SslMode.VerifyFull) pin = null;
+        // Oracle TCPS matches the server certificate against the host name too. (SQL Server keeps the name in HostNameInCertificate.)
+        if (pin != null && ep.Provider == LiveProviders.Oracle && connectionString.Contains("tcps", StringComparison.OrdinalIgnoreCase)) pin = null;
         return await LiveSchemaReader.ReadAsync(cfg.Provider, connectionString, cfg.Schemas, TimeSpan.FromSeconds(Math.Clamp(cfg.TimeoutSeconds, 5, 600)), ct, pin);
     }
 

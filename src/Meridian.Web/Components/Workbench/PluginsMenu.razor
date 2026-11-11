@@ -5,55 +5,48 @@
 @inject IJSRuntime JS
 @inject IDialogService Dialogs
 
-@* Ribbon group: plugin commands, exporters, importers, the script console and the loaded-plugins dialog. *@
-<div class="rgroup compact @(Active ? "active" : "")" data-tab="extend">
-    <div class="rlabel">Extend</div>
-    <div class="ritems">
-        <button class="rbtn @(ScriptOpen ? "on" : "")" @onclick="OnScript" title="C# script console"><MudIcon Icon="@Icons.Material.Outlined.Terminal" /><span class="t">Script</span></button>
-        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
-            <ActivatorContent><button class="rbtn" title="Commands, exporters and importers contributed by plugins"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><span class="t">Plugins</span></button></ActivatorContent>
-            <ChildContent>
-                @{ var commands = Plugins.Commands; var exporters = Plugins.Exporters; var importers = Plugins.Importers; }
-                @foreach (var c in commands)
-                {
-                    var cmd = c;
-                    <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunCommand(cmd)" Disabled="Ws.ReadOnly">@cmd.Title</MudMenuItem>
-                }
-                @if (exporters.Count > 0)
-                {
-                    <MudDivider />
-                    @foreach (var x in exporters)
-                    {
-                        var exporter = x;
-                        <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="() => Export(exporter)">Export: @exporter.Name (@exporter.Extension)</MudMenuItem>
-                    }
-                }
-                @if (importers.Count > 0)
-                {
-                    <MudDivider />
-                    @foreach (var x in importers)
-                    {
-                        var importer = x;
-                        <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="() => PickImport(importer)" Disabled="Ws.ReadOnly">Import: @importer.Name…</MudMenuItem>
-                    }
-                }
-                @if (commands.Count + exporters.Count + importers.Count > 0) { <MudDivider /> }
-                <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowPlugins">Loaded plugins…</MudMenuItem>
-            </ChildContent>
-        </MudMenu>
-    </div>
-    <div style="display:none">
-        <InputFile id="file-plugin-import" accept="@(_importer?.Extensions ?? "")" OnChange="OnImportFile" />
-    </div>
+@* Ribbon buttons on the Generate tab (the Extend tab before 0.7.1): plugin commands, exporters, importers, the script
+   console and the loaded-plugins dialog. *@
+<button class="rbtn @(ScriptOpen ? "on" : "")" @onclick="OnScript" title="C# script console"><MudIcon Icon="@Icons.Material.Outlined.Terminal" /><span class="t">Script</span></button>
+<MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+    <ActivatorContent><button class="rbtn" title="Commands, exporters and importers contributed by plugins"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><span class="t">Plugins</span></button></ActivatorContent>
+    <ChildContent>
+        @{ var commands = Plugins.Commands; var exporters = Plugins.Exporters; var importers = Plugins.Importers; }
+        @foreach (var c in commands)
+        {
+            var cmd = c;
+            <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunCommand(cmd)" Disabled="Ws.ReadOnly">@cmd.Title</MudMenuItem>
+        }
+        @if (exporters.Count > 0)
+        {
+            <MudDivider />
+            @foreach (var x in exporters)
+            {
+                var exporter = x;
+                <MudMenuItem Icon="@Icons.Material.Outlined.Download" OnClick="() => Export(exporter)">Export: @exporter.Name (@exporter.Extension)</MudMenuItem>
+            }
+        }
+        @if (importers.Count > 0)
+        {
+            <MudDivider />
+            @foreach (var x in importers)
+            {
+                var importer = x;
+                <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="() => PickImport(importer)" Disabled="Ws.ReadOnly">Import: @importer.Name…</MudMenuItem>
+            }
+        }
+        @if (commands.Count + exporters.Count + importers.Count > 0) { <MudDivider /> }
+        <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowPlugins">Loaded plugins…</MudMenuItem>
+    </ChildContent>
+</MudMenu>
+<div style="display:none">
+    <InputFile id="file-plugin-import" accept="@(_importer?.Extensions ?? "")" OnChange="OnImportFile" />
 </div>
 
 @code {
     private const long MaxUpload = 64 * 1024 * 1024;
     private PluginImporter? _importer;
     private int _logged;
-
-    /// <summary>True while the ribbon's Extend tab is showing (the CSS hides the group otherwise).</summary>
-    [Parameter] public bool Active { get; set; }
 
     /// <summary>True while the script dock is showing (drives the button's "on" state).</summary>
     [Parameter] public bool ScriptOpen { get; set; }

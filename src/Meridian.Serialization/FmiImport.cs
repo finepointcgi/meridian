@@ -8,10 +8,15 @@ namespace Meridian.Serialization;
 public sealed record FmiVariable(
     string Name, string ValueReference, string Causality, string Variability, string Type, string? Unit, string? Start, string? Description);
 
+/// <param name="DefaultStepSize">DefaultExperiment stepSize, as written.</param>
+/// <param name="DefaultStopTime">DefaultExperiment stopTime, as written.</param>
+/// <param name="VariableStepSize">CoSimulation canHandleVariableCommunicationStepSize.</param>
+/// <param name="FixedInternalStepSize">FMI 3.0 CoSimulation fixedInternalStepSize, as written.</param>
 public sealed record FmiModelDescription(
     string FmiVersion, string ModelName, string? Guid, string? Description, string? ModelIdentifier,
     bool CoSimulation, bool ModelExchange, IReadOnlyList<FmiVariable> Variables, IReadOnlyList<string> Units,
-    IReadOnlyList<string> Binaries);
+    IReadOnlyList<string> Binaries, string? DefaultStepSize = null, string? DefaultStopTime = null, bool VariableStepSize = true,
+    string? FixedInternalStepSize = null);
 
 /// <summary>
 /// FMI 2.0 / 3.0 interface import: reads an FMU's modelDescription.xml (variables, causality, units) and creates a block
@@ -82,8 +87,11 @@ public static class FmiImport
                 A(v, "name") ?? "", A(v, "valueReference") ?? "", A(v, "causality") ?? "local", A(v, "variability") ?? "continuous",
                 type, unit, A(typed, "start"), A(v, "description")));
         }
+        var experiment = root.Elements().FirstOrDefault(e => e.Name.LocalName == "DefaultExperiment");
         return new FmiModelDescription(version, A(root, "modelName") ?? "FMU", A(root, "guid") ?? A(root, "instantiationToken"),
-            A(root, "description"), A(cs ?? me ?? root, "modelIdentifier"), cs != null, me != null, vars, units, []);
+            A(root, "description"), A(cs ?? me ?? root, "modelIdentifier"), cs != null, me != null, vars, units, [],
+            experiment != null ? A(experiment, "stepSize") : null, experiment != null ? A(experiment, "stopTime") : null,
+            cs == null || A(cs, "canHandleVariableCommunicationStepSize") is not ("false" or "0"), cs != null ? A(cs, "fixedInternalStepSize") : null);
     }
 
     /// <summary>Maps an FMI variable type to a primitive type name.</summary>
@@ -91,10 +99,13 @@ public static class FmiImport
     {
         "Real" or "Float64" or "Float32" => "Real",
         "Integer" or "Int8" or "Int16" or "Int32" or "Int64" or "UInt8" or "UInt16" or "UInt32" or "UInt64" or "Enumeration" => "Integer",
-        "Boolean" => "Boolean",
-        "String" => "String",
+        "Boolean" or "Clock" => "Boolean",
+        "String" or "Binary" => "String",
         _ => "Real",
     };
+
+    /// <summary>FMI types whose values a co-simulation passes between parts (strings, binaries and clocks are not).</summary>
+    public static bool IsExchangeable(string fmiType) => fmiType is not ("String" or "Binary" or "Clock");
 
     /// <summary>The element name an FMI variable gets on import (array brackets and spaces replaced).</summary>
     public static string SimpleName(string fmiName) => fmiName.Replace("[", "_").Replace("]", "").Replace(" ", "_");
@@ -118,6 +129,10 @@ public static class FmiImport
             m.Set(block, FieldKeys.TagPrefix + "fmi.file", fileName);
             m.Set(block, FieldKeys.TagPrefix + "fmi.cosimulation", md.CoSimulation ? "supported" : "not supported by this FMU (Model Exchange only)");
             m.Set(block, FieldKeys.TagPrefix + "fmi.sha256", fmuHash);
+            m.Set(block, FieldKeys.TagPrefix + "fmi.defaultStepSize", md.DefaultStepSize);
+            m.Set(block, FieldKeys.TagPrefix + "fmi.defaultStopTime", md.DefaultStopTime);
+            m.Set(block, FieldKeys.TagPrefix + "fmi.fixedInternalStepSize", md.FixedInternalStepSize);
+            if (md.CoSimulation && !md.VariableStepSize) m.Set(block, FieldKeys.TagPrefix + "fmi.variableStepSize", "false");
 
             foreach (var v in md.Variables)
             {
@@ -134,6 +149,7 @@ public static class FmiImport
                 m.Set(e, FieldKeys.Documentation, v.Description);
                 m.Set(e, FieldKeys.TagPrefix + "fmi.valueReference", v.ValueReference);
                 m.Set(e, FieldKeys.TagPrefix + "fmi.causality", v.Causality);
+                m.Set(e, FieldKeys.TagPrefix + "fmi.type", v.Type);
                 if (v.Variability != "continuous") m.Set(e, FieldKeys.TagPrefix + "fmi.variability", v.Variability);
             }
             return block;

@@ -76,7 +76,6 @@ public partial class Workbench
             CA("New diagram from template…", Icons.Material.Outlined.AddChart, NewDiagramFromTemplate),
             CA("Export diagram as PNG…", Icons.Material.Outlined.Image, ExportImage),
             CA("Copy diagram as image", Icons.Material.Outlined.ContentCopy, CopyDiagramImage),
-            CA("Take the guided tour", Icons.Material.Outlined.Tour, StartTour),
             CA("Import into this project (BPMN, ArchiMate, SQL, C#, Mermaid, MagicDraw re-import)…", Icons.Material.Outlined.Input, () => ImportInto("file-into")),
             CA("Import ReqIF…", Icons.Material.Outlined.UploadFile, ImportReqIfIntoSelection),
             CA("Request review of selection…", Icons.Material.Outlined.RateReview, () => RequestReview()),
@@ -84,6 +83,7 @@ public partial class Workbench
         };
         list.AddRange(RequirementPaletteCommands());
         list.AddRange(VerificationPaletteCommands());   // Workbench.Verification.cs
+        list.AddRange(RelationMapPaletteCommands());    // Workbench.RelationMap.cs
         list.AddRange(ScriptingPaletteCommands());
         list.AddRange(AssistantPaletteCommands());
         list.AddRange(SettingsPaletteCommands());
@@ -93,13 +93,18 @@ public partial class Workbench
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
+        list.AddRange(SpreadsheetPaletteCommands());   // Workbench.Spreadsheet.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
+        list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
+        list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs
+        list.AddRange(InstancePaletteCommands());     // Workbench.Instances.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
             list.Add(new($"New {Metamodel.DisplayName(type)}", "Command", UiKinds.DiagramIcon(type), () => { NewDiagramSmart(type); return Task.CompletedTask; }));
         }
         list.AddRange(TablesPaletteCommands());
+        list.AddRange(DeploymentPaletteCommands());   // Workbench.Deployment.cs
         list.AddRange(LibraryPaletteCommands());   // used projects (Workbench.Libraries.cs)
         foreach (var d in Ws.Model.Diagrams.OrderBy(d => d.Name))
         {
@@ -126,6 +131,7 @@ public partial class Workbench
     {
         Ws.Dispatch = a => InvokeAsync(a);
         Ws.Confirm = ConfirmAsync;
+        Ws.AskLinkAssociation = AskLinkAssociationAsync;   // Workbench.Instances.cs
         Ws.Changed += OnWorkspaceChanged;
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         if (Guid.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var id))
@@ -252,11 +258,13 @@ public partial class Workbench
             case "Save" or "SaveAs": await Save(); break;
             case "Open": await OpenProjects(); break;
             case "Find": await FocusSearch(); break;
+            case "FindReplace": OpenFindReplace(); break;
             case "Palette": if (_palette != null) await _palette.Show(); break;
             case "Settings": await OpenSettings(); break;
             case "Undo": Undo(); break;
             case "Redo": Redo(); break;
             case "F7": Validate(); break;
+            case "Print": await PrintDiagram(); break;
         }
         StateHasChanged();
     }
@@ -265,7 +273,7 @@ public partial class Workbench
     {
         var m = Ws.Model;
         var els = m.AllElements.Count(e => e is not Relationship && e is not Diagram) - 1;
-        return $"{els} elements · {m.Relationships.Count()} relationships · {m.Diagrams.Count()} diagrams";
+        return $"{Plural.Of(els, "element")} · {Plural.Of(m.Relationships.Count(), "relationship")} · {Plural.Of(m.Diagrams.Count(), "diagram")}";
     }
 
     // ============================================================ navigation & shared commands (used by child panels)
@@ -281,6 +289,7 @@ public partial class Workbench
     {
         if (e is Diagram d) { Ws.Open(d); return; }
         if (e.Kind is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) { OpenSavedView(e); return; }
+        if (e.Kind == ElementKind.RelationMap) { OpenSavedRelationMap(e); return; }   // Workbench.RelationMap.cs
         if (Meridian.Serialization.Reports.ReportTemplates.TryLoad(e, out var template)) { Ws.OpenView(ViewTabKind.ReportTemplate, e, template); return; }
         var owned = e.OwnedElements.OfType<Diagram>().FirstOrDefault();
         if (owned != null) Ws.Open(owned);
@@ -367,8 +376,10 @@ public partial class Workbench
         StateHasChanged();
     }
 
-    public void ShowTreeMenu(Element e, double x, double y)
+    /// <param name="extra">Entries shown first (the relation map's "Re-centre on this element" …).</param>
+    public void ShowTreeMenu(Element e, double x, double y, IReadOnlyList<MenuEntry>? extra = null)
     {
+        if (extra is { Count: > 0 }) { ShowTreeMenu(e, x, y); if (_menu != null) OpenMenu([.. extra, MenuEntry.Sep(), .. _menu], x, y); return; }
         if (Ws.LibraryOf(e) is { } lib) { OpenMenu(LibraryTreeMenu(e, lib), x, y); return; }   // read-only (Workbench.Libraries.cs)
         var m = new List<MenuEntry>();
         var groups = new (string, ElementKind[])[]
@@ -380,19 +391,22 @@ public partial class Workbench
             ("New data model", [ElementKind.Table, ElementKind.Column]),
             ("New behavior", [ElementKind.Actor, ElementKind.UseCase, ElementKind.Activity, ElementKind.StateMachine, ElementKind.Interaction, ElementKind.Lifeline, ElementKind.Partition, ElementKind.Action, ElementKind.State, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.InitialState, ElementKind.FinalState]),
         };
+        // Short lists stay inline; long ones become "New element ▸" / "New diagram ▸" submenus (as in Cameo and EA), so
+        // the rest of the menu (Rename, Delete, Permissions…) stays on screen.
+        var create = new List<MenuEntry>();
         foreach (var (title, kinds) in groups)
         {
             var allowed = kinds.Where(k => Metamodel.CanOwn(e.Kind, k)).ToList();
             if (allowed.Count == 0) continue;
-            m.Add(MenuEntry.Title(title));
-            foreach (var k in allowed) m.Add(MenuEntry.Do(Metamodel.DisplayName(k), () => CreateElement(e, k)));
+            create.Add(MenuEntry.Title(title));
+            foreach (var k in allowed) create.Add(MenuEntry.Do(Metamodel.DisplayName(k), () => CreateElement(e, k)));
         }
-        var diagrams = Enum.GetValues<DiagramType>().Where(t => Metamodel.IsValidDiagramContext(t, e.Kind)).ToList();
-        if (diagrams.Count > 0)
-        {
-            m.Add(MenuEntry.Title("New diagram"));
-            foreach (var t in diagrams) m.Add(MenuEntry.Do(Metamodel.DisplayName(t), () => CreateDiagram(e, t)));
-        }
+        if (create.Count(x => !x.Header) > 6) m.Add(MenuEntry.Sub("New element", create));
+        else m.AddRange(create);
+        var diagrams = Enum.GetValues<DiagramType>().Where(t => Metamodel.IsValidDiagramContext(t, e.Kind))
+            .Select(t => MenuEntry.Do(Metamodel.DisplayName(t), () => CreateDiagram(e, t))).ToList();
+        if (diagrams.Count > 4) m.Add(MenuEntry.Sub("New diagram", diagrams));
+        else if (diagrams.Count > 0) { m.Add(MenuEntry.Title("New diagram")); m.AddRange(diagrams); }
         m.Add(MenuEntry.Sep());
         if (e is Diagram d) m.Add(MenuEntry.Do("Open diagram", () => Ws.Open(d)));
         if (Ws.Active is { } active && e is not Diagram && e.Kind != ElementKind.Model)
@@ -404,13 +418,20 @@ public partial class Workbench
         m.Add(MenuEntry.Sep());
         m.AddRange(AutoDiagramTreeEntries(e));   // Workbench.AutoDiagram.cs
         m.AddRange(DatabaseTreeEntries(e));      // Workbench.Database.cs
+        m.AddRange(InstanceMenuEntries(e));      // Workbench.Instances.cs
+        m.AddRange(DeploymentTreeEntries(e));    // Workbench.Deployment.cs
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
+        if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
+        m.AddRange(HistoryMenuEntries(e));   // element history (Workbench.History.cs)
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
         if (e is not Diagram && e.Descendants().OfType<Diagram>().Any())
+        {
             m.Add(MenuEntry.Async("Export diagrams as images (zip)…", () => ExportImages(e)));
+            m.Add(MenuEntry.Async("Print diagrams…", () => PrintDiagrams(e)));   // Workbench.Print.cs
+        }
         OpenMenu(m, x, y);
     }
 
@@ -426,6 +447,8 @@ public partial class Workbench
             m.Add(MenuEntry.Do("Rename", () => c.Editing = n, "F2"));
             m.Add(MenuEntry.Do("Select in containment tree", () => Navigate(el)));
             m.Add(MenuEntry.Do("Display related elements", () => c.DisplayRelated(n)));
+            m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(el)));   // Workbench.RelationMap.cs
+            m.AddRange(HistoryMenuEntries(el));   // element history (Workbench.History.cs)
             if (c.Diagram.DiagramType is DiagramType.InternalBlock or DiagramType.Parametric && el.Kind == ElementKind.Property)
             {
                 m.Add(MenuEntry.Do("Show ports on border", () => c.ShowPortsOf(n)));
@@ -433,6 +456,8 @@ public partial class Workbench
             }
             if (el.Kind == ElementKind.CombinedFragment && !Ws.ReadOnly) m.Add(MenuEntry.Do("Add operand", () => c.AddOperand(n)));
             m.AddRange(DatabaseCanvasEntries(c, n));   // Workbench.Database.cs
+            m.AddRange(InstanceMenuEntries(el, c, n));   // Workbench.Instances.cs
+            m.AddRange(DeploymentCanvasEntries(c, n)); // Workbench.Deployment.cs
             if (el.Kind == ElementKind.Action && !Ws.ReadOnly)
             {
                 m.Add(MenuEntry.Do("Add input pin", () => AddPin(c, n, ElementKind.InputPin)));
@@ -455,6 +480,7 @@ public partial class Workbench
         if (r.Edge is { } edge)
         {
             m.Add(MenuEntry.Do("Select in containment tree", () => Navigate(edge.Relationship)));
+            m.AddRange(HistoryMenuEntries(edge.Relationship));
             m.Add(MenuEntry.Do("Straighten path", c.StraightenSelectedEdge));
             m.Add(MenuEntry.Sep());
         }
@@ -541,6 +567,7 @@ public partial class Workbench
 
     private void OpenDock(int index)
     {
+        if (index == VerificationDock) { OpenVerification(); return; }   // a centre tab since 0.7.1 (Workbench.Verification.cs)
         _dock = index;
         _dockOpen = true;
     }
@@ -652,15 +679,14 @@ public partial class Workbench
         Ws.Bump();
     }
 
-    private Task ShowHelp() => Dialogs.ShowMessageBox("Keyboard & mouse", (MarkupString)(
-        "<b>Create:</b> pick a palette tool, click the canvas. Relationship tools: drag from source shape to target shape. Hold Shift to keep the tool.<br/><br/>" +
-        "<b>Tree:</b> drag items onto a diagram to show them, onto another tree item to move them. Right-click for New / Rename / Delete.<br/><br/>" +
-        "<b>Canvas:</b> double-click a shape to rename · double-click a path to add a bend point · Delete removes from model · Backspace removes from diagram · arrows nudge · ⌘/Ctrl+wheel zoom · wheel or middle-drag pans.<br/><br/>" +
-        "<b>Pictures, links, layers:</b> drop or paste images onto the canvas (Shift frees their aspect ratio when resizing) · Ctrl/⌘-click a linked shape or its link icon to follow it · the layers button hides, locks and reorders layers.<br/><br/>" +
-        "<b>Global:</b> ⌘S save · ⌘O open · ⌘Z / ⇧⌘Z undo/redo · ⌘F find · F7 validate."));
+    /// <summary>Help ▸ Keyboard &amp; mouse (the same list as the user guide's keyboard shortcuts page).</summary>
+    private Task ShowHelp() => Dialogs.ShowAsync<KeyboardHelpDialog>("Keyboard & mouse",
+        new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
 
     private Task ShowAbout() => Dialogs.ShowMessageBox("About Meridian",
-        "Meridian 0.1 — a model-based systems engineering workbench: UML 2.5 / SysML 1.6 modeling, SysML v2 textual exchange, XMI 2.5.1 interchange with Cameo, Enterprise Architect and Papyrus, requirements traceability, validation, reports and code generation.");
+        $"Meridian {TourChapters.WhatsNewVersion} — a model-based systems engineering workbench: UML 2.5 / SysML 1.6 modeling, SysML v2 textual exchange, " +
+        "XMI 2.5.1 interchange with Cameo, Enterprise Architect and Papyrus, requirements traceability and verification, database modelling, " +
+        "simulation, reports and code sync.");
 
     private async Task<string?> Prompt(string title, string label, string? value, bool multiline = false)
     {
@@ -763,7 +789,7 @@ public partial class Workbench
                     try { dir.Delete(true); } catch (IOException) { }
                 }
                 await CreateProjectFrom(model, Path.GetFileNameWithoutExtension(file.Name));
-                Ws.Log($"Imported EA repository {file.Name}: {report.Elements} elements, {report.Relationships} relationships, {report.Warnings.Count} warnings.");
+                Ws.Log($"Imported EA repository {file.Name}: {Plural.Of(report.Elements, "element")}, {Plural.Of(report.Relationships, "relationship")}, {Plural.Of(report.Warnings.Count, "warning")}.");
                 foreach (var w in report.Warnings.Take(200)) Ws.Log("  " + w);
                 Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);
                 return;
@@ -782,7 +808,7 @@ public partial class Workbench
             await CreateProjectFrom(model, projectName);
             if (report != null)
             {
-                Ws.Log($"Imported {file.Name}: {report.Elements} elements, {report.Relationships} relationships, {report.Warnings.Count} warnings.");
+                Ws.Log($"Imported {file.Name}: {Plural.Of(report.Elements, "element")}, {Plural.Of(report.Relationships, "relationship")}, {Plural.Of(report.Warnings.Count, "warning")}.");
                 foreach (var w in report.Warnings) Ws.Log("  warning: " + w);
                 if (report.Warnings.Count > 0) OpenDock(3);
             }
@@ -790,7 +816,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            Snackbar.Add($"Could not open {file.Name}: {ex.Message}", Severity.Error);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip and Mermaid files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 
@@ -867,7 +893,7 @@ public partial class Workbench
             }
             catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
             {
-                Snackbar.Add($"Could not import {file.Name}: {ex.Message}", Severity.Error);
+                ErrorWithGuide($"Could not import {file.Name}: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
             }
         }
         if (csharp.Count > 0)
@@ -949,7 +975,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
         {
-            Snackbar.Add($"ReqIF import failed: {ex.Message}", Severity.Error);
+            ErrorWithGuide($"Could not import the ReqIF file: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
         }
     }
 
@@ -965,13 +991,13 @@ public partial class Workbench
         {
             var (created, updated) = RequirementsCsv.Import(Ws.Model, _csvTarget, await ReadText(e.File));
             Ws.Log($"Requirements import into {_csvTarget.QualifiedName}: {created} created, {updated} updated.");
-            Snackbar.Add($"{created} requirements created, {updated} updated", Severity.Success);
+            Snackbar.Add($"{Plural.Of(created, "requirement")} created, {updated} updated", Severity.Success);
             OpenDock(1);
             Ws.Bump();
         }
         catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException)
         {
-            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+            ErrorWithGuide($"Could not import the file: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
         }
     }
 
@@ -1019,7 +1045,22 @@ public partial class Workbench
         if (await ModelForExport("HTML report") is not { } model) return;
         await DownloadText(BaseName + " report.html", "text/html", HtmlReport.Generate(model));
     }
-    private async Task OpenReport() => await JS.InvokeVoidAsync("meridian.openHtml", HtmlReport.Generate(Ws.Model));
+    /// <summary>The quick HTML model report, written on the server and opened from the streaming download endpoint
+    /// (a big model's report is far too large to pass through a JS interop call).</summary>
+    private async Task OpenReport()
+    {
+        var jobs = ReportJobService.From(Services);
+        var snapshot = Meridian.Serialization.Reports.ReportEngine.Snapshot(Ws.Model);
+        var job = jobs.Start(Ws.Model.Root.Name + " - Model Report", BaseName + " report.html", "text/html",
+            (stream, _, ct) => { using var w = new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024, leaveOpen: true); HtmlReport.Write(snapshot, w, ct); },
+            Ws.User?.Id, Ws.Session?.ProjectId, model: snapshot, access: Ws.Access);
+        Ws.SetStatus("Writing the HTML report…");
+        await jobs.WhenDone(job);
+        if (job.State != ReportJobState.Completed) { Snackbar.Add($"Could not write the report: {job.Error}", Severity.Error); return; }
+        job.Dismissed = true;
+        await ReportDownloads.OpenAsync(JS, jobs, job);
+        Ws.SetStatus($"Opened {job.FileName}");
+    }
 
     private Task ExportSvg()
     {

@@ -21,7 +21,7 @@ public partial class Workbench
 
     private IEnumerable<CommandPalette.Command> CodeSyncPaletteCommands() =>
     [
-        new("What changed (code changes to review)", "Command", Icons.Material.Outlined.Difference, () => { OpenCodeChanges(); return Task.CompletedTask; }),
+        new("Code changes (pushes from code to review)", "Command", Icons.Material.Outlined.Difference, () => { OpenCodeChanges(); return Task.CompletedTask; }),
         new("Highlight code changes", "Command", Icons.Material.Outlined.Highlight, () => { ToggleCodeHighlights(); return Task.CompletedTask; }),
     ];
 

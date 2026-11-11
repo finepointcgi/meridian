@@ -11,6 +11,19 @@
     <PackageReference Include="Npgsql" Version="10.0.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.14" />
+    <!-- SQL Server live import (MIT). Since 7.0 the Azure.Identity / MSAL code lives in a separate package that Meridian does
+         not reference; the native Windows SNI library is excluded in the app projects (managed networking is used). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <!-- Oracle live import: Oracle Free Use Terms (redistribution of the unmodified driver allowed when the license text ships
+         with it, see docs/DATABASE.md). The license is copied next to the binaries below. -->
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.400" GeneratePathProperty="true" />
+    <!-- Newer than the versions the two drivers ask for (those have security advisories). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(PkgOracle_ManagedDataAccess_Core)/LICENSE.txt" Link="licenses/Oracle.ManagedDataAccess.LICENSE.txt" Visible="false"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(PkgOracle_ManagedDataAccess_Core)' != ''" />
   </ItemGroup>
 
   <ItemGroup>

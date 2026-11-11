@@ -14,8 +14,6 @@ namespace Meridian.Web.Services;
 public sealed partial class Workspace : IDisposable, ISessionClient
 {
     private readonly List<DiagramController> _open = new();
-    private readonly List<ModelOp> _buffered = new();
-    private bool _joining;
 
     public Workspace()
     {
@@ -54,7 +52,8 @@ public sealed partial class Workspace : IDisposable, ISessionClient
     public UserAccount? User { get; set; }
     public ProjectSession? Session { get; private set; }
     public ProjectRole Role { get; private set; } = ProjectRole.Owner;
-    public bool ReadOnly => Role == ProjectRole.Viewer;
+    /// <summary>View-only role, or a historical view of a used project at its pinned version (<see cref="Pinned"/>).</summary>
+    public bool ReadOnly => Role == ProjectRole.Viewer || Pinned != null;
 
     /// <summary>The signed-in user is a server administrator (team servers; set when the workbench starts, re-checked before scripts run).</summary>
     public bool IsServerAdmin { get; set; }
@@ -70,124 +69,58 @@ public sealed partial class Workspace : IDisposable, ISessionClient
     public IReadOnlyList<Presence> Others =>
         Session?.Participants.Where(p => p.ParticipantId != ParticipantId).ToList() ?? (IReadOnlyList<Presence>)[];
 
-    public async Task<bool> JoinAsync(CollaborationHub hub, Guid projectId, ProjectRole role, Guid? branchId = null)
-    {
-        if (User is null) return false;
-        LeaveSession();
-        _joining = true;
-        _buffered.Clear();
-        var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
-        if (session is null) { _joining = false; return false; }
-        var replica = session.ReplicaFor(ParticipantId);   // shares the session's model; filtered when packages are hidden from me
-        Session = session;
-        Role = role;
-        Install(replica);
-        // Operations that arrived between registration and snapshot install, in order.
-        foreach (var op in _buffered) Model.ApplyRemote(op);
-        _buffered.Clear();
-        _joining = false;
-        OpenDefaultDiagrams();
-        Bump();
-        return true;
-    }
+    // ---------------------------------------------------------------- tabs across a rebuilt model
 
-    /// <summary>Uses a model without a collaboration session (tests, offline previews).</summary>
-    public void UseLocalModel(ModelRepository model)
-    {
-        LeaveSession();
-        Install(model);
-        Bump();
-    }
+    /// <summary>The open tabs, the active one, the selection and the back/forward history (see <see cref="CaptureTabs"/>).</summary>
+    private sealed record TabSnapshot(IReadOnlyList<DiagramController> Diagrams, string? ActiveDiagramId, IReadOnlyList<ViewTab> Views, ViewTab? ActiveView,
+                                      string? SelectedId, IReadOnlyList<string> Back, IReadOnlyList<string> Forward);
 
-    private void Install(ModelRepository replica)
-    {
-        Model.Changed -= OnModelChanged;
-        Model.History.Changed -= OnHistoryChanged;
-        Model.History.ActionCompleted -= FlushLocalOps;
-        Model.OpEmitted -= OnLocalOp;
-        _pendingOps.Clear();
-        Model = replica;
-        Model.History.ReadOnly = ReadOnly;
-        Model.Changed += OnModelChanged;
-        Model.History.Changed += OnHistoryChanged;
-        Model.OpEmitted += OnLocalOp;
-        Model.History.ActionCompleted += FlushLocalOps;
-        ModelVersion++;
-        TreeVersion++;
-        _open.Clear();
-        _views.Clear();
-        ActiveView = null;
-        _back.Clear();
-        _forward.Clear();
-        Active = null;
-        Selected = null;
-    }
-
-    private readonly List<ModelOp> _pendingOps = new();
+    /// <summary>Remembers the tabs before another model is installed (a library update, a merge, a resync or a version restore).</summary>
+    private TabSnapshot CaptureTabs() =>
+        new(_open.ToList(), Active?.Diagram.Id, _views.ToList(), ActiveView, Selected?.Id, _back.Select(d => d.Id).ToList(), _forward.Select(d => d.Id).ToList());
 
     /// <summary>
-    /// My operations go to the session one user action at a time (a delete with its cascades, an import, a script batch…), so
-    /// the server accepts or refuses the action as a whole (package permissions, locks) rather than part of it.
+    /// Re-opens the remembered tabs in the newly installed model: diagrams that still exist keep their tab, place, zoom, scroll
+    /// and selection; the active tab stays active (or its neighbour when it is gone); view tabs of saved elements and the
+    /// code-change and architecture reviews stay open. With no tab left, the default diagrams open.
     /// </summary>
-    private void OnLocalOp(ModelOp op)
+    private void RestoreTabs(TabSnapshot tabs)
     {
-        if (Session is null) return;
-        if (Model.History.InAction) { _pendingOps.Add(op); return; }
-        Session.Submit(ParticipantId, User?.Id ?? Guid.Empty, op);
-    }
-
-    private void FlushLocalOps()
-    {
-        if (_pendingOps.Count == 0) return;
-        var ops = _pendingOps.ToList();
-        _pendingOps.Clear();
-        Session?.SubmitAll(ParticipantId, User?.Id ?? Guid.Empty, ops);
-    }
-
-    public void LeaveSession()
-    {
-        Session?.Leave(ParticipantId);
-        Session = null;
-    }
-
-    void ISessionClient.RemoteOp(ModelOp op) => _ = Dispatch(() =>
-    {
-        if (_joining) { _buffered.Add(op); return; }
-        Model.ApplyRemote(op);
-    });
-
-    void ISessionClient.PresenceChanged() => _ = Dispatch(Bump);
-
-    void ISessionClient.Reset(SessionModel model) => _ = Dispatch(() =>
-    {
-        var activeId = Active?.Diagram.Id;
-        Install(model.CreateReplica());
-        if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
-        else OpenDefaultDiagrams();
-        SetStatus("The model was restored to an earlier version");
-    });
-
-    void ISessionClient.CommentsChanged() => _ = Dispatch(() => { CommentsVersion++; Bump(); });
-
-    void ISessionClient.Replaced(SessionModel model, string message) => _ = Dispatch(() =>
-    {
-        var activeId = Active?.Diagram.Id;
-        var selectedId = Selected?.Id;
-        // The code-change review stays open across a merge (accepting code changes replaces main's model).
-        var review = _views.FirstOrDefault(v => v.Kind == ViewTabKind.CodeChanges) is { } rv ? (Active: ReferenceEquals(ActiveView, rv), View: rv) : default;
-        Install(model.CreateReplica());
-        Session?.Resynced(ParticipantId);
-        if (activeId != null && Model.Find(activeId) is Diagram d) Open(d, recordHistory: false);
-        else OpenDefaultDiagrams();
-        if (review.View is { } keep)
+        foreach (var old in tabs.Diagrams)
         {
-            _views.Add(keep);
-            if (review.Active) ActiveView = keep;
+            if (Model.Find(old.Diagram.Id) is not Diagram d || _open.Any(c => ReferenceEquals(c.Diagram, d))) continue;
+            var c = new DiagramController(this, d);
+            c.TakeViewFrom(old);
+            _open.Add(c);
         }
-        if (Model.Find(selectedId) is { } sel) Select(sel);
-        Log(message);
-        SetStatus(message);
-    });
+        Active = _open.FirstOrDefault(c => c.Diagram.Id == tabs.ActiveDiagramId);
+        if (Active == null && tabs.ActiveDiagramId != null && _open.Count > 0)
+        {
+            var at = tabs.Diagrams.ToList().FindIndex(c => c.Diagram.Id == tabs.ActiveDiagramId);
+            Active = _open[Math.Clamp(at - 1, 0, _open.Count - 1)];
+        }
+        foreach (var v in tabs.Views)
+        {
+            if (v.Element is { } el)
+            {
+                if (Model.Find(el.Id) is not { } now) continue;
+                var tab = new ViewTab(v.Kind) { Element = now, State = v.State };
+                _views.Add(tab);
+                if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = tab;
+            }
+            else if (v.Kind is ViewTabKind.CodeChanges or ViewTabKind.Architecture or ViewTabKind.RelationMap)
+            {
+                _views.Add(v);   // reviews and unsaved relation maps (ids only) hold no model objects: the same tab carries on
+                if (ReferenceEquals(tabs.ActiveView, v)) ActiveView = v;
+            }
+        }
+        _back.AddRange(tabs.Back.Select(Model.Find).OfType<Diagram>());
+        _forward.AddRange(tabs.Forward.Select(Model.Find).OfType<Diagram>());
+        if (_open.Count == 0 && _views.Count == 0) OpenDefaultDiagrams();
+        if (Model.Find(tabs.SelectedId) is { } sel) Select(sel, syncCanvas: false);
+        SharePresence();
+        Bump();
+    }
 
     // ---------------------------------------------------------------- branches & element locks
 
@@ -439,13 +372,14 @@ public sealed partial class Workspace : IDisposable, ISessionClient
         if (change.Kind is ChangeKind.Added or ChangeKind.Removed or ChangeKind.Moved or ChangeKind.Reset
             || change is { Kind: ChangeKind.Updated, Field: FieldKeys.Name or FieldKeys.RequirementId })
             TreeVersion++;
-        if (change.Kind == ChangeKind.Removed)
+        // While my unconfirmed edits are rewound and re-applied (a rebase), removals are transient: tabs and selection are
+        // checked once it is over (Workspace.Collaboration.cs).
+        if (Model.IsRebasing)
         {
-            if (Selected != null && !Model.Contains(Selected)) Selected = null;
-            foreach (var c in _open.Where(c => !Model.Contains(c.Diagram)).ToList()) Close(c);
-            foreach (var v in _views.Where(v => v.Element != null && !Model.Contains(v.Element)).ToList()) CloseView(v);
-            foreach (var c in _open) c.ClearInvalidSelection();
+            _cleanupDue = true;
+            return;
         }
+        if (change.Kind == ChangeKind.Removed) CleanUpRemoved();
         if (change.Kind == ChangeKind.DiagramChanged) foreach (var c in _open) c.ClearInvalidSelection();
         if (change is { Kind: ChangeKind.Added, Element: Diagram created } && !Model.IsApplyingRemote) QueueCreatedDiagram(created);
         Bump();
@@ -579,7 +513,7 @@ public sealed partial class Workspace : IDisposable, ISessionClient
 }
 
 /// <summary>What a view tab shows.</summary>
-public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture }
+public enum ViewTabKind { Table, Query, ReportTemplate, CodeChanges, Architecture, Verification, RelationMap, Instances }
 
 /// <summary>A non-diagram tab: a generic table, a model query, or a report template being edited.</summary>
 public sealed class ViewTab(ViewTabKind kind)
@@ -591,12 +525,14 @@ public sealed class ViewTab(ViewTabKind kind)
     /// <summary>Per-tab state owned by the view (e.g. the template being edited).</summary>
     public object? State { get; set; }
 
-    public string Title => Element is { } e ? e.DisplayName : Kind switch
+    public string Title => Kind == ViewTabKind.Instances && Element is { } c ? $"{c.DisplayName} instances" : Element is { } e ? e.DisplayName : Kind switch
     {
-        ViewTabKind.Table => "New custom table",
+        ViewTabKind.Table => "New generic table",
         ViewTabKind.Query => "New query",
-        ViewTabKind.CodeChanges => "What changed",
+        ViewTabKind.CodeChanges => "Code changes",
         ViewTabKind.Architecture => "Architecture",
+        ViewTabKind.Verification => "Verification",
+        ViewTabKind.RelationMap => State is Meridian.Core.Analysis.RelationMapSettings s && s.RootName.Length > 0 ? "Relation map: " + s.RootName : "Relation map",
         _ => State is Meridian.Serialization.Reports.DocTemplate t && t.Name.Length > 0 ? t.Name : "Report template",
     };
 }

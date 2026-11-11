@@ -20,7 +20,7 @@ checklists: each reviewer ticks off the items they have looked at.
 
 ### Requesting a review
 
-Select what should be reviewed and choose **Review → Request** on the ribbon. In the desktop app's local mode the same
+Select what should be reviewed and choose **Traceability → Request review** on the ribbon. In the desktop app's local mode the same
 button creates a review checklist for yourself.
 
 | Field | Choices |
@@ -36,7 +36,7 @@ button creates a review checklist for yourself.
 
 ### Working through a review
 
-**Review → Reviews** opens the *Reviews* dock tab. Filter the list by *Open*, *Waiting for me*, *Mine* or *Closed*,
+**Traceability → Reviews** opens the *Reviews* dock tab. Filter the list by *Open*, *Waiting for me*, *Mine* or *Closed*,
 then open a review:
 
 - **Scope** lists the elements to review. Click one to select it on the diagrams; **Mark as reviewed** ticks it off.

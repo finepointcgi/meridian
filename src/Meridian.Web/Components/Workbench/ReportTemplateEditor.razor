@@ -134,10 +134,11 @@ else
         ForEachBlock => Icons.Material.Outlined.Repeat,
         IfBlock => Icons.Material.Outlined.Rule,
         FieldsBlock => Icons.Material.Outlined.ListAlt,
-        TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock => Icons.Material.Outlined.TableChart,
+        TableBlock or RequirementTableBlock or TraceTableBlock or StatisticsBlock or ValidationBlock or InstancesBlock => Icons.Material.Outlined.TableChart,
         TraceMatrixBlock => Icons.Material.Outlined.GridOn,
         CoverageBlock => Icons.Material.Outlined.DonutLarge,
         DiagramBlock => Icons.Material.Outlined.Schema,
+        RelationMapBlock => Icons.Material.Outlined.Hub,
         ElementListBlock => Icons.Material.Outlined.FormatListBulleted,
         _ => Icons.Material.Outlined.InsertPageBreak,
     };
@@ -242,7 +243,7 @@ else
         catch (OperationCanceledException) { return; }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or QueryParseException or System.Text.Json.JsonException or FormatException)
         {
-            _previewError = "Preview failed: " + ex.Message;
+            _previewError = $"The preview could not be built: {FriendlyError.Describe(ex)}. Check the section that was changed last.";
         }
         _previewBusy = false;
         await InvokeAsync(StateHasChanged);
@@ -265,8 +266,8 @@ else
         <div class="rte">
             <div class="rte-tree">
                 <div class="rte-bar">
-                    <MudTooltip Text="Add section after the selected one"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PostAdd" OnClick="AddSection" /></MudTooltip>
-                    <MudTooltip Text="Add subsection"><MudIconButton Class="rte-add-sub" Size="Size.Small" Icon="@Icons.Material.Outlined.SubdirectoryArrowRight" OnClick="AddSubsection" Disabled="@(_selected is not DocSection)" /></MudTooltip>
+                    <MudTooltip Text="Add section after the selected one"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PostAdd" OnClick="AddSection" aria-label="Add section after the selected one" /></MudTooltip>
+                    <MudTooltip Text="Add subsection"><MudIconButton Class="rte-add-sub" Size="Size.Small" Icon="@Icons.Material.Outlined.SubdirectoryArrowRight" OnClick="AddSubsection" Disabled="@(_selected is not DocSection)" aria-label="Add subsection" /></MudTooltip>
                     <MudMenu Icon="@Icons.Material.Outlined.AddBox" Size="Size.Small" Dense="true" Label="Block" AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
                         @foreach (var (type, label, create) in DocBlock.Catalog)
                         {
@@ -275,10 +276,10 @@ else
                         }
                     </MudMenu>
                     <span style="flex:1"></span>
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="() => Move(-1)" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="() => Move(1)" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="DuplicateSelected" Disabled="@(SelectedRow?.Container == null)" />
-                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteSelected" Disabled="@(SelectedRow?.Container == null)" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="() => Move(-1)" Disabled="@(SelectedRow?.Container == null)" aria-label="Move up" title="Move up" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="() => Move(1)" Disabled="@(SelectedRow?.Container == null)" aria-label="Move down" title="Move down" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="DuplicateSelected" Disabled="@(SelectedRow?.Container == null)" aria-label="Duplicate" title="Duplicate" />
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="DeleteSelected" Disabled="@(SelectedRow?.Container == null)" aria-label="Delete" title="Delete" />
                 </div>
                 <div class="rte-rows">
                     <div class="rte-row @(_selected == null ? "on" : "")" @onclick="() => SelectItem(null)">
@@ -327,7 +328,7 @@ else
                     <span class="section-title" style="margin:0">Live preview</span>
                     <span style="flex:1"></span>
                     <MudCheckBox T="bool" Value="_previewDiagrams" ValueChanged="v => { _previewDiagrams = v; _ = RefreshPreview(0); }" Label="Diagrams" Dense="true" Size="Size.Small" />
-                    <MudTooltip Text="Refresh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => RefreshPreview(0)" /></MudTooltip>
+                    <MudTooltip Text="Refresh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => RefreshPreview(0)" aria-label="Refresh" /></MudTooltip>
                 </div>
                 @if (_previewError != null)
                 {
@@ -488,6 +489,7 @@ else
                 @Txt("Column query", x.ColumnQuery, v => x.ColumnQuery = v, 1, mono: true)
                 @Multi("Relationship kinds", Metamodel.RelationshipKinds.Select(k => k.ToString()), Names(x.RelationshipKinds), vs => x.RelationshipKinds = Parse<ElementKind>(vs))
                 @Num("Columns per table", x.MaxColumns, v => x.MaxColumns = v, "Wider matrices continue in further tables")
+                @Chk("Hide empty rows and columns", x.HideEmpty, v => x.HideEmpty = v)
             </div>,
         CoverageBlock c => @<div>
                 @Caption(c)
@@ -502,6 +504,19 @@ else
                 @Chk("Include diagram documentation", d.IncludeDocumentation, v => d.IncludeDocumentation = v)
                 @Num("Max height (% of page)", (int)Math.Round(d.MaxHeight * 100), v => d.MaxHeight = Math.Clamp(v, 10, 100) / 100.0)
             </div>,
+        RelationMapBlock rm => @<div>
+                @Caption(rm)
+                @Opt("Saved relation map (name)", rm.Map, v => rm.Map = v, "Uses the saved map's root and filters; leave empty for the fields below")
+                @Opt("Root element (name, qualified name, requirement id or id)", rm.Root, v => rm.Root = v, "Empty = the current loop element, e.g. inside “For each requirement”")
+                @Num("Depth (1–6)", rm.Depth, v => rm.Depth = Math.Clamp(v, 1, 6))
+                @Pick("Relationships", rm.Preset ?? "All", v => rm.Preset = v, ("Traceability", "Traceability"), ("Structure", "Structure"), ("Allocation", "Allocation"), ("All", "All"))
+                @Multi("…or these relationship kinds", Metamodel.RelationshipKinds.Select(k => k.ToString()), Names(rm.RelationshipKinds), vs => rm.RelationshipKinds = Parse<ElementKind>(vs))
+                @Pick("Direction", rm.Direction.ToString(), v => rm.Direction = Enum.Parse<Meridian.Core.Analysis.RelationDirection>(v), ("Both", "Both"), ("Outgoing", "Outgoing"), ("Incoming", "Incoming"))
+                @Pick("Layout", rm.Layout.ToString(), v => rm.Layout = Enum.Parse<Meridian.Core.Analysis.RelationMapLayout>(v), ("TreeRight", "Tree →"), ("TreeDown", "Tree ↓"), ("Radial", "Radial"))
+                @Chk("Include owned elements", rm.IncludeOwned, v => rm.IncludeOwned = v)
+                @Chk("Include the owner", rm.IncludeOwner, v => rm.IncludeOwner = v)
+                @Num("Most elements", rm.MaxNodes, v => rm.MaxNodes = Math.Clamp(v, 10, 1000))
+            </div>,
         ElementListBlock l => @<div>
                 @Txt("Query", l.Query, v => l.Query = v, 1, mono: true)
                 @Opt("Related to current element", l.Related, v => l.Related = v)
@@ -513,6 +528,13 @@ else
                 @Caption(v)
                 @Chk("Include info messages", v.IncludeInfo, x => v.IncludeInfo = x)
                 @Num("Maximum rows", v.Limit, x => v.Limit = x)
+            </div>,
+        InstancesBlock ib => @<div>
+                @Caption(ib)
+                @Opt("Classifier (name, qualified name or id)", ib.Classifier, v => ib.Classifier = v, "Empty = the current loop element (e.g. inside For each kind:Block)")
+                @Pick("Layout", ib.Layout, v => ib.Layout = v, ("table", "One row per instance"), ("slots", "A slot table per instance"))
+                @Chk("Include nested part instances", ib.IncludeNested, v => ib.IncludeNested = v)
+                @Txt("When there are none", ib.EmptyText, v => ib.EmptyText = v)
             </div>,
         _ => @<MudText Typo="Typo.body2">Starts a new page.</MudText>,
     };

@@ -201,7 +201,7 @@ public sealed class LibraryWebTests : TestContext, IAsyncLifetime
         Assert.Equal(1, result.Suspect);
         Assert.Equal("19 inch", alice.Model.Find(_wheelId)!.Documentation);
         Assert.Equal("v2", alice.LibraryOf(alice.Model.Find(_wheelId))!.PinLabel);
-        Assert.Contains("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(alice.Model.Find(part.Id)!));
+        Assert.Contains("Wheel changed in Parts Library (v1 → v2)", SuspectLinks.LibraryChangeOf(alice.Model.Find(part.Id)!, alice.Model));
         Assert.Equal("2", (await _db.ListProjectUsagesAsync(_vehicle))[0].PinValue);
         Assert.Empty(state.Updates);
         Assert.StartsWith("Update “Parts Library” to v2", alice.Model.History.UndoDescription);

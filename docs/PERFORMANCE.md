@@ -42,7 +42,9 @@ dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --filter '*'
 
 # Opt-in heavy tests:
 MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests --filter Heavy_200k_Budgets
+MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests -c Release --filter HeavyReportTests --logger "console;verbosity=detailed"   # whole-model reports, prints the numbers below
 MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Web.Tests -c Release --filter CameoUiTimings      # MERIDIAN_HEAVY_ELEMENTS=500000
+MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests -c Release --filter Heavy_200k_Find_Replace --logger "console;verbosity=detailed"   # find and replace, prints the numbers below
 # Concurrency load test (runs in the normal suite for 30 s; longer / bigger with):
 MERIDIAN_LOAD_SECONDS=300 MERIDIAN_LOAD_CLIENTS=50 MERIDIAN_LOAD_ELEMENTS=200000 dotnet test tests/Meridian.Web.Tests --filter ConcurrencyLoadTests
 ```
@@ -116,6 +118,7 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | SysML v2 export / parse | 598 / 647 ms | 3,043 / 1,414 ms |
 | HTML report | 1,630 ms | 2,048 ms |
 | SRS template report (HTML) | 979 ms | 1,710 ms |
+| SDD / model overview template report (HTML, streamed) | 3.7 / 1.7 s | – |
 | AutoDiagrammer plan (whole model) | 619 ms | 1,380 ms |
 | Render 500-shape diagram (canvas) | 102 ms | 88 ms |
 | SQLite: load + deserialize (cold) | 665 ms | 1,225 ms |
@@ -128,41 +131,168 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | Session: each further tab | 63–76 ms | 180 ms |
 | Session: managed heap per further tab | 38 MB | 102 MB |
 | Session: op apply + relay to 24 tabs, p95 | 0.06 ms | 0.34 ms |
+| Session: rebase of a pending edit under a relayed one, p95 | 0.004 ms | – |
 | Model tree first render / reveal deepest element | 55 / 14 ms | – |
+| Relation map, depth 6, 500-element cap (build + layout / SVG) | 2–12 / 4–10 ms | – |
+
+## Find and replace
+
+`FindReplace` (docs-site/docs/find-replace.md) walks the containment tree once on the UI thread (no field reads), then
+matches the fields on the thread pool and streams hits back. Plain text uses `IndexOf` with ordinal comparison; regular
+expressions are compiled once and run with a 250 ms per-call timeout. Results stop at 10,000 matches. Numbers from
+`Heavy_200k_Find_Replace_Budgets` (200,000 elements, Release, M4 Pro):
+
+| Search | Matches | Time |
+|---|---:|---:|
+| Plain, no match | 0 | 23 ms |
+| Plain, "pump" (names, docs, requirements, values, tags, notes) | 2,753 | 37 ms |
+| Plain, match case + whole word | 1,421 | 26 ms |
+| Plain, "e" (stops at the 10,000 cap) | 10,006 | 14 ms |
+| Regex `\bmass\w*` | 8,006 | 54 ms |
+| Every field category | 2,753 | 30 ms |
+| Replace 5,000 names as one undo step / undo it | 5,000 | 12 ms / < 1 ms |
+
+Rendering is paged (200 elements at a time) so the browser never builds 10,000 rows at once.
+
+## Reports
+
+Template reports (SRS, ICD, SDD, VCRM, data dictionary, model overview, custom templates) are **streamed**: a numbering
+pass resolves the template once without keeping anything (it numbers headings, figures and tables, collects the
+cross-reference targets and counts the output), then the writing pass resolves it again on a worker thread and hands each
+paragraph, table and figure to the writer as it is made, through a bounded queue. Nothing is ever one big string or one
+big DOM:
+
+- **HTML** goes to a `TextWriter` over the output stream.
+- **Word** is written with the OpenXML SDK's `OpenXmlWriter` straight into the `word/document.xml` zip entry; the package
+  (styles, numbering, header / footer, media, relationships, content types) is assembled by hand around it, so the output
+  stream needn't be seekable and no part is buffered. Each diagram's SVG and PNG fallback is written once, after the body.
+- **PDF**: QuestPDF composes the document lazily from the node stream (orientation runs are split on the fly); diagrams
+  are parsed once per diagram and drawn when their page is laid out. QuestPDF itself keeps the laid-out document in memory
+  (it needs it for "page X of Y" and the table of contents), so PDF is the most memory-hungry format.
+- Diagrams are rendered once per diagram and model version (`DiagramImageCache`, by diagram id and
+  `ModelRepository.Revision`) and shared by both passes, every section that shows them and every document of a split
+  report.
+- Plain-text cross-references in headings and table cells are resolved in one pass (they used to look each heading up
+  in the heading list: quadratic in the number of headings).
+
+The server writes reports to a temporary file (`ReportJobService`) and the browser downloads them from
+`GET /api/reports/{id}/file` (chunked, with range support); the desktop app streams the same URL to the chosen file. The
+numbering pass is also the **size estimate**: above ~2,000 estimated pages the dialog warns and offers to split per
+top-level package or to narrow the scope; above ~150 pages (or 20,000 elements visited) the report runs as a background
+job with progress, cancel and a "Download" notification.
+
+The SDD's requirement × block matrix (and the VCRM's requirement × test case matrix) now **hide empty rows and columns**:
+in the 200k project the full matrix has 16,197 rows in each of ~300 tables (4.9 million rows, 100 million cells), almost
+all empty.
+
+200,000-element project (`MERIDIAN_HEAVY=1 HeavyReportTests`, Release; memory is the managed heap the report adds on top
+of the loaded model, sampled every 50 ms):
+
+| Report | Before | After | Output |
+|---|---|---|---|
+| SDD, HTML | `OverflowException` after 18.6 s, +6.2 GB | 3.7 s, +225 MB | 79.8 MB; 26,025 blocks, 128,240 table rows, 1,221 figures |
+| SDD, Word | stopped after 5 min at 3.5 GB (still building the DOM) | 44.7 s, +418 MB | 183.1 MB |
+| SDD, PDF | (not reached) | 47.1 s, +995 MB | 123.8 MB, 6,997 pages (estimated 8,097) |
+| SDD with the unfiltered matrix, HTML | `OverflowException` | 14.2 s, +455 MB; the size check estimates ~303,000 pages and warns first | 2,044 MB; 4,948,081 table rows |
+| Model overview, HTML | 4.9 s, +553 MB | 1.7 s, +47 MB | 65.0 MB; 77,805 blocks, 21,727 table rows, 1,004 figures |
+| Model overview, Word | 98.3 s, +1,793 MB | 37.3 s, +305 MB | 177.4 MB |
+| Model overview, PDF | 34.2 s, +550 MB | 28.2 s, +326 MB | 104.3 MB, 4,190 pages (estimated 5,963) |
+| Quick HTML model report | 3.3 s, +438 MB, an 80-million-character string sent to the browser through JS interop | streamed to a file and downloaded | 80 MB |
+
+"Before" is commit a847aca (one pass into memory, HTML in a `StringBuilder`, Word through the SDK's package DOM), run the
+same way. The Word time is mostly the PNG fallbacks of ~1,000 diagrams (rasterised a few at a time, at 80 dpi when a
+document has more than 200 diagrams, never more than 2,400 px on a side); the body takes ~5 s. The page estimate was
+16 % (SDD) and 42 % (model overview) above QuestPDF's real page count.
+
+The normal suite checks the streamed output against hashes of the pre-streaming output (HTML byte for byte, Word part
+XML) for every built-in template, the streaming and in-memory pipelines against each other (HTML, Word and PDF text),
+cancellation mid-stream, progress, the estimate, split per package, scope, hidden-empty matrices, linear numbering and
+the diagram cache (`ReportStreamingTests`), the download endpoint's checks (`ReportDownloadTests` in the web suite), the
+dialog's progress, background mode, warning and cancel (bUnit), the desktop save bridge, and a real browser download (E2E).
+
+## Element history
+
+Element history ("who changed this and when", docs-site version control) reads a per-element change index instead of stored
+versions. When a version is committed, `VersionControl.CommitAsync` hands the committed JSON to `ElementHistoryIndexer`,
+which compares it with its parent in the background: both versions are read with `FlatModel` (a forward-only
+`Utf8JsonReader` pass that keeps ids, owners, relationship ends, names and a 64-bit hash per field, no object graph) and the
+changed elements are written to `element_changes` in one transaction. The parsed parent of each line stays cached (105 MB at
+200k, the two most recently committed lines, dropped after five minutes idle), so a commit costs one parse. Field values are
+read from the two versions only when a diff is opened (`VersionReader`, redacted for the viewer).
+
+`MERIDIAN_HISTORY_VERSIONS=100 dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --quick --elements 200000 --only history`
+(`HistoryScenarios.cs`): 100 versions of the 200k project, each changing ~25 elements (a requirement renamed every fifth
+version, its text every seventh, a «satisfy» added every tenth). PostgreSQL was run with 25 versions (`--postgres`; 100
+versions of 17 MB each filled the Docker VM's disk). Other test suites were running on the machine at the same time.
+
+| Scenario | SQLite (100 versions) | PostgreSQL (25 versions) |
+|---|---:|---:|
+| Commit a version (unchanged by this feature) | 116 ms | 721 ms |
+| Added to the commit path (hand the JSON to the indexer) | < 0.01 ms (max 2 ms) | < 0.01 ms |
+| Index one commit, in the background (parse 240, compare 40, write 3 ms) | 300 ms (p95 435) | 274 ms (p95 326) |
+| **Open an element's history, indexed** (52 entries incl. relationships) | **0.4 ms** | **1.8 ms** |
+| … for a viewer with a hidden package | 0.4 ms | 2.0 ms |
+| Open a diff (read two versions) | 1.0 s | 0.83 s |
+| … redacted for a viewer with a hidden package (deserialize + redact) | 1.7 s | 1.4 s |
+| Uncommitted check (last commit vs the live element, first time; then cached) | 358 ms | 382 ms |
+| Backfill (lazy, background, resumable), per version | 1.13 s | 0.81 s |
+| Parse a version with `FlatModel` / deserialize it with `ProjectFile` | 257–296 / 471–605 ms | |
+
+The backfill runs once per project (the first time someone opens a history), oldest version first, one transaction per
+version; the panel shows its progress, and an interrupted backfill continues where it stopped. Its cost is reading each stored
+version (SQLite decompression ~100 ms, PostgreSQL `jsonb` to text ~200 ms) and parsing it; the per-version average is about
+twice a single commit's cost because the 80 MB strings churn a 2 GB benchmark heap (gen 2 collections). The first version of a
+project stores no rows (an element without an "added" row is shown as present since the first version), so the index grows
+with what commits change, not with the model: ~25 rows per version here.
+
+On SQLite, `element_change_versions` keeps a copy of each version's author and date: in `project_versions` they come after
+the multi-megabyte model column, and reading them made listing 100 versions take ~250 ms (SQLite walks the row's overflow
+pages to reach later columns).
 
 ## Concurrency load test
 
 `tests/Meridian.Web.Tests/ConcurrencyLoadTests.cs`: 25 in-process tabs (real `Workspace` replicas, each draining its inbox on
 its own logical thread like a Blazor circuit) against one `ProjectSession` for 30 s: field edits, creates, moves, deletes,
-shape moves, undo / redo, element locks (including three "rogue" tabs whose edits inside someone's subtree lock are
-rejected and resynchronised), comments and edits of a shared SysML v2 text. It asserts:
+shape moves, undo / redo, comments and edits of a shared SysML v2 text — and **shared elements edited without locks**:
+everyone writes the same "hot" fields, creates, renames, moves and deletes elements in shared packages, nests the shared
+packages into each other (moves that would make a cycle are refused) and moves and adds shapes on one shared diagram
+(docs/COLLABORATION.md). Some tabs still use element locks as a check-out, and three "rogue" tabs edit inside another tab's
+subtree lock; those actions are refused and rolled back in the rogue tab. It asserts:
 
-- an observer saw every accepted operation exactly once (count = session sequence, no duplicates), and every operation of
-  a tab that was never rejected was accepted;
+- an observer saw every accepted operation exactly once (count = session sequence, no duplicates), every operation a tab
+  emitted was either accepted or refused (and refused ones were never applied), no tab was ever resynchronised, and no
+  tab has unacknowledged edits left;
 - every replica serializes identically to the session's model, every shared-text editor has the server's text, and the
   persisted project equals the session model;
 - managed memory at the end is below 1.5 × the start + 256 MB;
 - **p95 of a local edit (including the server's apply and relay) < 50 ms** and **p95 inbox wait before a tab applies a
   relayed operation < 250 ms**.
 
-Results on the machine above (Debug test build, ~18,600-element project; recorded before shared replicas — see
-"Shared replicas" above for the current delivery and heap figures):
+Results on the machine above (Debug test build, ~18,600-element project; both stores run together, as in a full test run; recorded before shared replicas —
+see "Shared replicas" above for the current delivery and heap figures):
 
-| Store | Editing | Accepted ops | Submit p50 / p95 / max | Delivery p50 / p95 / max | Heap start → peak → end |
-|---|---|---|---|---|---|
-| SQLite | 15 s | 21,828 (1,444/s) | 0.01 / 12.3 / 48 ms | 5.8 / 87 / 2,135 ms | 1,183 → 3,192 → 1,227 MB |
-| PostgreSQL | 10 s | 11,782 (1,177/s) | 0.02 / 20.6 / 247 ms | 5.7 / 60 / 3,579 ms | 588 → 2,620 → 1,131 MB |
+| Store | Editing | Accepted ops | Refused actions | Rebases | Submit p50 / p95 / max | Delivery p50 / p95 / max | Heap start → peak → end |
+|---|---|---|---|---|---|---|---|
+| SQLite | 30 s | 64,023 (2,134/s) | 757 (697 rogue) | 25,175 | 0.01 / 1.1 / 14 ms | 4.6 / 15 / 2,104 ms | 517 → 1,489 → 627 MB |
+| PostgreSQL | 15 s | 31,813 (2,120/s) | 364 (331 rogue) | 12,465 | 0.02 / 1.2 / 36 ms | 4.6 / 12 / 2,487 ms | 644 → 901 → 603 MB |
 
-Delivery maxima are the rogue tabs' full resynchronisations (a whole-model snapshot is deserialized in the tab).
+Before this change (edits of shared elements only under locks; refused edits answered with a full resync) the same test
+measured submit p95 12–21 ms and delivery p95 60–87 ms: a refusal now costs a local rollback instead of deserializing a
+whole-model snapshot. Delivery maxima are isolated stalls of a few seconds under full CPU load; no tab is resynchronised.
 
 ## Known limits
 
-- **Concurrent writes to the same field without a lock can diverge.** Model operations are ordered by the server but not
-  transformed, and a tab applies its own edit before relayed earlier ones; two tabs writing the same field at the same
-  moment can end up with different values until the next resync or reload. Element locks prevent it (the load test edits
-  shared elements only under a lock), and a tab should process its inbox after taking a lock before editing.
-- **Template reports of the whole model** can exceed .NET's 2 GB string limit: the SDD template over the 200k project
-  throws `OverflowException` while writing HTML. Scope such reports to a package.
+- **Element history diffs read two stored versions** (~1 s at 200k, ~1.5 s for a viewer with hidden packages, who gets
+  versions redacted for them); the timeline itself opens in a few milliseconds. Indexing existing versions the first time takes
+  ~1 s per version at 200k, in the background.
+- **PDF reports keep the laid-out document in memory** (QuestPDF needs every page for page numbers and the table of
+  contents): ~1 GB for the 7,000-page SDD of the 200k project. Very large PDFs are best split per package.
+- **Word reports of diagram-heavy models** spend most of their time rasterising PNG fallbacks (~25 ms each at 80 dpi);
+  Word 2016 and later draw the SVG.
+- **Report size estimates** are within about ±40 % of the real page count; they decide when to warn and when to run in
+  the background, not the output.
+- **Finished reports** stay on the server's temporary disk for two hours (`ReportJobService.Retention`); a whole-model
+  SDD is ~80 MB (HTML) to ~180 MB (Word).
 - **Merge** is linear but allocation-heavy (three flat snapshots of the model): ~1.6 s at 200k, ~5.7 s at 500k.
 - **Every open tab holds a replica skeleton** (~40 MB at 200k including the tab's UI state, ~100 MB at 500k): element
   objects and indexes are per tab, field data is shared with the session until someone changes it. Tabs with hidden packages

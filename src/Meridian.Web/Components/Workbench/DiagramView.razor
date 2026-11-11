@@ -146,7 +146,7 @@
             @if (nodes) { @ColorBtn("text", "Text color", Icons.Material.Outlined.FormatColorText) }
             @if (nodes && C.SelectionHasContainer)
             {
-                <MudTooltip Text="Fit to contents"><button class="tool" @onclick="C.FitSelectionToContents"><MudIcon Icon="@Icons.Material.Outlined.FitScreen" /></button></MudTooltip>
+                <MudTooltip Text="Fit to contents"><button aria-label="Fit to contents" class="tool" @onclick="C.FitSelectionToContents"><MudIcon Icon="@Icons.Material.Outlined.FitScreen" /></button></MudTooltip>
                 <span class="sep"></span>
             }
             @if (C.SelectedEdge is { } routedEdge && !nodes && EdgeRouter.Routable(routedEdge))
@@ -224,9 +224,9 @@
                 </span>
             }
             <span class="sep"></span>
-            <MudTooltip Text="Copy format"><button class="tool" @onclick="C.CopyFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatPaint" /></button></MudTooltip>
-            <MudTooltip Text="Paste format"><button class="tool" disabled="@(!C.CanPasteFormat)" @onclick="C.PasteFormat"><MudIcon Icon="@Icons.Material.Outlined.ContentPasteGo" /></button></MudTooltip>
-            <MudTooltip Text="Reset to default look"><button class="tool" @onclick="C.ClearFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatClear" /></button></MudTooltip>
+            <MudTooltip Text="Copy format"><button aria-label="Copy format" class="tool" @onclick="C.CopyFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatPaint" /></button></MudTooltip>
+            <MudTooltip Text="Paste format"><button aria-label="Paste format" class="tool" disabled="@(!C.CanPasteFormat)" @onclick="C.PasteFormat"><MudIcon Icon="@Icons.Material.Outlined.ContentPasteGo" /></button></MudTooltip>
+            <MudTooltip Text="Reset to default look"><button aria-label="Reset to default look" class="tool" @onclick="C.ClearFormat"><MudIcon Icon="@Icons.Material.Outlined.FormatClear" /></button></MudTooltip>
             <span class="sep"></span>
             @if (nodes)
             {
@@ -244,9 +244,9 @@
             </span>
             @if (nodes)
             {
-                <MudTooltip Text="Duplicate (⌘D)"><button class="tool" @onclick="C.DuplicateSelection"><MudIcon Icon="@Icons.Material.Outlined.ContentCopy" /></button></MudTooltip>
+                <MudTooltip Text="Duplicate (⌘D)"><button aria-label="Duplicate (⌘D)" class="tool" @onclick="C.DuplicateSelection"><MudIcon Icon="@Icons.Material.Outlined.ContentCopy" /></button></MudTooltip>
             }
-            <MudTooltip Text="Remove from diagram (Backspace)"><button class="tool" @onclick="C.RemoveSelectionFromDiagram"><MudIcon Icon="@Icons.Material.Outlined.Delete" /></button></MudTooltip>
+            <MudTooltip Text="Remove from diagram (Backspace)"><button aria-label="Remove from diagram (Backspace)" class="tool" @onclick="C.RemoveSelectionFromDiagram"><MudIcon Icon="@Icons.Material.Outlined.Delete" /></button></MudTooltip>
         </div>
     }
 
@@ -474,7 +474,7 @@
     private async Task FollowLink(string link)
     {
         try { await DiagramLinks.FollowAsync(Ws, JS, link); }
-        catch (JSException ex) { Ws.SetStatus(ex.Message); }
+        catch (JSException) { Ws.SetStatus("Could not follow the link: the browser blocked it. Allow pop-ups for Meridian, or copy the link from the Inspector."); }
     }
 
     private static readonly string[] FormatColors =

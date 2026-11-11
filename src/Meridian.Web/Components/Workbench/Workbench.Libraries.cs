@@ -41,7 +41,7 @@ public partial class Workbench
             var existing = ProjectFile.Deserialize(await Meridian.Web.Services.VersionControl.HeadJsonAsync(Db, Hub, match.Id, null));
             var packages = MagicDrawImporter.SuggestPackages(existing, used);
             if (packages.Count == 0) continue;
-            var (removed, retyped, linked) = MagicDrawImporter.UseLibraries(model, report, existing, packages);
+            var (removed, retyped, linked) = MagicDrawImporter.UseLibraries(model, report, existing, packages, used, match.Name);
             Ws.Log($"“{used.Name}” will be used from “{match.Name}”: {removed} copied elements left out, {retyped} types and {linked} relationships linked to it.");
             var latest = (await Db.ListBranchVersionsAsync(match.Id, null)).Select(v => v.Number).DefaultIfEmpty(0).Max();
             chosen.Add(new CameoUsage(match.Id, match.Name, packages, latest > 0 ? LibraryPinKind.Version : LibraryPinKind.Branch,
@@ -82,19 +82,53 @@ public partial class Workbench
     public async Task UpdateUsedProject()
     {
         if (LibState.Updates.Count == 0) await LibState.CheckAsync();
-        if (LibState.Updates.Count == 1) await LibraryUpdateDialog.ShowAsync(Dialogs, LibState.Updates[0]);
+        if (LibState.Updates.Count == 1) await LibraryUpdateDialog.ShowAsync(Dialogs, LibState.Updates[0], OnPhone);
         else await ShowUsedProjects();
     }
 
-    /// <summary>Opens the project a library element comes from, with the element selected.</summary>
+    /// <summary>The phone layout is showing (dialogs open as full-screen sheets).</summary>
+    private bool OnPhone => Services.GetService(typeof(Meridian.Web.Services.MobileUiState)) is Meridian.Web.Services.MobileUiState { IsPhone: true };
+
+    /// <summary>
+    /// Follows a "library changed upstream" notification: opens the using project and the review of that usage's update (or the
+    /// Used projects dialog when there is nothing newer any more).
+    /// </summary>
+    private async Task ReviewLibraryUpdateAsync(Guid projectId, string? usageId)
+    {
+        if (Ws.Session?.ProjectId != projectId || Ws.Pinned != null) await OpenProject(projectId);
+        if (Ws.Session?.ProjectId != projectId) return;
+        var offers = await LibState.CheckAsync();
+        if (offers.FirstOrDefault(o => o.UsageId.ToString("N") == usageId) is { } offer) await LibraryUpdateDialog.ShowAsync(Dialogs, offer, OnPhone);
+        else
+        {
+            Ws.SetStatus("That library update was already applied (or the usage changed).");
+            await ShowUsedProjects();
+        }
+    }
+
+    /// <summary>
+    /// Opens the project a library element comes from at the library's pin, with the element selected: the pinned branch, or a
+    /// read-only historical view of the pinned version or baseline ("Viewing version 3 (pinned)", with Go to latest).
+    /// </summary>
     public async Task OpenInSourceProject(Element e)
     {
         if (Ws.LibraryOf(e) is not { } lib) return;
         var id = e.Id;
-        await OpenProject(lib.SourceProjectId);
-        if (Ws.Session?.ProjectId == lib.SourceProjectId && Ws.Model.Find(id) is { } there) Navigate(there);
-        if (lib.PinKind != LibraryPinKind.Branch || lib.PinValue != Meridian.Data.Branching.MainBranch)
-            Ws.SetStatus($"Opened {lib.SourceProjectName} (main). The library is pinned to {lib.PinLabel}.");
+        if (Ws.Session is { } s) await s.PersistAsync();
+        if (await Ws.OpenAtPinAsync(Db, Hub, lib) is { } why) { Snackbar.Add(why, Severity.Warning); return; }
+        _csvTarget = Ws.Model.Root;
+        if (Ws.Model.Find(id) is { } there) Navigate(there);
+        if (Ws.Pinned is null) Ws.SetStatus($"{LibraryPins.ViewLabel(lib.PinKind, lib.PinLabel, null)} of “{lib.SourceProjectName}” — the branch the library is pinned to, live.");
+        Ws.Log($"Opened “{lib.SourceProjectName}” at {lib.PinLabel} (the pin of the used project)");
+    }
+
+    /// <summary>Leaves a historical (pinned) view: opens the source project's latest main line.</summary>
+    public async Task GoToLatest()
+    {
+        if (Ws.Pinned is not { } pin) return;
+        var line = Ws.HistoricalLine;   // "Show model at this version" (element history) returns to the line it came from
+        await OpenProject(pin.ProjectId);
+        if (line is { IsMain: false }) await SwitchBranch(line);
     }
 
     private IEnumerable<CommandPalette.Command> LibraryPaletteCommands()

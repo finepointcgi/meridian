@@ -132,9 +132,10 @@ public class IssueTrackerTests
     }
 
     [Fact]
-    public void Config_Validation_Requires_Https_And_Repository_Shape()
+    public void Config_Validation_Requires_Http_Url_And_Repository_Shape()
     {
-        Assert.NotNull(new IssueTrackerConfig { Type = TrackerTypes.GitHub, BaseUrl = "http://api.github.com", Project = "a/b" }.Validate());
+        Assert.Null(new IssueTrackerConfig { Type = TrackerTypes.GitHub, BaseUrl = "http://github.internal/api/v3", Project = "a/b" }.Validate());
+        Assert.NotNull(new IssueTrackerConfig { Type = TrackerTypes.GitHub, BaseUrl = "ftp://api.github.com", Project = "a/b" }.Validate());
         Assert.NotNull(new IssueTrackerConfig { Type = TrackerTypes.GitHub, BaseUrl = "https://api.github.com", Project = "nope" }.Validate());
         Assert.NotNull(new IssueTrackerConfig { Type = TrackerTypes.JiraCloud, BaseUrl = "https://x.atlassian.net", Project = "MER" }.Validate());   // needs email
         Assert.Null(new IssueTrackerConfig { Type = TrackerTypes.AzureDevOps, BaseUrl = "https://dev.azure.com/acme", Project = "Car" }.Validate());

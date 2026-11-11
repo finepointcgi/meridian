@@ -1,0 +1,634 @@
+@inherits WorkspaceComponent
+@using System.Diagnostics
+@using System.Text.RegularExpressions
+@using Meridian.Core.Analysis
+@using Meridian.Data
+@using Meridian.Serialization
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceProvider Services
+@inject IJSRuntime JS
+
+@* Model-wide find and replace (docs-site/docs/find-replace.md). The search runs off the UI thread and streams its hits; a
+   replace is previewed as a before/after diff and applied as one undo step through FindReplace.ApplyPlan. *@
+<div class="fr-panel" data-testid="find-replace">
+    <div class="fr-bar">
+        <div class="fr-inputs">
+            <div class="fr-field">
+                <MudIcon Icon="@Icons.Material.Outlined.Search" />
+                <input @ref="_findBox" class="fr-find" data-testid="fr-find" placeholder="Find" aria-label="Find" spellcheck="false"
+                       value="@State.Find" @oninput="OnFindInput" @onkeydown="OnFindKey" />
+                <button class="fr-opt @(State.MatchCase ? "on" : "")" title="Match case" aria-pressed="@State.MatchCase" data-testid="fr-case" @onclick="() => Toggle(ref State.MatchCase)">Aa</button>
+                <button class="fr-opt @(State.WholeWord ? "on" : "")" title="Whole word" aria-pressed="@State.WholeWord" data-testid="fr-word" @onclick="() => Toggle(ref State.WholeWord)"><u>ab</u></button>
+                <button class="fr-opt @(State.Regex ? "on" : "")" title="Regular expression (.NET); use $1 in the replacement" aria-pressed="@State.Regex" data-testid="fr-regex" @onclick="() => Toggle(ref State.Regex)">.*</button>
+            </div>
+            <div class="fr-field">
+                <MudIcon Icon="@Icons.Material.Outlined.FindReplace" />
+                <input class="fr-replace" data-testid="fr-replace" placeholder="@(State.Regex ? "Replace ($1 for groups)" : "Replace")" aria-label="Replace" spellcheck="false"
+                       value="@State.Replace" @oninput="OnReplaceInput" />
+            </div>
+        </div>
+        <div class="fr-actions">
+            <button class="fr-btn" data-testid="fr-replace-selected" disabled="@(!CanReplace || SelectedCount == 0)" @onclick="() => Preview(selectedOnly: true)"
+                    title="Preview replacing the checked matches">Replace selected…</button>
+            <button class="fr-btn primary" data-testid="fr-replace-all" disabled="@(!CanReplace || ReplaceableCount == 0)" @onclick="() => Preview(selectedOnly: false)"
+                    title="Preview replacing every match that can be changed">Replace all…</button>
+        </div>
+    </div>
+    <div class="fr-options">
+        <label>Scope
+            <select data-testid="fr-scope" value="@State.Scope" @onchange="OnScope">
+                <option value="@FindScope.Model">Whole model</option>
+                <option value="@FindScope.Package" disabled="@(ScopePackage == null)">Package @(ScopePackage is { } p ? $"“{p.DisplayName}”" : "")</option>
+                <option value="@FindScope.Diagram" disabled="@(Ws.Active == null)">Diagram @(Ws.Active is { } a ? $"“{a.Diagram.Name}”" : "")</option>
+                <option value="@FindScope.Selection" disabled="@(SelectionScope.Count == 0)">Selection @(SelectionScope.Count > 0 ? $"({SelectionScope.Count})" : "")</option>
+            </select>
+        </label>
+        <label>Kind
+            <select data-testid="fr-kind" value="@(State.Kind?.ToString() ?? "")" @onchange="OnKind">
+                <option value="">All kinds</option>
+                @foreach (var k in KindsInModel())
+                {
+                    <option value="@k">@Metamodel.DisplayName(k)</option>
+                }
+            </select>
+        </label>
+        <span class="fr-in">Search in
+            @foreach (var c in Categories)
+            {
+                var cat = c;
+                <label class="fr-chk" title="@CategoryTip(cat)"><input type="checkbox" data-testid="@($"fr-in-{cat}")" checked="@((State.In & cat) != 0)" @onchange="e => ToggleIn(cat, e)" />@CategoryLabel(cat)</label>
+            }
+        </span>
+    </div>
+
+    <div class="fr-status" data-testid="fr-status">
+        @if (State.Error != null)
+        {
+            <span class="fr-error">@State.Error</span>
+        }
+        else if (string.IsNullOrEmpty(State.Find))
+        {
+            <span class="muted">Type to search names, documentation, requirements, values and more. ⇧⌘F opens this panel.</span>
+            <GuideLink Page="@Meridian.Web.Hosting.UserGuide.Pages.FindReplace" />
+        }
+        else
+        {
+            <span class="fr-count">@Plural.Of(State.Matches, "match", "matches") in @Plural.Of(State.Hits.Count, "element")</span>
+            @if (State.Running) { <span class="muted"> · searching…</span> }
+            else if (State.ElapsedMs is { } ms) { <span class="muted"> · @ms ms</span> }
+            @if (State.Truncated) { <span class="fr-warn" data-testid="fr-truncated"> · showing the first @FindReplace.DefaultMaxMatches.ToString("N0") — refine your search</span> }
+            @if (ReadOnlyCount > 0) { <span class="muted"> · @ReadOnlyCount read-only</span> }
+        }
+        @if (State.Message != null) { <span class="fr-msg" data-testid="fr-message">@State.Message</span> }
+    </div>
+
+    @if (State.Preview is { } plan)
+    {
+        <div class="fr-preview" data-testid="fr-preview">
+            <div class="fr-preview-head">
+                <b>Preview:</b> @Plural.Of(plan.Occurrences, "occurrence") in @Plural.Of(plan.Applicable.Count() + plan.External.Count(c => !c.Skipped), "field")
+                @if (plan.Changes.Count(c => c.Skipped) + plan.External.Count(c => c.Skipped) is var sk and > 0) { <span class="muted"> · @sk left unchanged</span> }
+                <span class="grow"></span>
+                <button class="fr-btn" data-testid="fr-cancel" @onclick="CancelPreview">Back</button>
+                <button class="fr-btn primary" data-testid="fr-apply" disabled="@(!plan.Applicable.Any() && !plan.External.Any(c => !c.Skipped))" @onclick="ApplyPreview">Apply as one undo step</button>
+            </div>
+            <table class="fr-diff">
+                <thead><tr><th>Element</th><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                <tbody>
+                    @foreach (var c in plan.Changes.Concat(plan.External).Take(500))
+                    {
+                        <tr class="@(c.Skipped ? "skipped" : "")" title="@c.SkipReason">
+                            <td>@(c.Element?.DisplayName ?? "—")</td>
+                            <td>@c.Label</td>
+                            <td class="before">@Diff(c.Before, c.After, true)</td>
+                            <td class="after">@if (c.Skipped) { <span class="fr-reason">@c.SkipReason</span> } else { @Diff(c.Before, c.After, false) }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (plan.Changes.Count + plan.External.Count > 500) { <div class="muted fr-more">… and @((plan.Changes.Count + plan.External.Count - 500).ToString("N0")) more</div> }
+            @if (plan.External.Any(c => !c.Skipped && c.Key.StartsWith(CommentPrefix, StringComparison.Ordinal)))
+            {
+                <div class="muted fr-more">Comments live in the project database: their changes are saved at once and are not part of ⌘Z.</div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="fr-results" data-testid="fr-results">
+            @foreach (var hit in State.Hits.Take(State.Shown))
+            {
+                var h = hit;
+                var groupState = GroupState(h);
+                <div class="fr-group" data-testid="fr-group" data-element="@h.Element?.Id">
+                    <div class="fr-ghead @(ReferenceEquals(Ws.Selected, h.Element) && h.Element != null ? "sel" : "")" @onclick="() => Reveal(h, null)">
+                        <input type="checkbox" class="fr-gchk" title="Replace in this element" disabled="@(groupState == null)" checked="@(groupState == true)"
+                               @onclick:stopPropagation="true" @onchange="e => ToggleGroup(h, e)" />
+                        @if (h.Element is { } el)
+                        {
+                            <MudIcon Icon="@UiKinds.Icon(el.Kind)" Class="fr-kicon" />
+                            <span class="fr-name">@h.Title</span>
+                            <span class="fr-kind">@Metamodel.DisplayName(el.Kind)</span>
+                            @if (el.Owner is { } o && o.Kind != ElementKind.Model) { <span class="fr-path">in @o.DisplayName</span> }
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Outlined.Code" Class="fr-kicon" />
+                            <span class="fr-name">@h.Title</span>
+                        }
+                        <span class="fr-n">@h.Count</span>
+                    </div>
+                    @foreach (var field in h.Fields)
+                    {
+                        var f = field;
+                        for (var i = 0; i < f.Matches.Count; i++)
+                        {
+                            var index = i;
+                            var m = f.Matches[i];
+                            var (pre, hitText, post) = FindReplace.Snippet(f.Value, m);
+                            <div class="fr-row @(f.ReadOnly ? "ro" : "")" data-testid="fr-row" title="@f.ReadOnlyReason" @onclick="() => Reveal(h, f)">
+                                <input type="checkbox" disabled="@f.ReadOnly" checked="@(!f.ReadOnly && !State.Excluded.Contains(Key(h, f, index)))"
+                                       @onclick:stopPropagation="true" @onchange="e => ToggleMatch(h, f, index, e)" />
+                                <span class="fr-flabel">@f.Label</span>
+                                <span class="fr-snip">@pre<mark>@hitText</mark>@if (CanReplace && !f.ReadOnly && State.Replace.Length + m.Replacement.Length > 0 && m.Replacement != hitText) {<ins>@m.Replacement</ins>}@post</span>
+                                @if (f.ReadOnly) { <span class="fr-reason">@f.ReadOnlyReason</span> }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+            @if (State.Hits.Count > State.Shown)
+            {
+                <button class="fr-btn fr-more" data-testid="fr-show-more" @onclick="() => State.Shown += PageSize">Show @Math.Min(PageSize, State.Hits.Count - State.Shown) more elements (@State.Shown of @State.Hits.Count shown)</button>
+            }
+            @if (State.LastSkipped is { Count: > 0 } skipped)
+            {
+                <div class="fr-skipped" data-testid="fr-skipped">
+                    <b>Not replaced</b>
+                    @foreach (var s in skipped.Take(50))
+                    {
+                        <div><span class="fr-name">@(s.Element?.DisplayName ?? "—")</span> · @s.Label: <span class="fr-reason">@s.SkipReason</span></div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The query, options, results and checkboxes; kept by the workbench so they survive switching dock tabs.</summary>
+    public sealed class PanelState
+    {
+        public string Find = "";
+        public string Replace = "";
+        public bool MatchCase, WholeWord, Regex;
+        public FindScope Scope = FindScope.Model;
+        public SearchIn In = SearchIn.Default;
+        public ElementKind? Kind;
+        public List<ElementHits> Hits { get; } = [];
+        public int Matches { get; set; }
+        public bool Truncated { get; set; }
+        public bool Running { get; set; }
+        public long? ElapsedMs { get; set; }
+        public string? Error { get; set; }
+        public string? Message { get; set; }
+        /// <summary>Matches the user unchecked ("element id|field key|match index").</summary>
+        public HashSet<string> Excluded { get; } = new(StringComparer.Ordinal);
+        public ReplacePlan? Preview { get; set; }
+        public IReadOnlyList<ReplaceChange>? LastSkipped { get; set; }
+        public int Shown { get; set; } = PageSize;
+        /// <summary>The query the hits belong to (a replace uses exactly what was searched).</summary>
+        public FindQuery? Query { get; set; }
+        internal int FocusRequest { get; private set; }
+        internal int FocusHandled { get; set; }
+        public void RequestFocus() => FocusRequest++;
+    }
+
+    [Parameter, EditorRequired] public PanelState State { get; set; } = default!;
+
+    public const int PageSize = 200;
+    public const string CommentPrefix = "comment:";
+    private const string SysmlPrefix = "sysml:";
+
+    private static readonly SearchIn[] Categories =
+    [
+        SearchIn.Names, SearchIn.Documentation, SearchIn.Requirements, SearchIn.Values, SearchIn.TaggedValues,
+        SearchIn.Stereotypes, SearchIn.DiagramText, SearchIn.Comments, SearchIn.SysmlText,
+    ];
+
+    private ElementReference _findBox;
+    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _debounce;
+    private int _generation;
+    private int _searchedModelVersion = -1;
+    /// <summary>A search is waiting for the typing pause.</summary>
+    private bool _scheduled;
+
+    private static string CategoryLabel(SearchIn c) => c switch
+    {
+        SearchIn.Names => "Names",
+        SearchIn.Documentation => "Documentation",
+        SearchIn.Requirements => "Requirement text/id",
+        SearchIn.Values => "Values",
+        SearchIn.TaggedValues => "Tagged values",
+        SearchIn.Stereotypes => "Stereotypes",
+        SearchIn.DiagramText => "Diagram notes",
+        SearchIn.Comments => "Comments",
+        SearchIn.SysmlText => "SysML v2 text",
+        _ => c.ToString(),
+    };
+
+    private static string CategoryTip(SearchIn c) => c switch
+    {
+        SearchIn.Values => "Default values, constraint expressions and bodies, guards, effects, entry/exit/do behaviours, durations, distributions",
+        SearchIn.TaggedValues => "Tagged values of stereotypes and custom requirement attributes",
+        SearchIn.Stereotypes => "Applied stereotype names (find only)",
+        SearchIn.DiagramText => "Diagram notes (comments) and text in free shapes",
+        SearchIn.Comments => "Discussion comments (find only, except your own)",
+        SearchIn.SysmlText => "The model's SysML v2 text (find only; the text editor and its sync are left alone)",
+        _ => FindReplace.Describe(c),
+    };
+
+    private bool CanReplace => !Ws.ReadOnly && State.Error == null && State.Query != null && !State.Running;
+
+    private Element? ScopePackage => (Ws.Selected ?? Ws.Active?.Diagram)?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model);
+
+    private IReadOnlyList<Element> SelectionScope
+    {
+        get
+        {
+            if (Ws.Active?.SelectedElements is { Count: > 0 } onCanvas) return onCanvas;
+            return Ws.Selected is { } s ? [s] : [];
+        }
+    }
+
+    private IEnumerable<ElementKind> KindsInModel() =>
+        Enum.GetValues<ElementKind>().Where(k => k != ElementKind.Model && Ws.Model.OfKind(k).Any()).OrderBy(Metamodel.DisplayName);
+
+    private int ReadOnlyCount => State.Hits.Sum(h => h.Fields.Where(f => f.ReadOnly).Sum(f => f.Matches.Count));
+    private int ReplaceableCount => State.Matches - ReadOnlyCount;
+    private int SelectedCount => State.Hits.Sum(h => h.Fields.Where(f => !f.ReadOnly).Sum(f => Enumerable.Range(0, f.Matches.Count).Count(i => !State.Excluded.Contains(Key(h, f, i)))));
+
+    private static string Key(ElementHits h, FieldHit f, int index) => $"{h.Id}|{f.Key}|{index}";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (State.FocusHandled != State.FocusRequest)
+        {
+            State.FocusHandled = State.FocusRequest;
+            try { await _findBox.FocusAsync(); } catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException) { }
+        }
+    }
+
+    protected override void OnWorkspaceChanged()
+    {
+        // Results go stale when the model changes (not while a preview is open: applying re-checks every field anyway).
+        if (State.Preview == null && !State.Running && State.Query != null && _searchedModelVersion != Ws.ModelVersion && _searchedModelVersion >= 0)
+        {
+            State.Message = null;   // an undo or someone else's edit: the last replace's report no longer describes the model
+            State.LastSkipped = null;
+            Schedule(400);
+        }
+    }
+
+    // ------------------------------------------------------------------ input
+
+    private void OnFindInput(ChangeEventArgs e)
+    {
+        State.Find = e.Value?.ToString() ?? "";
+        State.Message = null;
+        Schedule(200);
+    }
+
+    private void OnReplaceInput(ChangeEventArgs e)
+    {
+        State.Replace = e.Value?.ToString() ?? "";
+        Schedule(200);   // replacements ($1 groups) are computed with the matches
+    }
+
+    private async Task OnFindKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Search();
+    }
+
+    private void Toggle(ref bool option)
+    {
+        option = !option;
+        Schedule(0);
+    }
+
+    private void ToggleIn(SearchIn c, ChangeEventArgs e)
+    {
+        State.In = e.Value is true ? State.In | c : State.In & ~c;
+        Schedule(0);
+    }
+
+    private void OnScope(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<FindScope>(e.Value?.ToString(), out var s)) State.Scope = s;
+        Schedule(0);
+    }
+
+    private void OnKind(ChangeEventArgs e)
+    {
+        State.Kind = Enum.TryParse<ElementKind>(e.Value?.ToString(), out var k) ? k : null;
+        Schedule(0);
+    }
+
+    /// <summary>Searches after a short pause in typing (or at once).</summary>
+    private void Schedule(int delayMs)
+    {
+        _debounce?.Cancel();
+        var cts = _debounce = new CancellationTokenSource();
+        _scheduled = true;
+        State.Running = true;   // "searching…" until the search it schedules is over
+        _ = Task.Run(async () =>
+        {
+            try { if (delayMs > 0) await Task.Delay(delayMs, cts.Token); }
+            catch (TaskCanceledException) { return; }
+            if (!cts.IsCancellationRequested) await InvokeAsync(Search);
+        });
+    }
+
+    private FindQuery BuildQuery()
+    {
+        var q = new FindQuery(State.Find)
+        {
+            Replace = State.Replace,
+            MatchCase = State.MatchCase,
+            WholeWord = State.WholeWord,
+            Regex = State.Regex,
+            In = State.In,
+            Scope = State.Scope,
+            Kinds = State.Kind is { } k ? new HashSet<ElementKind> { k } : null,
+            Access = Ws.Access,
+            ViewOnly = Ws.ReadOnly,
+        };
+        return State.Scope switch
+        {
+            FindScope.Package when ScopePackage is { } p => q with { Roots = [p] },
+            FindScope.Diagram when Ws.Active is { } a => q with { Diagram = a.Diagram },
+            FindScope.Selection => q with { Roots = SelectionScope },
+            FindScope.Package or FindScope.Diagram => q with { Scope = FindScope.Model },
+            _ => q,
+        };
+    }
+
+    // ------------------------------------------------------------------ search
+
+    /// <summary>
+    /// Runs the search: the scope (a walk of the tree) and the comments are read here; matching runs on the thread pool and
+    /// streams hits back every ~100 ms. A newer search (or closing the panel) cancels it.
+    /// </summary>
+    public async Task Search()
+    {
+        _cts?.Cancel();
+        _scheduled = false;
+        var generation = ++_generation;
+        State.Preview = null;
+        State.Hits.Clear();
+        State.Matches = 0;
+        State.Truncated = false;
+        State.Error = null;
+        State.ElapsedMs = null;
+        State.Shown = PageSize;
+        State.Excluded.Clear();
+        State.Query = null;
+        if (string.IsNullOrEmpty(State.Find)) { State.Running = false; StateHasChanged(); return; }
+        var q = BuildQuery();
+        var (matcher, error) = FindReplace.Matcher.Create(q);
+        if (matcher == null) { State.Error = error; State.Running = false; StateHasChanged(); return; }
+
+        var cts = _cts = new CancellationTokenSource();
+        var model = Ws.Model;
+        var scope = FindReplace.ScopeOf(model, q);
+        var comments = (q.In & SearchIn.Comments) != 0 ? await CommentTexts() : [];
+        if (generation != _generation) return;
+        Element? sysmlScope = q.Scope == FindScope.Package ? q.Roots?.FirstOrDefault() : null;
+        var wantSysml = (q.In & SearchIn.SysmlText) != 0;
+        State.Query = q;
+        State.Running = true;
+        _searchedModelVersion = Ws.ModelVersion;
+        StateHasChanged();
+
+        var watch = Stopwatch.StartNew();
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            var batch = new List<ElementHits>();
+            var flushed = Stopwatch.StartNew();
+            var count = 0;
+            var truncated = false;
+            string? failure = null;
+            async Task Flush(bool done)
+            {
+                var items = batch.ToArray();
+                batch.Clear();
+                var (c, t, f) = (count, truncated, failure);
+                await InvokeAsync(() =>
+                {
+                    if (generation != _generation) return;
+                    State.Hits.AddRange(items);
+                    State.Matches = c;
+                    State.Truncated = t;
+                    if (done)
+                    {
+                        State.Running = _scheduled;
+                        State.Error = f;
+                        State.ElapsedMs = watch.ElapsedMilliseconds;
+                    }
+                    StateHasChanged();
+                });
+                flushed.Restart();
+            }
+            try
+            {
+                var external = new List<ExternalText>(comments);
+                if (wantSysml) external.AddRange(SysmlTexts(model, sysmlScope, matcher));
+                foreach (var h in FindReplace.Search(model, q, matcher, scope, external, token))
+                {
+                    batch.Add(h);
+                    count += h.Count;
+                    if (count >= q.MaxMatches) { truncated = true; break; }
+                    if (flushed.ElapsedMilliseconds > 100) await Flush(false);
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch (RegexMatchTimeoutException) { failure = FindReplace.Matcher.TimeoutMessage; }
+            catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException or ArgumentException)
+            {
+                failure = "The model changed during the search; search again.";   // read while someone edited it
+            }
+            if (!token.IsCancellationRequested) await Flush(true);
+        }, CancellationToken.None);
+    }
+
+    /// <summary>The project's discussion comments (server projects): mine can be replaced, others' are find only.</summary>
+    private async Task<IReadOnlyList<ExternalText>> CommentTexts()
+    {
+        if (Ws.Session is not { } session || Services.GetService<IMeridianStore>() is not { } db) return [];
+        try
+        {
+            var me = Ws.User?.Id;
+            return (await db.ListCommentsAsync(session.ProjectId))
+                .Where(c => Ws.Model.Find(c.ElementId) != null)
+                .Select(c => new ExternalText(CommentPrefix + c.Id, SearchIn.Comments, $"Comment by {c.Author.DisplayName}", c.Body, c.ElementId,
+                    c.Author.Id == me ? null : "Only its author can change a comment"))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException) { return []; }
+    }
+
+    /// <summary>The lines of the model's SysML v2 text that match (find only).</summary>
+    private static IEnumerable<ExternalText> SysmlTexts(ModelRepository model, Element? scope, FindReplace.Matcher matcher)
+    {
+        var text = SysMLv2Text.Export(model, new SysMLv2ExportOptions { Scope = scope });
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+            if (matcher.Matches(lines[i]) != null)
+                yield return new ExternalText($"{SysmlPrefix}{i + 1}", SearchIn.SysmlText, $"Line {i + 1}", lines[i], null, "Find only");
+    }
+
+    // ------------------------------------------------------------------ results
+
+    /// <summary>Selects the element in the tree and inspector; opens a diagram that shows it when that helps (notes, diagram scope).</summary>
+    private void Reveal(ElementHits h, FieldHit? f)
+    {
+        if (h.Element is not { } e)
+        {
+            if (f?.Key.StartsWith(SysmlPrefix, StringComparison.Ordinal) == true) Shell?.ShowSysmlText(State.Query?.Scope == FindScope.Package ? State.Query.Roots?.FirstOrDefault() : null);
+            return;
+        }
+        if (!Ws.Model.Contains(e)) return;
+        if (e is Diagram d) { Ws.Open(d); Ws.Select(d, syncCanvas: false); return; }
+        var shownHere = Ws.Active?.Diagram.Shows(e) == true || Ws.Active?.Diagram.Edges.Any(x => ReferenceEquals(x.Relationship, e)) == true;
+        if (!shownHere && (e.Kind is ElementKind.Comment or ElementKind.Shape || f?.Category == SearchIn.DiagramText || State.Query?.Scope == FindScope.Diagram))
+        {
+            var target = State.Query?.Diagram is { } qd && qd.Shows(e) ? qd : Ws.Model.Diagrams.FirstOrDefault(x => x.Shows(e));
+            if (target != null) Ws.Open(target);
+        }
+        if (Shell != null) Shell.Navigate(e);
+        else Ws.Select(e);
+    }
+
+    /// <summary>True when every replaceable match of the element is checked, false when some are not, null when none can be replaced.</summary>
+    private bool? GroupState(ElementHits h)
+    {
+        var any = false;
+        foreach (var f in h.Fields)
+        {
+            if (f.ReadOnly) continue;
+            for (var i = 0; i < f.Matches.Count; i++)
+            {
+                any = true;
+                if (State.Excluded.Contains(Key(h, f, i))) return false;
+            }
+        }
+        return any ? true : null;
+    }
+
+    private void ToggleGroup(ElementHits h, ChangeEventArgs e)
+    {
+        var on = e.Value is true;
+        foreach (var f in h.Fields.Where(f => !f.ReadOnly))
+            for (var i = 0; i < f.Matches.Count; i++)
+                if (on) State.Excluded.Remove(Key(h, f, i)); else State.Excluded.Add(Key(h, f, i));
+    }
+
+    private void ToggleMatch(ElementHits h, FieldHit f, int index, ChangeEventArgs e)
+    {
+        if (e.Value is true) State.Excluded.Remove(Key(h, f, index));
+        else State.Excluded.Add(Key(h, f, index));
+    }
+
+    // ------------------------------------------------------------------ replace
+
+    /// <summary>Builds the before/after preview of replacing the checked (or all) matches.</summary>
+    public void Preview(bool selectedOnly)
+    {
+        if (!CanReplace) return;
+        var selection = new List<(ElementHits, FieldHit, IReadOnlyCollection<TextMatch>?)>();
+        foreach (var h in State.Hits)
+            foreach (var f in h.Fields)
+            {
+                if (!selectedOnly || f.ReadOnly) { selection.Add((h, f, null)); continue; }
+                var chosen = f.Matches.Where((_, i) => !State.Excluded.Contains(Key(h, f, i))).ToList();
+                if (chosen.Count > 0) selection.Add((h, f, chosen));
+            }
+        State.Preview = FindReplace.Plan(Ws.Model, selection, WhyReadOnly);
+        State.Message = null;
+        State.LastSkipped = null;
+    }
+
+    private void CancelPreview() => State.Preview = null;
+
+    /// <summary>
+    /// Applies the preview as one undo step (one replicated batch through the collaboration session). Fields someone else
+    /// changed since the preview, or that became read-only, are skipped and listed. My own comments are updated afterwards.
+    /// </summary>
+    public async Task ApplyPreview()
+    {
+        if (State.Preview is not { } plan || Ws.ReadOnly) return;
+        var description = string.IsNullOrEmpty(State.Replace) ? $"Remove “{State.Find}”" : $"Replace “{State.Find}” with “{State.Replace}”";
+        ReplaceOutcome outcome;
+        try
+        {
+            outcome = FindReplace.ApplyPlan(Ws.Model, plan, WhyReadOnly, description);
+        }
+        catch (InvalidOperationException ex) { State.Message = ex.Message; return; }
+        var skipped = outcome.Skipped.Concat(plan.External.Where(c => c.Skipped)).ToList();
+        var comments = 0;
+        var mine = plan.External.Where(c => !c.Skipped && c.Key.StartsWith(CommentPrefix, StringComparison.Ordinal)).ToList();
+        if (mine.Count > 0 && Services.GetService<IMeridianStore>() is { } db && Ws.User is { } me)
+        {
+            var current = Ws.Session is { } s ? (await db.ListCommentsAsync(s.ProjectId)).ToDictionary(c => c.Id) : [];
+            foreach (var c in mine)
+            {
+                var id = long.Parse(c.Key[CommentPrefix.Length..], System.Globalization.CultureInfo.InvariantCulture);
+                if (!current.TryGetValue(id, out var now) || now.Body != c.Before) { skipped.Add(c with { SkipReason = "Changed since the preview" }); continue; }
+                if (await db.UpdateCommentBodyAsync(id, me.Id, c.After)) comments++;
+                else skipped.Add(c with { SkipReason = "Only its author can change a comment" });
+            }
+            if (comments > 0) Ws.Session?.NotifyComments();
+        }
+        var applied = outcome.Applied + comments;
+        State.Message = $"Replaced in {Plural.Of(applied, "field")}" + (skipped.Count > 0 ? $"; {skipped.Count} not replaced (listed below)" : "") + (outcome.Applied > 0 ? " — ⌘Z undoes it" : "");
+        Ws.SetStatus(State.Message);
+        Ws.Log(State.Message);
+        State.Preview = null;
+        await Search();
+        State.LastSkipped = skipped;
+    }
+
+    /// <summary>The changed middle of a field, highlighted (common prefix and suffix shortened).</summary>
+    /// <summary>Checked again when applying: permissions, used projects and element locks may have changed since the preview.</summary>
+    private string? WhyReadOnly(Element e) =>
+        Ws.ReadOnly ? "View only"
+        : Ws.Model.ReadOnlyReason(e) is { } library ? library
+        : !Ws.Access.CanEdit(e) ? "Read-only for you (package permissions)"
+        : Ws.IsLockedForMe(e) ? "Locked by someone else"
+        : null;
+
+    private static RenderFragment Diff(string old, string now, bool before) => __builder =>
+    {
+        var p = 0;
+        while (p < old.Length && p < now.Length && old[p] == now[p]) p++;
+        var s = 0;
+        while (s < old.Length - p && s < now.Length - p && old[^(s + 1)] == now[^(s + 1)]) s++;
+        var text = before ? old : now;
+        var head = text[..p];
+        var mid = text[p..(text.Length - s)];
+        var tail = text[(text.Length - s)..];
+        if (head.Length > 40) head = "…" + head[^40..];
+        if (tail.Length > 40) tail = tail[..40] + "…";
+        if (before) { @head<del>@mid</del>@tail }
+        else { @head<ins>@mid</ins>@tail }
+    };
+
+    public override void Dispose()
+    {
+        _cts?.Cancel();
+        _debounce?.Cancel();
+        base.Dispose();
+    }
+}

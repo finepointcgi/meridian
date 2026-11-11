@@ -57,6 +57,8 @@ public static class MeridianServer
                 ?? throw new InvalidOperationException("Missing connection string 'Meridian' (PostgreSQL). Set Meridian:Storage=sqlite for a single-file database.")));
         builder.Services.AddSingleton<CollaborationHub>();
         builder.Services.AddSingleton<ImageCache>();
+        builder.Services.AddSingleton(sp => new ReportJobService(sp.GetRequiredService<ILogger<ReportJobService>>(),
+            builder.Configuration.GetValue("Meridian:Reports:Concurrency", 2)));   // background report jobs + streaming downloads
         builder.Services.AddScoped<Workspace>();
         builder.Services.AddScoped<ReviewService>();
         builder.Services.AddScoped<MobileUiState>();   // phone / tablet shell state (Components/Mobile)
@@ -90,12 +92,15 @@ public static class MeridianServer
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
         builder.AddMeridianAdmin(host); // SSO, lockout + rate limiting, audit log, backups (Admin/AdminHosting.cs)
+        Hosting.UserGuide.AddMeridianUserGuide(builder);   // the bundled user guide at /guide (Hosting/UserGuide.cs)
 
         var app = builder.Build();
         Hosting.OperationsHosting.UseMeridianRequestLogging(app);
 
         var meridianDb = app.Services.GetRequiredService<IMeridianStore>();
         await meridianDb.MigrateAsync();
+        Meridian.Data.History.ElementHistoryIndexer.For(meridianDb).OnError = (project, ex) =>   // element history index (built in the background)
+            app.Logger.LogWarning(ex, "Indexing element history of project {Project} failed; it is retried on the next request", project);
         var localUser = host.LocalMode ? await EnsureLocalUser(meridianDb) : null;
 
         // Development only: seed test accounts from appsettings.Development.json (DevSeed:Users).
@@ -117,6 +122,8 @@ public static class MeridianServer
         }
         app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
         app.UseMeridianAdmin();
+        // The user guide: public documentation, served before sign-in and the desktop's launch-token gate (Hosting/UserGuide.cs).
+        Hosting.UserGuide.UseMeridianUserGuide(app);
         app.UseAuthentication();
 
         // Desktop local mode: the host can import a file it was asked to open (token-guarded; see LocalFileImport).
@@ -139,6 +146,8 @@ public static class MeridianServer
                     return;
                 }
                 if (http.Request.Path.StartsWithSegments("/_framework") || http.Request.Path.StartsWithSegments("/_content") || Path.HasExtension(http.Request.Path.Value)) { await next(); return; }
+                // The desktop host's save-file bridge downloads a report with a single-use ticket (checked by the endpoint).
+                if (http.Request.Path.StartsWithSegments("/api/reports") && http.Request.Query.ContainsKey("ticket")) { await next(); return; }
                 http.Response.StatusCode = 403;
                 await http.Response.WriteAsync("This Meridian workspace is private to the desktop app. Open it from the Meridian window.");
             });
@@ -282,6 +291,32 @@ public static class MeridianServer
             var (model, error) = await LoadCommit(http, db, hub, projectId, commitId);
             if (error != null) return error;
             return model!.Find(elementId) is { } e ? Results.Content(SysMLv2Json.Element(model, e).ToJsonString(), "application/json") : Results.NotFound();
+        });
+
+        // ---------------------------------------------------------------- report downloads (Services/ReportJobs.cs)
+        // Streams a generated report from its temporary file: chunked, with range support, never through a JS interop call.
+        // Only the user who generated it may download it, only while still a member of the project, and not after package
+        // permissions hid something the report contains. The desktop host (no cookie) presents a single-use ticket instead.
+        api.MapGet("/reports/{jobId:guid}/file", async (HttpContext http, IMeridianStore db, ReportJobService jobs, Guid jobId, string? ticket, bool? inline) =>
+        {
+            var job = jobs.Find(jobId);
+            var caller = (await ApiUser(http, db))?.Id;
+            if (caller is null && job != null && jobs.RedeemTicket(job, ticket)) caller = job.OwnerId;
+            if (caller is null) return Unauthorized();
+            if (job is null || job.OwnerId != caller) return Results.NotFound();
+            if (job.ProjectId is { } projectId)
+            {
+                if (await db.RoleOfAsync(projectId, caller.Value) is null) return Results.NotFound();
+                if (ReportJobService.PermissionsNarrowed(job, await PackagePermissions.ViewForAsync(db, projectId, caller.Value)))
+                    return Results.Text("Your package permissions changed after this report was generated. Generate it again.", statusCode: 403);
+            }
+            if (jobs.FileOf(job) is not { } path)
+                return Results.Text(job.IsDone ? "This report is not available: " + (job.Error ?? job.State.ToString().ToLowerInvariant()) : "The report is still being generated.", statusCode: 409);
+            http.Response.Headers.CacheControl = "private, no-store";
+            http.Response.Headers.XContentTypeOptions = "nosniff";
+            // Opened in a tab, a report is a document: no scripts, no requests.
+            http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox";
+            return Results.File(path, job.Mime, inline == true ? null : job.FileName, enableRangeProcessing: true);
         });
 
         Integrations.IntegrationsSetup.MapMeridianIntegrations(app);

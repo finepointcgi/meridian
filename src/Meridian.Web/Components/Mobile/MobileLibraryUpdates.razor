@@ -1,0 +1,61 @@
+@using Meridian.Web.Libraries
+@inherits MobileComponent
+@inject LibraryState State
+@inject IDialogService Dialogs
+
+@* Phone top bar: library updates available (docs/LIBRARIES.md). One update opens its review as a full-screen sheet; several
+   are listed in an action sheet first. *@
+@if (State.Updates.Count > 0 && Ws.Pinned is null)
+{
+    <button class="m-lib-update" aria-label="@($"{State.Updates.Count} library update{(State.Updates.Count == 1 ? "" : "s")} — review")"
+            data-testid="m-lib-updates" @onclick="Open">
+        <MudIcon Icon="@Icons.Material.Outlined.LibraryBooks" />
+        <span class="n">@State.Updates.Count</span>
+    </button>
+}
+@if (_list)
+{
+    <div class="m-scrim" @onclick="() => _list = false"></div>
+    <div class="m-action-sheet" role="dialog" aria-label="Library updates" data-testid="m-lib-update-list">
+        <div class="m-action-title"><span>Library updates</span></div>
+        @foreach (var u in State.Updates)
+        {
+            var offer = u;
+            <button class="m-menu-item" @onclick="() => Review(offer)">
+                <MudIcon Icon="@Icons.Material.Outlined.Difference" />
+                <span class="m-row-text"><span class="m-row-title">@offer.LibraryName</span><span class="m-row-sub">@offer.CurrentLabel → @offer.Label</span></span>
+            </button>
+        }
+        <button class="m-menu-item cancel" @onclick="() => _list = false">Cancel</button>
+    </div>
+}
+
+@code {
+    private bool _list;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        State.Changed += OnState;
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task Open()
+    {
+        if (State.Updates.Count == 1) await Review(State.Updates[0]);
+        else _list = true;
+    }
+
+    private async Task Review(LibraryUpdateOffer offer)
+    {
+        _list = false;
+        await LibraryUpdateDialog.ShowAsync(Dialogs, offer, phone: true);
+    }
+
+    public override void Dispose()
+    {
+        State.Changed -= OnState;
+        base.Dispose();
+    }
+}

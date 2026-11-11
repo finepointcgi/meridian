@@ -48,8 +48,22 @@ public static class ConnectorRules
             foreach (var l in Metamodel.PaletteLinks(diagram).Where(l => l.Kind != ElementKind.Allocate))
                 Add(l.Kind, false, l.Subtype);
 
+        // Instances: a link (typed afterwards by the one matching association, or the user's pick when several fit).
+        if (source == ElementKind.InstanceSpecification && target == ElementKind.InstanceSpecification) Add(ElementKind.Link);
+        // Deployment: node ↔ node communication path, artifact → node «deploy», artifact → block / component / package «manifest»
+        // (a database or schema package → node is a «deploy» first on deployment diagrams).
+        static bool Node(ElementKind k) => Deployment.DeploymentModel.IsNode(k);
+        static bool Artifact(ElementKind k) => Deployment.DeploymentModel.IsArtifact(k);
+        if (Node(source) && Node(target)) Add(ElementKind.CommunicationPath);
+        if ((Artifact(source) || source == ElementKind.Package && diagram == DiagramType.Deployment) && Node(target)) Add(ElementKind.Deployment);
+        if (Node(source) && (Artifact(target) || target == ElementKind.Package && diagram == DiagramType.Deployment)) Add(ElementKind.Deployment, reverse: true);
+        if (Artifact(source) && !Node(target)) Add(ElementKind.Manifestation);
+        if (Artifact(target) && !Node(source)) Add(ElementKind.Manifestation, reverse: true);
+
         // Packages: dependency.
         if (source == ElementKind.Package || target == ElementKind.Package) Add(ElementKind.Dependency);
+        if (source == ElementKind.Package && Node(target)) Add(ElementKind.Deployment);
+        if (Node(source) && target == ElementKind.Package) Add(ElementKind.Deployment, reverse: true);
 
         // Requirements.
         if (Req(source) && Req(target)) { Add(ElementKind.DeriveReqt); Add(ElementKind.Refine); Add(ElementKind.Copy); Add(ElementKind.Trace); }

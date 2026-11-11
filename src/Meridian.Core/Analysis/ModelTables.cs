@@ -72,6 +72,7 @@ public sealed class TableDefinition
         ElementKind.Property or ElementKind.Port => [new("name"), new("owner"), new("type"), new("field:multiplicity"), new("field:defaultValue")],
         ElementKind.Action or ElementKind.Activity => [new("name"), new("owner"), new("allocatedTo")],
         ElementKind.TestCase => [new("name"), new("owner"), new("verifies")],
+        ElementKind.Artifact or ElementKind.DeploymentSpecification => [.. Deployment.DeploymentModel.DeploymentTable().Columns],
         _ => [new("name"), new("kind"), new("owner"), new("documentation")],
     };
 }

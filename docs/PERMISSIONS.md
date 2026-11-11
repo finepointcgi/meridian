@@ -83,6 +83,9 @@ placeholders. The server never sends them hidden data:
 - **Their workspace model** (Blazor Server keeps it on the server, but everything rendered — tree, diagrams, search,
   tables, matrices, reports, exports, validation, the assistant's context and tools, scripts' reads — is built from it)
   is installed from `ProjectSession.SnapshotFor(participant)`.
+- **Generated reports** are written from a snapshot of that model and downloaded from `GET /api/reports/{id}/file` by
+  their owner only, while still a project member. The job records which packages' contents the owner could see; if a
+  rule later hides one of them, the download is refused (403, "generate it again").
 - **Live collaboration**: others' operations are relayed only when they touch what the user can see; operations inside
   hidden packages are dropped; an operation that changes what they can see (a move across the boundary, a new view of a
   hidden element) is replaced by a fresh filtered model (`PermissionCheck.Probe`/`Decide`). Merges, restores and code
@@ -92,6 +95,9 @@ placeholders. The server never sends them hidden data:
 - **REST API** (`/api/projects/{id}/commits/{commit}/…`, head and stored versions) and **OSLC** responses are filtered
   per caller.
 - **Version history, baselines and reviews** filter stored versions before comparing or downloading them.
+- **Element history** (`ElementHistoryService`) is only shown for elements in the user's filtered model; index rows from
+  when the element (or a connected relationship, or a diagram) sat in a package the user can't see now, or that is gone,
+  are left out, and diffs are read from versions redacted for the user (`VersionReader`).
 - **Notifications**: comments on elements a user can't see don't notify them.
 - **Code-change reviews** (they show main's whole model) and **merging** are unavailable to them; the architecture
   check runs on their filtered model but doesn't store or post its result.

@@ -11,7 +11,7 @@
         <h3><MudIcon Icon="@Icons.Material.Outlined.Domain" Style="font-size:15px" /> Organizations</h3>
         <div class="d-flex gap-2 mb-2">
             <MudTextField T="string" @bind-Value="_newOrg" Placeholder="New organization" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" OnKeyDown="@(e => e.Key == "Enter" ? CreateOrg() : Task.CompletedTask)" />
-            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newOrg)" OnClick="CreateOrg" Class="mt-1" />
+            <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newOrg)" OnClick="CreateOrg" Class="mt-1" aria-label="Add" title="Add" />
         </div>
         <div class="admin-list">
             @foreach (var o in _orgs)
@@ -55,7 +55,7 @@
                     <h3><MudIcon Icon="@Icons.Material.Outlined.Groups" Style="font-size:15px" /> Teams</h3>
                     <div class="d-flex gap-2 mb-2">
                         <MudTextField T="string" @bind-Value="_newTeam" Placeholder="New team" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" OnKeyDown="@(e => e.Key == "Enter" ? CreateTeam() : Task.CompletedTask)" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newTeam)" OnClick="CreateTeam" Class="mt-1" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small" Disabled="string.IsNullOrWhiteSpace(_newTeam)" OnClick="CreateTeam" Class="mt-1" aria-label="Add" title="Add" />
                     </div>
                     <div class="admin-list">
                         @foreach (var t in _teams)
@@ -120,7 +120,7 @@
                                                 <MudSelectItem Value="ProjectRole.Owner">Owner</MudSelectItem>
                                             </MudSelect>
                                         </td>
-                                        <td style="width:40px"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Close" OnClick="() => RemoveGrant(grant)" /></td>
+                                        <td style="width:40px"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Close" OnClick="() => RemoveGrant(grant)" aria-label="Remove" title="Remove" /></td>
                                     </tr>
                                 }
                             </tbody>

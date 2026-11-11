@@ -1,0 +1,106 @@
+@* Inspector section for deployment: where an artifact (deployment specification, database, schema) is deployed, with
+   "Deploy to…"; what an artifact manifests; what is deployed on a node, device or execution environment and the
+   communication paths it has. *@
+@using Meridian.Core.Deployment
+@inherits WorkspaceComponent
+@inject IDialogService Dialogs
+
+@if (E is { } e && Ws.Model.Contains(e) && e is not Relationship && (DeploymentModel.CanDeploy(e) || DeploymentModel.IsNode(e.Kind)))
+{
+    var editable = !Ws.ReadOnly && Ws.CanEdit(e);
+    <div class="deploy-inspector" data-testid="deploy-inspector">
+        @if (DeploymentModel.CanDeploy(e))
+        {
+            var deployments = Ws.Model.Outgoing(e, ElementKind.Deployment).ToList();
+            <div class="section-title">Deployed to <span class="grow"></span></div>
+            <div data-testid="deploy-targets">
+                @if (deployments.Count == 0)
+                {
+                    <div class="deploy-none" style="font-size:12.5px; color:var(--text-3)">Not deployed to any node</div>
+                }
+                @foreach (var d in deployments)
+                {
+                    var dep = d;
+                    var env = DeploymentModel.EnvironmentOf(dep.Target);
+                    var host = DeploymentModel.HostOf(dep.Target);
+                    <div class="deploy-row" style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:2px 0">
+                        <MudIcon Icon="@UiKinds.Icon(dep.Target.Kind)" Style="@($"font-size:15px; color:{UiKinds.Accent(dep.Target.Kind)}")" />
+                        <span class="link" @onclick="() => Shell.Navigate(dep.Target)">@dep.Target.DisplayName</span>
+                        @if (env != null && host != null && !ReferenceEquals(host, dep.Target))
+                        {
+                            <span style="color:var(--text-3)">on @host.DisplayName</span>
+                        }
+                        <span class="grow" style="flex:1"></span>
+                        @if (editable)
+                        {
+                            <button title="Remove this deployment" @onclick="() => Ws.Model.Delete(dep)" style="border:none; background:none; cursor:pointer; padding:0; color:var(--text-3)">
+                                <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px" />
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+            @if (editable)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="mt-1" StartIcon="@Icons.Material.Outlined.Publish" data-testid="deploy-to"
+                           OnClick="() => DeployDialog.ShowAsync(Dialogs, Ws, [e], Ws.Active)">Deploy to…</MudButton>
+            }
+            var manifests = DeploymentModel.Manifests(Ws.Model, e).ToList();
+            @if (manifests.Count > 0)
+            {
+                <div class="section-title" style="margin-top:10px">Manifests</div>
+                <div data-testid="deploy-manifests">
+                    @foreach (var x in manifests)
+                    {
+                        var el = x;
+                        <div style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:2px 0">
+                            <MudIcon Icon="@UiKinds.IconOf(el)" Style="@($"font-size:15px; color:{UiKinds.Accent(el.Kind)}")" />
+                            <span class="link" @onclick="() => Shell.Navigate(el)">@el.DisplayName</span>
+                        </div>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            var hosted = DeploymentModel.DeployedOn(Ws.Model, e).ToList();
+            var paths = Ws.Model.RelationshipsOf(e).Where(r => r.Kind == ElementKind.CommunicationPath).ToList();
+            <div class="section-title">Deployed here <span class="grow"></span></div>
+            <div data-testid="deploy-hosted">
+                @if (hosted.Count == 0)
+                {
+                    <div style="font-size:12.5px; color:var(--text-3)">Nothing is deployed here</div>
+                }
+                @foreach (var a in hosted)
+                {
+                    var art = a;
+                    <div style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:2px 0">
+                        <MudIcon Icon="@UiKinds.IconOf(art)" Style="@($"font-size:15px; color:{UiKinds.Accent(art.Kind)}")" />
+                        <span class="link" @onclick="() => Shell.Navigate(art)">@art.DisplayName</span>
+                    </div>
+                }
+            </div>
+            @if (paths.Count > 0)
+            {
+                <div class="section-title" style="margin-top:10px">Communication paths</div>
+                <div data-testid="deploy-paths">
+                    @foreach (var p in paths)
+                    {
+                        var path = p;
+                        var other = ReferenceEquals(path.Source, e) ? path.Target : path.Source;
+                        var protocol = path.Get(DeploymentFields.Protocol);
+                        <div style="display:flex; align-items:center; gap:6px; font-size:12.5px; margin:2px 0">
+                            <MudIcon Icon="@Icons.Material.Outlined.SettingsEthernet" Style="font-size:15px" />
+                            <span class="link" @onclick="() => Shell.Navigate(other)">@other.DisplayName</span>
+                            @if (protocol.Length > 0) { <span style="color:var(--text-3)">@protocol</span> }
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+}

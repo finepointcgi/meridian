@@ -46,20 +46,28 @@ public sealed partial class ProjectSession
     /// A replica of the model as <paramref name="participantId"/> may see it, for their tab to edit. Operations relayed to the
     /// participant after this call apply on top of it.
     /// </summary>
-    public ModelRepository ReplicaFor(string participantId)
+    public ModelRepository ReplicaFor(string participantId) => ReplicaWithSequence(participantId).Replica;
+
+    /// <summary>
+    /// <see cref="ReplicaFor"/> with the sequence number it reflects: a joining tab skips relayed operations up to it (they
+    /// were queued for it before the replica was taken, and are already in it).
+    /// </summary>
+    public (ModelRepository Replica, long Sequence) ReplicaWithSequence(string participantId)
     {
         SessionModel model;
+        long sequence;
         lock (_gate)
         {
+            sequence = Sequence;
             if (SeesWholeModelLocked(participantId))
             {
                 // A frozen replica of this very state (made for a resync) is copied outside the lock; otherwise copy the model.
-                if (!TryFrozenLocked(out var frozen)) return _master.CreateReplica();
+                if (!TryFrozenLocked(out var frozen)) return (_master.CreateReplica(), sequence);
                 model = new SessionModel(frozen);
             }
             else model = new SessionModel(SnapshotLocked(participantId));
         }
-        return model.CreateReplica();   // filtered (package permissions, used projects): parsed outside the lock
+        return (model.CreateReplica(), sequence);   // filtered (package permissions, used projects): parsed outside the lock
     }
 
     /// <summary>

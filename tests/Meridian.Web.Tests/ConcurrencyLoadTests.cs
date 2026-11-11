@@ -22,10 +22,11 @@ namespace Meridian.Web.Tests;
 /// (docs/PERFORMANCE.md). Knobs: MERIDIAN_LOAD_SECONDS, MERIDIAN_LOAD_CLIENTS, MERIDIAN_LOAD_ELEMENTS.
 /// </summary>
 /// <remarks>
-/// Model operations are replicated without transformation (the server orders them; a tab applies its own edits first), so
-/// two tabs writing the same field at the same moment can end up different. Real editing avoids that with element locks,
-/// and so does this test: each tab writes its own elements, and shared "hot" elements only under a lock. Three "rogue" tabs
-/// also edit hot elements without the lock, which the session rejects and answers with a resync.
+/// Shared elements are edited <b>without locks</b> (docs/COLLABORATION.md): every tab writes the same "hot" fields, creates,
+/// renames, moves and deletes elements in shared packages, nests the shared packages into each other (concurrent moves that
+/// would make a cycle are refused and rolled back), and moves and adds shapes on one shared diagram — and every replica still
+/// converges. Some tabs also use the optional lock as a check-out, and three "rogue" tabs edit inside another tab's subtree
+/// lock: those actions are refused and taken back in the rogue tab itself (no resync).
 /// </remarks>
 public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
 {
@@ -101,6 +102,17 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         var guardedReq = model.Create(guarded, ElementKind.Requirement, "Guarded requirement");
         var textScope = model.Create(work, ElementKind.Package, "Shared text");
         for (var k = 0; k < 5; k++) model.Create(textScope, ElementKind.Block, $"Texted {k}");
+        // The shared area: everyone creates, edits, moves and deletes in it, without locks.
+        var sharedRoot = model.Create(work, ElementKind.Package, "Shared area");
+        var shared = new Shared(sharedRoot.Id, Enumerable.Range(0, 5).Select(i => model.Create(sharedRoot, ElementKind.Package, $"Shared {i}").Id).ToList());
+        var sharedView = model.CreateDiagram(sharedRoot, DiagramType.BlockDefinition, "Shared view");
+        shared.DiagramId = sharedView.Id;
+        for (var k = 0; k < 6; k++)
+        {
+            var b = model.Create(model.Find(shared.Packages[k % 5])!, ElementKind.Block, $"Shared block {k}");
+            model.AddNode(sharedView, b, new Bounds(40 + k * 200, 40, 160, 90), showRelationships: false);
+            shared.Elements[b.Id] = 0;
+        }
         var project = await store.CreateProjectAsync("Load", ProjectFile.Serialize(model), users[0].Id);
         foreach (var u in users.Skip(1)) await store.SetMemberAsync(project, u.Id, ProjectRole.Editor);
 
@@ -113,7 +125,7 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         var circuits = new List<Circuit>();
         for (var i = 0; i < Clients; i++)
         {
-            var c = new Circuit(i, users[i], store, project, hot.Select(h => h.Id).ToList(), textScope.Id, guardedReq.Id, rogue: i < 3);
+            var c = new Circuit(i, users[i], store, project, hot.Select(h => h.Id).ToList(), textScope.Id, guardedReq.Id, rogue: i < 3, shared);
             Assert.True(await c.Ws.JoinAsync(hub, project, ProjectRole.Editor));
             circuits.Add(c);
         }
@@ -154,11 +166,18 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         var emitted = new HashSet<object>(circuits.SelectMany(c => c.Emitted), ReferenceEqualityComparer.Instance);
         Assert.All(accepted, op => Assert.Contains(op, emitted));
         var acceptedSet = new HashSet<object>(accepted, ReferenceEqualityComparer.Instance);
-        var strict = circuits.Where(c => !c.Resynced).ToList();
-        Assert.True(strict.Count >= Clients - 3, "only the rogue tabs may be resynchronised");
-        foreach (var c in strict) Assert.All(c.Emitted, op => Assert.True(acceptedSet.Contains(op), $"tab {c.Index}: an accepted operation was lost"));
+        // Refused actions are taken back in the tab itself: no tab is ever resynchronised, and each of its operations was
+        // either accepted (exactly once) or refused (never applied anywhere).
+        Assert.All(circuits, c => Assert.False(c.Resynced, $"tab {c.Index} was resynchronised"));
+        foreach (var c in circuits)
+        {
+            Assert.All(c.Emitted, op => Assert.True(acceptedSet.Contains(op) || c.Refused.Contains(op), $"tab {c.Index}: an operation was lost"));
+            Assert.All(c.Refused, op => Assert.False(acceptedSet.Contains(op), $"tab {c.Index}: a refused operation was applied"));
+            Assert.Equal(0, c.Ws.PendingBatches);
+        }
+        Assert.True(circuits.Take(3).All(c => c.Refused.Count > 0), "the rogue tabs' edits inside the lock are refused");
 
-        // ---- every replica converged to the authoritative model, and the observer's replay of the log matches it too
+        // ---- every replica converged to the authoritative model (no locks on the shared elements)
         var master = session.Snapshot();
         foreach (var c in circuits) Assert.True(ProjectFile.Serialize(c.Ws.Model) == master, $"tab {c.Index} diverged from the session model");
 
@@ -182,8 +201,10 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         var comments = (await store.ListCommentsAsync(project)).Count;
         output.WriteLine($"{store.GetType().Name}: {Clients} tabs, {model.Count:N0} elements, {editing.TotalSeconds:0.0} s editing");
         output.WriteLine($"  accepted ops {accepted.Count:N0} ({accepted.Count / editing.TotalSeconds:N0}/s), emitted {emitted.Count:N0}, " +
-                         $"resynced tabs {circuits.Count(c => c.Resynced)}, locks taken {circuits.Sum(c => c.LocksTaken)}, undos {circuits.Sum(c => c.Undos)}, " +
+                         $"refused actions {circuits.Sum(c => c.RefusedActions)} (rogue {circuits.Take(3).Sum(c => c.RefusedActions)}), " +
+                         $"rebases {circuits.Sum(c => c.Ws.Rebases)}, locks taken {circuits.Sum(c => c.LocksTaken)}, undos {circuits.Sum(c => c.Undos)}, " +
                          $"comments {comments}, text edits {circuits.Sum(c => c.TextEdits)}");
+        output.WriteLine($"  unlocked shared edits: hot fields {circuits.Sum(c => c.HotWrites)}, shared structure {circuits.Sum(c => c.SharedEdits)}, shared elements at end {shared.Elements.Count}");
         output.WriteLine($"  submit p50 {P(submit, 0.5):0.00} ms, p95 {P(submit, 0.95):0.00} ms, max {P(submit, 1):0.0} ms");
         output.WriteLine($"  delivery p50 {P(delivery, 0.5):0.00} ms, p95 {P(delivery, 0.95):0.00} ms, max {P(delivery, 1):0.0} ms");
         output.WriteLine($"  managed heap: start {memoryAtStart / 1048576:N0} MB, peak {memoryPeak / 1048576:N0} MB, end {memoryAtEnd / 1048576:N0} MB");
@@ -195,6 +216,21 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
 
         foreach (var c in circuits) c.Ws.Dispose();
         session.Leave("observer");
+    }
+
+    /// <summary>The shared area's ids (packages, the shared diagram, and elements anyone created there).</summary>
+    private sealed class Shared(string rootId, IReadOnlyList<string> packages)
+    {
+        public string RootId { get; } = rootId;
+        public IReadOnlyList<string> Packages { get; } = packages;
+        public string DiagramId { get; set; } = "";
+        public ConcurrentDictionary<string, byte> Elements { get; } = new();
+
+        public string? Any(Random rng)
+        {
+            var all = Elements.Keys.ToList();
+            return all.Count == 0 ? null : all[rng.Next(all.Count)];
+        }
     }
 
     /// <summary>A participant that never edits: it records every relayed operation, in the session's order.</summary>
@@ -224,10 +260,13 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         private TextClient? _text;
         private int _undoable, _redoable;
         private readonly string _guarded;
+        private readonly Shared _shared;
+        private int _refusals;
 
-        public Circuit(int index, UserAccount user, IMeridianStore store, Guid project, IReadOnlyList<string> hot, string textScope, string guarded, bool rogue)
+        public Circuit(int index, UserAccount user, IMeridianStore store, Guid project, IReadOnlyList<string> hot, string textScope, string guarded, bool rogue, Shared shared)
         {
             _guarded = guarded;
+            _shared = shared;
             Index = index;
             _rng = new Random(1000 + index);
             _store = store;
@@ -237,7 +276,19 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
             _rogue = rogue;
             Ws = new Workspace { User = user };
             Ws.Dispatch = a => { _inbox.Enqueue((Stopwatch.GetTimestamp(), a)); return Task.CompletedTask; };
+            Ws.EditRefused += (ops, _) =>
+            {
+                _refusals++;
+                RefusedActions++;
+                foreach (var op in ops) Refused.Add(op);
+            };
         }
+
+        /// <summary>Operations of this tab's actions the session refused (taken back here).</summary>
+        public HashSet<object> Refused { get; } = new(ReferenceEqualityComparer.Instance);
+        public int RefusedActions { get; private set; }
+        public int HotWrites { get; private set; }
+        public int SharedEdits { get; private set; }
 
         public int Index { get; }
         public Workspace Ws { get; }
@@ -293,11 +344,77 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
         /// <summary>A local edit, timed (it includes the session's apply and relay). <paramref name="history"/>: it adds an undo step.</summary>
         private T Mine<T>(Func<ModelRepository, T> edit, bool history = true)
         {
+            var refusals = _refusals;
             var t = Stopwatch.GetTimestamp();
             var r = edit(Ws.Model);
             Submit.Add(Stopwatch.GetElapsedTime(t).TotalMilliseconds);
-            if (history) (_undoable, _redoable) = (_undoable + 1, 0);
+            // A refused action left no trace in the history (CommandStack.DiscardLastAction).
+            if (history && refusals == _refusals) (_undoable, _redoable) = (_undoable + 1, 0);
             return r;
+        }
+
+        /// <summary>Runs an undo or redo; false when the session refused it.</summary>
+        private bool Accepted(Action<ModelRepository> step)
+        {
+            var refusals = _refusals;
+            Mine(x => { step(x); return 0; }, history: false);
+            return refusals == _refusals;
+        }
+
+        /// <summary>
+        /// One unlocked edit in the shared area: create, rename, delete or move someone's element, nest the shared packages into
+        /// each other (two tabs nesting two packages into each other at once: the later move is refused), or move / add / remove
+        /// shapes on the shared diagram.
+        /// </summary>
+        private void SharedEdit(ModelRepository m)
+        {
+            SharedEdits++;
+            Element? Pkg() => m.Find(_shared.Packages[_rng.Next(_shared.Packages.Count)]);
+            switch (_rng.Next(8))
+            {
+                case 0 when Pkg() is { } owner:
+                {
+                    var e = Mine(x => x.Create(owner, ElementKind.Block, $"S{Index} {_rng.Next(100_000)}"));
+                    if (m.Contains(e)) _shared.Elements[e.Id] = 0;
+                    break;
+                }
+                case 1 when _shared.Any(_rng) is { } id && m.Find(id) is { } e:   // delete vs. edit / move of the same element
+                    if (_rng.Next(3) == 0)
+                    {
+                        _shared.Elements.TryRemove(id, out _);
+                        Mine(x => { x.Delete(e); return 0; });
+                    }
+                    else Mine(x => { x.Rename(e, $"{e.Name.Split('·')[0]}·{Index}"); return 0; });
+                    break;
+                case 2 when _shared.Any(_rng) is { } id && m.Find(id) is { } e && Pkg() is { } to && !ReferenceEquals(e.Owner, to):
+                    Mine(x => { x.Move(e, to, _rng.Next(to.OwnedElements.Count + 1)); return 0; });
+                    break;
+                case 3 when Pkg() is { } p && Pkg() is { } into:   // nest packages (or put one back at the top)
+                {
+                    var target = _rng.Next(3) == 0 ? m.Find(_shared.RootId)! : into;
+                    if (!ReferenceEquals(p, target) && !p.IsAncestorOf(target) && !ReferenceEquals(p.Owner, target))
+                        Mine(x => { x.Move(p, target); return 0; });
+                    break;
+                }
+                case 4 or 5 when m.Find(_shared.DiagramId) is Diagram d && d.Nodes.Count > 0:   // the same shapes, moved by everyone
+                {
+                    var n = d.Nodes[_rng.Next(d.Nodes.Count)];
+                    Mine(x => { x.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [n] = n.Bounds.Offset(_rng.Next(-30, 31), _rng.Next(-30, 31)) }); return 0; });
+                    break;
+                }
+                case 6 when m.Find(_shared.DiagramId) is Diagram d:
+                    if (d.Nodes.Count > 30)
+                    {
+                        var n = d.Nodes[_rng.Next(d.Nodes.Count)];
+                        Mine(x => { x.RemoveFromDiagram(d, [n]); return 0; });
+                    }
+                    else if (_shared.Any(_rng) is { } id && m.Find(id) is { } e && d.NodeFor(e) is null)
+                        Mine(x => x.AddNode(d, e, new Bounds(_rng.Next(0, 1200), _rng.Next(0, 800), 160, 90), showRelationships: false));
+                    break;
+                case 7 when _shared.Any(_rng) is { } id && m.Find(id) is { } e:
+                    Mine(x => { x.Set(e, FieldKeys.Documentation, $"tab {Index} {_rng.Next()}"); return 0; });
+                    break;
+            }
         }
 
         /// <summary>The keeper (tab 3) holds a subtree lock on the guarded package for the whole run.</summary>
@@ -312,27 +429,27 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
             var roll = _rng.Next(100);
             switch (roll)
             {
-                case < 35:   // edit one of my elements (or a block of my diagram)
+                case < 25:   // edit one of my elements (or a block of my diagram)
                 {
                     var target = _mine.Count > 0 && _rng.Next(2) == 0 ? m.Find(_mine[_rng.Next(_mine.Count)]) : Area('A').OwnedElements.FirstOrDefault(e => e.Kind == ElementKind.Block);
                     if (target != null) Mine(x => { x.Set(target, FieldKeys.Documentation, $"tab {Index} edit {_rng.Next()}"); return 0; });
                     break;
                 }
-                case < 45:
+                case < 32:
                 {
                     var owner = Area(_rng.Next(2) == 0 ? 'A' : 'B');
                     var e = Mine(x => x.Create(owner, _rng.Next(2) == 0 ? ElementKind.Requirement : ElementKind.Block, $"T{Index} {_rng.Next(100_000)}"));
                     _mine.Add(e.Id);
                     break;
                 }
-                case < 50 when _mine.Count > 0:
+                case < 35 when _mine.Count > 0:
                 {
                     var id = _mine[_rng.Next(_mine.Count)];
                     _mine.Remove(id);
                     if (m.Find(id) is { } e) Mine(x => { x.Delete(e); return 0; });
                     break;
                 }
-                case < 55 when _mine.Count > 0:
+                case < 38 when _mine.Count > 0:
                 {
                     if (m.Find(_mine[_rng.Next(_mine.Count)]) is { } e)
                     {
@@ -341,7 +458,7 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
                     }
                     break;
                 }
-                case < 62:   // move a shape on my diagram
+                case < 43:   // move a shape on my diagram
                 {
                     var d = (Diagram)Area('A').OwnedElements.First(e => e is Diagram);
                     if (d.Nodes.Count > 0)
@@ -351,23 +468,32 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
                     }
                     break;
                 }
-                // Undo / redo only reach this tab's own edits (a shared element's edit is never undone after its lock is gone).
-                case < 70 when _undoable > 0 && m.History.CanUndo:
-                    Mine(x => { x.History.Undo(); return 0; }, history: false);
-                    (_undoable, _redoable) = (_undoable - 1, _redoable + 1);
+                // Undo / redo reach only this tab's own actions, including unlocked edits of shared elements (parts whose
+                // target someone deleted are skipped; an undo the session refuses is taken back and stays undoable).
+                case < 49 when _undoable > 0 && m.History.CanUndo:
+                    if (Accepted(x => x.History.Undo())) (_undoable, _redoable) = (_undoable - 1, _redoable + 1);
                     Undos++;
                     break;
-                case < 73 when _redoable > 0 && m.History.CanRedo:
-                    Mine(x => { x.History.Redo(); return 0; }, history: false);
-                    (_undoable, _redoable) = (_undoable + 1, _redoable - 1);
+                case < 52 when _redoable > 0 && m.History.CanRedo:
+                    if (Accepted(x => x.History.Redo())) (_undoable, _redoable) = (_undoable + 1, _redoable - 1);
                     break;
-                case < 78 when _rogue:   // inside the keeper's subtree lock: always rejected, and the tab is resynchronised
+                case < 56 when _rogue:   // inside the keeper's subtree lock: refused, and taken back in this tab
                 {
                     if (m.Find(_guarded) is { } g && Session.BlockingLock(Ws.User!.Id, g.Id) != null)
                         Mine(x => { x.Set(g, FieldKeys.Text, $"rogue {Index} {_rng.Next()}"); return 0; });
                     break;
                 }
-                case < 78:   // a shared element: lock it, catch up with what arrived meanwhile, then edit it
+                case < 62:   // a shared "hot" field, written by everyone at once, without a lock
+                {
+                    if (m.Find(_hot[_rng.Next(_hot.Count)]) is { } target && Session.BlockingLock(Ws.User!.Id, target.Id) == null)
+                    {
+                        var key = _rng.Next(3) switch { 0 => FieldKeys.Name, 1 => FieldKeys.Text, _ => FieldKeys.Documentation };
+                        Mine(x => { x.Set(target, key, $"tab {Index} says {_rng.Next()}"); return 0; });
+                        HotWrites++;
+                    }
+                    break;
+                }
+                case < 64:   // the optional check-out: lock a hot element, edit it, keep it a few rounds
                 {
                     var id = _hot[_rng.Next(_hot.Count)];
                     if (_locked == null && Session.TryLock(Ws.ParticipantId, id, subtree: false) == null)
@@ -375,15 +501,14 @@ public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
                         _locked = id;
                         _lockedFor = _rng.Next(2, 8);
                         LocksTaken++;
-                        Drain();
                     }
                     if (_locked != null && Ws.Model.Find(_locked) is { } target)
-                    {
-                        Mine(x => { x.Set(target, FieldKeys.Text, $"tab {Index} says {_rng.Next()}"); return 0; });
-                        (_undoable, _redoable) = (0, 0);
-                    }
+                        Mine(x => { x.Set(target, FieldKeys.Text, $"tab {Index} checked out {_rng.Next()}"); return 0; });
                     break;
                 }
+                case < 78:   // the shared area: concurrent structure edits, no locks
+                    SharedEdit(m);
+                    break;
                 case < 82:   // comment on one of my elements
                 {
                     var on = _mine.Count > 0 ? _mine[^1] : Area('A').Id;
