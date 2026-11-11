@@ -71,7 +71,7 @@ public sealed class UxAuditTests : TestContext
     [Fact]
     public void Whats_New_And_The_Tour_Cover_The_Recent_Features()
     {
-        Assert.Equal("0.8", TourChapters.WhatsNewVersion);
+        Assert.Equal("0.9", TourChapters.WhatsNewVersion);
         foreach (var id in new[] { "database", "libraries", "verify", "team", "analysis", TourChapters.ComingFrom })
             Assert.NotNull(TourChapters.Find(id));
         foreach (var id in new[] { "analysis", "team", TourChapters.ComingFrom })

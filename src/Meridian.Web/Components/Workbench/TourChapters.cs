@@ -21,7 +21,7 @@ public static class TourChapters
     public const string ComingFrom = "coming-from";
 
     /// <summary>The release the "What's new" card describes; <c>UserPreferences.WhatsNewSeen</c> stores the last one shown.</summary>
-    public const string WhatsNewVersion = "0.8";
+    public const string WhatsNewVersion = "0.9";
 
     public static readonly Chapter[] All =
     [
@@ -189,12 +189,10 @@ public static class TourChapters
 
     public static readonly WhatsNewItem[] WhatsNew =
     [
-        new("Instances & object diagrams", "Create an instance of a block with its parts, edit slot values in an instance table, and verify against it.", "analysis"),
-        new("Deployment diagrams", "Nodes, devices and artifacts; drawing a line from an artifact to a node deploys it.", "analysis"),
-        new("Relation map, find & replace", "Explore everything connected to an element; search and replace across the whole model (⇧⌘F).", "analysis"),
-        new("History, spreadsheets & printing", "Per-element history with diffs, Excel/CSV import for any element, and multi-page PDF printing (⌘P).", "analysis"),
-        new("Behaviour from code", "Code sync draws activity and sequence diagrams from method bodies: for entry points, or for any operation on demand.", "code"),
-        new("Editing together","Several people can change the same element at once without locks; everyone ends up with the same model.", "team"),
+        new("Your code as diagrams", "Connect a repository and its first sync lands straight in main: a package overview, structure diagrams, and activity and sequence diagrams drawn from the code.", "code"),
+        new("Code waiting for review", "Later pushes wait on a review branch; a banner on main shows them with Open and Accept all.", "code"),
+        new("Tokens survive upgrades", "Encryption keys now live in the Meridian database, so saved tokens and passwords keep working after an upgrade or a move.", "team"),
+        new("Instances, deployment & more", "Object and deployment diagrams, the relation map, find and replace, element history, spreadsheets and printing (new in 0.8).", "analysis"),
         new("Coming from Cameo or EA?", "A short chapter on where the containment tree, specification window and menus went.", ComingFrom),
     ];
 

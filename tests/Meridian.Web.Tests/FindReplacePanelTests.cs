@@ -29,6 +29,17 @@ public class FindReplacePanelTests : TestContext
         return (ws, cut, state);
     }
 
+    /// <summary>Clicks the first match, finding it again if the panel re-rendered in between (results stream in from a
+    /// background search, so a just-found button's handler can already be gone).</summary>
+    private static void Click(IRenderedComponent<FindReplacePanel> cut, string selector)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { cut.Find(selector).Click(); return; }
+            catch (Bunit.Rendering.UnknownEventHandlerIdException) when (attempt < 20) { Thread.Sleep(25); }
+        }
+    }
+
     private static void Type(IRenderedComponent<FindReplacePanel> cut, string testId, string text) =>
         cut.Find($"[data-testid={testId}]").Input(text);
 
@@ -59,7 +70,7 @@ public class FindReplacePanelTests : TestContext
         var (ws, cut, state) = Open(SampleModels.Vehicle());
         Type(cut, "fr-find", "maxPower");
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Hits.Count > 0), Wait);
-        cut.FindAll("[data-testid=fr-row]").First().Click();
+        Click(cut, "[data-testid=fr-row]");
         Assert.Equal("maxPower", ws.Selected?.Name);
     }
 
@@ -68,13 +79,13 @@ public class FindReplacePanelTests : TestContext
     {
         var (ws, cut, state) = Open(SampleModels.Vehicle());
         ws.Model.History.Clear();
-        cut.Find("[data-testid=fr-case]").Click();
+        Click(cut, "[data-testid=fr-case]");
         Type(cut, "fr-replace", "Motor");
         Type(cut, "fr-find", "Engine");
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Matches > 3), Wait);
         Assert.Contains("Motor", cut.Find(".fr-row ins").TextContent);
 
-        cut.Find("[data-testid=fr-replace-all]").Click();
+        Click(cut, "[data-testid=fr-replace-all]");
         var preview = cut.Find("[data-testid=fr-preview]");
         Assert.Contains("Preview:", preview.TextContent);
         var row = cut.FindAll(".fr-diff tbody tr").First(r => r.Children[0].TextContent == "Engine" && r.Children[1].TextContent == "Name");
@@ -82,7 +93,7 @@ public class FindReplacePanelTests : TestContext
         Assert.Equal("Motor", row.QuerySelector("td.after ins")!.TextContent);
         Assert.Equal("Engine", Block(ws, "Engine").Name);   // nothing changed yet
 
-        cut.Find("[data-testid=fr-apply]").Click();
+        Click(cut, "[data-testid=fr-apply]");
         cut.WaitForAssertion(() => Assert.Contains("Replaced in", cut.Find("[data-testid=fr-message]").TextContent), Wait);
         Assert.Single(ws.Model.OfKind(ElementKind.Block), b => b.Name == "Motor");
         Assert.DoesNotContain(ws.Model.AllElements, e => e.Name.Contains("Engine", StringComparison.Ordinal));
@@ -107,9 +118,9 @@ public class FindReplacePanelTests : TestContext
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Hits.Count == 2), Wait);
         // Uncheck the whole of "Pump B" with its element checkbox.
         cut.FindAll("[data-testid=fr-group]").Single(g => g.GetAttribute("data-element") == b.Id).QuerySelector(".fr-gchk")!.Change(false);
-        cut.Find("[data-testid=fr-replace-selected]").Click();
+        Click(cut, "[data-testid=fr-replace-selected]");
         Assert.Single(cut.FindAll(".fr-diff tbody tr"));
-        cut.Find("[data-testid=fr-apply]").Click();
+        Click(cut, "[data-testid=fr-apply]");
         cut.WaitForAssertion(() => Assert.Equal("Valve A", a.Name), Wait);
         Assert.Equal("Pump B", b.Name);
     }
@@ -135,7 +146,7 @@ public class FindReplacePanelTests : TestContext
             Assert.Contains("1 read-only", cut.Find("[data-testid=fr-status]").TextContent);
         }, Wait);
 
-        cut.Find("[data-testid=fr-replace-all]").Click();
+        Click(cut, "[data-testid=fr-replace-all]");
         cut.WaitForAssertion(() =>
         {
             var rows = cut.FindAll(".fr-diff tbody tr");
@@ -150,11 +161,11 @@ public class FindReplacePanelTests : TestContext
     public void Bad_Regex_And_Too_Many_Results_Explain_Themselves()
     {
         var (_, cut, state) = Open(LargeModelGenerator.Generate(LargeModelOptions.Cameo(20_000)));
-        cut.Find("[data-testid=fr-regex]").Click();
+        Click(cut, "[data-testid=fr-regex]");
         Type(cut, "fr-find", "(unclosed");
         cut.WaitForAssertion(() => Assert.Contains("Invalid regular expression", cut.Find("[data-testid=fr-status]").TextContent), Wait);
 
-        cut.Find("[data-testid=fr-regex]").Click();
+        Click(cut, "[data-testid=fr-regex]");
         Type(cut, "fr-find", "e");
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Truncated), Wait);
         // The panel re-renders after the search finishes on another thread: wait for each rendered state.
@@ -163,7 +174,7 @@ public class FindReplacePanelTests : TestContext
             Assert.Contains("refine your search", cut.Find("[data-testid=fr-truncated]").TextContent);
             Assert.Equal(FindReplacePanel.PageSize, cut.FindAll("[data-testid=fr-group]").Count);   // only the first page of elements
         }, Wait);
-        cut.Find("[data-testid=fr-show-more]").Click();
+        Click(cut, "[data-testid=fr-show-more]");
         cut.WaitForAssertion(() => Assert.Equal(Math.Min(state.Hits.Count, 2 * FindReplacePanel.PageSize), cut.FindAll("[data-testid=fr-group]").Count), Wait);
     }
 
