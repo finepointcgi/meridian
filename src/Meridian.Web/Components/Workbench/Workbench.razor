@@ -49,7 +49,7 @@
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.Group" OnClick="ShareProject">Share &amp; members…</MudMenuItem>
                 }
-                <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => Dialogs.ShowAsync<IntegrationsDialog>("Integrations", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true }))" Disabled="Ws.Session == null"
+                <MudMenuItem Icon="@Icons.Material.Outlined.Extension" OnClick="@(() => IntegrationsDialog.ShowAsync(Dialogs))" Disabled="Ws.Session == null"
                              title="Issue trackers (Jira, Azure DevOps, GitHub, GitLab), webhooks, DOORS Next and Polarion, code repositories and live databases">Integrations… <span class="menu-hint">Jira, DOORS, Polarion, Git, databases</span></MudMenuItem>
                 <MudDivider />
                 @* Export ▸ (a submenu since 0.7.1; MudBlazor's nested menu: hover, click or → opens it, ← and Escape close it). *@

@@ -107,6 +107,10 @@ public sealed partial class CodeRepoConfig
     public bool CommentOnPullRequests { get; set; } = true;
     /// <summary>Create diagrams for new packages and blocks. The model root's <c>codeSync.autoDiagrams</c> field overrides it when set.</summary>
     public bool AutoDiagrams { get; set; } = true;
+    /// <summary>Leave out the package of the root namespace every type shares (so a repository whose model package and
+    /// root namespace are both "Meridian" reads "Meridian ▸ Core", not "Meridian ▸ Meridian ▸ Core"). On by default,
+    /// including for connections saved before the setting existed.</summary>
+    public bool CollapseRootNamespace { get; set; } = true;
     /// <summary>Keep deployment artifacts that «manifest» the synced code (one for the repository, or one per top-level
     /// package), so the code can be deployed to nodes. Off by default.</summary>
     public Meridian.Core.CodeSync.CodeArtifactMode DeploymentArtifacts { get; set; } = Meridian.Core.CodeSync.CodeArtifactMode.None;
@@ -167,6 +171,51 @@ public sealed partial class CodeRepoConfig
     /// <summary>The repository name: the last part of the GitHub / Bitbucket repo or the GitLab path.</summary>
     [JsonIgnore]
     public string RepoName => Host == GitHostKind.GitLab ? Project.Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "" : Repo.Trim();
+
+    /// <summary>
+    /// The permissions the access token needs for these settings, in the host's own terms: reading the code always; posting
+    /// commit statuses only with <see cref="PostStatus"/>; pull requests only with <see cref="PreviewPullRequests"/> (write
+    /// only to comment on them).
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> TokenPermissions
+    {
+        get
+        {
+            var prs = PreviewPullRequests;
+            var comments = prs && CommentOnPullRequests;
+            var list = new List<string>();
+            switch (Host)
+            {
+                case GitHostKind.GitLab:
+                    list.Add(PostStatus || comments ? "api" : "read_api");
+                    break;
+                case GitHostKind.Bitbucket when IsBitbucketCloud:
+                    list.Add(PostStatus ? "Repositories: write" : "Repositories: read");
+                    if (prs) list.Add(comments ? "Pull requests: write" : "Pull requests: read");
+                    break;
+                case GitHostKind.Bitbucket:
+                    list.Add(PostStatus || comments ? "Repository: write" : "Repository: read");
+                    break;
+                default:
+                    list.Add("Contents: read");
+                    if (PostStatus) list.Add("Commit statuses: write");
+                    if (prs) list.Add(comments ? "Pull requests: write" : "Pull requests: read");
+                    break;
+            }
+            return list;
+        }
+    }
+
+    /// <summary>The token field's label: "Access token (Contents: read, Commit statuses: write)" and the like.</summary>
+    [JsonIgnore]
+    public string TokenLabel => Host switch
+    {
+        GitHostKind.GitLab => $"Access token (scope: {string.Join(", ", TokenPermissions)})",
+        GitHostKind.Bitbucket when IsBitbucketCloud => $"Access token ({string.Join(", ", TokenPermissions)}) or username:app-password",
+        GitHostKind.Bitbucket => $"HTTP access token ({string.Join(", ", TokenPermissions)})",
+        _ => $"Access token ({string.Join(", ", TokenPermissions)})",
+    };
 
     [JsonIgnore]
     public string EffectiveRootPackage => RootPackage is { Length: > 0 } r && r.Trim().Length > 0 ? r.Trim() : RepoName is { Length: > 0 } n ? n : "Code";

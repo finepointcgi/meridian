@@ -18,16 +18,16 @@
     @foreach (var f in Filters)
     {
         var filter = f;
-        <span class="chip @(_filter == filter.Name ? "on" : "")" @onclick="() => _filter = filter.Name">@filter.Name</span>
+        <span class="chip @(_filter == filter.Name ? "on" : "")" @onclick="() => SetFilter(filter.Name)">@filter.Name</span>
     }
     @if (Meridian.Core.DataModeling.DbModel.HasDataModel(Ws.Model))
     {
         @* Data models: every table, or the tables of one subject area. *@
-        <span class="chip @(_filter == DataFilter ? "on" : "")" @onclick="() => _filter = DataFilter" data-testid="tree-filter-data">Data</span>
+        <span class="chip @(_filter == DataFilter ? "on" : "")" @onclick="() => SetFilter(DataFilter)" data-testid="tree-filter-data">Data</span>
         @foreach (var g in Meridian.Core.DataModeling.DbModel.Groups(Ws.Model))
         {
             var key = "group:" + g.Id;
-            <span class="chip @(_filter == key ? "on" : "")" @onclick="() => _filter = key" data-group="@g.Name" title="Tables of the subject area @g.Name">
+            <span class="chip @(_filter == key ? "on" : "")" @onclick="() => SetFilter(key)" data-group="@g.Name" title="Tables of the subject area @g.Name">
                 <span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:@Meridian.Core.DataModeling.DbModel.ColorOf(g); margin-right:4px"></span>@g.Name
             </span>
         }
@@ -45,7 +45,7 @@
 
     @if (_hits != null)
     {
-        <div class="section-label">@_hits.Count result@(_hits.Count == 1 ? "" : "s")</div>
+        <div class="section-label">@_hits.Count result@(_hits.Count == 1 ? "" : "s")@(_filter == "All" ? "" : $" in {FilterLabel}")</div>
         @foreach (var h in _hits) { @FlatItem(h) }
     }
     else if (_filter != "All")
@@ -176,6 +176,29 @@
         _filteredKey = (_filter, Ws.TreeVersion);
         return _filtered;
     }
+
+    /// <summary>Picks a filter chip; a search in progress is narrowed (or widened) to match.</summary>
+    private void SetFilter(string filter)
+    {
+        _filter = filter;
+        if (_query is { Length: >= 2 }) RunSearch();
+    }
+
+    /// <summary>Which elements the active filter chip lets through (all of them for "All").</summary>
+    private Func<Element, bool> FilterPredicate()
+    {
+        if (_filter == "All") return _ => true;
+        if (_filter.StartsWith("group:", StringComparison.Ordinal))
+        {
+            var members = Ws.Model.Find(_filter[6..]) is { } area ? Meridian.Core.DataModeling.DbModel.Members(Ws.Model, area).ToHashSet() : [];
+            return members.Contains;
+        }
+        var kinds = (_filter == DataFilter ? [ElementKind.Table, ElementKind.Sequence, ElementKind.Routine] : Filters.FirstOrDefault(f => f.Name == _filter).Kinds ?? []).ToHashSet();
+        return e => kinds.Contains(e.Kind);
+    }
+
+    /// <summary>"Diagrams", or the subject area's name for a subject-area chip.</summary>
+    private string FilterLabel => _filter.StartsWith("group:", StringComparison.Ordinal) ? Ws.Model.Find(_filter[6..])?.Name ?? "subject area" : _filter;
 
     public Task FocusSearch() => _search?.FocusAsync().AsTask() ?? Task.CompletedTask;
 
@@ -318,7 +341,9 @@
 
     private void RunSearch()
     {
-        _hits = Ws.Model.Search(_query!.Trim()).Take(150).ToList();
+        // The active filter chip (Diagrams, Requirements, …) narrows the results too.
+        var keep = FilterPredicate();
+        _hits = Ws.Model.Search(_query!.Trim()).Where(keep).Take(150).ToList();
         _hitsVersion = Ws.ModelVersion;
     }
 

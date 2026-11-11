@@ -7,7 +7,8 @@ namespace Meridian.Tests;
 
 public class CodeSyncMapperTests
 {
-    private static CodeSyncOptions Options(string commit = "c1") => new() { RepoId = "repo-1", Commit = commit, RootPackage = "Software::Code" };
+    // The package tree as the code has it (no collapsed root namespace, no derived package dependencies): those have tests of their own.
+    private static CodeSyncOptions Options(string commit = "c1") => new() { RepoId = "repo-1", Commit = commit, RootPackage = "Software::Code", CollapseRootNamespace = false, PackageDependencies = false };
 
     private static CodeSyncChanges Sync(ModelRepository m, IReadOnlyList<CodeFile> files, string commit = "c1", CodeSyncOptions? options = null) =>
         CodeModelMapper.Apply(m, new CSharpCodeReader().Read(files), (options ?? Options()) with { Commit = commit });
@@ -392,7 +393,7 @@ public class CodeSyncMapperTests
         var m = new ModelRepository("CubeSat");
         var code = new CSharpCodeReader().Read(CubeSatCode.Files);
         Assert.Empty(code.Warnings);
-        var changes = CodeModelMapper.Apply(m, code, new CodeSyncOptions { RepoId = "gh:cubesat", Commit = "abc123", RootPackage = "Flight Software" });
+        var changes = CodeModelMapper.Apply(m, code, new CodeSyncOptions { RepoId = "gh:cubesat", Commit = "abc123", RootPackage = "Flight Software", CollapseRootNamespace = false });
         Assert.Empty(changes.Warnings);
         var root = m.Root.OwnedElements.Single(e => e.Name == "Flight Software");
 
@@ -419,7 +420,7 @@ public class CodeSyncMapperTests
         var diagrams = m.Diagrams.Count();
         var files = Replace(CubeSatCode.Files, "src/Thermal/Thermal.cs", s => s.Replace("public class Heater { public double Watts { get; set; } }", "")
             .Replace("public List<Heater> Heaters { get; } = new();", ""));
-        var later = CodeModelMapper.Apply(m, new CSharpCodeReader().Read(files), new CodeSyncOptions { RepoId = "gh:cubesat", Commit = "def456", RootPackage = "Flight Software" });
+        var later = CodeModelMapper.Apply(m, new CSharpCodeReader().Read(files), new CodeSyncOptions { RepoId = "gh:cubesat", Commit = "def456", RootPackage = "Flight Software", CollapseRootNamespace = false });
         Assert.Null(Sym(m, "Sat.Thermal.Heater"));
         Assert.Equal(diagrams, m.Diagrams.Count());
         Assert.NotEmpty(later.Removed);

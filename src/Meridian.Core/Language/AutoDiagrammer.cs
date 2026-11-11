@@ -130,7 +130,7 @@ public static class AutoDiagrammer
         var plan = new AutoDiagramPlan();
 
         if (o.DerivePackageDependencies) plan.Dependencies.AddRange(DeriveDependencies(m, scope));
-        PlanPackages(ctx, plan, scope, scope.Kind == ElementKind.Model ? "Package overview" : $"{scope.Name} – package overview", plan.Dependencies);
+        PlanPackages(ctx, plan, scope, PackageOverviewName(scope), plan.Dependencies);
 
         var content = scope.Descendants().Prepend(scope).Where(e => e is not Relationship && e is not Diagram && !Excluded(e)).ToList();
 
@@ -313,15 +313,39 @@ public static class AutoDiagrammer
         var autos = root.OwnedElements.OfType<Diagram>().Where(d => d.DiagramType == DiagramType.Package && d.Get(MarkerKey) == key).ToList();
         var newDeps = deps.Any(x => shown.Contains(x.Client) && shown.Contains(x.Supplier));
         var trigger = ctx.O.Regenerate || newDeps || shown.Any(p => !ctx.Shown(DiagramType.Package, p));
-        const string purpose = "How the model is organised into packages and how the packages depend on each other.";
         if (trigger)
         {
             var chunks = shown.Count <= ctx.Cap ? [shown] : shown.Chunk(ctx.Cap).Select(c => c.ToList()).ToList();
             for (var i = 0; i < chunks.Count; i++)
-                AddOverview(plan, root, Suffix(name, i, chunks.Count), purpose, chunks[i], autos.ElementAtOrDefault(i), key);
+                AddOverview(plan, root, Suffix(name, i, chunks.Count), PackageOverviewPurpose, chunks[i], autos.ElementAtOrDefault(i), key);
         }
         foreach (var p in shown.Where(p => Depth(p) == depth && PackagesUnder(p).Any()))
             PlanPackages(ctx, plan, p, $"{p.Name} – packages", deps);
+    }
+
+    /// <summary>What a package overview is for (its documentation).</summary>
+    public const string PackageOverviewPurpose = "How the model is organised into packages and how the packages depend on each other.";
+
+    /// <summary>"Package overview" for the model, "&lt;package&gt; – package overview" for a package.</summary>
+    public static string PackageOverviewName(Element root) =>
+        root.Kind == ElementKind.Model ? "Package overview" : $"{root.Name} – package overview";
+
+    /// <summary>
+    /// The package overview of <paramref name="root"/> showing exactly <paramref name="packages"/> (nested inside each other
+    /// where one owns another), marked like the overviews <see cref="Plan"/> makes, so a later Auto-diagram run updates it
+    /// rather than adding another. Code sync uses it for its "&lt;root&gt; – package overview".
+    /// </summary>
+    public static PlannedDiagram PlanPackageOverview(ModelRepository m, Element root, IReadOnlyList<Element> packages, Diagram? existing = null)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+        ArgumentNullException.ThrowIfNull(root);
+        var p = new PlannedDiagram
+        {
+            Type = DiagramType.Package, Owner = root, Name = PackageOverviewName(root), Purpose = PackageOverviewPurpose,
+            Elements = packages, Existing = existing, Key = KeyFor(DiagramType.Package, root),
+        };
+        p.NodeCount = Count(Collect(m, p.Type, p.Owner, p.Elements));
+        return p;
     }
 
     private static void AddOverview(AutoDiagramPlan plan, Element owner, string name, string purpose, List<Element> items, Diagram? existing, string key) =>

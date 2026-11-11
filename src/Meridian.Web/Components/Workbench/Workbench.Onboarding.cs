@@ -35,6 +35,8 @@ public partial class Workbench
         }
         if (Ws.Session != null && !Ws.ReadOnly)
             yield return new("Connect a code repository…", "Command", Icons.Material.Outlined.Extension, () => IntegrationsDialog.ShowCodeRepositoriesAsync(Dialogs));
+        if (Ws.Session != null && !Ws.ReadOnly)
+            yield return new("Connect DOORS Next or Polarion…", "Command", Icons.Material.Outlined.SyncAlt, () => IntegrationsDialog.ShowRequirementsToolsAsync(Dialogs));
         yield return new($"What's new in {TourChapters.WhatsNewVersion}", "Command", Icons.Material.Outlined.NewReleases, ShowWhatsNew);
         yield return new("Keyboard & mouse shortcuts", "Command", Icons.Material.Outlined.Keyboard, ShowHelp);
         yield return new("User guide", "Command", Icons.Material.Outlined.MenuBook, () => OpenGuide());

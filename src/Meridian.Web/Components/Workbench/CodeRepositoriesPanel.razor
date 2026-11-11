@@ -37,7 +37,7 @@
                         }
                         @if (last.ReviewUrl is { Length: > 0 } url)
                         {
-                            <span> · <a href="@url">Review</a></span>
+                            <span> · <a href="@url" class="code-repo-review" @onclick="OpenReview" @onclick:preventDefault>Review</a></span>
                         }
                     }
                 </div>
@@ -202,6 +202,8 @@ else
             <MudTextField T="string" Label="Model package" @bind-Value="f.RootPackage" Placeholder="@(f.RepoName is { Length: > 0 } n ? n : "Repository name")"
                           HelperText="@(RootPackageOverride is { } rp ? $"This project's model sets {CodeSyncRunner.RootPackageField} = “{rp}”, which wins over this setting." : "The package that receives the code. Defaults to the repository name.")"
                           Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudSwitch T="bool" @bind-Value="f.CollapseRootNamespace" Label="Collapse common root namespace" Color="Color.Primary" Class="code-repo-collapse-root"
+                       title="When every type shares one root namespace (or it is named like the model package), its sub-namespaces go straight into the model package: Meridian ▸ Core, not Meridian ▸ Meridian ▸ Core." />
             <MudSwitch T="bool" @bind-Value="f.AutoDiagrams" Label="Create diagrams for new packages and classes" Color="Color.Primary" Class="code-repo-auto-diagrams" />
             @if (AutoDiagramsOverride is { } ad)
             {
@@ -246,6 +248,16 @@ else
 @code {
     [Parameter] public bool CanManage { get; set; }
 
+    /// <summary>Opens the review of a synced repository (Integrations closes itself and opens Code changes). Without it the
+    /// Code changes tab is opened directly.</summary>
+    [Parameter] public EventCallback OnOpenReview { get; set; }
+
+    private async Task OpenReview()
+    {
+        if (OnOpenReview.HasDelegate) await OnOpenReview.InvokeAsync();
+        else Ws.OpenView(ViewTabKind.CodeChanges);
+    }
+
     private sealed record Setup(Guid Id, string? Secret);
 
     private IReadOnlyList<IntegrationConnection> _repos = [];
@@ -274,13 +286,7 @@ else
         _ => "https://api.github.com, or https://your-server/api/v3 for GitHub Enterprise",
     };
 
-    private static string TokenLabel(CodeRepoConfig f) => f.Host switch
-    {
-        GitHostKind.GitLab => "Access token (read_repository, api for statuses and comments)",
-        GitHostKind.Bitbucket when CodeRepoConfig.IsBitbucketCloudUrl(f.BaseUrl) => "Access token (Repositories: read, Pull requests: write) or username:app-password",
-        GitHostKind.Bitbucket => "HTTP access token (Repository: write for build statuses and comments)",
-        _ => "Access token (Contents: read, Commit statuses: write, Pull requests: write)",
-    };
+    private static string TokenLabel(CodeRepoConfig f) => f.TokenLabel;
     private string BaseUrl => CodeSync.PublicBaseUrl ?? Nav.BaseUri.TrimEnd('/');
 
     protected override async Task OnInitializedAsync()

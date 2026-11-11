@@ -336,7 +336,7 @@ Project menu → **Integrations…** → *Code repositories* → **Add repositor
 |---|---|---|---|---|
 | Server URL | `https://api.github.com`, or `https://ghe.example.com/api/v3` | `https://gitlab.com`, or your server | `https://api.bitbucket.org/2.0` (any `bitbucket.org` URL works) | your server, e.g. `https://bitbucket.example.com` |
 | Repository | owner and repository name | project path (`group/project`) or numeric id | workspace and repository slug | project key and repository slug |
-| Access token | fine-grained token: *Contents: read*, *Commit statuses: write*, *Pull requests: write* (for comments) | project or personal token: `read_repository`, plus `api` to post statuses and comments | repository or workspace access token (*Repositories: read*, *Pull requests: write*), or `username:app-password` | HTTP access token with *Repository write* (build statuses and comments), or `username:password` |
+| Access token (the form lists what the current settings need) | fine-grained token: *Contents: read*; *Commit statuses: write* to post statuses; *Pull requests: read* for previews, *write* to comment | project or personal token: `read_api`, or `api` to post statuses or comments | repository or workspace access token: *Repositories: read* (*write* to post build statuses); *Pull requests: read* for previews, *write* to comment; or `username:app-password` | HTTP access token with *Repository read* (*write* for build statuses and comments), or `username:password` |
 
 A token that contains `:` is sent with basic authentication (Bitbucket app passwords); every other token as a bearer token.
 

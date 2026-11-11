@@ -25,11 +25,17 @@ public sealed partial class ModelValidator
                                      && !(e.Kind == ElementKind.BpmnNode && Notation.ShapeOf(e) is NodeShape.Event or NodeShape.Gateway))
                 .Select(e => Issue(Severity.Error, "MER-001", $"{Metamodel.DisplayName(e.Kind)} has no name", e))),
 
-        new Rule("MER-002", "Sibling names must be unique per kind", m =>
+        // Operations are told apart by their parameter types (UML overloading): same-named operations with different
+        // parameter lists are fine; only an identical parameter list is a duplicate.
+        new Rule("MER-002", "Sibling names must be unique per kind (operations: per parameter list)", m =>
             m.AllElements.Where(e => e.OwnedElements.Count > 1).SelectMany(owner =>
                 owner.OwnedElements.Where(c => !string.IsNullOrEmpty(c.Name) && !c.IsRelationship)
-                    .GroupBy(c => (c.Kind, c.Name)).Where(g => g.Count() > 1)
-                    .SelectMany(g => g.Skip(1).Select(c => Issue(Severity.Error, "MER-002", $"Duplicate name '{c.Name}' in {owner.DisplayName}", c))))),
+                    .GroupBy(c => (c.Kind, c.Name, Overload: c.Kind == ElementKind.Operation ? OverloadKey(c) : ""))
+                    .Where(g => g.Count() > 1)
+                    .SelectMany(g => g.Skip(1).Select(c => Issue(Severity.Error, "MER-002",
+                        g.Key.Kind == ElementKind.Operation
+                            ? $"Duplicate operation '{c.Name}{g.Key.Overload}' in {owner.DisplayName} (same name and parameter types)"
+                            : $"Duplicate name '{c.Name}' in {owner.DisplayName}", c))))),
 
         new Rule("MER-003", "Relationship ends must be valid for the relationship kind", m =>
             m.Relationships.Where(r => !Libraries.MissingReference.Is(r.Source) && !Libraries.MissingReference.Is(r.Target))
@@ -94,6 +100,75 @@ public sealed partial class ModelValidator
              .ToList();
 
     private static ValidationIssue Issue(Severity s, string id, string msg, Element e) => new(s, id, msg, e);
+
+    /// <summary>
+    /// What tells an operation apart from its overloads (MER-002): the directions and types of its parameters, in order,
+    /// whitespace removed, e.g. "(int,out string)". Parameter names and the return type do not count. Read from the
+    /// signature ("(a : int, out b : string) : bool"); an untyped parameter counts as "?". "()" without parameters or
+    /// without a signature.
+    /// </summary>
+    public static string OverloadKey(Element operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        var sig = operation.Get(FieldKeys.Signature);
+        var open = sig.IndexOf('(');
+        if (open < 0) return "()";
+        var parts = new List<string>();
+        var depth = 0;
+        var start = open + 1;
+        for (var i = open + 1; i < sig.Length; i++)
+        {
+            var ch = sig[i];
+            if (ch is '(' or '<' or '[' or '{') depth++;
+            else if (ch is ')' or '>' or ']' or '}')
+            {
+                if (depth > 0) depth--;
+                else if (ch == ')')
+                {
+                    Add(sig[start..i]);
+                    start = -1;
+                    break;
+                }
+            }
+            else if (ch == ',' && depth == 0)
+            {
+                Add(sig[start..i]);
+                start = i + 1;
+            }
+        }
+        if (start >= 0) Add(sig[start..]);   // unbalanced: take the rest
+        return "(" + string.Join(",", parts) + ")";
+
+        void Add(string p)
+        {
+            p = p.Trim();
+            if (p.Length == 0) return;
+            var dir = "";
+            foreach (var (word, norm) in new[] { ("inout ", "inout "), ("ref ", "inout "), ("out ", "out "), ("in ", "") })
+                if (p.StartsWith(word, StringComparison.Ordinal))
+                {
+                    (dir, p) = (norm, p[word.Length..].Trim());
+                    break;
+                }
+            var colon = TypeColon(p);
+            var type = colon < 0 ? "" : string.Concat(p[(colon + 1)..].Where(c => !char.IsWhiteSpace(c)));
+            parts.Add(dir + (type.Length == 0 ? "?" : type));
+        }
+
+        // The ":" between a parameter's name and its type (not "::" in a qualified type name, not inside brackets).
+        static int TypeColon(string p)
+        {
+            var depth = 0;
+            for (var i = 0; i < p.Length; i++)
+            {
+                var ch = p[i];
+                if (ch is '(' or '<' or '[' or '{') depth++;
+                else if (ch is ')' or '>' or ']' or '}') depth--;
+                else if (ch == ':' && depth == 0 && (i + 1 >= p.Length || p[i + 1] != ':') && (i == 0 || p[i - 1] != ':')) return i;
+            }
+            return -1;
+        }
+    }
 
     private static IEnumerable<ValidationIssue> CheckCycles(ModelRepository m)
     {

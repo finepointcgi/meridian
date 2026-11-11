@@ -69,6 +69,57 @@ public static class CodeModelMapper
 
     private const string NamespacePrefix = "ns:";
 
+    /// <summary>Symbol prefix of the derived «use» dependencies between namespace packages ("pkgdep:Sat.Power->Sat.Comms").</summary>
+    public const string PackageDependencyPrefix = "pkgdep:";
+
+    /// <summary>Field set to "true" on a derived package dependency that is part of a dependency cycle.</summary>
+    public const string CycleKey = "code.cycle";
+
+    /// <summary>Most packages the package overview shows with their sub-namespaces; above it only the top level is shown.</summary>
+    public const int OverviewMaxPackages = 40;
+
+    /// <summary>Whether <paramref name="e"/> is a package code sync made for a namespace.</summary>
+    public static bool IsNamespacePackage(Element e) =>
+        e.Kind == ElementKind.Package && e.Get(CodeFieldKeys.Symbol).StartsWith(NamespacePrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The namespace packages a package overview of <paramref name="root"/> (a code-sync root package) shows: the top-level
+    /// ones, plus the level below while all of them together stay within <see cref="OverviewMaxPackages"/>. Packages
+    /// marked removed are left out. Top level first, each level by name.
+    /// </summary>
+    public static IReadOnlyList<Element> OverviewPackages(Element root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        return OverviewPackages(root, p => IsNamespacePackage(p) && p.Get(RemovedKey) != "true");
+    }
+
+    private static List<Element> OverviewPackages(Element root, Func<Element, bool> include)
+    {
+        var top = root.OwnedElements.Where(c => c.Kind == ElementKind.Package && include(c)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList();
+        var below = top.SelectMany(t => t.OwnedElements.Where(c => c.Kind == ElementKind.Package && include(c)).OrderBy(c => c.Name, StringComparer.Ordinal)).ToList();
+        return top.Count + below.Count <= OverviewMaxPackages ? [.. top, .. below] : top;
+    }
+
+    /// <summary>The package <see cref="CodeSyncOptions.RootPackage"/> names ("Software::Code"), or null when it does not exist yet.</summary>
+    public static Element? FindRootPackage(ModelRepository model, string? rootPackage)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        Element? owner = model.Root;
+        foreach (var name in RootPackageNames(rootPackage))
+        {
+            owner = owner.OwnedElements.FirstOrDefault(c => c.Kind == ElementKind.Package && c.Name == name);
+            if (owner is null) return null;
+        }
+        return owner;
+    }
+
+    private static string[] RootPackageNames(string? rootPackage)
+    {
+        var names = (string.IsNullOrWhiteSpace(rootPackage) ? "Code" : rootPackage)
+            .Split("::", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return names.Length == 0 ? ["Code"] : names;
+    }
+
     public static CodeSyncChanges Apply(ModelRepository model, CodeModel code, CodeSyncOptions options)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -94,6 +145,8 @@ public static class CodeModelMapper
         private readonly Dictionary<string, Element> _types = new(StringComparer.Ordinal);
         private readonly Dictionary<string, CodeType> _codeTypes = new(StringComparer.Ordinal);
         private Element _root = null!;
+        /// <summary>The root namespace left out of the package tree (<see cref="CodeSyncOptions.CollapseRootNamespace"/>), or null.</summary>
+        private string? _collapsed;
 
         public void Execute()
         {
@@ -108,6 +161,7 @@ public static class CodeModelMapper
             }
 
             var ordered = _codeTypes.Values.OrderBy(t => t.Symbol, StringComparer.Ordinal).ToList();
+            _collapsed = CollapsedNamespace();
             DetectMoves(ordered);
             foreach (var t in ordered) EnsureType(t, 0);
 
@@ -141,11 +195,137 @@ public static class CodeModelMapper
                     rels.Add(($"dep:{from}->{to}", ElementKind.Dependency, _codeTypes[from], s, tt, null));
                 }
             foreach (var r in rels) EnsureRelationship(r.Symbol, r.Kind, r.From, r.Source, r.Target, r.Multiplicity);
+            EnsurePackageDependencies(rels.Select(r => (r.Source, r.Target)));
             EnsureArtifacts();
             EnsureBehaviour();
 
             RemoveGone();
+            ReleaseCollapsedPackage();
             RemoveEmptyPackages();
+        }
+
+        /// <summary>
+        /// The namespace whose package is left out (<see cref="CodeSyncOptions.CollapseRootNamespace"/>): the first segment
+        /// every namespace starts with, when it equals the root package's name or no type is in the global namespace.
+        /// </summary>
+        private string? CollapsedNamespace()
+        {
+            if (!o.CollapseRootNamespace) return null;
+            string? first = null;
+            var global = false;
+            foreach (var t in _codeTypes.Values)
+            {
+                var dot = t.Namespace.IndexOf('.');
+                var segment = (dot < 0 ? t.Namespace : t.Namespace[..dot]).Trim();
+                if (segment.Length == 0) global = true;
+                else if (first is null) first = segment;
+                else if (first != segment) return null;
+            }
+            if (first is null) return null;
+            return !global || string.Equals(first, _root.Name, StringComparison.OrdinalIgnoreCase) ? first : null;
+        }
+
+        /// <summary>
+        /// When the root namespace is collapsed, its old package (from a sync before the option, or while it was off) is no
+        /// longer used: its sub-packages and types have already moved to the root package. What else it holds (diagrams,
+        /// hand-made elements) moves along, auto-diagram markers following the owner, so the empty package can go.
+        /// </summary>
+        private void ReleaseCollapsedPackage()
+        {
+            if (_collapsed is null || !_existing.TryGetValue(NamespacePrefix + _collapsed, out var old) || _seen.Contains(NamespacePrefix + _collapsed)
+                || !m.Contains(old) || ReferenceEquals(old, _root) || old.IsAncestorOf(_root)) return;
+            foreach (var c in old.OwnedElements.ToList())
+            {
+                if (!Metamodel.CanOwn(_root.Kind, c.Kind)) continue;
+                m.Move(c, _root);
+                if (c is Diagram d && d.Get(AutoDiagrammer.MarkerKey) is var key && key.EndsWith(":" + old.Id, StringComparison.Ordinal))
+                    m.Set(d, AutoDiagrammer.MarkerKey, key[..^old.Id.Length] + _root.Id);
+            }
+        }
+
+        /// <summary>
+        /// «use» dependencies between the packages of <see cref="OverviewPackages(Element)"/>: one per ordered pair whose
+        /// types are related in code (inheritance, parts, references, usage), lifted to the packages shown. Those in a
+        /// cycle carry <see cref="CycleKey"/> and say so in their documentation.
+        /// </summary>
+        private void EnsurePackageDependencies(IEnumerable<(Element Source, Element Target)> typeLinks)
+        {
+            if (!o.PackageDependencies) return;
+            var shown = OverviewPackages(_root, p => IsOurs(p) && IsNamespacePackage(p) && _seen.Contains(p.Get(CodeFieldKeys.Symbol)))
+                .ToHashSet(ReferenceEqualityComparer.Instance);
+            if (shown.Count < 2) return;
+            Element? Bucket(Element e) => e.AncestorsAndSelf().FirstOrDefault(shown.Contains);
+            string Ns(Element p) => p.Get(CodeFieldKeys.Symbol)[NamespacePrefix.Length..];
+
+            var pairs = new SortedDictionary<(string From, string To), (Element From, Element To)>();
+            foreach (var (s, t) in typeLinks)
+            {
+                if (Bucket(s) is not { } a || Bucket(t) is not { } b || ReferenceEquals(a, b) || a.IsAncestorOf(b) || b.IsAncestorOf(a)) continue;
+                pairs.TryAdd((Ns(a), Ns(b)), (a, b));
+            }
+            if (pairs.Count == 0) return;
+
+            var cycles = PackageCycles(pairs.Keys);
+            foreach (var ((from, to), (a, b)) in pairs)
+            {
+                var cycle = cycles.TryGetValue(from, out var c1) && cycles.TryGetValue(to, out var c2) && ReferenceEquals(c1, c2) ? c1 : null;
+                EnsureRelationship($"{PackageDependencyPrefix}{from}->{to}", ElementKind.Dependency, null, a, b, null,
+                [
+                    (FieldKeys.Stereotypes, "use"),
+                    (CycleKey, cycle is null ? null : "true"),
+                    (FieldKeys.Documentation, cycle is null ? null : $"Derived from code. Part of a dependency cycle between {string.Join(", ", cycle)}."),
+                ]);
+            }
+        }
+
+        /// <summary>Strongly connected components with more than one package (Tarjan), by member.</summary>
+        private static Dictionary<string, List<string>> PackageCycles(IEnumerable<(string From, string To)> edges)
+        {
+            var next = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var (f, t) in edges)
+            {
+                if (!next.TryGetValue(f, out var l)) next[f] = l = [];
+                l.Add(t);
+                next.TryAdd(t, []);
+            }
+            var index = new Dictionary<string, int>(StringComparer.Ordinal);
+            var low = new Dictionary<string, int>(StringComparer.Ordinal);
+            var stack = new Stack<string>();
+            var onStack = new HashSet<string>(StringComparer.Ordinal);
+            var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var counter = 0;
+
+            void Visit(string v)
+            {
+                index[v] = low[v] = counter++;
+                stack.Push(v);
+                onStack.Add(v);
+                foreach (var w in next[v])
+                {
+                    if (!index.ContainsKey(w))
+                    {
+                        Visit(w);
+                        low[v] = Math.Min(low[v], low[w]);
+                    }
+                    else if (onStack.Contains(w)) low[v] = Math.Min(low[v], index[w]);
+                }
+                if (low[v] != index[v]) return;
+                var component = new List<string>();
+                string x;
+                do
+                {
+                    x = stack.Pop();
+                    onStack.Remove(x);
+                    component.Add(x);
+                } while (x != v);
+                if (component.Count < 2) return;
+                component.Sort(StringComparer.Ordinal);
+                foreach (var member in component) result[member] = component;
+            }
+
+            foreach (var v in next.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList())
+                if (!index.ContainsKey(v)) Visit(v);
+            return result;
         }
 
         /// <summary>
@@ -162,6 +342,9 @@ public static class CodeModelMapper
                 CodeTypeKind.Enum => ElementKind.Enumeration,
                 _ => ElementKind.Block,
             };
+            // A type directly in the root package with a dotted symbol was in a collapsed root namespace ("Meridian.Foo").
+            string CollapsedNamespaceOf(string symbol, Element e) =>
+                ReferenceEquals(e.Owner, _root) && symbol.IndexOf('.') is > 0 and var dot ? symbol[..dot] : "";
             static string LocalPath(string symbol, string ns) => ns.Length > 0 && symbol.StartsWith(ns + ".", StringComparison.Ordinal) ? symbol[(ns.Length + 1)..] : symbol;
 
             var fresh = ordered.Where(t => !_existing.ContainsKey(t.Symbol))
@@ -172,7 +355,8 @@ public static class CodeModelMapper
                              && kv.Value.Kind is ElementKind.Block or ElementKind.InterfaceBlock or ElementKind.Enumeration)
                 .Select(kv => (Symbol: kv.Key, Element: kv.Value,
                                Ns: kv.Value.AncestorsAndSelf().Skip(1).Select(a => a.Get(CodeFieldKeys.Symbol))
-                                   .FirstOrDefault(x => x.StartsWith(NamespacePrefix, StringComparison.Ordinal))?[NamespacePrefix.Length..] ?? ""))
+                                   .FirstOrDefault(x => x.StartsWith(NamespacePrefix, StringComparison.Ordinal))?[NamespacePrefix.Length..]
+                                   ?? CollapsedNamespaceOf(kv.Key, kv.Value)))
                 .Where(v => !HasVanishedOuter(v.Symbol))   // outermost vanished types only
                 .GroupBy(v => (LocalPath(v.Symbol, v.Ns), v.Element.Kind)).Where(g => g.Count() == 1).Select(g => g.Single()).ToList();
             var renames = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -208,9 +392,10 @@ public static class CodeModelMapper
                 string next;
                 var arrow = symbol.IndexOf("->", StringComparison.Ordinal);
                 var colon = symbol.IndexOf(':');
-                if (e is Relationship && arrow > 0 && colon > 0 && colon < arrow)
+                // Namespace packages and the dependencies between them are keyed by namespace, which a type move does not change.
+                if (symbol.StartsWith(NamespacePrefix, StringComparison.Ordinal) || symbol.StartsWith(PackageDependencyPrefix, StringComparison.Ordinal)) next = symbol;
+                else if (e is Relationship && arrow > 0 && colon > 0 && colon < arrow)
                     next = symbol[..(colon + 1)] + Rekey(symbol[(colon + 1)..arrow]) + "->" + Rekey(symbol[(arrow + 2)..]);
-                else if (symbol.StartsWith(NamespacePrefix, StringComparison.Ordinal)) next = symbol;
                 else next = Rekey(symbol);
                 if (next == symbol || _existing.ContainsKey(next) && !ReferenceEquals(_existing[next], e)) continue;
                 _existing.Remove(symbol);
@@ -252,10 +437,7 @@ public static class CodeModelMapper
         private Element EnsureRootPackage()
         {
             var owner = m.Root;
-            var names = (string.IsNullOrWhiteSpace(o.RootPackage) ? "Code" : o.RootPackage)
-                .Split("::", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (names.Length == 0) names = ["Code"];
-            foreach (var name in names)
+            foreach (var name in RootPackageNames(o.RootPackage))
             {
                 var next = owner.OwnedElements.FirstOrDefault(c => c.Kind == ElementKind.Package && c.Name == name);
                 if (next == null)
@@ -275,7 +457,10 @@ public static class CodeModelMapper
             var owner = _root;
             if (string.IsNullOrEmpty(ns)) return owner;
             var segments = ns.Split('.', StringSplitOptions.RemoveEmptyEntries);
-            for (var i = 0; i < segments.Length; i++)
+            // A collapsed root namespace has no package: its children (and its own types) live in the root package. The
+            // symbols stay the full namespace, so collapsing or not only moves packages.
+            var first = _collapsed is not null && segments.Length > 0 && segments[0] == _collapsed ? 1 : 0;
+            for (var i = first; i < segments.Length; i++)
             {
                 var symbol = NamespacePrefix + string.Join(".", segments.Take(i + 1));
                 owner = Ensure(symbol, ElementKind.Package, owner, segments[i], [], null, null);
@@ -485,7 +670,8 @@ public static class CodeModelMapper
             _warnings.AddRange(b.Warnings);
         }
 
-        private void EnsureRelationship(string symbol, ElementKind kind, CodeType? from, Element source, Element target, string? multiplicity)
+        private void EnsureRelationship(string symbol, ElementKind kind, CodeType? from, Element source, Element target, string? multiplicity,
+                                        List<(string Key, string? Value)>? fields = null)
         {
             if (!_seen.Add(symbol)) return;
             if (Metamodel.CheckEnds(kind, source.Kind, target.Kind) is { } problem)
@@ -503,6 +689,8 @@ public static class CodeModelMapper
                     if (!ReferenceEquals(r.Owner, owner)) { m.Move(r, owner); changed = true; }
                     if (multiplicity != null && r.Get(FieldKeys.Multiplicity) != multiplicity) { m.Set(r, FieldKeys.Multiplicity, multiplicity); changed = true; }
                     if (r.Get(RemovedKey).Length > 0) { m.Set(r, RemovedKey, null); changed = true; }
+                    foreach (var (k, v) in fields ?? [])
+                        if (r.Get(k) != (v ?? "")) { m.Set(r, k, v); changed = true; }
                     if (from != null)
                     {
                         m.Set(r, CodeFieldKeys.File, from.File);
@@ -516,6 +704,7 @@ public static class CodeModelMapper
             }
             var created = m.Connect(kind, source, target, owner);
             if (multiplicity != null) m.Set(created, FieldKeys.Multiplicity, multiplicity);
+            foreach (var (k, v) in fields ?? []) m.Set(created, k, v);
             Stamp(created, symbol, from?.File, from?.Line);
             _existing[symbol] = created;
             _added.Add(created.Id);
