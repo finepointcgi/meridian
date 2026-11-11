@@ -183,6 +183,7 @@ public sealed class CodeSyncTests(ServerFixture f) : E2ETest(f)
             [new CodeFile("src/Sat.cs", "class Sat {}"), new CodeFile("libs/core/Battery.cs", "class Battery {}")], IsFullSnapshot: true)
         {
             Submodules = [new CodeSubmodulePin("libs/core", sha, compare)],
+            TriggeredBy = alice.Id,   // the host runs a sync as whoever pressed "Sync now" or connected the repository
         };
 
         // The first sync pins libs/core: the repository's first import, it goes straight into main.

@@ -372,6 +372,10 @@ public sealed partial class CodeSyncRunner(
     {
         var user = request.TriggeredBy;
         string? who = null;
+        // No one to check permissions for (a connection made before connectors were recorded, synced by a webhook):
+        // never write main unchecked; review it instead. "Sync now" always runs as whoever pressed it.
+        if (user is null)
+            return (null, "waiting for review because no one is recorded as having connected this repository");
         if (user is { } u)
         {
             who = (await db.GetUserAsync(u))?.User.DisplayName ?? "the user who started the sync";

@@ -112,10 +112,21 @@ public sealed class CodeSyncFirstImportTests : TestContext, IAsyncLifetime
         await _db.SaveIntegrationAsync(row with { ConfigJson = config.ToJson() });
     }
 
-    private Task<CodeSyncOutcome> SyncAsync(string block, Guid? connection = null, string repo = "acme/sat", Guid? triggeredBy = null)
+    /// <summary>Runs a sync as <paramref name="triggeredBy"/> (default: Ann, the owner who connected the repository, as the
+    /// host passes it); <paramref name="anonymous"/> runs it with no one recorded.</summary>
+    private Task<CodeSyncOutcome> SyncAsync(string block, Guid? connection = null, string repo = "acme/sat", Guid? triggeredBy = null, bool anonymous = false)
     {
         _applier.Names.Enqueue(block);
-        return Runner().RunAsync(Request(connection ?? _connection, repo, $"Add {block}") with { TriggeredBy = triggeredBy });
+        return Runner().RunAsync(Request(connection ?? _connection, repo, $"Add {block}") with { TriggeredBy = anonymous ? null : triggeredBy ?? _ann.Id });
+    }
+
+    [Fact]
+    public async Task A_First_Import_With_No_One_Recorded_Waits_For_Review()
+    {
+        // A connection made before connectors were recorded, synced by a webhook: main is never written unchecked.
+        var outcome = await SyncAsync("Antenna", anonymous: true);
+        Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
+        Assert.Contains("no one is recorded", outcome.Summary);
     }
 
     private CodeSyncRequest Request(Guid connection, string repo, string message) => new(
