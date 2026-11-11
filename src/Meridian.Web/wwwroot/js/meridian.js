@@ -9,7 +9,85 @@ window.meridian = (() => {
     if (id && e.dataTransfer) { e.dataTransfer.setData("text/plain", id); e.dataTransfer.effectAllowed = "copyMove"; }
   });
 
+  // The user guide (/guide/…, served by this app): a new browser tab, or the system browser from the desktop app.
+  const openGuide = path => {
+    const p = typeof path === "string" && path.startsWith("/guide") ? path : "/guide/";
+    const url = new URL(p, location.origin).href;
+    if (typeof window.external?.sendMessage === "function") window.external.sendMessage(JSON.stringify({ command: "open-url", url }));
+    else window.open(url, "_blank", "noopener");
+  };
+  // "Learn more" links (<a data-guide href="/guide/…">, GuideLink.razor and tour text) go through openGuide.
+  document.addEventListener("click", e => {
+    const a = e.target?.closest?.("a[data-guide]");
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    openGuide(a.getAttribute("href"));
+  });
+
+  // Keyboard for title-bar menus whose list has the class kbd-menu (the project menu and its Export ▸ submenu, a
+  // kbd-submenu): ↑ / ↓ / Home / End move between items, → or Enter on a submenu opens it at its first item, ← goes back
+  // to the parent item, Enter / Space run the item. Escape stays MudBlazor's (submenu first, then the menu).
+  const menuItems = list => [...list.querySelectorAll(":scope > .mud-menu-item, :scope > .mud-menu > .mud-menu-item")]
+    .filter(i => !i.classList.contains("mud-disabled") && i.getAttribute("aria-disabled") !== "true");
+  const openMenuLists = () => [...document.querySelectorAll(".mud-popover-open .mud-list.kbd-menu")];
+  const enterSubmenu = item => {
+    const before = new Set(openMenuLists());
+    if (!item.closest(".mud-menu")?.querySelector(":scope > .mud-menu-item[aria-expanded=true]")) item.click();
+    let tries = 0;
+    const focusFirst = () => {
+      const sub = openMenuLists().find(l => !before.has(l) && l.classList.contains("kbd-submenu"))
+        || openMenuLists().filter(l => l.classList.contains("kbd-submenu")).pop();
+      if (sub && menuItems(sub)[0]) menuItems(sub)[0].focus();
+      else if (tries++ < 20) setTimeout(focusFirst, 25);
+    };
+    focusFirst();
+  };
+  window.addEventListener("keydown", e => {
+    if (!e.isTrusted) return;   // our own Escape below
+    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End", "Enter", " ", "Escape"].includes(e.key)) return;
+    const lists = openMenuLists();
+    if (lists.length === 0) return;
+    const active = document.activeElement;
+    if (e.key === "Escape") {
+      // Escape closes an open submenu first (wherever the focus is), then the menu (MudBlazor).
+      const sub = lists.filter(l => l.classList.contains("kbd-submenu")).pop();
+      if (!sub) return;
+      const parent = lists.find(l => l !== sub && l.querySelector(".mud-menu-sub-menu-activator"))?.querySelector(".mud-menu-sub-menu-activator");
+      (menuItems(sub)[0] || sub).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      if (parent) setTimeout(() => parent.focus(), 60);
+      e.preventDefault(); e.stopImmediatePropagation();
+      return;
+    }
+    let list = lists.find(l => l.contains(active) && active.closest(".mud-list") === l);
+    if (!list) {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      list = lists[lists.length - 1];
+      const items = menuItems(list);
+      (e.key === "ArrowUp" || e.key === "End" ? items[items.length - 1] : items[0])?.focus();
+      e.preventDefault(); e.stopImmediatePropagation();
+      return;
+    }
+    const items = menuItems(list);
+    const i = items.indexOf(active);
+    const isParent = active.classList.contains("mud-menu-sub-menu-activator");
+    if (e.key === "ArrowDown") items[(i + 1) % items.length]?.focus();
+    else if (e.key === "ArrowUp") items[(i - 1 + items.length) % items.length]?.focus();
+    else if (e.key === "Home") items[0]?.focus();
+    else if (e.key === "End") items[items.length - 1]?.focus();
+    else if (isParent && (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ")) enterSubmenu(active);
+    else if (e.key === "ArrowLeft" && list.classList.contains("kbd-submenu")) {
+      const parent = lists.find(l => l !== list && l.querySelector(".mud-menu-sub-menu-activator"))?.querySelector(".mud-menu-sub-menu-activator");
+      // MudBlazor closes the innermost open submenu on an Escape from inside it.
+      active.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      if (parent) setTimeout(() => parent.focus(), 60);
+    }
+    else if (e.key === "Enter" || e.key === " ") active.click();
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+
   return {
+    openGuide,
     setDirty: v => { dirty = v; },
     getLast: () => { try { return localStorage.getItem("meridian.lastProject"); } catch { return null; } },
     setLast: name => { try { if (name) localStorage.setItem("meridian.lastProject", name); else localStorage.removeItem("meridian.lastProject"); } catch { } },

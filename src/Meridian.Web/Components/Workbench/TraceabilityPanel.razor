@@ -35,7 +35,7 @@
             </select>
         }
         <span style="flex:1"></span>
-        <span class="tt-count">@(_mode == Mode.Table ? $"{rows.Count} of {all.Count} requirements" : "")</span>
+        <span class="tt-count">@(_mode == Mode.Table ? $"{rows.Count} of {Plural.Of(all.Count, "requirement")}" : "")</span>
         @if (suspectCount > 0 && !Ws.ReadOnly)
         {
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.DoneAll" OnClick="ClearAllSuspect">Clear @suspectCount suspect</MudButton>

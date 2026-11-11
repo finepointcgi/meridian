@@ -87,16 +87,24 @@ The first account registered on a server becomes a server administrator (so does
 
 | Area | What it does |
 | --- | --- |
-| **Title bar** | The project menu (click the project name: projects, import, commit, history, branches, baselines, used projects, sharing, integrations, exports), the branch picker, the command palette (**⌘K** / **Ctrl+K**), the **Help (?)** menu (tour, keyboard shortcuts, what's new), people editing with you, notifications, undo/redo, dark mode and **Commit**. |
-| **Ribbon** | Tabs for *Create*, *Diagram*, *Requirements*, *Traceability*, *Review*, *Model views*, *Simulate*, *Generate*, *Extend* and *AI*; *Database* appears when the project has a data model and *Code* when a code repository is connected. |
+| **Title bar** | The project menu (click the project name: projects, import, commit, history, branches, baselines, used projects, sharing, integrations, and an **Export ▸** submenu), the branch picker, the command palette (**⌘K** / **Ctrl+K**), the **Help (?)** menu (tour, keyboard shortcuts, this **User guide**, what's new), people editing with you, notifications, undo/redo, dark mode and **Commit**. |
+| **Ribbon** | Tabs for *Create*, *Diagram*, *Requirements*, *Traceability* (with *Request review* and *Reviews*), *Model views*, *Simulate*, *Generate* (with the *Script* console and *Plugins*) and *AI*; *Database* appears when the project has a data model and *Code* when a code repository is connected. |
 | **Model explorer** (left) | The containment tree. Search it, drag items onto a diagram to show them or onto another item to move them, right-click for *New element ▸*, *New diagram ▸*, *Rename*, *Delete*, *Permissions…* and more. Star items as favorites. |
 | **Diagram area** (centre) | Open diagrams as tabs, with breadcrumbs, back/forward, zoom and *Fit*. **+** on the tab strip creates a diagram, also *From template…*. |
-| **Dock** (bottom) | Validation, Requirements table, Traceability matrix, Impact analysis, Simulation, Parametrics, Traceability table, Reviews, Script, Variants & trades, Verification, SysML v2 text, the AI assistant and Output. Generic tables, queries, code changes and architecture checks open as tabs next to the diagrams. |
+| **Dock** (bottom) | Validation, Requirements table, Traceability matrix, Impact analysis, Simulation, Parametrics, Traceability table, Reviews, Script, Variants & trades, SysML v2 text, the AI assistant and Output. Generic tables, queries, code changes, architecture checks and **verification results** open as tabs next to the diagrams (the dock's *Verification* entry opens that tab). Right-click a diagram tab for *Export ▸*, *Close* and *Close others*. |
 | **Inspector** (right) | Properties, specification, stereotypes and tagged values, traceability, appearance on the current diagram, comments and linked issues for the selection. The requirements side panel sits below it. |
 | **Status bar** | Model health (errors and warnings; click to validate), status messages, element counts and save state. |
 
 The guided tour walks through these areas the first time you open Meridian. Pick any of its chapters later from the
 **Help (?)** menu in the title bar ▸ **Tour…** (or ⌘K "Tour"); see [Settings and theming](settings.md#the-guided-tour).
+
+This user guide comes with Meridian: **Help (?) ▸ User guide** (or ⌘K "User guide") opens it at `/guide` on your Meridian
+server, or from the desktop app, so it works offline. "Learn more" links in empty screens and error messages open the
+matching page. The sign-in page links to it too, so it can be read before signing in.
+
+On a phone, the account menu (your initials, top right) also has **Verification results** and **Code changes**: read-only
+lists of each requirement's last result (status, value against the bound, margin) and of the model changes pushed code
+implies. Running a verification and accepting or rejecting code changes need a larger screen.
 
 ## Your first project
 

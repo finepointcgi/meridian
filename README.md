@@ -13,7 +13,8 @@ and Linux. The desktop app works offline on your computer or connects to a team 
   <img src="docs-site/images/workbench-light.png" alt="The Meridian workbench with a block definition diagram, the model explorer and the inspector">
 </picture>
 
-The user guide is in [`docs-site/`](docs-site/) (built with DocFX).
+The user guide is in [`docs-site/`](docs-site/) (built with DocFX). Release builds and the Docker image include it and serve
+it at `/guide` (**Help (?) ▸ User guide** in the app), so it needs no public hosting and works offline.
 
 ## Download
 

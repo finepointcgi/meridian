@@ -21,18 +21,28 @@ public static class Ui
     public static ILocator Inspector(this IPage p) => p.Locator("aside.stack > section.card").First;
     public static ILocator MudDialog(this IPage p) => p.Locator(".mud-dialog").Last;
 
-    /// <summary>Counts from the status bar: "70 elements · 37 relationships · 8 diagrams".</summary>
+    /// <summary>Counts from the status bar: "70 elements · 37 relationships · 8 diagrams" ("1 diagram" for one, see Plural).</summary>
     public static async Task<(int Elements, int Relationships, int Diagrams)> CountsAsync(this IPage p)
     {
-        var m = Regex.Match(await p.StatusCounts().InnerTextAsync(), @"(\d+) elements · (\d+) relationships · (\d+) diagrams");
+        var m = Regex.Match(await p.StatusCounts().InnerTextAsync(), @"(\d+) elements? · (\d+) relationships? · (\d+) diagrams?\b");
         if (!m.Success) throw new InvalidOperationException("Unexpected status bar text");
         return (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value));
     }
 
-    /// <summary>Opens the project menu in the title bar and clicks an item.</summary>
+    /// <summary>The exports that sit in the project menu's Export ▸ submenu (since 0.7.1).</summary>
+    private static readonly string[] ExportItems =
+        ["Download .meridian file", "Export XMI", "Export SysML v2", "Export diagram as", "Copy diagram as"];
+
+    /// <summary>Opens the project menu in the title bar and clicks an item (opening Export ▸ first for the exports).</summary>
     public static async Task ProjectMenuAsync(this IPage p, string item)
     {
         await p.Locator("header.titlebar .project").ClickAsync();
+        if (ExportItems.Any(e => item.StartsWith(e, StringComparison.Ordinal)))
+        {
+            await p.Locator(".mud-popover-open .project-menu .mud-menu-sub-menu-activator").Filter(new() { HasTextString = "Export" }).ClickAsync();
+            await p.Locator(".mud-popover-open .export-menu .mud-menu-item").Filter(new() { HasTextString = item }).First.ClickAsync();
+            return;
+        }
         await p.Locator(".mud-popover-open .mud-menu-item").Filter(new() { HasTextString = item }).First.ClickAsync();
     }
 
@@ -51,10 +61,14 @@ public static class Ui
         await button.ClickAsync();
     }
 
-    /// <summary>Shows a ribbon tab by its id (create, diagram, requirements, trace, review, views, simulate, generate, extend, ai, database, code).</summary>
+    /// <summary>
+    /// Shows a ribbon tab by its id (create, diagram, requirements, trace, views, simulate, generate, ai, database, code). The
+    /// Review and Extend tabs of 0.7.0 were merged into trace and generate; their old ids still work here.
+    /// </summary>
     public static async Task RibbonTabAsync(this IPage p, string tab)
     {
         if (tab.Length == 0) return;
+        tab = Meridian.Web.Components.Workbench.Workbench.CurrentRibbonTabId(tab);
         var t = p.Locator($"nav.ribbon .rtab[data-tab={tab}]");
         if (await t.GetAttributeAsync("aria-selected") != "true") await t.ClickAsync();
         await Expect(p.Locator($"nav.ribbon .rgroup[data-tab={tab}]")).ToBeVisibleAsync();

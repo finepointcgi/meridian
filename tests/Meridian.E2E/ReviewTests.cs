@@ -34,7 +34,7 @@ public sealed class ReviewTests(ServerFixture f) : E2ETest(f)
 
         // Alice asks Bob to review Engine.
         await a.Tree().GetByText("Engine", new() { Exact = true }).First.ClickAsync();
-        await a.RibbonAsync("Request");
+        await a.RibbonAsync("Request review");   // Traceability tab (Review before 0.7.1)
         var dlg = a.MudDialog();
         await dlg.GetByLabel("Title").FillAsync("Check the engine");
         await Expect(dlg.Locator(".mud-chip", new() { HasTextString = "Engine" })).ToBeVisibleAsync();

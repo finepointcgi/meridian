@@ -32,6 +32,13 @@
                 <MudText Typo="Typo.caption" Class="px-4 pb-2" Style="opacity:.6">@(Shell?.SavedStatus)</MudText>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Outlined.FolderOpen" OnClick="OpenProjects">Projects…</MudMenuItem>
+                @* Read-only lists that have no bottom tab (accepting and running stay on larger screens). *@
+                <MudMenuItem Icon="@Icons.Material.Outlined.Rule" OnClick="() => Ui.Show(MobileUiState.View.Verification)" data-testid="m-menu-verification">Verification results</MudMenuItem>
+                @if (Ws.Session != null)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Difference" OnClick="() => Ui.Show(MobileUiState.View.CodeChanges)" data-testid="m-menu-code-changes">Code changes</MudMenuItem>
+                }
+                <MudMenuItem Icon="@Icons.Material.Outlined.MenuBook" OnClick="OpenGuide" data-testid="m-guide">User guide</MudMenuItem>
                 <MudMenuItem Icon="@(Ws.DarkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)" OnClick="() => Shell?.ToggleDarkMode()">@(Ws.DarkMode ? "Light mode" : "Dark mode")</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Settings" OnClick="() => Shell?.OpenSettings()">Settings…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Tour" OnClick="() => Shell?.ShowTour() ?? Task.CompletedTask" data-testid="m-tour">Tour…</MudMenuItem>
@@ -48,4 +55,6 @@
     private Task OpenProjects() => Shell?.ShowProjects() ?? Task.CompletedTask;
 
     private void Search() => Shell?.ShowPalette();
+
+    private Task OpenGuide() => Shell?.OpenGuide() ?? Task.CompletedTask;
 }

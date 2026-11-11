@@ -264,7 +264,7 @@ public partial class Workbench
     {
         var m = Ws.Model;
         var els = m.AllElements.Count(e => e is not Relationship && e is not Diagram) - 1;
-        return $"{els} elements · {m.Relationships.Count()} relationships · {m.Diagrams.Count()} diagrams";
+        return $"{Plural.Of(els, "element")} · {Plural.Of(m.Relationships.Count(), "relationship")} · {Plural.Of(m.Diagrams.Count(), "diagram")}";
     }
 
     // ============================================================ navigation & shared commands (used by child panels)
@@ -543,6 +543,7 @@ public partial class Workbench
 
     private void OpenDock(int index)
     {
+        if (index == VerificationDock) { OpenVerification(); return; }   // a centre tab since 0.7.1 (Workbench.Verification.cs)
         _dock = index;
         _dockOpen = true;
     }
@@ -764,7 +765,7 @@ public partial class Workbench
                     try { dir.Delete(true); } catch (IOException) { }
                 }
                 await CreateProjectFrom(model, Path.GetFileNameWithoutExtension(file.Name));
-                Ws.Log($"Imported EA repository {file.Name}: {report.Elements} elements, {report.Relationships} relationships, {report.Warnings.Count} warnings.");
+                Ws.Log($"Imported EA repository {file.Name}: {Plural.Of(report.Elements, "element")}, {Plural.Of(report.Relationships, "relationship")}, {Plural.Of(report.Warnings.Count, "warning")}.");
                 foreach (var w in report.Warnings.Take(200)) Ws.Log("  " + w);
                 Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);
                 return;
@@ -783,7 +784,7 @@ public partial class Workbench
             await CreateProjectFrom(model, projectName);
             if (report != null)
             {
-                Ws.Log($"Imported {file.Name}: {report.Elements} elements, {report.Relationships} relationships, {report.Warnings.Count} warnings.");
+                Ws.Log($"Imported {file.Name}: {Plural.Of(report.Elements, "element")}, {Plural.Of(report.Relationships, "relationship")}, {Plural.Of(report.Warnings.Count, "warning")}.");
                 foreach (var w in report.Warnings) Ws.Log("  warning: " + w);
                 if (report.Warnings.Count > 0) OpenDock(3);
             }
@@ -791,7 +792,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            Snackbar.Add($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip and Mermaid files.", Severity.Error);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip and Mermaid files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 
@@ -868,7 +869,7 @@ public partial class Workbench
             }
             catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
             {
-                Snackbar.Add($"Could not import {file.Name}: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
+                ErrorWithGuide($"Could not import {file.Name}: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
             }
         }
         if (csharp.Count > 0)
@@ -950,7 +951,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or InvalidOperationException or InvalidDataException)
         {
-            Snackbar.Add($"Could not import the ReqIF file: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
+            ErrorWithGuide($"Could not import the ReqIF file: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
         }
     }
 
@@ -966,13 +967,13 @@ public partial class Workbench
         {
             var (created, updated) = RequirementsCsv.Import(Ws.Model, _csvTarget, await ReadText(e.File));
             Ws.Log($"Requirements import into {_csvTarget.QualifiedName}: {created} created, {updated} updated.");
-            Snackbar.Add($"{created} requirements created, {updated} updated", Severity.Success);
+            Snackbar.Add($"{Plural.Of(created, "requirement")} created, {updated} updated", Severity.Success);
             OpenDock(1);
             Ws.Bump();
         }
         catch (Exception ex) when (ex is IOException or FormatException or InvalidOperationException)
         {
-            Snackbar.Add($"Could not import the file: {FriendlyError.Describe(ex)}. Nothing was changed.", Severity.Error);
+            ErrorWithGuide($"Could not import the file: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.Requirements);
         }
     }
 

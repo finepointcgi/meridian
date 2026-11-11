@@ -5,11 +5,21 @@ using MudBlazor;
 
 namespace Meridian.Web.Components.Workbench;
 
-/// <summary>Simulation-driven verification and the variant view: dock tab, ribbon button and ⌘K commands.</summary>
+/// <summary>
+/// Simulation-driven verification and the variant view: the results tab in the centre, ribbon button and ⌘K commands.
+/// </summary>
 public partial class Workbench
 {
-    /// <summary>Bottom-dock index of the verification results.</summary>
+    /// <summary>
+    /// The bottom-dock index the verification results had before 0.7.1. They open as a centre view tab now
+    /// (<see cref="ViewTabKind.Verification"/>); the dock keeps a "Verification" shortcut, and opening this index opens the tab.
+    /// </summary>
     public const int VerificationDock = 20;
+
+    /// <summary>Opens (or brings forward) the verification results tab next to the diagrams.</summary>
+    public void OpenVerification() => Ws.OpenView(ViewTabKind.Verification);
+
+    private bool VerificationTabActive => Ws.ActiveView?.Kind == ViewTabKind.Verification;
 
     /// <summary>Bottom-dock index of variants &amp; trade studies.</summary>
     private const int VariantsDock = 11;
@@ -17,7 +27,7 @@ public partial class Workbench
     /// <summary>Opens the results tab and verifies (the selected run, or everything).</summary>
     public async Task VerifyRequirements()
     {
-        OpenDock(VerificationDock);
+        OpenVerification();
         StateHasChanged();
         var run = Ws.Selected is { } s && Verification.IsRun(s) ? s : null;
         await VerificationPanel.RunAndReport(Ws, Services, run);
@@ -30,7 +40,7 @@ public partial class Workbench
         var list = new List<CommandPalette.Command>
         {
             CA("Verify requirements (run criteria)", Icons.Material.Outlined.Rule, VerifyRequirements),
-            C("Verification results", Icons.Material.Outlined.Rule, () => OpenDock(VerificationDock)),
+            C("Verification results", Icons.Material.Outlined.Rule, OpenVerification),
             C(Ws.Verification.ShowOnDiagrams ? "Hide verification results on diagrams" : "Show verification results on diagrams",
               Icons.Material.Outlined.Palette, () => Ws.Verification.SetShowOnDiagrams(!Ws.Verification.ShowOnDiagrams)),
             C("Feature model editor", Icons.Material.Outlined.AccountTree, () => OpenDock(VariantsDock)),

@@ -38,7 +38,7 @@
         _issues = new ModelValidator().Validate(Ws.Model);
         var errors = _issues.Count(i => i.Severity == Sev.Error);
         _summary = _issues.Count == 0 ? "No issues found."
-            : $"{errors} errors · {_issues.Count(i => i.Severity == Sev.Warning)} warnings · {_issues.Count(i => i.Severity == Sev.Info)} info";
+            : $"{Plural.Of(errors, "error")} · {Plural.Of(_issues.Count(i => i.Severity == Sev.Warning), "warning")} · {_issues.Count(i => i.Severity == Sev.Info)} info";
         if (render) StateHasChanged();
         return errors;
     }
