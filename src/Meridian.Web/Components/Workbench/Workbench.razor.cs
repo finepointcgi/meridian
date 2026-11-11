@@ -1021,7 +1021,22 @@ public partial class Workbench
         if (await ModelForExport("HTML report") is not { } model) return;
         await DownloadText(BaseName + " report.html", "text/html", HtmlReport.Generate(model));
     }
-    private async Task OpenReport() => await JS.InvokeVoidAsync("meridian.openHtml", HtmlReport.Generate(Ws.Model));
+    /// <summary>The quick HTML model report, written on the server and opened from the streaming download endpoint
+    /// (a big model's report is far too large to pass through a JS interop call).</summary>
+    private async Task OpenReport()
+    {
+        var jobs = ReportJobService.From(Services);
+        var snapshot = Meridian.Serialization.Reports.ReportEngine.Snapshot(Ws.Model);
+        var job = jobs.Start(Ws.Model.Root.Name + " - Model Report", BaseName + " report.html", "text/html",
+            (stream, _, ct) => { using var w = new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024, leaveOpen: true); HtmlReport.Write(snapshot, w, ct); },
+            Ws.User?.Id, Ws.Session?.ProjectId, model: snapshot, access: Ws.Access);
+        Ws.SetStatus("Writing the HTML report…");
+        await jobs.WhenDone(job);
+        if (job.State != ReportJobState.Completed) { Snackbar.Add($"Could not write the report: {job.Error}", Severity.Error); return; }
+        job.Dismissed = true;
+        await ReportDownloads.OpenAsync(JS, jobs, job);
+        Ws.SetStatus($"Opened {job.FileName}");
+    }
 
     private Task ExportSvg()
     {

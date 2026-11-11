@@ -28,6 +28,8 @@ internal static class Program
     private static readonly object _gate = new();
     private static UpdateInfo? _update;
     private static int _updating;
+    /// <summary>A server opened with --server (not necessarily in the settings).</summary>
+    private static string? _serverArg;
 
     [STAThread]
     private static void Main(string[] args)
@@ -67,7 +69,7 @@ internal static class Program
         var serverArg = Array.IndexOf(args, "--server") is >= 0 and var si && si + 1 < args.Length ? args[si + 1] : null;
         if (files.Length > 0) _window.LoadRawString(StartPage.Html(_settings, busy: true, update: _update)).RegisterWindowCreatedHandler((_, _) => _ = OpenFilesAsync(files));
         else if (args.Contains("--local")) _window.LoadRawString(StartPage.Html(_settings, busy: true)).RegisterWindowCreatedHandler((_, _) => OpenLocal());
-        else if (serverArg != null) _window.Load(serverArg);
+        else if (serverArg != null) _window.Load(_serverArg = serverArg);
         else if (_settings.AutoOpen && _settings.LastMode == "local") _window.LoadRawString(StartPage.Html(_settings, busy: true)).RegisterWindowCreatedHandler((_, _) => OpenLocal());
         else if (_settings.AutoOpen && _settings.LastMode == "server" && _settings.Servers.FirstOrDefault() is { } last) _window.Load(last);
         else _window.LoadRawString(StartPage.Html(_settings, update: CachedUpdate()));
@@ -120,6 +122,9 @@ internal static class Program
                 break;
             case "save":
                 _ = SaveFileAsync((string?)msg!["name"] ?? "download", (string?)msg["data"] ?? "");
+                break;
+            case "save-url":
+                _ = SaveUrlAsync((string?)msg!["name"] ?? "download", (string?)msg["url"] ?? "");
                 break;
             case "openFile":
                 _ = PickAndOpenAsync();
@@ -653,6 +658,40 @@ internal static class Program
     {
         byte[] bytes;
         try { bytes = Convert.FromBase64String(base64); } catch (FormatException) { return; }
+        try
+        {
+            var target = await PickSaveTargetAsync(name);
+            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
+            if (target == null) return;
+            await File.WriteAllBytesAsync(target, bytes);
+        }
+        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
+    }
+
+    private static readonly HttpClient _downloads = new() { Timeout = Timeout.InfiniteTimeSpan };
+
+    /// <summary>A file the server streams (a generated report): pick the target, then copy the response to it in chunks.</summary>
+    private static async Task SaveUrlAsync(string name, string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || !DesktopDownloads.IsAllowed(uri, [_localUrl, _serverArg, .. _settings.Servers]))
+        {
+            Log($"Save {name}: refused a download from '{url}'.");
+            return;
+        }
+        try
+        {
+            var target = await PickSaveTargetAsync(name);
+            Log($"Save {name} (streamed): dialog returned '{target}'.");
+            if (target == null) return;
+            var bytes = await DesktopDownloads.SaveAsync(_downloads, uri, target);
+            Log($"Saved {name}: {bytes:N0} bytes.");
+        }
+        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
+    }
+
+    /// <summary>The native save dialog (null when cancelled); the file's extension is added when the user leaves it off.</summary>
+    private static async Task<string?> PickSaveTargetAsync(string name)
+    {
         var ext = Path.GetExtension(name).TrimStart('.');
         var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
         var tcs = new TaskCompletionSource<string?>();
@@ -670,14 +709,9 @@ internal static class Program
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         }));
-        try
-        {
-            var target = await tcs.Task;
-            Log($"Save {name} ({bytes.Length} bytes): dialog returned '{target}'.");
-            if (string.IsNullOrEmpty(target)) return;
-            if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
-            await File.WriteAllBytesAsync(target, bytes);
-        }
-        catch (Exception ex) { Log($"Save {name} failed: {ex}"); }
+        var target = await tcs.Task;
+        if (string.IsNullOrEmpty(target)) return null;
+        if (ext.Length > 0 && !Path.HasExtension(target)) target += "." + ext;
+        return target;
     }
 }

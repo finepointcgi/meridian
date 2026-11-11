@@ -173,6 +173,18 @@ window.meridian = (() => {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     },
+    // A file the server streams (reports: GET api/reports/{id}/file). The browser downloads it directly, chunk by chunk;
+    // the desktop host fetches it with the single-use ticket in the URL and writes it to the file the user picks.
+    downloadUrl: (name, url) => {
+      const href = new URL(url, document.baseURI).href;
+      if (typeof window.external?.sendMessage === "function") {
+        window.external.sendMessage(JSON.stringify({ command: "save-url", name, url: href }));
+        return;
+      }
+      const a = Object.assign(document.createElement("a"), { href, download: name });
+      document.body.appendChild(a); a.click(); a.remove();
+    },
+    openUrl: url => window.open(new URL(url, document.baseURI).href, "_blank", "noopener"),
     openHtml: html => {
       const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
       window.open(url, "_blank");

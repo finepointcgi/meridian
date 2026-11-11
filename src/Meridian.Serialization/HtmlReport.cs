@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using Meridian.Core.Analysis;
 using Meridian.Core.Language;
 using Meridian.Core.Model;
@@ -15,7 +14,15 @@ public static class HtmlReport
 
     public static string Generate(ModelRepository model)
     {
-        var sb = new StringBuilder();
+        var w = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        Write(model, w);
+        return w.ToString();
+    }
+
+    /// <summary>Streams the report to <paramref name="writer"/> (a whole-model report of a big model is hundreds of megabytes).</summary>
+    public static void Write(ModelRepository model, TextWriter writer, CancellationToken ct = default)
+    {
+        var sb = new Out(writer);
         var cov = Traceability.Coverage(model);
         var issues = new ModelValidator().Validate(model);
         sb.Append($$"""
@@ -49,6 +56,7 @@ public static class HtmlReport
         sb.Append("<h2>Diagrams</h2>");
         foreach (var d in model.Diagrams.OrderBy(d => d.QualifiedName))
         {
+            ct.ThrowIfCancellationRequested();
             sb.Append($"<h3 id=\"{E(d.Id)}\">{E(d.Name)} <span class=\"kw\">{E(Metamodel.DisplayName(d.DiagramType))}</span></h3>");
             if (!string.IsNullOrWhiteSpace(d.Documentation)) sb.Append($"<p>{E(d.Documentation)}</p>");
             sb.Append("<div class=\"diagram\">").Append(SvgRenderer.Render(model, d)).Append("</div>");
@@ -81,16 +89,22 @@ public static class HtmlReport
             sb.Append("</table>");
         }
         sb.Append("</main></body></html>");
-        return sb.ToString();
+        writer.Flush();
     }
 
-    private static void Stat(StringBuilder sb, string label, string value) =>
+    /// <summary>StringBuilder-style chaining over a <see cref="TextWriter"/>.</summary>
+    private readonly struct Out(TextWriter w)
+    {
+        public Out Append(string? s) { w.Write(s); return this; }
+    }
+
+    private static void Stat(Out sb, string label, string value) =>
         sb.Append($"<div class=\"stat\"><b>{E(value)}</b><span class=\"muted\">{E(label)}</span></div>");
 
     private static string Links(IEnumerable<Element> els) =>
         string.Join(", ", els.Select(e => $"<a href=\"#{E(e.Id)}\">{E(e.DisplayName)}</a>"));
 
-    private static void ElementSpec(StringBuilder sb, ModelRepository m, Element e)
+    private static void ElementSpec(Out sb, ModelRepository m, Element e)
     {
         var kw = Metamodel.Keyword(e.Kind) is { } k ? $"«{k}» " : "";
         sb.Append($"<h4 id=\"{E(e.Id)}\"><span class=\"kw\">{E(kw)}{E(Metamodel.DisplayName(e.Kind))}</span> {E(e.DisplayName)}</h4>");

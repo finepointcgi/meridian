@@ -360,7 +360,14 @@ public sealed partial class ModelRepository
         return made[root.Id];
     }
 
-    private void Raise(ChangeKind k, Element? e, string? field = null) => Changed?.Invoke(this, new ModelChange(k, e, field));
+    private void Raise(ChangeKind k, Element? e, string? field = null)
+    {
+        Revision++;
+        Changed?.Invoke(this, new ModelChange(k, e, field));
+    }
+
+    /// <summary>Increases with every change notification: a cheap version for caches of derived output (e.g. rendered diagrams in reports).</summary>
+    public long Revision { get; private set; }
 
     /// <summary>Tells listeners the whole model should be re-read (after load/import).</summary>
     public void RaiseReset() => Raise(ChangeKind.Reset, Root);
