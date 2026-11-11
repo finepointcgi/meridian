@@ -21,7 +21,7 @@ public static class TourChapters
     public const string ComingFrom = "coming-from";
 
     /// <summary>The release the "What's new" card describes; <c>UserPreferences.WhatsNewSeen</c> stores the last one shown.</summary>
-    public const string WhatsNewVersion = "0.7";
+    public const string WhatsNewVersion = "0.8";
 
     public static readonly Chapter[] All =
     [
@@ -159,6 +159,23 @@ public static class TourChapters
             new(".titlebar .project", Icons.Material.Outlined.CallSplit, "Branches, baselines and reviews",
                 "<b>Branches &amp; merge…</b> and <b>Baselines…</b> are in the project menu; <b>Traceability ▸ Request review</b> asks colleagues to approve the selection."),
         ]),
+        new("analysis", "Instances, deployment & more", Icons.Material.Outlined.Explore, "Object and deployment diagrams, relation map, find and replace, history, spreadsheets and printing.",
+        [
+            new("", Icons.Material.Outlined.DataObject, "Instances",
+                "Right-click a block ▸ <b>Create instance of…</b> builds the whole part tree. The <b>instance table</b> edits slot values with units, and an <b>object diagram</b> shows the instances and their links. Verification can run against an instance."),
+            new("", Icons.Material.Outlined.Dns, "Deployment diagrams",
+                "Nodes, devices, execution environments and artifacts. Draw a line from an artifact to a node and it becomes «deploy»; <b>Deploy to…</b> works on a selection, databases included."),
+            new("", Icons.Material.Outlined.Hub, "Relation map",
+                "<b>Traceability ▸ Relation map</b> (or right-click an element) shows everything connected to it, up to six levels. Select nodes and create a real diagram from them."),
+            new("", Icons.Material.Outlined.FindReplace, "Find and replace",
+                "<b>⇧⌘F</b> searches names, documentation, requirement text and values across the model. Replace shows a preview and is one undo step."),
+            new("", Icons.Material.Outlined.History, "Element history",
+                "<b>History</b> in the inspector, or right-click ▸ <b>History…</b>, lists who changed an element and when, with a field-by-field diff. Restore one field in a click."),
+            new("", Icons.Material.Outlined.TableView, "Spreadsheets",
+                "<b>Import ▸ Spreadsheet (Excel / CSV)…</b> maps columns to any element kind, with presets for requirements and parts lists. Re-importing shows what changed."),
+            new("", Icons.Material.Outlined.Print, "Printing",
+                "<b>⌘P</b> prints the diagram across one or many pages with headers, footers and a classification marking, as a vector PDF."),
+        ]),
         new("settings", "Settings & themes", Icons.Material.Outlined.Palette, "Light and dark, accent colour, density and more.",
         [
             new(".titlebar .tb-settings", Icons.Material.Outlined.Settings, "Settings",
@@ -172,11 +189,11 @@ public static class TourChapters
 
     public static readonly WhatsNewItem[] WhatsNew =
     [
-        new("Database modelling", "Tables, keys and subject areas on crow's-foot diagrams; import DDL, .dacpac or a live database; generate DDL and migration scripts.", "database"),
-        new("Used projects", "Reuse a package of another project, read-only and pinned to a version, with an update review.", "libraries"),
-        new("Verify requirements", "Give requirements a criterion and verify them with parametrics or simulation; see pass and fail on diagrams.", "verify"),
-        new("Permissions, DOORS & Polarion", "Make packages read-only or hidden per person, and sync requirements with DOORS Next or Polarion.", "team"),
-        new("Code: more languages", "TypeScript, Java and Python, submodules, pull request previews and architecture checks.", "code"),
+        new("Instances & object diagrams", "Create an instance of a block with its parts, edit slot values in an instance table, and verify against it.", "analysis"),
+        new("Deployment diagrams", "Nodes, devices and artifacts; drawing a line from an artifact to a node deploys it.", "analysis"),
+        new("Relation map, find & replace", "Explore everything connected to an element; search and replace across the whole model (⇧⌘F).", "analysis"),
+        new("History, spreadsheets & printing", "Per-element history with diffs, Excel/CSV import for any element, and multi-page PDF printing (⌘P).", "analysis"),
+        new("Editing together", "Several people can change the same element at once without locks; everyone ends up with the same model.", "team"),
         new("Coming from Cameo or EA?", "A short chapter on where the containment tree, specification window and menus went.", ComingFrom),
     ];
 

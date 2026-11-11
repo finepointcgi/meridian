@@ -60,7 +60,7 @@ public sealed class OnboardingTests : TestContext
         Assert.Equal(TourChapters.Basics, TourChapters.All[0].Id);
         Assert.Equal(TourChapters.All.Length, TourChapters.All.Select(c => c.Id).Distinct().Count());
         Assert.Equal(
-            ["The basics", "Coming from Cameo or EA", "Generate diagrams", "Create diagrams from diagrams", "Connect your code", "Import Mermaid", "AI assistant providers", "Select many & link", "Database modelling", "Used projects (shared libraries)", "Verify requirements", "Permissions & requirements tools", "Settings & themes"],
+            ["The basics", "Coming from Cameo or EA", "Generate diagrams", "Create diagrams from diagrams", "Connect your code", "Import Mermaid", "AI assistant providers", "Select many & link", "Database modelling", "Used projects (shared libraries)", "Verify requirements", "Permissions & requirements tools", "Instances, deployment & more", "Settings & themes"],
             TourChapters.All.Select(c => c.Title));
         Assert.All(TourChapters.All, c => Assert.True(c.Steps.Length >= 2, c.Id));
         Assert.All(TourChapters.All.SelectMany(c => c.Steps), s => Assert.False(string.IsNullOrWhiteSpace(s.Html)));
@@ -171,9 +171,9 @@ public sealed class OnboardingTests : TestContext
         Model();
         var cut = RenderComponent<OnboardingTour>();
         cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll(".tour-new")));
-        cut.Find(".tour-new[data-chapter='verify'] button").Click();
-        cut.WaitForAssertion(() => Assert.Equal("verify", cut.Instance.CurrentChapter));
-        Assert.Contains("criterion", cut.Find(".tour-card h3").TextContent);
+        cut.Find(".tour-new[data-chapter='analysis'] button").Click();
+        cut.WaitForAssertion(() => Assert.Equal("analysis", cut.Instance.CurrentChapter));
+        Assert.Contains("Instances", cut.Find(".tour-card h3").TextContent);
         Assert.Equal(TourChapters.WhatsNewVersion, theme.Prefs.WhatsNewSeen);
     }
 

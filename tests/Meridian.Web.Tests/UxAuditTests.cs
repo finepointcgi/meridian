@@ -69,14 +69,13 @@ public sealed class UxAuditTests : TestContext
     }
 
     [Fact]
-    public void Whats_New_And_The_Tour_Cover_The_06_And_07_Features()
+    public void Whats_New_And_The_Tour_Cover_The_Recent_Features()
     {
-        Assert.Equal("0.7", TourChapters.WhatsNewVersion);
-        foreach (var id in new[] { "database", "libraries", "verify", "team", TourChapters.ComingFrom })
-        {
+        Assert.Equal("0.8", TourChapters.WhatsNewVersion);
+        foreach (var id in new[] { "database", "libraries", "verify", "team", "analysis", TourChapters.ComingFrom })
             Assert.NotNull(TourChapters.Find(id));
+        foreach (var id in new[] { "analysis", "team", TourChapters.ComingFrom })
             Assert.Contains(TourChapters.WhatsNew, w => w.ChapterId == id);
-        }
         Assert.Equal(TourChapters.ComingFrom, TourChapters.All[1].Id);   // right after the basics
         // No tour text still points at the old project-menu Help section.
         Assert.DoesNotContain(TourChapters.All.SelectMany(c => c.Steps), s => s.Html.Contains("project menu: <b>Help", StringComparison.Ordinal));
