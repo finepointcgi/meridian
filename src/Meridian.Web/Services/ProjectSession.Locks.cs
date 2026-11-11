@@ -110,7 +110,7 @@ public sealed partial class ProjectSession
         if (_participants.TryGetValue(participantId, out var me))
         {
             _rejecting.Add(participantId);
-            me.Client.Replaced(SnapshotLocked(participantId), why);
+            me.Client.Replaced(ModelForLocked(participantId), why);
         }
         return false;
     }
@@ -150,7 +150,7 @@ public sealed partial class ProjectSession
     {
         lock (_gate)
         {
-            _snapshotSequence = -1;
+            InvalidateSnapshots();
             _master = Materialize(modelJson);   // used projects stay mounted (ProjectSession.Libraries.cs)
             Sequence++;
             MarkDirty();
@@ -160,7 +160,7 @@ public sealed partial class ProjectSession
             foreach (var (id, p) in _participants)
             {
                 _rejecting.Remove(id);
-                p.Client.Replaced(SnapshotLocked(id, modelJson), message);
+                p.Client.Replaced(ModelForLocked(id, modelJson), message);
             }
         }
     }

@@ -141,8 +141,8 @@ public sealed partial class ModelRepository
             e = rebuilt;
         }
         e.Owner = owner;
-        if (index < 0 || index > owner.Children.Count) owner.Children.Add(e);
-        else owner.Children.Insert(index, e);
+        if (index < 0 || index > owner.Children.Count) owner.ChildList.Add(e);
+        else owner.ChildList.Insert(index, e);
         IndexRecursive(e);
         if (Journal is { } j)
         {
@@ -170,7 +170,7 @@ public sealed partial class ModelRepository
         }
         var owner = e.Owner;
         var i = owner.Children.IndexOf(e);
-        owner.Children.RemoveAt(i);
+        owner.ChildList.RemoveAt(i);
         UnindexRecursive(e);
         e.Owner = null;
         Journal?.Inverses.Add(() => AttachRaw(owner, e, i, normalize: false));
@@ -183,7 +183,7 @@ public sealed partial class ModelRepository
     internal void DetachForRedaction(Element e)
     {
         if (e.Owner is not { } owner || !Contains(e)) return;
-        owner.Children.Remove(e);
+        owner.ChildList.Remove(e);
         UnindexRecursive(e);
         e.Owner = null;
     }
@@ -206,9 +206,9 @@ public sealed partial class ModelRepository
         if (!Contains(e) || !Contains(newOwner) || e.Owner == null || ReferenceEquals(e, newOwner) || e.IsAncestorOf(newOwner)) { SkippedLocal(); return; }
         var oldOwner = e.Owner;
         var oldIndex = oldOwner.Children.IndexOf(e);
-        oldOwner.Children.RemoveAt(oldIndex);
-        if (index < 0 || index > newOwner.Children.Count) newOwner.Children.Add(e);
-        else newOwner.Children.Insert(index, e);
+        oldOwner.ChildList.RemoveAt(oldIndex);
+        if (index < 0 || index > newOwner.Children.Count) newOwner.ChildList.Add(e);
+        else newOwner.ChildList.Insert(index, e);
         e.Owner = newOwner;
         Journal?.Inverses.Add(() => MoveRaw(e, oldOwner, oldIndex));
         Raise(ChangeKind.Moved, e);
@@ -612,7 +612,7 @@ public sealed partial class ModelRepository
                 if (byId.ContainsKey(c.Id) && Link(c) is { } ce)
                 {
                     ce.Owner = e;
-                    e.Children.Add(ce);
+                    e.ChildList.Add(ce);
                 }
             return e;
         }
@@ -844,7 +844,7 @@ public sealed partial class ModelRepository
             {
                 var cc = CloneTree(child);
                 cc.Owner = c;
-                c.Children.Add(cc);
+                c.ChildList.Add(cc);
             }
             map[src] = c;
             return c;

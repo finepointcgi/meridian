@@ -17,7 +17,7 @@ public sealed partial class Workspace
     private abstract record Inbound;
     private sealed record InOp(ModelOp Op, long Sequence) : Inbound;
     private sealed record InAck(long Sequence) : Inbound;
-    private sealed record InReplace(string Json, string? Message) : Inbound;
+    private sealed record InReplace(SessionModel Model, string? Message) : Inbound;
 
     private readonly ConcurrentQueue<Inbound> _inbox = new();
     private ReplicaSync? _sync;
@@ -45,10 +45,10 @@ public sealed partial class Workspace
         _inbox.Clear();
         var session = await hub.JoinAsync(projectId, new Presence(ParticipantId, User, null, null, CanEdit: role != ProjectRole.Viewer), this, branchId);
         if (session is null) { _joining = false; return false; }
-        var (json, sequence) = session.SnapshotWithSequence(ParticipantId);   // filtered when packages are hidden from me
+        var (replica, sequence) = session.ReplicaWithSequence(ParticipantId);   // shares the session's model; filtered when packages are hidden from me
         Session = session;
         Role = role;
-        Install(ProjectFile.Deserialize(json));
+        Install(replica);
         _joinedAt = sequence;   // operations relayed before the snapshot was taken are already in it
         _joining = false;
         DrainInbox();
@@ -156,8 +156,8 @@ public sealed partial class Workspace
     void ISessionClient.RemoteOp(ModelOp op) => Enqueue(new InOp(op, -1));
     void ISessionClient.RemoteOp(ModelOp op, long sequence) => Enqueue(new InOp(op, sequence));
     void ISessionClient.Acked(long sequence) => Enqueue(new InAck(sequence));
-    void ISessionClient.Reset(string modelJson) => Enqueue(new InReplace(modelJson, null));
-    void ISessionClient.Replaced(string modelJson, string message) => Enqueue(new InReplace(modelJson, message));
+    void ISessionClient.Reset(SessionModel model) => Enqueue(new InReplace(model, null));
+    void ISessionClient.Replaced(SessionModel model, string message) => Enqueue(new InReplace(model, message));
     void ISessionClient.PresenceChanged() => _ = Dispatch(Bump);
     void ISessionClient.CommentsChanged() => _ = Dispatch(() => { CommentsVersion++; Bump(); });
 
@@ -197,7 +197,7 @@ public sealed partial class Workspace
                         _sync?.Acknowledge(a.Sequence);
                         break;
                     case InReplace r:
-                        dropped.AddRange(ApplyReplacement(r.Json, r.Message));
+                        dropped.AddRange(ApplyReplacement(r.Model, r.Message));
                         break;
                 }
             }
@@ -222,10 +222,10 @@ public sealed partial class Workspace
     }
 
     /// <summary>The session replaced the whole model: a version restore (no message), a merge, a permission change or a resync.</summary>
-    private IReadOnlyList<DroppedEdit> ApplyReplacement(string json, string? message)
+    private IReadOnlyList<DroppedEdit> ApplyReplacement(SessionModel model, string? message)
     {
         var tabs = CaptureTabs();
-        var dropped = Install(ProjectFile.Deserialize(json), keepPending: true);
+        var dropped = Install(model.CreateReplica(), keepPending: true);
         if (message != null) Session?.Resynced(ParticipantId);
         RestoreTabs(tabs);   // the code-change review stays open across a merge (accepting code changes replaces main's model)
         message ??= "The model was restored to an earlier version";
