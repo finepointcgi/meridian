@@ -120,6 +120,7 @@ public static class EdgeRouter
         {
             var wps = waypoints?.Invoke(e);
             if (DataModeling.DbNotation.ColumnRoute(d, e, boundsOf, wps) is { } columns) { result[e] = columns; continue; }
+            if (Safety.SafetyNotation.TreeRoute(e, boundsOf, wps) is { } tree) { result[e] = tree; continue; }
             if (StyleOf(d, e) is EdgeRouting.Orthogonal or EdgeRouting.Curved && Routable(e) && (wps ?? e.Waypoints).Count == 0) auto.Add(e);
             else result[e] = Notation.RouteIn(d, e, boundsOf, wps);
         }

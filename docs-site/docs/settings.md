@@ -49,6 +49,7 @@ The theme is drawn by the server before the first paint, so a reload never flash
 | Setting | What it does |
 | --- | --- |
 | Confirm before deleting from the model | ask before **Delete** removes elements from the model (**Backspace** only removes them from the diagram) |
+| Library changed upstream | team servers: notify me when a used project's source commits a change to the package a project I edit uses (on by default); see [Used projects](libraries.md) |
 | Guided tour | **Show the tour again** restarts the first-run tour |
 | Keyboard shortcuts | the full list; see also [Keyboard shortcuts](keyboard-shortcuts.md) |
 
@@ -66,17 +67,22 @@ server (desktop app). See [AI assistant](ai-assistant.md).
 ## The guided tour
 
 The tour runs once, the first time you open Meridian on a desktop screen. It has chapters you can pick at any time from
-the project menu ▸ **Help ▸ Tour…**, from ⌘K ("Tour: …") or, on a phone, from the account menu ▸ **Tour…**:
+the **Help (?)** menu in the title bar ▸ **Tour…**, from ⌘K ("Tour: …") or, on a phone, from the account menu ▸ **Tour…**:
 
 | Chapter | Shows |
 | --- | --- |
 | The basics | shapes, connecting, the Inspector, requirements, ⌘K and commits |
+| Coming from Cameo or EA | where the containment tree, specification window, palette and menus went |
 | Generate diagrams | Auto-diagram and Diagram my model |
 | Create diagrams from diagrams | Create from…, the plan, the derivation chain |
-| Connect your code | code repositories, review branches and What changed |
+| Connect your code | code repositories, review branches, code changes and architecture checks |
 | Import Mermaid | Paste Mermaid, dropping files, export |
 | AI assistant providers | Claude, a local model and Claude Code |
 | Select many & link | multi-select, bulk edits, Link to… and automatic connector types |
+| Database modelling | importing a schema, the Database tab, subject areas |
+| Used projects (shared libraries) | using a package of another project, updates, library elements in the tree |
+| Verify requirements | criteria, Simulate ▸ Verify, variants |
+| Permissions & requirements tools | package permissions, DOORS Next and Polarion, branches and reviews |
 | Settings & themes | this page in three steps |
 
 <picture>
@@ -85,4 +91,4 @@ the project menu ▸ **Help ▸ Tour…**, from ⌘K ("Tour: …") or, on a phon
 </picture>
 
 On a phone each step is a card at the bottom of the screen. After an upgrade, a **What's new** card lists what the
-release added, once, with a **Show me** button for each item. It is also on the project menu ▸ **Help**.
+release added, once, with a **Show me** button for each item. It is also in the **Help (?)** menu.

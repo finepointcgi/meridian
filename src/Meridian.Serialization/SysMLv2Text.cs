@@ -82,6 +82,7 @@ public static class SysMLv2Text
         ElementKind.State => "state",
         ElementKind.DecisionNode => "decide",
         ElementKind.ForkNode => "fork",
+        ElementKind.InstanceSpecification => "part",
         _ => Keyword(e.Kind) ?? "",
     };
 
@@ -134,6 +135,7 @@ public static class SysMLv2Text
             if (Metamodel.IsClassifier(e.Kind) && e.Kind is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype) && e.IsAbstract) parts.Add("abstract");
             if (e.Get(PrefixField) is { Length: > 0 } prefix) parts.Add(prefix);
             if (e.Kind == ElementKind.Actor) parts.Add("#actor");
+            if (DeploymentTag(e.Kind) is { } dtag) parts.Add("#" + dtag);
             var annotated = Annotations(e).Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
             foreach (var s in e.Stereotypes.Where(s => !annotated.Contains(s))) parts.Add("#" + QName(s));
             var kw = keyword ?? KeywordOf(e);
@@ -200,6 +202,8 @@ public static class SysMLv2Text
             switch (e.Kind)
             {
                 case ElementKind.Package: WritePackage(e, d); return;
+                case ElementKind.InstanceSpecification: WriteInstance(e, d); return;
+                case ElementKind.Slot: return;   // written by its instance
                 case ElementKind.Comment: Line(d, $"comment /* {Esc(e.Get(FieldKeys.Body))} */"); return;
                 case ElementKind.Property or ElementKind.Port or ElementKind.Lifeline or ElementKind.EnumerationLiteral:
                     Leaf(d, Header(e, e.Name) + (e.Kind == ElementKind.EnumerationLiteral ? "" : TypeSuffix(e)) + Clauses(e), e);
@@ -297,6 +301,47 @@ public static class SysMLv2Text
 
         private string TypeText(Element e) => e.Get(TypeField) is { Length: > 0 } tt ? " : " + tt : "";
 
+        /// <summary>
+        /// An instance specification as an individual usage: <c>individual part vehicle1 : Vehicle { :>> mass = 1500 [kg]; :>> engine = engine;
+        /// individual part engine : Engine { … } }</c>. Slots are redefinitions of the classifier's features bound to their values.
+        /// </summary>
+        private void WriteInstance(Element e, int d)
+        {
+            var types = Core.Instances.InstanceModel.Classifiers(m, e).Select(c => Ref(c, e.Owner ?? m.Root, x => Metamodel.IsClassifier(x.Kind))).ToList();
+            var header = "individual " + Header(e, e.Name) + (types.Count > 0 ? " : " + string.Join(", ", types) : "") + Id(e);
+            var slots = Core.Instances.InstanceModel.Slots(e).Where(s => Core.Instances.InstanceModel.FeatureOf(m, s) != null).ToList();
+            var nested = Core.Instances.InstanceModel.NestedInstances(e).ToList();
+            if (slots.Count == 0 && nested.Count == 0 && !HasExtras(e)) { Line(d, header + ";"); return; }
+            Line(d, header + " {");
+            Head(e, d + 1, e.Documentation);
+            foreach (var s in slots) Line(d + 1, $":>> {N(Core.Instances.InstanceModel.FeatureName(m, s))} = {SlotValue(s, e)}{Id(s)};");
+            foreach (var c in e.OwnedElements.Where(c => c.Kind is not ElementKind.Slot)) WriteMember(c, d + 1);
+            Tail(e, d + 1);
+            Line(d, "}");
+        }
+
+        /// <summary>A slot value in SysML v2: <c>1500 [kg]</c>, <c>"text"</c>, <c>true</c>, <c>Colour::Red</c>, <c>engine</c>, <c>(wheel1, wheel2)</c>, or the expression.</summary>
+        private string SlotValue(Element slot, Element instance)
+        {
+            var raw = slot.Get(Core.Instances.InstanceFields.Value);
+            switch (Core.Instances.InstanceModel.KindOf(slot))
+            {
+                case Core.Instances.SlotValueKind.Expression: return raw;
+                case Core.Instances.SlotValueKind.Enum:
+                    return string.Join(", ", Core.Instances.InstanceModel.ValueIds(slot).Select(m.Find).OfType<Element>().Select(l => l.Owner is { } en ? N(en.Name) + "::" + N(l.Name) : N(l.Name)));
+                case Core.Instances.SlotValueKind.Instance:
+                {
+                    var refs = Core.Instances.InstanceModel.ReferencedInstances(m, slot).Select(i => Ref(i, instance, x => x.Kind == ElementKind.InstanceSpecification)).ToList();
+                    return refs.Count == 1 ? refs[0] : "(" + string.Join(", ", refs) + ")";
+                }
+            }
+            if (raw is "true" or "false") return raw;
+            var match = System.Text.RegularExpressions.Regex.Match(raw, @"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(.*?)\s*$");
+            if (match.Success && (match.Groups[2].Value.Length == 0 || Core.Analysis.Units.Parse(match.Groups[2].Value) != null))
+                return match.Groups[2].Value.Length == 0 ? match.Groups[1].Value : $"{match.Groups[1].Value} [{match.Groups[2].Value.Trim('[', ']')}]";
+            return "\"" + raw.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
         private static bool HasStateActions(Element e) =>
             e.Get(FieldKeys.Entry).Length > 0 || e.Get(FieldKeys.DoActivity).Length > 0 || e.Get(FieldKeys.Exit).Length > 0;
 
@@ -364,9 +409,13 @@ public static class SysMLv2Text
                     Line(d, $"allocate {S()} to {T()};");
                     break;
                 case ElementKind.Dependency: Line(d, $"dependency from {S()} to {T()};"); break;
+                case ElementKind.Link: Line(d, $"#link dependency from {S()} to {T()};"); break;   // typed by the one matching association on import
                 case ElementKind.DeriveReqt: Line(d, $"#derivation dependency from {S()} to {T()};"); break;
                 case ElementKind.Refine: Line(d, $"#refinement dependency from {S()} to {T()};"); break;
                 case ElementKind.Trace: Line(d, $"#trace dependency from {S()} to {T()};"); break;
+                case ElementKind.Deployment: Line(d, $"#deploy dependency from {S()} to {T()};"); break;
+                case ElementKind.Manifestation: Line(d, $"#manifest dependency from {S()} to {T()};"); break;
+                case ElementKind.CommunicationPath: Line(d, $"#communicationPath dependency from {S()} to {T()};"); break;
                 case ElementKind.Verify when r.Source.Kind != ElementKind.TestCase: Line(d, $"// {S()} verifies {T()}"); break;
                 case ElementKind.Message:
                 {
@@ -421,9 +470,22 @@ public static class SysMLv2Text
         }
     }
 
+    /// <summary>The #tag that marks a deployment element's part definition (and maps it back on import).</summary>
+    internal static string? DeploymentTag(ElementKind k) => k switch
+    {
+        ElementKind.Node => "node",
+        ElementKind.Device => "device",
+        ElementKind.ExecutionEnvironment => "executionEnvironment",
+        ElementKind.Artifact => "artifact",
+        ElementKind.DeploymentSpecification => "deploymentSpec",
+        _ => null,
+    };
+
     internal static string? Keyword(ElementKind k) => k switch
     {
         ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Actor => "part def",
+        // Deployment elements: part definitions tagged #node, #device, #executionEnvironment, #artifact, #deploymentSpec.
+        ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment or ElementKind.Artifact or ElementKind.DeploymentSpecification => "part def",
         ElementKind.InterfaceBlock or ElementKind.Interface => "port def",
         ElementKind.ValueType or ElementKind.DataType => "attribute def",
         ElementKind.Enumeration => "enum def",

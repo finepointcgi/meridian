@@ -89,7 +89,16 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
 
     private static readonly CodeModel DirectCall = new("csharp",
     [
-        new CodeType("Sat.Thermal.ThermalControl", "ThermalControl", "Sat.Thermal", CodeTypeKind.Class, "src/Thermal/ThermalControl.cs", 12, null, [], [], [], ["Sat.Power.PowerBus"]),
+        new CodeType("Sat.Thermal.ThermalControl", "ThermalControl", "Sat.Thermal", CodeTypeKind.Class, "src/Thermal/ThermalControl.cs", 12, null, [], [], [], ["Sat.Power.PowerBus"])
+        {
+            // Where ThermalControl uses PowerBus (the reader kept two lines and counted four more).
+            DependencyLocations =
+            [
+                new CodeDependencyUse("Sat.Power.PowerBus", "src/Thermal/ThermalControl.cs", 17, CodeDependencyKind.New),
+                new CodeDependencyUse("Sat.Power.PowerBus", "src/Thermal/Heating.cs", 23, CodeDependencyKind.Call),
+            ],
+            OmittedDependencyLocations = new Dictionary<string, int> { ["Sat.Power.PowerBus"] = 4 },
+        },
         new CodeType("Sat.Power.PowerBus", "PowerBus", "Sat.Power", CodeTypeKind.Class, "src/Power/PowerBus.cs", 5, null, [], ["Sat.Power.IPowerBus"],
             [new CodeMember("Draw", CodeMemberKind.Method, "void", null, false, "public")], []),
         new CodeType("Sat.Power.IPowerBus", "IPowerBus", "Sat.Power", CodeTypeKind.Interface, "src/Power/IPowerBus.cs", 3, null, [], [],
@@ -151,7 +160,7 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
 
         Assert.Equal(1, report!.Result.Errors);
         var status = Assert.Single(_host.Statuses);
-        Assert.Equal((Sha, CommitState.Success, "1 violation (not enforced)", "meridian/architecture"), (status.Commit, status.State, status.Description, status.Context));
+        Assert.Equal((Sha, CommitState.Success, "1 violation (not enforced), first at src/Thermal/ThermalControl.cs:17", "meridian/architecture"), (status.Commit, status.State, status.Description, status.Context));
         Assert.Equal($"https://meridian.test/?project={_project}&panel=architecture", status.Url);
         Assert.Equal("meridian/model", GitHostFactory.StatusContext);   // only inside the architecture post
 
@@ -169,7 +178,7 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
         await _checks.SetFailPullRequestsAsync(_project, _connection, true);
         await _checks.CheckRunAsync(Request(), NoChanges);
         var status = Assert.Single(_host.Statuses);
-        Assert.Equal((CommitState.Failure, "1 violation"), (status.State, status.Description));
+        Assert.Equal((CommitState.Failure, "1 violation, first at src/Thermal/ThermalControl.cs:17"), (status.State, status.Description));
 
         // An «allow» in main's model, then the on-demand re-check: green again.
         var main = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(_db, _hub, _project, null));
@@ -252,12 +261,30 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
         var warn = one with { Rule = ConformanceRule.MissingInModel, Severity = ViolationSeverity.Warning };
         Assert.Equal((CommitState.Success, "No architecture violations"), ArchitectureCheckService.StatusFor(ConformanceResult.Empty, true));
         Assert.Equal((CommitState.Success, "No architecture violations (1 warning)"), ArchitectureCheckService.StatusFor(new([warn], [], 1, 1), true));
-        Assert.Equal((CommitState.Failure, "2 violations (1 warning)"), ArchitectureCheckService.StatusFor(new([one, one, warn], [], 1, 1), true));
-        Assert.Equal((CommitState.Success, "2 violations, 1 warning (not enforced)"), ArchitectureCheckService.StatusFor(new([one, one, warn], [], 1, 1), false));
+        Assert.Equal((CommitState.Failure, "2 violations (1 warning), first at a.cs:1"), ArchitectureCheckService.StatusFor(new([one, one, warn], [], 1, 1), true));
+        Assert.Equal((CommitState.Success, "2 violations, 1 warning (not enforced), first at a.cs:1"), ArchitectureCheckService.StatusFor(new([one, one, warn], [], 1, 1), false));
+
+        // The first line that breaks the rule is cited; a long path keeps its last folders to fit the hosts' 140 characters.
+        var located = one with { Locations = [new("B", "src/very/deep/folder/structure/of/the/flight/software/thermal/control/loops/ThermalControlLoop.cs", 42, CodeDependencyKind.Call)] };
+        var (_, text) = ArchitectureCheckService.StatusFor(new([located], [], 1, 1), true);
+        Assert.Equal("1 violation, first at src/very/deep/folder/structure/of/the/flight/software/thermal/control/loops/ThermalControlLoop.cs:42", text);
+        var longer = located with { Locations = [located.Locations[0] with { File = string.Concat(Enumerable.Repeat("deeper/", 20)) + "ThermalControlLoop.cs" }] };
+        (_, text) = ArchitectureCheckService.StatusFor(new([longer], [], 1, 1), false);
+        Assert.True(text.Length <= ArchitectureCheckService.MaxDescription, text);
+        Assert.StartsWith("1 violation (not enforced), first at …/deeper/", text);
+        Assert.EndsWith("/ThermalControlLoop.cs:42", text);
+        // Warnings alone cite nothing.
+        Assert.Equal((CommitState.Success, "No architecture violations (1 warning)"), ArchitectureCheckService.StatusFor(new([warn with { Locations = located.Locations }], [], 1, 1), true));
 
         Assert.Equal($"https://github.com/acme/sat/blob/{Sha}/src/My%20Dir/A.cs#L12", ArchitectureCheckService.FileUrl($"https://github.com/acme/sat/commit/{Sha}", Sha, "src/My Dir/A.cs", 12));
         Assert.Equal($"https://gitlab.com/g/p/-/blob/{Sha}/src/A.cs#L3", ArchitectureCheckService.FileUrl($"https://gitlab.com/g/p/-/commit/{Sha}", Sha, "src/A.cs", 3));
         Assert.Equal($"https://bitbucket.org/w/r/src/{Sha}/src/A.cs#lines-3", ArchitectureCheckService.FileUrl($"https://bitbucket.org/w/r/commits/{Sha}", Sha, "src/A.cs", 3));
+        Assert.Equal($"https://git.acme.test/projects/SAT/repos/fsw/browse/src/A.cs?at={Sha}#3",
+            ArchitectureCheckService.FileUrl($"https://git.acme.test/projects/SAT/repos/fsw/commits/{Sha}", Sha, "src/A.cs", 3));
+        Assert.Equal($"https://git.acme.test/projects/SAT/repos/fsw/browse/src/A.cs?at={Sha}",
+            ArchitectureCheckService.FileUrl($"https://git.acme.test/projects/SAT/repos/fsw/commits/{Sha}", Sha, "src/A.cs", 0));
+        Assert.Equal($"https://gitlab.example.com/g/sub/p/-/blob/{Sha}/src/A.cs#L40", ArchitectureCheckService.FileUrl($"https://gitlab.example.com/g/sub/p/-/commit/{Sha}", Sha, "src/A.cs", 40));
+        Assert.Equal($"https://github.example.com/acme/sat/blob/{Sha}/src/A.cs", ArchitectureCheckService.FileUrl($"https://github.example.com/acme/sat/commit/{Sha}", Sha, "src/A.cs", 0));
         Assert.Equal("https://git.example/x", ArchitectureCheckService.FileUrl("https://git.example/x", Sha, "src/A.cs", 3));
         Assert.Null(ArchitectureCheckService.FileUrl("javascript:alert(1)", Sha, "a.cs", 1));
         Assert.Null(ArchitectureCheckService.FileUrl(null, Sha, "a.cs", 1));
@@ -298,6 +325,13 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
         Assert.Equal($"https://github.com/acme/sat/blob/{Sha}/src/Thermal/ThermalControl.cs#L12", row.QuerySelector("a.loc")!.GetAttribute("href"));
         Assert.Contains("src/Thermal/ThermalControl.cs:12", row.TextContent);
         Assert.Contains("main: 1 violation", cut.Find(".arch-status").TextContent);
+        // The lines that break the rule, each linked to its line at the synced commit, then how many more there are.
+        var uses = row.QuerySelectorAll(".arch-uses a.use");
+        Assert.Equal(
+            [($"https://github.com/acme/sat/blob/{Sha}/src/Thermal/ThermalControl.cs#L17", "line 17 (new)"), ($"https://github.com/acme/sat/blob/{Sha}/src/Thermal/Heating.cs#L23", "Heating.cs:23 (call)")],
+            uses.Select(a => (a.GetAttribute("href"), a.TextContent.Trim())));
+        Assert.Equal("src/Thermal/Heating.cs:23 (call)", uses[1].GetAttribute("title"));
+        Assert.Equal("+4 more", row.QuerySelector(".arch-uses .more")!.TextContent.Trim());
 
         // The red dashed edge between the two blocks.
         var edge = Assert.Single(ws.ArchitectureViolations!);
@@ -318,6 +352,36 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
         Assert.Empty(view.FindAll("g.arch-violation"));
     }
 
+    [Theory]
+    [InlineData("https://github.com/acme/sat/commit/" + Sha, "https://github.com/acme/sat/blob/" + Sha + "/src/Thermal/ThermalControl.cs#L17")]
+    [InlineData("https://gitlab.example.com/space/sat/-/commit/" + Sha, "https://gitlab.example.com/space/sat/-/blob/" + Sha + "/src/Thermal/ThermalControl.cs#L17")]
+    [InlineData("https://bitbucket.org/acme/sat/commits/" + Sha, "https://bitbucket.org/acme/sat/src/" + Sha + "/src/Thermal/ThermalControl.cs#lines-17")]
+    [InlineData("https://git.acme.test/projects/SAT/repos/sat/commits/" + Sha, "https://git.acme.test/projects/SAT/repos/sat/browse/src/Thermal/ThermalControl.cs?at=" + Sha + "#17")]
+    public async Task Architecture_tab_links_each_line_in_the_hosts_own_format(string commitUrl, string expected)
+    {
+        await _checks.CheckRunAsync(Request() with { CommitUrl = commitUrl }, NoChanges);
+        await UiAsync();
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<ArchitectureTab>();
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".arch-row")), TimeSpan.FromSeconds(5));
+        var first = cut.Find(".arch-row .arch-uses a.use");
+        Assert.Equal(expected, first.GetAttribute("href"));
+        Assert.Equal(("new", "17"), (first.GetAttribute("data-kind"), first.GetAttribute("data-line")));
+        Assert.Equal("_blank", first.GetAttribute("target"));
+    }
+
+    [Fact]
+    public async Task Without_a_commit_link_the_lines_are_listed_as_text()
+    {
+        await _checks.CheckRunAsync(Request() with { CommitUrl = null }, NoChanges);
+        await UiAsync();
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<ArchitectureTab>();
+        cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".arch-row")), TimeSpan.FromSeconds(5));
+        Assert.Empty(cut.FindAll(".arch-uses a"));
+        Assert.Equal(["line 17 (new)", "Heating.cs:23 (call)"], cut.FindAll(".arch-uses span.use").Select(s => s.TextContent.Trim()));
+    }
+
     [Fact]
     public async Task The_fail_pull_requests_toggle_is_saved_per_repository_and_check_reposts_on_main()
     {
@@ -334,7 +398,7 @@ public sealed class ArchitectureCheckTests : TestContext, IAsyncLifetime
         // "Check architecture" on main re-posts the status, now failing.
         cut.Find(".arch-check").Click();
         cut.WaitForAssertion(() => Assert.Equal(2, _host.Statuses.Count), TimeSpan.FromSeconds(5));
-        Assert.Equal((CommitState.Failure, "1 violation", "meridian/architecture"), (_host.Statuses[1].State, _host.Statuses[1].Description, _host.Statuses[1].Context));
+        Assert.Equal((CommitState.Failure, "1 violation, first at src/Thermal/ThermalControl.cs:17", "meridian/architecture"), (_host.Statuses[1].State, _host.Statuses[1].Description, _host.Statuses[1].Context));
 
         // Fixing the model (an «allow») and checking again clears the tab.
         var allow = ws.Model.Connect(ElementKind.Dependency, ws.Model.Find(_thermalId)!, ws.Model.Find(_busId)!);

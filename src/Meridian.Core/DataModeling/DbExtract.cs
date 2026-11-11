@@ -45,7 +45,7 @@ public sealed class DbExtract
             var schemaName = SchemaName(t);
             var schema = x.Catalog.Schema(schemaName);
             if (DbModel.SchemaOf(t) is { } sp) Register(x, schema, sp, DbPaths.Schema(schemaName));
-            var def = new DbTableDef { Name = NameOf(t), Kind = t.Get(FieldKeys.Subtype), Comment = CommentOf(t), Definition = Null(t.Get(DbFields.Definition)), PrimaryKeyName = Null(t.Get(DbFields.PkName)) };
+            var def = new DbTableDef { Id = t.Id, Name = NameOf(t), Kind = t.Get(FieldKeys.Subtype), Comment = CommentOf(t), Definition = Null(t.Get(DbFields.Definition)), PrimaryKeyName = Null(t.Get(DbFields.PkName)) };
             schema.Tables.Add(def);
             var tp = DbPaths.Table(schemaName, def.Name);
             x.Index[tp] = t;
@@ -53,7 +53,7 @@ public sealed class DbExtract
             {
                 var cd = new DbColumnDef
                 {
-                    Name = NameOf(c), Type = c.Get(FieldKeys.SqlType),
+                    Id = c.Id, Name = NameOf(c), Type = c.Get(FieldKeys.SqlType), DefaultName = Null(c.Get(DbFields.DefaultName)),
                     Nullable = DbModel.IsNullable(c), Default = Null(c.Get(FieldKeys.DefaultValue)), Identity = Null(c.Get(DbFields.Identity)),
                     Generated = Null(c.Get(DbFields.Generated)), Collation = Null(c.Get(DbFields.Collation)), Comment = CommentOf(c),
                     Unique = DbModel.IsUnique(c) && !DbModel.IsPk(c),
@@ -132,7 +132,8 @@ public sealed class DbExtract
                         }
                         case ElementKind.Routine:
                         {
-                            var rd = new DbRoutineDef { Name = NameOf(e), Kind = e.Get(FieldKeys.Subtype) == DbFields.Procedure ? DbFields.Procedure : DbFields.Function, Signature = Or(e.Get(FieldKeys.Signature), "()"), Returns = Null(e.Get(DbFields.Returns)), Language = Null(e.Get(DbFields.Language)), Comment = CommentOf(e) };
+                            var rd = new DbRoutineDef { Name = NameOf(e), Kind = e.Get(FieldKeys.Subtype) == DbFields.Procedure ? DbFields.Procedure : DbFields.Function, Signature = Or(e.Get(FieldKeys.Signature), "()"), Returns = Null(e.Get(DbFields.Returns)), Language = Null(e.Get(DbFields.Language)), Comment = CommentOf(e),
+                                Body = Null(e.Get(DbFields.Definition)), Options = Null(e.Get(DbFields.Options)) };
                             schema.Routines.Add(rd);
                             x.Index[DbPaths.Routine(schemaName, rd.Name)] = e;
                             break;

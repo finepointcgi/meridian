@@ -1,0 +1,21 @@
+/* Safety & reliability: FMEA worksheet, RPN / action priority badges, fault tree analysis summary (SafetyPanel, SafetyInspectorSection). */
+.rpn-badge, .ap-badge {
+    display: inline-block; min-width: 34px; padding: 1px 7px; border-radius: 10px; font-weight: 600; font-size: 12px; text-align: center;
+    background: var(--surface-2, rgba(127,127,127,.12)); color: var(--text-2);
+}
+.rpn-badge.low { background: rgba(63,191,127,.16); color: #2e8b57; }
+.rpn-badge.med { background: rgba(240,180,41,.2); color: #a86f00; }
+.rpn-badge.high { background: rgba(255,107,107,.2); color: #c0392b; }
+.ap-badge.ap-L { background: rgba(63,191,127,.16); color: #2e8b57; }
+.ap-badge.ap-M { background: rgba(240,180,41,.2); color: #a86f00; }
+.ap-badge.ap-H { background: rgba(255,107,107,.2); color: #c0392b; }
+.fmea-table td { vertical-align: top; }
+.fmea-table .mud-input { font-size: 12.5px; }
+.fta-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 8px; }
+.fta-stat { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; min-width: 120px; }
+.fta-stat .v { font-size: 17px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.fta-stat .l { font-size: 11px; color: var(--text-3); }
+.safety-panel .mud-tabs-tabbar { min-height: 34px; }
+.fmea-table { overflow-x: auto; }
+.fmea-table table { min-width: 1480px; table-layout: fixed; }
+.fmea-table td { overflow: hidden; }

@@ -62,7 +62,7 @@
                             @if (refs.Count > 0)
                             {
                                 <MudIconButton Size="Size.Small" Icon="@(_open.Contains(u.Id) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
-                                               OnClick="() => ToggleRefs(usage.Id)" data-testid="lib-refs-toggle" />
+                                               OnClick="() => ToggleRefs(usage.Id)" data-testid="lib-refs-toggle" aria-label="Show what uses it" title="Show what uses it" />
                                 @if (_open.Contains(u.Id))
                                 {
                                     <ul class="lib-refs" data-testid="lib-refs">
@@ -80,8 +80,8 @@
                             {
                                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" Disabled="!CanEdit" OnClick="() => Review(update)" data-testid="lib-review-update">Update…</MudButton>
                             }
-                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" title="Change pin or mount point" Disabled="!CanEdit" OnClick="() => Edit(usage)" data-testid="lib-edit" />
-                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove usage" Disabled="!CanEdit" OnClick="() => Remove(usage, refs.Count)" data-testid="lib-remove" />
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Edit" title="Change pin or mount point" Disabled="!CanEdit" OnClick="() => Edit(usage)" data-testid="lib-edit" aria-label="Change pin or mount point" />
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" title="Remove usage" Disabled="!CanEdit" OnClick="() => Remove(usage, refs.Count)" data-testid="lib-remove" aria-label="Remove usage" />
                         </td>
                     </tr>
                 }

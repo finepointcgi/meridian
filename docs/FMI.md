@@ -19,8 +19,11 @@ stereotype:
 | `parameter`, `calculatedParameter`, `local`     | value property, with the start value as its default value            |
 | `independent` (time), `der(...)`                | skipped                                                              |
 
-Each element keeps its `fmi.valueReference` and `fmi.causality`. The block records `fmi.version`, `fmi.guid`,
-`fmi.modelIdentifier` and `fmi.sha256`. Importing never runs the FMU's code.
+Each element keeps its `fmi.valueReference`, `fmi.causality` and FMI type (`fmi.type`: `Real`, `Float64`, `Int32`,
+`Binary` …). Units come from the variable or from its declared type (`declaredType="Position"` → `m`). The block
+records `fmi.version`, `fmi.guid`, `fmi.modelIdentifier` and `fmi.sha256`, and from the model description the default
+experiment (`fmi.defaultStepSize`, `fmi.defaultStopTime`), `fmi.fixedInternalStepSize` (FMI 3.0) and, when the FMU
+cannot change its communication step, `fmi.variableStepSize = false`. Importing never runs the FMU's code.
 
 When running FMUs is enabled (see below), the `.fmu` file is also saved to the FMU store. The store keeps files by their
 SHA-256, in `<DataPath>/fmus` or at `Meridian:Fmi:StorePath`. The block's `fmi.sha256` names its file. A block imported
@@ -41,9 +44,11 @@ Meridian checks that the attached file has the same GUID as the block.
 Before a run, the Co-simulation tab checks the wiring:
 
 - each connector must join an output to an input, and each input can have only one driver;
-- **units**: connected ports must have the same unit symbol. `m` and `km` count as a mismatch because no conversion is
-  done. If only one end has a unit, you get a warning;
-- string signals cannot be exchanged;
+- **units**: connected ports with different but compatible units (`km` → `m`, `ft` → `m`, `degF` → `degC`) are
+  converted on the way (scale and offset, listed as an info line); different dimensions (`m` → `s`) or unknown unit
+  symbols that differ are an error. If only one end has a unit, you get a warning;
+- string signals cannot be exchanged. FMU string inputs keep their start value, string outputs are recorded as NaN.
+  FMI 3.0 binary and clock variables are not exchanged at all (an info line lists them);
 - ordinary (algebraic) blocks must not feed each other in a loop without an FMU in between.
 
 Inputs with no connector keep a constant value: the FMU start value or the port's default value, otherwise 0. They are
@@ -52,7 +57,12 @@ listed with the parameters and can be overridden there.
 ## Running (Simulation panel › Co-simulation)
 
 - Pick the system: a block, or one of its internal block diagrams.
-- Set the start time, end time and communication step.
+- Set the start time, end time and communication step. When a system is picked, they start from the FMUs' default
+  experiment: the smallest default step size and the largest default stop time.
+- **Step size.** The master uses a fixed communication step and shortens the last step to land on the end time. An FMU
+  with `canHandleVariableCommunicationStepSize="false"` cannot take that shortened step, so the run is refused with
+  the nearest end time that works. An FMU whose fixed internal step (FMI 3.0 `fixedInternalStepSize`) is longer than
+  the communication step only changes its outputs every internal step, and the run says so.
 - Pick the master algorithm:
   - **Gauss-Seidel** (the default) steps the FMUs in data-flow order, so each FMU sees the outputs its predecessors just
     computed.
@@ -72,7 +82,8 @@ listed with the parameters and can be overridden there.
   time) or on the final value only. The threshold is drawn on the chart.
 - The **FMU log** shows the FMU's logger messages, stdout and warnings.
 
-An FMU can end the run early: FMI 3.0 `terminateSimulation`. An error status or a crash ends the run with a message. The
+An FMU can end the run early: FMI 3.0 `terminateSimulation`, or FMI 2.0 `fmi2Discard` from `fmi2DoStep` with
+`fmi2GetBooleanStatus(fmi2Terminated)` true. Any other error status or a crash ends the run with a message. The
 samples recorded up to that point are kept.
 
 ## FMI support
@@ -82,8 +93,9 @@ samples recorded up to that point are kept.
 | FMI 2.0 Co-Simulation             | Supported: Instantiate, SetupExperiment, Enter/ExitInitializationMode, Set/Get Real, Integer, Boolean, String, DoStep, Terminate, FreeInstance, logger |
 | FMI 3.0 Co-Simulation             | Supported: InstantiateCoSimulation (no event mode, early return or intermediate update), Set/Get Float32/64, (U)Int8–64, Boolean, String, DoStep, Terminate |
 | Model Exchange only FMUs          | Not supported: they need a solver                                          |
-| Variable step size, rollback, `Discard` | Not supported: a `Discard` status ends the run; try a smaller step   |
-| FMI 3.0 clocks, binaries, arrays  | Not supported                                                              |
+| Variable step size, rollback, `Discard` | Not supported: a `Discard` status ends the run (except an FMI 2.0 terminate request); try a smaller step |
+| FMI 3.0 clocks, binaries          | Not exchanged: the variables are skipped, the FMU runs                     |
+| FMI 3.0 arrays                    | Not supported                                                              |
 | Platforms                         | `binaries/` folders `darwin64` / `aarch64-darwin` / `x86_64-darwin`, `linux64` / `x86_64-linux` / `aarch64-linux`, `win64` / `x86_64-windows` |
 
 The FMI 2.0 logger is variadic: Meridian logs its message text without substituting the `%` arguments.
@@ -142,7 +154,23 @@ tests check:
 - unit mismatch and wiring errors;
 - zip-slip and missing platform binaries.
 
-Without a C compiler (and on Windows), the runtime tests are skipped.
+Without a C compiler (and on Windows), these runtime tests are skipped.
+
+`ReferenceFmuTests` runs three of the Modelica Association's
+[Reference FMUs](https://github.com/modelica/Reference-FMUs) (v0.0.42, BSD-2-Clause), each in FMI 2.0 and 3.0, through
+`Meridian.FmuHost` exactly as the app does:
+
+- **Dahlquist** (`x' = -k x`, explicit Euler at 0.1 s): `x(n · 0.1) = 0.9^n` to 12 digits and the shipped reference
+  result; a parameter override; a communication step smaller than the solver step;
+- **BouncingBall** (events inside the FMU): `h` and `v` against the shipped reference result to 1e-9, the first
+  bounce near 0.45 s, units from declared types, FMI 2.0 and 3.0 giving the same trajectory, a tunable parameter;
+- **Feedthrough**: real, integer and boolean inputs from an algebraic block passed through; string and binary
+  variables skipped without failing the FMU; an FMI 2.0 and an FMI 3.0 FMU connected to each other;
+- cancel kills the host process and removes the unpacked FMU; a finished run leaves no host process or files.
+
+The sources and prebuilt binaries (macOS arm64 and x86-64, Linux arm64 and x86-64) are in
+`tests/Meridian.Tests/Fmi/reference`; its README says how to rebuild them. On a platform without a prebuilt binary the
+tests compile the FMUs with the system C compiler, and skip without one.
 
 The FMI headers in `tests/Meridian.Tests/Fmi/native/fmi2` and `fmi3` are copies of the Modelica Association's FMI 2.0.4
 and 3.0.2 headers, released under the BSD 2-Clause license. The license text is next to each set.

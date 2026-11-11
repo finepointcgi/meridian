@@ -23,6 +23,9 @@ public sealed class CSharpCodeReader : ICodeReader
     /// <summary>Stop reading files once their total length exceeds this (characters); a warning says so.</summary>
     public long MaxTotalLength { get; init; } = 200_000_000;
 
+    /// <summary>Uses recorded per (type, target) in <see cref="CodeType.DependencyLocations"/>; the rest are only counted.</summary>
+    public int MaxDependencyUsesPerTarget { get; init; } = CodeDependencyUses.DefaultMaxPerTarget;
+
     public string Language => "csharp";
 
     public bool Handles(string path) =>
@@ -159,7 +162,7 @@ public sealed class CSharpCodeReader : ICodeReader
         foreach (var info in decls.Values.OrderBy(i => i.Key, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            types.Add(BuildType(info, decls, ct));
+            types.Add(BuildType(info, decls, MaxDependencyUsesPerTarget, ct));
         }
         return new CodeModel(Language, types, warnings);
     }
@@ -194,7 +197,7 @@ public sealed class CSharpCodeReader : ICodeReader
     private static string DisplayName(INamedTypeSymbol t) =>
         t.Arity > 0 ? $"{t.Name}<{string.Join(", ", t.TypeParameters.Select(p => p.Name))}>" : t.Name;
 
-    private static CodeType BuildType(TypeInfo info, Dictionary<string, TypeInfo> scanned, CancellationToken ct)
+    private static CodeType BuildType(TypeInfo info, Dictionary<string, TypeInfo> scanned, int maxUses, CancellationToken ct)
     {
         var sym = info.Symbol;
         var ordered = info.Declarations
@@ -289,6 +292,20 @@ public sealed class CSharpCodeReader : ICodeReader
         foreach (var b in bases) excluded.Add(b);
         foreach (var i in interfaces) excluded.Add(i);
         var deps = new SortedSet<string>(StringComparer.Ordinal);
+        // Where each scanned type is used (base lists, member types, bodies): file, line and kind of the use.
+        var uses = new List<CodeDependencyUse>();
+        void Use(string target, SyntaxNode at, CodeDependencyKind how)
+        {
+            if (target == info.Key) return;
+            var path = at.SyntaxTree.FilePath;
+            uses.Add(new CodeDependencyUse(target, path, at.SyntaxTree.GetLineSpan(at.Span, ct).StartLinePosition.Line + 1, how));
+        }
+        foreach (var (decl, model) in ordered)
+        {
+            if (decl.BaseList is not { } baseList) continue;
+            foreach (var entry in baseList.Types)
+                if (model.GetTypeInfo(entry.Type, ct).Type is { } b && Scanned(b) is { } s) Use(s, entry, CodeDependencyKind.Inherit);
+        }
         if (kind != CodeTypeKind.Enum)
             foreach (var (decl, model) in ordered)
             {
@@ -302,16 +319,51 @@ public sealed class CSharpCodeReader : ICodeReader
                         _ => null,
                     };
                     if (used == null) continue;
+                    var how = UseKind(node);
                     foreach (var t in Flatten(used))
-                        if (Scanned(t) is { } s && !excluded.Contains(s)) deps.Add(s);
+                        if (Scanned(t) is { } s)
+                        {
+                            if (!excluded.Contains(s)) deps.Add(s);
+                            Use(s, node, how);
+                        }
                 }
             }
+        var (locations, omitted) = CodeDependencyUses.Cap(uses, maxUses);
 
         return new CodeType(info.Key, DisplayName(sym), NamespaceOf(sym), kind, first.SyntaxTree.FilePath, line, doc,
             bases.Distinct().ToList(), interfaces, members, deps.ToList())
         {
             IsAbstract = sym.IsAbstract && kind is CodeTypeKind.Class or CodeTypeKind.Record && !sym.IsStatic,
             IsStatic = sym.IsStatic,
+            DependencyLocations = locations,
+            OmittedDependencyLocations = omitted,
+        };
+    }
+
+    /// <summary>How the type named at <paramref name="node"/> is used: created, called, a member / parameter / return type,
+    /// or anything else (locals, casts, typeof, generic arguments, static member reads).</summary>
+    internal static CodeDependencyKind UseKind(SyntaxNode node)
+    {
+        if (node is ImplicitObjectCreationExpressionSyntax) return CodeDependencyKind.New;
+        // Climb from the name to the whole type it is part of (Sat.Battery, Battery?, Battery[], List<Battery>).
+        var n = node;
+        while (n.Parent is QualifiedNameSyntax or AliasQualifiedNameSyntax or NullableTypeSyntax or ArrayTypeSyntax or TypeArgumentListSyntax
+               or GenericNameSyntax or TupleElementSyntax or TupleTypeSyntax or RefTypeSyntax or PointerTypeSyntax or ScopedTypeSyntax)
+            n = n.Parent;
+        return n.Parent switch
+        {
+            ObjectCreationExpressionSyntax oc when oc.Type == n => CodeDependencyKind.New,
+            ArrayCreationExpressionSyntax => CodeDependencyKind.New,
+            ParameterSyntax { Parent.Parent: RecordDeclarationSyntax } p when p.Type == n => CodeDependencyKind.Field,
+            ParameterSyntax p when p.Type == n => CodeDependencyKind.Param,
+            MethodDeclarationSyntax m when m.ReturnType == n => CodeDependencyKind.Return,
+            LocalFunctionStatementSyntax lf when lf.ReturnType == n => CodeDependencyKind.Return,
+            OperatorDeclarationSyntax op when op.ReturnType == n => CodeDependencyKind.Return,
+            DelegateDeclarationSyntax dd when dd.ReturnType == n => CodeDependencyKind.Return,
+            VariableDeclarationSyntax { Parent: BaseFieldDeclarationSyntax } => CodeDependencyKind.Field,
+            BasePropertyDeclarationSyntax bp when bp.Type == n => CodeDependencyKind.Field,
+            MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax inv } ma when ma.Expression == n && inv.Expression == ma => CodeDependencyKind.Call,
+            _ => CodeDependencyKind.Use,
         };
     }
 

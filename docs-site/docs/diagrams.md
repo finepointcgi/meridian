@@ -11,10 +11,10 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 
 | Diagram | Header | Owned by | Typical content |
 | --- | --- | --- | --- |
-| Block definition | `bdd` | package | blocks, interface blocks, value types, constraint blocks, enumerations, actors; association, composition, aggregation, generalization, realization, dependency, allocate |
+| Block definition | `bdd` | package | blocks, interface blocks, value types, constraint blocks, enumerations, actors, instances; association, composition, aggregation, generalization, realization, dependency, allocate |
 | Internal block | `ibd` | block | parts, ports, connectors, item flows, allocate |
 | Parametric | `par` | block | value properties, constraint properties and their parameters, binding connectors |
-| Requirement | `req` | package | requirements, test cases, blocks, use cases; derive, satisfy, verify, refine, trace, copy |
+| Requirement | `req` | package | requirements, test cases, blocks, use cases, failure modes; derive, satisfy, verify, refine, trace, copy, mitigate |
 | Use case | `uc` | package | actors, use cases, subject blocks; association, include, extend, generalization |
 | Activity | `act` | activity | actions, initial/final nodes, decisions/merges, forks/joins, swimlanes, object nodes, pins; control and object flows |
 | State machine | `stm` | state machine | states (also composite), initial and final states, pseudostates (choice, junction, fork, join, shallow / deep history, entry / exit point, terminate), transitions |
@@ -25,7 +25,10 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 | ArchiMate | `archi` | package | business, application and technology elements and ArchiMate relationships |
 | Entity-relationship | `erd` | package | tables, columns, foreign keys |
 | Feature model | `fm` | package | features, configurations; feature decomposition, requires, excludes |
+| Deployment | `deploy` | package | nodes, devices, execution environments (nested), artifacts, deployment specifications; deploy, manifest, communication paths ([details](deployment-diagrams.md)) |
 | Whiteboard | `board` | package | free shapes, sticky notes and lines |
+| Object | `obj` | package | instances (`name : Type`, underlined, with slots) and the blocks they instantiate; links ([details](instances.md)) |
+| Fault tree | `fta` | package | top, intermediate, basic, undeveloped and house events; AND, OR and k-of-n vote gates; fault tree links (see [Safety and reliability](safety.md)) |
 
 Every diagram can also hold comments and the general shapes from [Drawing basics](drawing.md).
 

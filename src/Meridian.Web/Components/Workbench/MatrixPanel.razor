@@ -16,6 +16,7 @@
         <MudButton OnClick="() => Preset(0, 6, ElementKind.Verify)">Verify</MudButton>
         <MudButton OnClick="() => Preset(9, 1, ElementKind.Allocate)">Allocation</MudButton>
         <MudButton OnClick="() => Preset(0, 0, ElementKind.DeriveReqt)">Derivation</MudButton>
+        <MudButton OnClick="() => Preset(10, 11, ElementKind.Deployment)" data-testid="matrix-deployment">Deployment</MudButton>
     </MudButtonGroup>
     <MudText Typo="Typo.caption" Style="color:var(--text-3)">Click an empty cell to create the relationship; a filled cell to select it.</MudText>
 </div>
@@ -69,6 +70,8 @@ else
         ("Activities / Actions", [ElementKind.Activity, ElementKind.Action]),
         ("States", [ElementKind.StateMachine, ElementKind.State]),
         ("Actions (functions)", [ElementKind.Action]),
+        ("Artifacts", [ElementKind.Artifact, ElementKind.DeploymentSpecification]),
+        ("Nodes", [ElementKind.Node, ElementKind.Device, ElementKind.ExecutionEnvironment]),
     ];
 
     private void Preset(int rows, int cols, ElementKind rel)

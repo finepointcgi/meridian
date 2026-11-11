@@ -15,7 +15,7 @@
             <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">Copy your new token now — it won't be shown again.</MudAlert>
             <div class="d-flex gap-1 align-center mb-3">
                 <MudTextField T="string" Value="_created" ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="token-value" />
-                <MudTooltip Text="Copy"><MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" OnClick="Copy" /></MudTooltip>
+                <MudTooltip Text="Copy"><MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" OnClick="Copy" aria-label="Copy" /></MudTooltip>
             </div>
             <MudText Typo="Typo.caption" Style="opacity:.7">Try it: <code>curl -H "Authorization: Bearer @(_created[..12])…" @(Nav.BaseUri)api/projects</code></MudText>
         }

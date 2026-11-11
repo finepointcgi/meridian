@@ -49,6 +49,12 @@ public partial class Workbench
     /// <summary>Follows a notification: opens its project if needed, then selects the element and/or opens the review.</summary>
     public async Task GoToNotificationAsync(NotificationInfo n)
     {
+        if (n is { Kind: NotificationKinds.LibraryUpdate, ProjectId: { } usingProject })
+        {
+            await ReviewLibraryUpdateAsync(usingProject, n.ElementId);   // "Review update" (Workbench.Libraries.cs)
+            StateHasChanged();
+            return;
+        }
         if (n.ProjectId is { } pid && Ws.Session?.ProjectId != pid) await OpenProject(pid);
         if (n.ProjectId is { } p && Ws.Session?.ProjectId != p) return;
         if (n.ElementId != null && Ws.Model.Find(n.ElementId) is { } e) Navigate(e);

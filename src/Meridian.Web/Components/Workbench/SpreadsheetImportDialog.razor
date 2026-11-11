@@ -1,0 +1,668 @@
+@using Meridian.Core.Analysis
+@using Meridian.Core.Language
+@using Meridian.Core.Model
+@using Meridian.Serialization
+@using Meridian.Serialization.Spreadsheets
+@using Microsoft.AspNetCore.Components.Forms
+@inject Workspace Ws
+
+@* Spreadsheet (Excel / CSV) import and round-trip sync for any element kind (Cameo's Excel/CSV Import, EA's CSV
+   import/export specifications): 1 source and preview, 2 column mapping (presets saved per project, exportable as JSON;
+   the same mapping exports), 3 review of adds / changes / removals with per-row checkboxes. The workbench applies the
+   accepted rows as ONE undo step. *@
+<MudDialog Class="ss-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.GridOn" />
+            <MudText Typo="Typo.h6">Spreadsheet import</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @* The steps live in the content: MudDialog does not re-render its title when this component's state changes. *@
+        <div class="ss-steps">
+            @foreach (var (label, i) in new[] { "Source", "Mapping", "Review" }.Select((l, i) => (l, i)))
+            {
+                var step = i;
+                <button class="ss-step @(_step == step ? "on" : "") @(step == 2 && _plan == null ? "dis" : "")" data-step="@step"
+                        disabled="@(step == 2 && _plan == null)" @onclick="() => _step = step">@(i + 1) @label</button>
+            }
+            @if (_fileName.Length > 0) { <span class="ss-dim ss-filename">@_fileName</span> }
+        </div>
+        @if (_error != null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2 ss-error">@_error</MudAlert>
+        }
+        @if (_step == 0)
+        {
+            <div class="ss-source">
+                <div class="ss-row">
+                    <label class="ss-file mud-button-root mud-button mud-button-outlined">
+                        <MudIcon Icon="@Icons.Material.Outlined.UploadFile" Style="font-size:16px" />
+                        <span>Choose .xlsx / .csv / .tsv…</span>
+                        <InputFile accept=".xlsx,.xlsm,.csv,.tsv,.txt" OnChange="OnFile" data-testid="ss-file" />
+                    </label>
+                    <span class="ss-dim">@(_fileName.Length > 0 ? _fileName : "or paste cells copied from Excel below")</span>
+                </div>
+                <textarea class="ss-paste" rows="3" placeholder="Paste cells here (tab separated, as Excel copies them)" @bind="_paste" @bind:event="oninput" data-testid="ss-paste"></textarea>
+                @if (_paste.Length > 0)
+                {
+                    <div><MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReadPaste" Class="ss-read-paste">Read pasted cells</MudButton></div>
+                }
+                @if (_book != null)
+                {
+                    <div class="ss-row ss-opts">
+                        @if (_book.Sheets.Count > 1)
+                        {
+                            <label>Sheet
+                                <select class="ss-sel ss-sheet" value="@_sheet" @onchange="e => { _sheet = int.Parse((string)e.Value!); SourceChanged(true); }">
+                                    @for (var i = 0; i < _book.Sheets.Count; i++) { <option value="@i">@_book.Sheets[i].Name</option> }
+                                </select>
+                            </label>
+                        }
+                        @if (_book.Delimiter != null)
+                        {
+                            <label>Delimiter
+                                <select class="ss-sel ss-delim" value="@_delimiter" @onchange="e => { _delimiter = (string)e.Value!; Reread(); }">
+                                    <option value="auto">Detect (@DelimiterName(_book.Delimiter.Value))</option>
+                                    <option value=",">Comma</option><option value=";">Semicolon</option><option value="tab">Tab</option><option value="|">Pipe</option>
+                                </select>
+                            </label>
+                            @if (_bytes != null)
+                            {
+                                <label>Encoding
+                                    <select class="ss-sel ss-enc" value="@_encoding" @onchange="e => { _encoding = (string)e.Value!; Reread(); }">
+                                        <option value="auto">Detect (@_book.EncodingName)</option>
+                                        @foreach (var n in SheetReader.EncodingNames) { <option value="@n">@n</option> }
+                                    </select>
+                                </label>
+                            }
+                        }
+                        <label>Header row
+                            <input type="number" min="1" max="@Math.Max(1, Table?.Rows.Count ?? 1)" class="ss-num ss-header" value="@(_headerRow + 1)"
+                                   @onchange="e => { if (int.TryParse((string?)e.Value, out var h) && h >= 1) { _headerRow = h - 1; RemapHeaders(); } }" />
+                        </label>
+                        <span class="ss-dim">@Plural.Of(DataRowCount, "data row")</span>
+                    </div>
+                    @foreach (var w in _book.Warnings) { <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-1 ss-warning">@w</MudAlert> }
+                    <div class="ss-preview">
+                        <table class="tt ss-table" data-testid="ss-preview">
+                            <thead><tr><th class="ss-ln">#</th>@for (var c = 0; c < Width; c++) { <th>@Xlsx.ColumnName(c)</th> }</tr></thead>
+                            <tbody>
+                                @foreach (var (row, i) in Table!.Rows.Take(_headerRow + 1 + PreviewRows).Select((r, i) => (r, i)))
+                                {
+                                    <tr class="@(i == _headerRow ? "ss-head" : i < _headerRow ? "ss-skip" : "")">
+                                        <td class="ss-ln">@(i + 1)</td>
+                                        @for (var c = 0; c < Width; c++) { <td>@Short(c < row.Count ? row[c] : "")</td> }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <div class="ss-empty">
+                        Excel workbooks (every sheet), CSV / TSV files (delimiter and encoding detected) or pasted cells. Formulas are not
+                        evaluated: the values Excel last saved are read. Up to @SheetLimits.MaxRows.ToString("N0") rows. You can also drop a
+                        file onto the model tree, or go straight to <a href="javascript:void(0)" @onclick="() => _step = 1">Mapping</a> to export.
+                    </div>
+                }
+            </div>
+        }
+        else if (_step == 1)
+        {
+            <div class="ss-mapping">
+                <div class="ss-row ss-presets">
+                    <label>Preset
+                        <select class="ss-sel ss-preset" value="@_presetName" @onchange="e => LoadPreset((string)e.Value!)">
+                            <option value="">(custom)</option>
+                            <optgroup label="Built-in">
+                                @foreach (var p in SheetPresets.BuiltIn()) { <option value="@("builtin:" + p.Name)">@p.Name</option> }
+                            </optgroup>
+                            @if (_projectPresets.Count > 0)
+                            {
+                                <optgroup label="This project">
+                                    @foreach (var p in _projectPresets) { <option value="@("project:" + p.Name)">@p.Name</option> }
+                                </optgroup>
+                            }
+                        </select>
+                    </label>
+                    <input class="ss-text ss-preset-name" placeholder="Preset name" @bind="_saveName" />
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="Ws.ReadOnly || _saveName.Trim().Length == 0" OnClick="SavePreset" Class="ss-save-preset">Save to project</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ExportPreset" Disabled="Download == null">Export JSON</MudButton>
+                    <label class="ss-file mud-button-root mud-button mud-button-text">
+                        <span>Import JSON…</span>
+                        <InputFile accept=".json" OnChange="ImportPreset" />
+                    </label>
+                    @if (_presetName.StartsWith("project:"))
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="Ws.ReadOnly" OnClick="DeletePreset">Delete preset</MudButton>
+                    }
+                </div>
+
+                <div class="ss-grid2">
+                    <label>Element kind
+                        <select class="ss-sel ss-kind" value="@_map.Kind" @onchange="e => { _map.Kind = (string)e.Value!; Invalidate(); }">
+                            <option value="">By column (a column holds the kind)</option>
+                            <optgroup label="Common">
+                                @foreach (var k in SheetKinds.Common) { <option value="@k.Id">@k.Label</option> }
+                            </optgroup>
+                            <optgroup label="All kinds">
+                                @foreach (var k in SheetKinds.All.Skip(SheetKinds.Common.Count)) { <option value="@k.Id">@k.Label</option> }
+                            </optgroup>
+                        </select>
+                    </label>
+                    <label>Stereotype (applied, and required to match)
+                        <input class="ss-text ss-stereo" value="@_map.Stereotype" placeholder="none" @onchange="e => { _map.Stereotype = NullIfEmpty((string?)e.Value); Invalidate(); }" />
+                    </label>
+                    <label>Match rows by
+                        <select class="ss-sel ss-keymatch" value="@_map.KeyMatch" @onchange="e => { _map.KeyMatch = Enum.Parse<SheetKeyMatch>((string)e.Value!); Invalidate(); }">
+                            <option value="@SheetKeyMatch.ExternalId">External id (stored in a field)</option>
+                            <option value="@SheetKeyMatch.ElementId">Meridian element id</option>
+                            <option value="@SheetKeyMatch.QualifiedName">Qualified name</option>
+                            <option value="@SheetKeyMatch.Name">Name</option>
+                        </select>
+                    </label>
+                    @if (_map.KeyMatch == SheetKeyMatch.ExternalId)
+                    {
+                        <label>Key stored in field
+                            <input class="ss-text ss-keyfield" value="@_map.KeyField" @onchange="SetKeyField" />
+                        </label>
+                    }
+                    <label>Hierarchy means
+                        <select class="ss-sel ss-hier" value="@_map.Hierarchy" @onchange="e => { _map.Hierarchy = Enum.Parse<SheetHierarchy>((string)e.Value!); Invalidate(); }">
+                            <option value="@SheetHierarchy.Containment">Containment (parent owns child)</option>
+                            <option value="@SheetHierarchy.PartOf">Part of (parent block gets a part property)</option>
+                        </select>
+                    </label>
+                    <label>New elements go into
+                        <select class="ss-sel ss-scope" value="@_scope.Id" @onchange="e => { _scope = Ws.Model.Find((string)e.Value!) ?? Ws.Model.Root; Invalidate(); }">
+                            <option value="@Ws.Model.Root.Id">@Ws.Model.Root.DisplayName (model)</option>
+                            @foreach (var p in Packages()) { <option value="@p.Id">@p.QualifiedName</option> }
+                        </select>
+                    </label>
+                    <label class="ss-check"><input type="checkbox" checked="@_map.IndentHierarchy" @onchange="e => { _map.IndentHierarchy = e.Value is true; Invalidate(); }" /> Hierarchy from the name column's indentation</label>
+                    <label class="ss-check"><input type="checkbox" class="ss-create-types" checked="@_map.CreateMissingTypes" @onchange="e => { _map.CreateMissingTypes = e.Value is true; Invalidate(); }" /> Create missing types</label>
+                </div>
+
+                <table class="tt ss-table ss-columns" data-testid="ss-columns">
+                    <thead><tr><th>Column</th><th>Sample</th><th>Maps to</th><th>Details</th></tr></thead>
+                    <tbody>
+                        @foreach (var c in _map.Columns)
+                        {
+                            var col = c;
+                            <tr class="ss-col @(col.Role == SheetRole.Ignore ? "ignored" : "")" data-column="@col.Column">
+                                <td class="ss-colname">@col.Column</td>
+                                <td class="ss-sample">@Short(Sample(col.Column))</td>
+                                <td>
+                                    <select class="ss-sel ss-role" value="@col.Role" @onchange="e => { col.Role = Enum.Parse<SheetRole>((string)e.Value!); Defaults(col); Invalidate(); }">
+                                        @foreach (var r in Enum.GetValues<SheetRole>()) { <option value="@r">@SheetMapping.RoleLabel(r)</option> }
+                                    </select>
+                                </td>
+                                <td><div class="ss-details">
+                                    @switch (col.Role)
+                                    {
+                                        case SheetRole.Tag or SheetRole.Attribute or SheetRole.Field:
+                                            <input class="ss-text ss-name" value="@col.Name" placeholder="@(col.Role == SheetRole.Field ? "field key (text, priority, direction…)" : "name")" @onchange="e => { col.Name = NullIfEmpty((string?)e.Value); Invalidate(); }" />
+                                            break;
+                                        case SheetRole.Value or SheetRole.Unit:
+                                            <input class="ss-text ss-name" value="@col.Name" placeholder="value property name (empty: the row's own value)" @onchange="e => { col.Name = NullIfEmpty((string?)e.Value); Invalidate(); }" />
+                                            break;
+                                        case SheetRole.Relationship:
+                                            <select class="ss-sel ss-relkind" value="@col.Relationship" @onchange="e => { col.Relationship = (string)e.Value!; Invalidate(); }">
+                                                @foreach (var k in RelationshipKinds) { <option value="@k.ToString()">@Metamodel.DisplayName(k)</option> }
+                                            </select>
+                                            <select class="ss-sel ss-reldir" value="@Direction(col)" @onchange="e => SetDirection(col, e)">
+                                                <option value="out">row → listed</option>
+                                                <option value="in">listed → row</option>
+                                            </select>
+                                            @MatchSelect(col)
+                                            break;
+                                        case SheetRole.Parent or SheetRole.PartOf:
+                                            @MatchSelect(col)
+                                            break;
+                                        case SheetRole.Key:
+                                            <span class="ss-dim">@KeyHelp</span>
+                                            break;
+                                    }
+                                </div></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <details class="ss-export">
+                    <summary>Export with this mapping (round trip: export, edit in Excel, import)</summary>
+                    <div class="ss-row">
+                        <label><input type="radio" name="ss-exp" checked="@(_exportFrom == "scope")" @onchange="@(() => _exportFrom = "scope")" /> Every @KindLabel in @_scope.DisplayName</label>
+                        <label><input type="radio" name="ss-exp" checked="@(_exportFrom == "selection")" disabled="@(Selection.Count == 0)" @onchange="@(() => _exportFrom = "selection")" /> Selection (@Selection.Count)</label>
+                        <label><input type="radio" name="ss-exp" checked="@(_exportFrom == "query")" @onchange="@(() => _exportFrom = "query")" /> Query</label>
+                        <input class="ss-text ss-query" placeholder="kind:Block where name contains &quot;Engine&quot;" @bind="_exportQuery" @onfocus="@(() => _exportFrom = "query")" />
+                    </div>
+                    <div class="ss-row">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Download" Disabled="Download == null" OnClick="@(() => Export(true))" Class="ss-export-xlsx">Export .xlsx</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="Download == null" OnClick="@(() => Export(false))">Export .csv</MudButton>
+                        @if (_exportNote != null) { <span class="ss-dim">@_exportNote</span> }
+                    </div>
+                </details>
+            </div>
+        }
+        else if (_plan != null)
+        {
+            var plan = _plan;
+            <div class="ss-review">
+                <div class="ss-row ss-summary" data-testid="ss-summary">
+                    <span class="diff-kind added">@plan.Count(SheetChangeKind.Added) new</span>
+                    <span class="diff-kind changed">@plan.Count(SheetChangeKind.Changed) changed</span>
+                    <span class="diff-kind removed">@plan.Count(SheetChangeKind.Removed) not in the sheet</span>
+                    <span class="ss-dim">@plan.Unchanged unchanged · @Plural.Of(plan.Errors.Count, "error")</span>
+                    <span style="flex:1"></span>
+                    <span class="chip" @onclick="() => SetAll(true)">Accept all</span>
+                    <span class="chip" @onclick="() => SetAll(false)">Accept none</span>
+                </div>
+                @foreach (var w in plan.Warnings) { <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-1 ss-warning">@w</MudAlert> }
+                @if (plan.MissingTypes.Count > 0 && !_map.CreateMissingTypes)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-1 ss-missing-types">
+                        Unknown types: @string.Join(", ", plan.MissingTypes.Take(12))@(plan.MissingTypes.Count > 12 ? "…" : "").
+                        <a href="javascript:void(0)" class="ss-create-missing" @onclick="CreateMissingTypes">Create them</a> and re-check.
+                    </MudAlert>
+                }
+                @if (plan.Errors.Count > 0)
+                {
+                    <details class="ss-errors" open="@(plan.Rows.Count == 0)">
+                        <summary>@Plural.Of(plan.Errors.Count, "row error") — those rows are skipped
+                            <a href="javascript:void(0)" class="ss-export-errors" @onclick="ExportErrors" @onclick:stopPropagation="true">Export errors (CSV)</a></summary>
+                        <table class="tt ss-table">
+                            <thead><tr><th>Row</th><th>Key</th><th>Column</th><th>Problem</th></tr></thead>
+                            <tbody>
+                                @foreach (var e in plan.Errors.Take(200))
+                                {
+                                    <tr class="ss-err"><td class="mono">@e.Row</td><td class="mono">@e.Key</td><td>@e.Column</td><td>@e.Message</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </details>
+                }
+                @if (plan.Rows.Count == 0)
+                {
+                    <div class="tt-empty ss-nothing">The sheet matches the model — nothing to import.</div>
+                }
+                else
+                {
+                    <div class="ss-preview">
+                        <table class="tt diff ss-table" data-testid="ss-review">
+                            <thead><tr><th style="width:32px"></th><th style="width:80px">Change</th><th style="width:48px">Row</th><th style="width:110px">Key</th><th style="width:180px">Name</th><th>Fields</th></tr></thead>
+                            <tbody>
+                                @foreach (var r in plan.Rows.Take(MaxReviewRows))
+                                {
+                                    var row = r;
+                                    <tr class="ss-change @row.Kind.ToString().ToLowerInvariant() @(row.Accept ? "" : "off")">
+                                        <td><input type="checkbox" checked="@row.Accept" @onchange="e => row.Accept = e.Value is true" /></td>
+                                        <td><span class="diff-kind @row.Kind.ToString().ToLowerInvariant()">@(row.Kind == SheetChangeKind.Removed ? "delete" : row.Kind == SheetChangeKind.Added ? "new" : "change")</span></td>
+                                        <td class="mono">@(row.Row > 0 ? row.Row : "")</td>
+                                        <td class="mono">@row.Key</td>
+                                        <td>@row.Name <span class="ss-dim">@row.Target.Label</span></td>
+                                        <td>
+                                            @if (row.Kind == SheetChangeKind.Removed)
+                                            {
+                                                <span class="ss-dim">Not in the sheet — tick to delete it (and its links) from the model.</span>
+                                            }
+                                            @foreach (var f in row.Fields)
+                                            {
+                                                <div class="diff-field">
+                                                    <span class="lbl">@f.Label</span>
+                                                    @if (row.Kind == SheetChangeKind.Changed) { <span class="old">@(f.Old.Length > 0 ? Short(f.Old) : "∅")</span><span class="arrow">→</span> }
+                                                    <span class="new">@(f.New.Length > 0 ? Short(f.New) : "∅")</span>
+                                                </div>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (plan.Rows.Count > MaxReviewRows)
+                        {
+                            <div class="ss-dim pa-2">… and @(plan.Rows.Count - MaxReviewRows) more rows (Accept all / none applies to every row).</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        @if (_step == 0)
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_book == null" OnClick="() => _step = 1" Class="ss-next">Next: mapping</MudButton>
+        }
+        else if (_step == 1)
+        {
+            <MudButton Variant="Variant.Text" OnClick="() => _step = 0">Back</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_book == null || Ws.ReadOnly" OnClick="Check" Class="ss-check-btn">Check changes</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Text" OnClick="() => _step = 1">Back</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_plan == null || !_plan.Rows.Any(r => r.Accept) || Ws.ReadOnly" OnClick="Apply" Class="ss-apply">
+                Apply @(_plan?.Rows.Count(r => r.Accept) ?? 0) changes
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>A file already chosen (dropped on the tree, or picked by the workbench).</summary>
+    [Parameter] public byte[]? Bytes { get; set; }
+    [Parameter] public string FileName { get; set; } = "";
+    /// <summary>A workbook already read (tests, pasted cells).</summary>
+    [Parameter] public SheetBook? Book { get; set; }
+    /// <summary>Built-in or project preset to start with, by name.</summary>
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public Element? Scope { get; set; }
+    [Parameter] public IReadOnlyList<Element> Selection { get; set; } = [];
+    /// <summary>Offers a file for download (file name, MIME type, content).</summary>
+    [Parameter] public Func<string, string, byte[], Task>? Download { get; set; }
+
+    private const int PreviewRows = 50;
+    private const int MaxReviewRows = 500;
+    private const string XlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    private int _step;
+    private byte[]? _bytes;
+    private string _fileName = "";
+    private SheetBook? _book;
+    private int _sheet;
+    private string _delimiter = "auto", _encoding = "auto";
+    private int _headerRow;
+    private string _paste = "";
+    private string? _error;
+    private SheetMapping _map = new() { Name = "Mapping", Kind = "Block", KeyMatch = SheetKeyMatch.ExternalId };
+    private string _presetName = "";
+    private string _saveName = "";
+    private List<SheetMapping> _projectPresets = [];
+    private Element _scope = default!;
+    private SheetImportPlan? _plan;
+    private string _exportFrom = "scope";
+    private string _exportQuery = "";
+    private string? _exportNote;
+
+    private static readonly ElementKind[] RelationshipKinds =
+    [
+        ElementKind.Satisfy, ElementKind.Verify, ElementKind.Trace, ElementKind.Allocate, ElementKind.Refine, ElementKind.DeriveReqt,
+        ElementKind.Copy, ElementKind.Dependency, ElementKind.Realization, ElementKind.Generalization, ElementKind.Association,
+        ElementKind.Composition, ElementKind.Aggregation, ElementKind.Include, ElementKind.Extend,
+    ];
+
+    /// <summary>The plan the user reviewed (set when the dialog closes with Apply).</summary>
+    public SheetImportPlan? Plan => _plan;
+    public SheetMapping Mapping => _map;
+
+    private SheetTable? Table => _book != null && _sheet < _book.Sheets.Count ? _book.Sheets[_sheet] : null;
+    private int Width => Table == null ? 0 : Math.Min(60, Table.Rows.Take(_headerRow + 1 + PreviewRows).Select(r => r.Count).DefaultIfEmpty(0).Max());
+    private int DataRowCount => Table == null ? 0 : Table.Rows.Skip(_headerRow + 1).Count(r => r.Any(c => !string.IsNullOrWhiteSpace(c)));
+    private string KindLabel => SheetKinds.ById(_map.Kind)?.Label ?? "element";
+    private string KeyHelp => _map.KeyMatch switch
+    {
+        SheetKeyMatch.ExternalId => $"stored in “{_map.KeyField}”: re-imports update, not duplicate",
+        SheetKeyMatch.ElementId => "Meridian ids (from an export)",
+        SheetKeyMatch.QualifiedName => "a::b::c — also gives the owner and name",
+        _ => "unique names",
+    };
+
+    protected override void OnInitialized()
+    {
+        _scope = Scope is { } s && Ws.Model.Contains(s) ? s : Ws.Model.Root;
+        _projectPresets = SheetPresets.Project(Ws.Model);
+        var start = Preset is { Length: > 0 } ? FindPreset(Preset) : null;
+        if (start != null) { _map = start.Clone(); _presetName = PresetKey(Preset!); }
+        _bytes = Bytes;
+        _fileName = FileName;
+        if (Book != null) { _book = Book; SourceChanged(true); }
+        else if (_bytes != null) Reread();
+        if (_book != null && _error == null) _step = 1;
+    }
+
+    private SheetMapping? FindPreset(string name) =>
+        _projectPresets.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+        ?? SheetPresets.BuiltIn().FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    private string PresetKey(string name) =>
+        (_projectPresets.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) ? "project:" : "builtin:") + name;
+
+    private IEnumerable<Element> Packages() =>
+        Ws.Model.OfKind(ElementKind.Package).Where(p => !Ws.Model.IsLibraryElement(p)).OrderBy(p => p.QualifiedName, StringComparer.OrdinalIgnoreCase).Take(500);
+
+    private static string DelimiterName(char d) => d switch { ',' => "comma", ';' => "semicolon", '\t' => "tab", '|' => "pipe", _ => d.ToString() };
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string Short(string s) => s.Length > 120 ? s[..117] + "…" : s;
+
+    private RenderFragment MatchSelect(SheetColumn col) => @<select class="ss-sel ss-match" value="@col.Match" title="How targets are found" @onchange="e => { col.Match = Enum.Parse<SheetTargetMatch>((string)e.Value!); Invalidate(); }">
+        <option value="@SheetTargetMatch.Auto">match: auto</option>
+        <option value="@SheetTargetMatch.RequirementId">by requirement id</option>
+        <option value="@SheetTargetMatch.Key">by key</option>
+        <option value="@SheetTargetMatch.Name">by name</option>
+        <option value="@SheetTargetMatch.QualifiedName">by qualified name</option>
+        <option value="@SheetTargetMatch.ElementId">by element id</option>
+    </select>;
+
+    // ------------------------------------------------------------------ source
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        try
+        {
+            await using var s = e.File.OpenReadStream(SheetLimits.MaxFileBytes);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            _bytes = ms.ToArray();
+            _fileName = e.File.Name;
+            _delimiter = _encoding = "auto";
+            _paste = "";
+            Reread();
+        }
+        catch (IOException ex) { _error = $"Could not read {e.File.Name}: {FriendlyError.Describe(ex)}"; }
+    }
+
+    private void Reread()
+    {
+        if (_bytes == null) { if (_paste.Length > 0) ReadPaste(); return; }
+        _error = null;
+        try
+        {
+            _book = SheetReader.Read(_fileName.Length > 0 ? _fileName : "sheet.csv", new MemoryStream(_bytes), Delim(), _encoding == "auto" ? null : _encoding);
+            _sheet = Math.Min(_sheet, _book.Sheets.Count - 1);
+            SourceChanged(true);
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or System.Xml.XmlException or IOException or ArgumentException)
+        {
+            _book = null;
+            _error = $"Could not read {_fileName}: {FriendlyError.Describe(ex)}";
+        }
+    }
+
+    private char? Delim() => _delimiter switch { "auto" => null, "tab" => '\t', var d => d[0] };
+
+    private void ReadPaste()
+    {
+        _error = null;
+        try
+        {
+            _book = SheetReader.ReadText(_paste, Delim());
+            _bytes = null;
+            _fileName = "Pasted cells";
+            SourceChanged(true);
+        }
+        catch (FormatException ex) { _error = ex.Message; }
+    }
+
+    /// <summary>A new source or sheet: detect the header row and map the headers.</summary>
+    private void SourceChanged(bool detectHeader)
+    {
+        if (Table is not { } t) return;
+        if (detectHeader) _headerRow = _map.HeaderRow is { } h && h < t.Rows.Count ? h : SheetReader.DetectHeaderRow(t.Rows);
+        RemapHeaders();
+    }
+
+    private IReadOnlyList<string> Headers => Table is { } t && _headerRow < t.Rows.Count ? t.Rows[_headerRow].Select(h => h.Trim()).ToList() : [];
+
+    private void RemapHeaders()
+    {
+        if (Table != null) _map = _map.AutoMap(Headers);
+        Invalidate();
+    }
+
+    private string Sample(string column)
+    {
+        if (Table is not { } t) return "";
+        var i = Headers.ToList().FindIndex(h => string.Equals(h, column, StringComparison.OrdinalIgnoreCase));
+        if (i < 0) return "";
+        return t.Rows.Skip(_headerRow + 1).Select(r => i < r.Count ? r[i] : "").FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "";
+    }
+
+    // ------------------------------------------------------------------ mapping
+
+    private void Invalidate() { _plan = null; _exportNote = null; }
+
+    private void SetKeyField(ChangeEventArgs e)
+    {
+        _map.KeyField = (e.Value as string ?? "").Trim();
+        Invalidate();
+    }
+
+    private static string Direction(SheetColumn c) => c.Incoming ? "in" : "out";
+
+    private void SetDirection(SheetColumn c, ChangeEventArgs e)
+    {
+        c.Incoming = e.Value as string == "in";
+        Invalidate();
+    }
+
+    private static void Defaults(SheetColumn col)
+    {
+        if (col.Role == SheetRole.Relationship && col.RelationshipKind == null) col.Relationship = nameof(ElementKind.Trace);
+        if (col.Role is SheetRole.Tag or SheetRole.Attribute && string.IsNullOrEmpty(col.Name)) col.Name = col.Column;
+    }
+
+    private void LoadPreset(string key)
+    {
+        _presetName = key;
+        if (key.Length == 0) return;
+        var name = key[(key.IndexOf(':') + 1)..];
+        var preset = key.StartsWith("project:") ? _projectPresets.FirstOrDefault(p => p.Name == name) : SheetPresets.BuiltIn().FirstOrDefault(p => p.Name == name);
+        if (preset == null) return;
+        _map = preset.Clone();
+        _saveName = key.StartsWith("project:") ? name : "";
+        if (Table != null) SourceChanged(true);
+        Invalidate();
+    }
+
+    private void SavePreset()
+    {
+        var preset = _map.Clone();
+        preset.Name = _saveName.Trim();
+        preset.HeaderRow = null;
+        SheetPresets.Save(Ws.Model, preset);
+        _projectPresets = SheetPresets.Project(Ws.Model);
+        _presetName = "project:" + preset.Name;
+        _exportNote = null;
+        Ws.SetStatus($"Saved the mapping preset “{preset.Name}” in this project");
+    }
+
+    private void DeletePreset()
+    {
+        var name = _presetName["project:".Length..];
+        SheetPresets.Delete(Ws.Model, name);
+        _projectPresets = SheetPresets.Project(Ws.Model);
+        _presetName = "";
+    }
+
+    private async Task ExportPreset()
+    {
+        if (Download == null) return;
+        var preset = _map.Clone();
+        preset.Name = _saveName.Trim().Length > 0 ? _saveName.Trim() : _presetName.Length > 0 ? _presetName[(_presetName.IndexOf(':') + 1)..] : "Mapping";
+        await Download(preset.Name + ".mapping.json", "application/json", System.Text.Encoding.UTF8.GetBytes(preset.ToJson()));
+    }
+
+    private async Task ImportPreset(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        try
+        {
+            await using var s = e.File.OpenReadStream(1024 * 1024);
+            using var reader = new StreamReader(s);
+            var preset = SheetMapping.FromJson(await reader.ReadToEndAsync());
+            _map = preset;
+            _saveName = preset.Name;
+            _presetName = "";
+            if (Table != null) SourceChanged(true);
+        }
+        catch (Exception ex) when (ex is FormatException or IOException) { _error = $"Could not read the preset: {FriendlyError.Describe(ex)}"; }
+    }
+
+    private async Task Export(bool xlsx)
+    {
+        if (Download == null) return;
+        _error = null;
+        IEnumerable<Element>? elements = null;
+        if (_exportFrom == "selection") elements = Selection;
+        else if (_exportFrom == "query")
+        {
+            if (!ModelQuery.TryParse(_exportQuery, out var q, out var problem)) { _error = $"Query: {problem}"; return; }
+            elements = q.Run(Ws.Model);
+        }
+        var map = _map.Clone();
+        if (map.Columns.All(c => c.Role == SheetRole.Ignore))
+            map.Columns = [new("Name", SheetRole.Name), new("Kind", SheetRole.Kind), new("Owner", SheetRole.Owner), new("Documentation", SheetRole.Documentation)];
+        var sheet = SheetExport.ToSheet(Ws.Model, map, elements, _scope);
+        var name = (_saveName.Trim().Length > 0 ? _saveName.Trim() : KindLabel) + (xlsx ? ".xlsx" : ".csv");
+        if (xlsx) await Download(name, XlsxMime, Xlsx.Write(sheet));
+        else await Download(name, "text/csv", System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(SheetExport.ToCsv(sheet))).ToArray());
+        _exportNote = $"Exported {Plural.Of(sheet.Rows.Count, "row")} to {name}";
+    }
+
+    // ------------------------------------------------------------------ review
+
+    private void Check()
+    {
+        if (Table is not { } t) return;
+        _error = null;
+        try
+        {
+            var map = _map.Clone();
+            map.HeaderRow = _headerRow;
+            _plan = SheetImport.Plan(Ws.Model, t, map, _scope);
+            _step = 2;
+        }
+        catch (FormatException ex) { _error = ex.Message; }
+    }
+
+    private void CreateMissingTypes()
+    {
+        _map.CreateMissingTypes = true;
+        Check();
+    }
+
+    private void SetAll(bool on)
+    {
+        if (_plan == null) return;
+        foreach (var r in _plan.Rows) r.Accept = on;
+    }
+
+    private async Task ExportErrors()
+    {
+        if (_plan == null || Download == null) return;
+        await Download(Path.GetFileNameWithoutExtension(_fileName.Length > 0 ? _fileName : "sheet") + " errors.csv", "text/csv", System.Text.Encoding.UTF8.GetBytes(_plan.ErrorsCsv()));
+    }
+
+    private void Apply()
+    {
+        if (_plan == null) return;
+        MudDialog.Close(DialogResult.Ok(_plan));
+    }
+}

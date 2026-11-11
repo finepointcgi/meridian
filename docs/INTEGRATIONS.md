@@ -6,6 +6,10 @@ elements to ALM tools through OSLC. The code lives in `src/Meridian.Web/Integrat
 `Components/Workbench/{IntegrationsDialog,LinkedIssuesSection,ApiTokensDialog}.razor`, and storage in
 `src/Meridian.Data/*Store.Integrations.cs`.
 
+Server URLs for issue trackers, code repositories and requirements tools may be `http://` or `https://`, so servers on
+an internal network without TLS work. Over plain `http://` the token or password is sent unencrypted, so use it only on
+a network you trust.
+
 ## 1. Issue trackers
 
 Open the project menu → **Integrations (issue trackers, webhooks, code)…** → *Issue trackers* (project owners only).
@@ -19,7 +23,7 @@ Open the project menu → **Integrations (issue trackers, webhooks, code)…** �
 | GitLab Issues (REST v4) | `https://gitlab.com` or `https://gitlab.example.com` (the `/api/v4` suffix is optional) | `group/subgroup/project` or numeric project id | project, group or personal access token with `api` (`PRIVATE-TOKEN`), or an OAuth access token (Bearer, tick the option) |
 
 Optionally set the issue / work item type for new issues (default `Task`). **Test connection** checks the
-credentials and that the project/repository is reachable. Base URLs must be `https://`.
+credentials and that the project/repository is reachable. Base URLs may be `http://` or `https://`.
 
 **GitLab Issues** (gitlab.com and self-managed, `GitLabTracker` in `IssueTrackers.cs`):
 
@@ -203,7 +207,7 @@ the usual way. Use the steps below instead.
 
 ## 4. Requirements tools: IBM DOORS Next and Siemens Polarion
 
-Project menu → **Integrations…** → *Requirements tools*. Project owners manage connections; editors can use
+Project menu → **Integrations…** → *DOORS & Polarion*. Project owners manage connections; editors can use
 **Sync now**. Code: `src/Meridian.Web/Integrations/Requirements/`; UI:
 `Components/Workbench/{RequirementsToolsPanel,RequirementConflictDialog}.razor`.
 
@@ -446,29 +450,36 @@ schema is imported into the model and refreshed later with a review. Code: `src/
 
 | Engine | Driver | Reads |
 |---|---|---|
-| PostgreSQL | Npgsql | `pg_catalog`: schemas, tables, views, materialized views, columns, keys, indexes, triggers, sequences, enum / domain types, routines, comments |
-| MySQL / MariaDB | MySqlConnector 2.6 (MIT) | `information_schema` |
+| PostgreSQL | Npgsql | `pg_catalog`: schemas, tables, views, materialized views, columns, keys, indexes, triggers, sequences, enum / domain types, routines with bodies, comments |
+| SQL Server / Azure SQL | Microsoft.Data.SqlClient 7.1 (MIT) | `sys.*` catalog views: schemas, tables, views, columns, keys, defaults (with their names), indexes, triggers, sequences, alias types, procedures and functions with bodies (`sys.sql_modules`), `MS_Description` |
+| MySQL / MariaDB | MySqlConnector 2.6 (MIT) | `information_schema`, routine and trigger bodies |
+| Oracle | Oracle.ManagedDataAccess.Core 23.26 (Oracle Free Use Terms) | `ALL_*` views of the user's schema (or the listed ones): tables, views, materialized views, columns, keys, indexes, sequences, procedures, functions and triggers with their source, comments |
 | SQLite (desktop / local mode only) | Microsoft.Data.Sqlite | the DDL in `sqlite_master` |
-| SQL Server, Oracle | — | not supported live: import DDL scripts, or a SQL Server `.dacpac` |
 
-Microsoft.Data.SqlClient is MIT licensed but brings Azure.Identity, MSAL and native SNI libraries (tens of MB), so
-SQL Server is supported through DDL and `.dacpac` only.
+Microsoft.Data.SqlClient 7 no longer depends on Azure.Identity or MSAL (that moved to a separate package Meridian does
+not ship); its native Windows SNI library is excluded and the managed network layer is used everywhere. Oracle's driver
+may be redistributed unmodified with its license text, which ships in `licenses/`. Sizes and the full license
+discussion are in [DATABASE.md](DATABASE.md#drivers-and-licenses).
 
 A connection is a `project_integrations` row of kind `database`: the config JSON holds the provider, a display host,
 the schemas to read, a timeout (5–600 s) and the database element it fills; the **connection string is the secret**,
 encrypted like the other integration secrets, never returned to the browser, never logged (driver errors have
 passwords masked).
 
-* **Read-only.** Meridian only runs catalog queries inside a read-only transaction (SQLite opens the file read-only)
-  and never executes DDL. Still, connect with a **read-only account**: PostgreSQL — a role with `CONNECT` and `USAGE`
-  on the schemas; MySQL — `SELECT` and `SHOW VIEW`.
+* **Read-only.** Meridian only runs catalog queries inside a read-only transaction (SQLite opens the file read-only;
+  SQL Server, which has none, gets only SELECTs in a transaction that is rolled back) and never executes DDL. Still,
+  connect with a **read-only account**: PostgreSQL — a role with `CONNECT` and `USAGE` on the schemas; SQL Server — a
+  database user with `VIEW DEFINITION`; MySQL — `SELECT` and `SHOW VIEW`; Oracle — `CREATE SESSION` (its own schema)
+  or dictionary access for other schemas.
 * **Who.** On a team server only **server administrators** can add, change, test or delete connections; project
   members can import and refresh through saved ones. In the desktop app's local mode anyone can.
 * **Where.** The host is resolved once and checked like webhook URLs (*Which addresses the server will call*):
   link-local and metadata addresses are always refused; loopback and private networks need
-  `Meridian:Integrations:AllowPrivateNetworks=true`. The connection then goes to the checked address (with
-  `SSL Mode=VerifyFull` the host name is kept for certificate validation). SQLite files and Unix sockets are refused
-  on a team server (they are paths on the server); multi-host connection strings are refused.
+  `Meridian:Integrations:AllowPrivateNetworks=true`. The connection then goes to the checked address (with PostgreSQL
+  `SSL Mode=VerifyFull` and Oracle TCPS the host name is kept for certificate validation; SQL Server validates the
+  certificate against the name through `HostNameInCertificate`). SQLite files and Unix sockets are refused on a team
+  server (they are paths on the server), as are SQL Server named pipes / shared memory / LocalDB and Oracle TNS aliases;
+  multi-host connection strings (a SQL Server failover partner, an Oracle descriptor with several addresses) are refused.
 * **Time.** Connect and command timeouts follow the connection's timeout, and the whole read is cancelled when it
   runs out.
 

@@ -9,6 +9,7 @@ public partial class Workbench
     {
         var m = new List<MenuEntry> { MenuEntry.Title($"{c.SelectionCount} selected") };
         m.AddRange(DatabaseMultiEntries(c));   // Workbench.Database.cs
+        m.AddRange(DeploymentMultiEntries(c)); // Workbench.Deployment.cs
         if (!Ws.ReadOnly && c.LinkableSelection.Count > 0)
         {
             m.Add(MenuEntry.Async("Link to…", () => BulkLinkDialog.ShowAsync(Dialogs, Ws, c)));

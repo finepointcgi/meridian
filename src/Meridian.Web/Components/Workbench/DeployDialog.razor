@@ -1,0 +1,99 @@
+@using Meridian.Core.Deployment
+@inject Workspace Ws
+
+@* "Deploy to…": pick a node, device or execution environment; every artifact (deployment specification, database, schema)
+   given is deployed to it with a «deploy», in one undo step, and the lines are drawn on the active diagram when both ends are on it. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.Publish" />
+            <MudText Typo="Typo.h6">Deploy to…</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="link-dlg deploy-dlg">
+            <div class="link-hint"><span data-testid="deploy-hint">@Hint()</span> <GuideLink Page="@Meridian.Web.Hosting.UserGuide.Pages.DeploymentDiagrams" /></div>
+            <input class="link-search" data-testid="deploy-search" placeholder="Search nodes, devices and execution environments…" value="@_query" @oninput="e => _query = e.Value?.ToString()" />
+            <div class="link-list">
+                @foreach (var n in Matches())
+                {
+                    var node = n;
+                    <div class="link-item @(ReferenceEquals(node, _target) ? "on" : "")" data-testid="deploy-target" @onclick="() => _target = node" @ondblclick="() => { _target = node; Ok(); }">
+                        <MudIcon Icon="@UiKinds.Icon(node.Kind)" Style="@($"font-size:16px; color:{UiKinds.Accent(node.Kind)}")" />
+                        <span class="nm">@node.DisplayName</span>
+                        <span class="kd">@Metamodel.DisplayName(node.Kind)@(node.Owner is { Kind: not ElementKind.Model } o ? $" · {o.DisplayName}" : "")</span>
+                    </div>
+                }
+                @if (!Matches().Any())
+                {
+                    <div class="link-empty">@(DeploymentModel.Targets(Ws.Model).Any() ? "No node matches" : "The model has no nodes yet: add one on a deployment diagram first")</div>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudSpacer />
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_target == null)" OnClick="Ok" data-testid="deploy-ok">
+            @(_target == null ? "Deploy" : $"Deploy to {_target.DisplayName}")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public IReadOnlyList<Element> Elements { get; set; } = [];
+    [Parameter] public DiagramController? C { get; set; }
+
+    private string? _query;
+    private Element? _target;
+
+    private string Hint() => Elements.Count == 1
+        ? $"{Elements[0].DisplayName} will be deployed («deploy») to the node you pick."
+        : $"{Elements.Count} elements will each be deployed («deploy») to the node you pick.";
+
+    private IEnumerable<Element> Matches()
+    {
+        var q = _query?.Trim() ?? "";
+        return DeploymentModel.Targets(Ws.Model)
+            .Where(n => q.Length == 0 || n.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) || n.QualifiedName.Contains(q, StringComparison.OrdinalIgnoreCase))
+            .Take(80);
+    }
+
+    private void Ok()
+    {
+        if (_target == null) return;
+        Deploy(Ws, C, Elements, _target);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    /// <summary>Deploys the elements to the node in one undo step; draws the «deploy» lines on the diagram when both ends are on it.</summary>
+    public static IReadOnlyList<Relationship> Deploy(Workspace ws, DiagramController? c, IReadOnlyList<Element> elements, Element node)
+    {
+        try
+        {
+            IReadOnlyList<Relationship> created;
+            using (ws.Model.History.Transaction($"Deploy to {node.DisplayName}"))
+            {
+                created = DeploymentModel.DeployTo(ws.Model, elements, node);
+                if (c != null && !c.ReadOnly)
+                    foreach (var r in created.Where(r => c.Diagram.Shows(r.Source) && c.Diagram.Shows(r.Target))) ws.Model.AddEdge(c.Diagram, r);
+            }
+            var skipped = elements.Count - created.Count;
+            ws.SetStatus($"Deployed {created.Count} element{(created.Count == 1 ? "" : "s")} to {node.DisplayName}" + (skipped > 0 ? $" ({skipped} already deployed there or not deployable)" : ""));
+            return created;
+        }
+        catch (InvalidOperationException ex) { ws.SetStatus(ex.Message); return []; }
+    }
+
+    /// <summary>Opens "Deploy to…" for the given elements (only those that can be deployed are kept).</summary>
+    public static async Task ShowAsync(IDialogService dialogs, Workspace ws, IEnumerable<Element> elements, DiagramController? c = null)
+    {
+        if (ws.ReadOnly) return;
+        var list = elements.Where(DeploymentModel.CanDeploy).Distinct().ToList();
+        if (list.Count == 0) { ws.SetStatus("Select artifacts (or a database / schema) to deploy first"); return; }
+        var parameters = new DialogParameters<DeployDialog> { { x => x.Elements, list }, { x => x.C, c } };
+        var dlg = await dialogs.ShowAsync<DeployDialog>("Deploy to", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+        await dlg.Result;
+    }
+}

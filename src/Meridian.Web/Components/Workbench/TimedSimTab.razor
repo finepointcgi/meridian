@@ -36,7 +36,7 @@
             <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Outlined.Bolt" OnClick="() => Inject(sig)">@sig</MudButton>
         }
         <MudTextField T="string" @bind-Value="_custom" Placeholder="signal name" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:160px" />
-        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Send" Disabled="@string.IsNullOrWhiteSpace(_custom)" OnClick="() => Inject(_custom!)" />
+        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Send" Disabled="@string.IsNullOrWhiteSpace(_custom)" OnClick="() => Inject(_custom!)" aria-label="Send" title="Send" />
     </div>
     <div class="px-3" style="overflow-x:auto">@((MarkupString)SvgCharts.Timeline(_sim.Spans, _sim.Signals, _sim.Clock))</div>
     <div style="display:grid; grid-template-columns: 220px 1fr; gap:12px; padding:6px 12px 12px">

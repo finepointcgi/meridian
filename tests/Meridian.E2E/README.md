@@ -47,6 +47,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `DrawingTests` | shapes panel, rename by typing (also very fast typing), move, undo/redo, quick-connect arrow drag, fill colour, delete; whiteboard shapes and lines |
 | `RequirementsTests` | new requirement, Inspector attributes, satisfy link from the traceability table, coverage, suspect link and clearing it |
 | `TablesTests` | text query, open as table, inline cell edit, save the view |
+| `SpreadsheetImportTests` | parts-list `.xlsx` into the Vehicle sample with the BOM preset, then an edited sheet dropped on the model tree and its change review |
 | `BranchTests` | new branch, edit, switch to main, conflicting merge, resolve, verify |
 | `ReviewTests` | share with a second user, request a review, live notification bell, approve, vote notification |
 | `SysmlTextTests` | edit SysML v2 text, apply, tree updates, error reporting, undo |
@@ -55,8 +56,13 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `CollaborationTests` | two browsers on one project see each other's edits live |
 | `PermissionsTests` | Alice makes a package read-only for Bob (his edit is refused), then hidden (tree, diagrams and REST API lose it at once) |
 | `LibraryTests` | a parts library is used from the Vehicle sample, a part is typed by a library block, a new library version shows the update badge and review, and the part becomes suspect |
+| `LibraryGapsTests` | accepting a library update keeps both open diagram tabs and the active one; *Open in source project* shows the pinned version read-only with *Go to latest*; on a 390×844 phone the model list shows the library (read-only, pin badge) and the update review is a full-screen sheet without horizontal scrolling |
+| `CameoImportTests` | a Cameo `.mdzip` whose sequence diagram has an alt fragment with two operands opens as a new project with the separator where Cameo drew it and both guards |
 | `OperandTests` | Vehicle sample sequence: make the fragment an alt, add an operand from the context menu, guard it in the inspector, drag its separator, undo |
+| `RelationMapTests` | ⌘K "Relation map of REQ-002": the requirement's traceability map, depth 1 → 3, the All and Traceability presets, ⇧-click three nodes and create a requirement diagram from them (`MERIDIAN_DOCS_SCREENSHOTS=1` also writes the guide's picture) |
 | `TourTests` | Help ▸ Tour lists the chapters, a chapter spotlights its target, ⌘K opens a chapter, and on a phone a chapter is a bottom sheet from the account menu |
+| `UxTests` | every tour spotlight target is on screen, dialogs fit a 1280×800 window, the tree context menu nests long lists, fits the window and closes with Escape |
+| `UxWalkthroughTests` | opt-in (`MERIDIAN_UX_WALKTHROUGH=1`): screenshots of every entry point at four sizes in both themes plus `audit.json`, in `$TMPDIR/meridian-ux` (see `docs/UX-AUDIT-0.7.md`) |
 | `DocsScreenshotTests` | opt-in (`MERIDIAN_DOCS_SCREENSHOTS=1`): writes the user guide's screenshots to `docs-site/images` in the dark and the light theme |
 
 Tests in the `server` collection share one server and run one at a time; each creates its own project, so they do not

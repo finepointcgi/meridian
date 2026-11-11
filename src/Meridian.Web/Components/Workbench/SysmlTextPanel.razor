@@ -49,7 +49,7 @@
             <button class="sx-btn primary" @onclick="ApplyClicked" disabled="@(Ws.ReadOnly || !State.Dirty)"><MudIcon Icon="@Icons.Material.Outlined.Check" />Apply <kbd>@(_mac ? "⌘↵" : "Ctrl+↵")</kbd></button>
         </MudTooltip>
         <MudTooltip Text="@(State.Expanded ? "Back to the dock" : "Full editor")">
-            <MudIconButton Size="Size.Small" Icon="@(State.Expanded ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)" OnClick="() => State.Expanded = !State.Expanded" />
+            <MudIconButton Size="Size.Small" Icon="@(State.Expanded ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)" OnClick="() => State.Expanded = !State.Expanded" aria-label="@(State.Expanded ? "Back to the dock" : "Full editor")" />
         </MudTooltip>
     </div>
     @if (State.Stale && State.Dirty)

@@ -25,12 +25,13 @@ public sealed record SvgTheme(
             ElementKind.InterfaceBlock or ElementKind.Interface => "#ece2ff",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#d8f0ef",
             ElementKind.ConstraintBlock => "#fbdede", ElementKind.Property or ElementKind.Port => "#fff4d6",
+            ElementKind.FailureMode => "#fde2df",
             ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#dcecfb", _ => "#eef0f4",
         },
         k => k switch
         {
             ElementKind.Comment => "#fff8d0", ElementKind.Package => "#f7f8fa", ElementKind.UseCase => "#fff6e2",
-            ElementKind.Action or ElementKind.State => "#eef5ff", _ => "#ffffff",
+            ElementKind.Action or ElementKind.State => "#eef5ff", ElementKind.FaultTreeGate => "#fff3e6", _ => "#ffffff",
         },
         k => k switch
         {
@@ -38,7 +39,7 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Property => "#c98a00",
             ElementKind.InterfaceBlock or ElementKind.Interface or ElementKind.Port => "#7b4fd6",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#1d8a8a",
-            ElementKind.ConstraintBlock => "#c0392b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#2a7fbf", _ => "#6b7586",
+            ElementKind.ConstraintBlock or ElementKind.FailureMode => "#c0392b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#2a7fbf", _ => "#6b7586",
         });
 
     public static readonly SvgTheme Dark = new(
@@ -50,13 +51,13 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.CommunicationLifeline => "#3a2f14",
             ElementKind.InterfaceBlock or ElementKind.Interface => "#2d2453",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#123c3c",
-            ElementKind.ConstraintBlock => "#4a2222", ElementKind.Property or ElementKind.Port => "#33291a",
+            ElementKind.ConstraintBlock => "#4a2222", ElementKind.Property or ElementKind.Port => "#33291a", ElementKind.FailureMode => "#4a2420",
             ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#16304e", _ => "#232d42",
         },
         k => k switch
         {
             ElementKind.Comment => "#353020", ElementKind.Package => "#1a2335", ElementKind.UseCase => "#2b2517",
-            ElementKind.Action or ElementKind.State => "#172640", _ => "#182133",
+            ElementKind.Action or ElementKind.State => "#172640", ElementKind.FaultTreeGate => "#33261a", _ => "#182133",
         },
         k => k switch
         {
@@ -64,7 +65,7 @@ public sealed record SvgTheme(
             ElementKind.Block or ElementKind.Class or ElementKind.Component or ElementKind.Property => "#f0b429",
             ElementKind.InterfaceBlock or ElementKind.Interface or ElementKind.Port => "#a283ff",
             ElementKind.ValueType or ElementKind.DataType or ElementKind.Enumeration => "#2ec4b6",
-            ElementKind.ConstraintBlock => "#ff6b6b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#4aa3ff", _ => "#7f8ca3",
+            ElementKind.ConstraintBlock or ElementKind.FailureMode => "#ff6b6b", ElementKind.Activity or ElementKind.StateMachine or ElementKind.Interaction => "#4aa3ff", _ => "#7f8ca3",
         });
 
     /// <summary>Maps an embedded image's data URI to the URL drawn (the editor serves cached copies so the canvas markup stays small).</summary>
@@ -126,7 +127,8 @@ public static partial class SvgRenderer
 
     /// <param name="theme">Colours (light by default).</param>
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
-    public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false)
+    /// <param name="frame">Draw the SysML diagram frame and its header (printing can leave it off).</param>
+    public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false, bool frame = true)
     {
         // Effective bounds measure each shape's compartments; routing asks for every obstacle once per path, so compute each once.
         var memo = new Dictionary<DiagramNode, Bounds>(ReferenceEqualityComparer.Instance);
@@ -151,9 +153,9 @@ public static partial class SvgRenderer
         sb.Append(t.Defs);
         if (!transparent) sb.Append($"<rect x=\"{F(minX)}\" y=\"{F(minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" fill=\"{t.Background}\"/>");
         // Whiteboards are free drawing: no SysML diagram frame.
-        if (d.DiagramType != DiagramType.Whiteboard)
+        if (frame && d.DiagramType != DiagramType.Whiteboard)
             sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
-        RenderHeader(sb, d, minX + 4, minY + 4, t);
+        if (frame) RenderHeader(sb, d, minX + 4, minY + 4, t);
         RenderBody(sb, model, d, bounds, null, t, null, routes);   // the routes just computed (same view, same bounds)
         sb.Append("</svg>");
         return sb.ToString();
@@ -222,7 +224,7 @@ public static partial class SvgRenderer
         // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then paths, then contents by depth.
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
-        foreach (var e in d.Edges) RenderEdge(sb, d, e, routes[e], t, jumps);
+        foreach (var e in d.Edges.Where(e => !Core.Deployment.DeploymentModel.ShownByNesting(d, e))) RenderEdge(sb, d, e, routes[e], t, jumps, model);
         if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
         foreach (var n in d.Nodes.Except(containers).OrderBy(n => Depth(d, n))) RenderNode(sb, model, d, n, bounds(n), t);
         if (d.DiagramType == DiagramType.Timing) RenderTimeAxis(sb, d, bounds, t);
@@ -299,14 +301,14 @@ public static partial class SvgRenderer
     }
 
     /// <summary>Each connector in a group tagged with its edge id (so overlays such as the variant view can style it).</summary>
-    private static void RenderEdge(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps)
+    private static void RenderEdge(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps, ModelRepository? model = null)
     {
         sb.Append($"<g data-edge=\"{E(e.Id)}\">");
-        RenderEdgeShape(sb, d, e, pts, t, jumps);
+        RenderEdgeShape(sb, d, e, pts, t, jumps, model);
         sb.Append("</g>");
     }
 
-    private static void RenderEdgeShape(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps)
+    private static void RenderEdgeShape(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps, ModelRepository? model = null)
     {
         var style = Notation.StyleOf(e.Relationship);
         if (e.Style.TryGetValue("stroke", out var ec) && SafeColor(ec) is { } edgeColor) t = t with { Edge = edgeColor };
@@ -352,7 +354,8 @@ public static partial class SvgRenderer
             Head(sb, pts[^2], pts[^1], style.TargetHead, t);
             Head(sb, pts[1], pts[0], style.SourceHead, t);
         }
-        var label = Notation.EdgeLabel(e.Relationship);
+        var label = e.Relationship.Kind == ElementKind.Link && model != null ? NullIfEmpty(Core.Instances.InstanceModel.LinkLabel(model, e.Relationship)) : Notation.EdgeLabel(e.Relationship);
+        var underline = e.Relationship.Kind == ElementKind.Link ? " text-decoration=\"underline\"" : "";   // UML: link labels are underlined
         var mid = Notation.Midpoint(pts);
         if (label != null && ReferenceEquals(e.Source, e.Target) && pts.Count >= 2)
         {
@@ -364,7 +367,7 @@ public static partial class SvgRenderer
             var ls = labelSize / 11;
             var w = label.Length * 5.9 * ls + 6;
             sb.Append($"<rect x=\"{F(mid.X - w / 2)}\" y=\"{F(mid.Y - 3 - 14 * ls)}\" width=\"{F(w)}\" height=\"{F(14 * ls)}\" rx=\"3\" fill=\"{t.LabelBg}\" fill-opacity=\"0.85\"/>");
-            sb.Append($"<text x=\"{F(mid.X)}\" y=\"{F(mid.Y - 6)}\" text-anchor=\"middle\" font-size=\"{F(labelSize)}\" font-style=\"italic\" fill=\"{t.Muted}\">{E(label)}</text>");
+            sb.Append($"<text x=\"{F(mid.X)}\" y=\"{F(mid.Y - 6)}\" text-anchor=\"middle\" font-size=\"{F(labelSize)}\" font-style=\"italic\" fill=\"{t.Muted}\"{underline}>{E(label)}</text>");
         }
         if (e.Relationship.Kind is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation && pts.Count >= 2 && !string.IsNullOrEmpty(e.Relationship.Multiplicity))
             sb.Append($"<text x=\"{F(pts[^1].X + 6)}\" y=\"{F(pts[^1].Y - 6)}\" font-size=\"11\" fill=\"{t.Muted}\">{E(e.Relationship.Multiplicity)}</text>");
@@ -742,6 +745,12 @@ public static partial class SvgRenderer
             case NodeShape.Timeline:
                 RenderTimeline(sb, d, n.Element, b, c.Name, t);
                 break;
+            case NodeShape.FaultEvent:
+                RenderFaultEvent(sb, m, n.Element, b, fill, t);
+                break;
+            case NodeShape.FaultGate:
+                RenderFaultGate(sb, m, n.Element, b, fill, t);
+                break;
             case NodeShape.DurationMarker:
             {
                 var y = b.Center.Y + 6;
@@ -801,6 +810,7 @@ public static partial class SvgRenderer
                     break;
                 }
                 if (n.Element.Kind == ElementKind.Table) { RenderTable(sb, m, d, n, b, c, fill, header, t); break; }
+                if (RenderDeployment(sb, m, d, n, b, c, fill, header, t)) break;   // SvgRenderer.Deployment.cs
                 RenderCompartments(sb, b, c, fill, n.Element.Kind, t, header);
                 break;
         }
@@ -1026,7 +1036,7 @@ public static partial class SvgRenderer
         sb.Append($"<rect x=\"{F(b.X + 1)}\" y=\"{F(b.Y + 1)}\" width=\"{F(Math.Max(0, b.Width - 2))}\" height=\"3\" rx=\"1.5\" fill=\"{t.Accent(kind)}\"/>");
         var y = b.Y + Line + 2;
         if (c.Keyword != null) { Text(sb, b.Center.X, y, Trunc(c.Keyword, b.Width - 8), false, "middle", size: 11, color: t.Muted); y += Line; }
-        Text(sb, b.Center.X, y, Trunc(c.Name, b.Width - 8, 7.4), true, "middle", c.Italic, size: 13.5, color: t.Text);
+        Text(sb, b.Center.X, y, Trunc(c.Name, b.Width - 8, 7.4), true, "middle", c.Italic, size: 13.5, color: t.Text, underline: kind == ElementKind.InstanceSpecification);   // UML instances: underlined
         y = b.Y + headerH;
         foreach (var comp in c.Compartments)
         {
@@ -1062,8 +1072,10 @@ public static partial class SvgRenderer
         return s.Length <= max ? s : s[..Math.Max(1, max - 1)] + "…";
     }
 
-    private static void Text(StringBuilder sb, double x, double y, string s, bool bold, string anchor, bool italic = false, double size = 12, string color = "#25303f") =>
-        sb.Append($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\" font-size=\"{F(size * (_fontScale > 0 ? _fontScale : 1))}\" fill=\"{color}\"{(bold ? " font-weight=\"600\"" : "")}{(italic ? " font-style=\"italic\"" : "")}>{E(s)}</text>");
+    private static void Text(StringBuilder sb, double x, double y, string s, bool bold, string anchor, bool italic = false, double size = 12, string color = "#25303f", bool underline = false) =>
+        sb.Append($"<text x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\" font-size=\"{F(size * (_fontScale > 0 ? _fontScale : 1))}\" fill=\"{color}\"{(bold ? " font-weight=\"600\"" : "")}{(italic ? " font-style=\"italic\"" : "")}{(underline ? " text-decoration=\"underline\"" : "")}>{E(s)}</text>");
+
+    private static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
 
     private static void Wrapped(StringBuilder sb, double x, double y, double width, double bottom, string s, string color)
     {

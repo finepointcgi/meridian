@@ -138,6 +138,12 @@ with a note otherwise:
 The `.zip`, `.tar.gz` and server zip build anywhere the .NET 10 SDK runs, so a Mac can build every platform's portable
 archive. Set `KEEP_WORK=1` to keep `artifacts/work/` (the staged `.app`, AppDir and `.deb` tree) for inspection.
 
+Before the platforms, the script builds the user guide once with DocFX (`dotnet tool restore` and `dotnet docfx` in
+`docs-site`, the version pinned in `docs-site/dotnet-tools.json`, with `--warningsAsErrors`) and copies it into every
+desktop package and the server zip as `guide/`, which the app serves at `/guide`. `SKIP_GUIDE=1` leaves it out. The
+Dockerfile does the same into `/app/guide`. The test suites never build the guide; `UserGuideTests` checks that the
+script and the Dockerfile do.
+
 ## Code signing
 
 Signing is optional. Without the secrets below, the workflow still produces working packages: macOS builds are

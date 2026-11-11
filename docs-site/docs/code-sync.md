@@ -5,13 +5,13 @@ Connect a GitHub or GitLab repository and Meridian keeps a part of the model in 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/code-changes-dark.png">
-  <img src="../images/code-changes-light.png" alt="The What changed tab: one push from acme/vehicle, with an added and a changed block">
+  <img src="../images/code-changes-light.png" alt="The Code changes tab: one push from acme/vehicle, with an added and a changed block">
 </picture>
 
 ## Connect a repository
 
 1. Open the project menu ▸ **Integrations (issue trackers, webhooks, code)…** ▸ **Code repositories**. In an empty
-   **What changed** tab, **Connect a repository** opens the same place, and so does ⌘K "Connect a code repository".
+   **Code changes** tab, **Connect a repository** opens the same place, and so does ⌘K "Connect a code repository".
 2. Click **Add repository** and choose **GitHub** or **GitLab**.
 3. Fill in the owner and repository (GitHub) or the project path (GitLab), the **Branch** to follow, and an
    **Access token**:
@@ -21,6 +21,8 @@ Connect a GitHub or GitLab repository and Meridian keeps a part of the model in 
    - **Folders to include** (for example `src/Domain, src/Shared`). Empty means the whole repository.
    - **Model package**: the package the code goes into. By default it is named after the repository.
    - **Sync on every push to the branch** and **Post a commit status (meridian/model)**.
+   - **Deployment artifacts**: *None* (default), *One for the repository* or *One per top-level package*: artifacts that
+     «manifest» the synced packages, so you can deploy the code to nodes ([deployment diagrams](deployment-diagrams.md#deploying-code)).
 5. **Test connection**, then **Save**.
 6. Copy the **Payload URL** and **Secret** into the repository's webhook settings, as the dialog explains. The secret is
    shown once and stored encrypted.
@@ -68,7 +70,7 @@ if they were part of the repository. Submodules inside submodules are read up to
 - **When one cannot be read**, the sync still runs without it, and its summary says "1 submodule not read". The
   repository's entry lists every submodule of the last sync with its commit and whether it was **fetched**,
   **skipped**, had **no access** or was **not found**.
-- **Bumps.** When the repository moves a submodule to a new commit, **What changed** shows it under **Submodules**
+- **Bumps.** When the repository moves a submodule to a new commit, **Code changes** shows it under **Submodules**
   (`libs/core 1a2b3c4 → 5d6e7f8`, with a **Compare** link) next to the model changes the new code brings. Accept it
   together with them.
 - Elements made from submodule code have a `code.submodule` field (`libs/core@<commit>`) that tells where they came
@@ -77,9 +79,9 @@ if they were part of the repository. Submodules inside submodules are read up to
 ## Review the changes
 
 When a push changes the model, the title bar shows **Code changes (N)**. Click it, or use the **Code ▸ Changes** ribbon
-button, or ⌘K "What changed".
+button, or ⌘K "Code changes".
 
-**What changed** lists, per review branch:
+**Code changes** lists, per review branch:
 
 - the pushes waiting for review: commit, message, author and a summary. Tick a push to select all of its changes;
 - the changes grouped into **Added**, **Changed** and **Removed**. A changed element opens to show each field before and

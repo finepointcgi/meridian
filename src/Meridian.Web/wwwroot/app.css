@@ -75,6 +75,8 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .rbtn:disabled { opacity: .4; cursor: default; background: transparent; }
 .rbtn .mud-icon-root { font-size: 17px; }
 .rbtn.on { background: var(--sel); color: var(--text); border-color: var(--sel-border); }
+/* A divider between the button sets of one tab (Traceability | Review, Generate | Extend). */
+.rsep { flex: none; width: 1px; height: 20px; margin: 0 6px; background: var(--border-strong, var(--border)); }
 
 /* ============================================================ workspace grid */
 .workbench { position: absolute; top: 106px; left: 0; right: 0; bottom: 28px; display: grid;
@@ -308,13 +310,35 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 
 /* ============================================================ context menu */
 .ctx-backdrop { position: fixed; inset: 0; z-index: 1400; }
-.ctx-menu { position: fixed; z-index: 1401; min-width: 230px; max-height: 70vh; overflow: auto; background: var(--panel-solid); border: 1px solid var(--border-strong);
+.ctx-menu { position: fixed; z-index: 1401; min-width: 230px; max-height: calc(100vh - 16px); overflow: auto; background: var(--panel-solid); border: 1px solid var(--border-strong);
   border-radius: 10px; box-shadow: var(--shadow); padding: 5px; font-size: 12.5px; color: var(--text); }
 .ctx-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 18px; }
 .ctx-item:hover { background: var(--sel); }
 .ctx-item .key { color: var(--text-3); font-size: 11px; }
 .ctx-header { padding: 7px 10px 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); }
 .ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+/* People who ask their system for less motion get no transitions or animations (tour, menus, dialogs, ripples). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Help ▸ Keyboard & mouse */
+.kbd-note { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.kbd-section { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); margin: 14px 0 4px; }
+.kbd-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.kbd-table td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.kbd-table td.kbd-keys { width: 42%; }
+.kbd-table kbd { font: 600 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2, rgba(127,127,127,.12)); border: 1px solid var(--border-strong);
+  border-radius: 5px; padding: 1px 6px; white-space: normal; }
+/* Project / Help menus: never taller than the window (the list scrolls), with a grey hint after an item. */
+.menu-fit .mud-list { max-height: calc(100vh - 64px); overflow-y: auto; }
+.menu-hint { color: var(--text-3); font-size: 11.5px; margin-left: 6px; }
+.ctx-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ctx-menu:focus { outline: none; }
+.ctx-sub.open > .ctx-item { background: var(--sel); }
+/* Submenus are placed beside their entry by meridian.fitMenu (fixed, so the scrolling parent menu does not clip them). */
+.ctx-submenu { display: none; z-index: 1402; }
+.ctx-sub.open > .ctx-submenu { display: block; }
 
 /* MudBlazor touch-ups inside the app */
 .app .mud-input-control { margin-top: 6px !important; }
@@ -627,6 +651,19 @@ svg.chart { display: block; max-width: 100%; }
 /* ============================================================ view tabs (tables, queries, report templates) in the centre */
 .view-host { position: absolute; inset: 0; z-index: 30; overflow: auto; background: var(--panel-solid, var(--panel)); }
 .tabstrip .tab.view-tab span { font-style: normal; }
+/* Verification results as a view tab (0.7.1; the bottom dock before): the whole centre's height, ids and dates on one line. */
+/* A global .row is a flex row; the results table's rows must stay table rows or their cells stop lining up with the header. */
+.vfy-table tr.row { display: table-row; }
+.vfy-tab { min-height: 100%; container-type: inline-size; }
+.vfy-tab .vfy-head { position: sticky; top: 0; z-index: 3; background: var(--panel-solid, var(--panel)); border-bottom: 1px solid var(--border); }
+.vfy-tab .vfy-table th { position: static; }
+.vfy-tab .vfy-table tr.row > td:first-child, .vfy-tab .vfy-table tr.row > td:last-child, .vfy-tab .vfy-table th { white-space: nowrap; }
+/* A narrow centre (1280 px windows with both side panels): drop the Variant column (it is in each row's details) and tighten. */
+@container (max-width: 760px) {
+  .vfy-tab .vfy-table tr > :nth-child(8) { display: none; }
+  .vfy-tab .vfy-table td, .vfy-tab .vfy-table th { padding-left: 6px; padding-right: 6px; }
+}
+.dock-tab-link .dl::after { content: " ↗"; opacity: .55; }
 /* Wide tables in a view tab scroll inside the tab: never let focusing a cell scroll the centre card or the tab strip away. */
 main.workbench > section.card.center, .diagram-host { overflow: clip; }
 /* The tables/query panel fits its container (a centre tab or the dock): long help lines wrap, wide tables scroll inside. */
@@ -674,6 +711,9 @@ main.workbench > section.card.center, .diagram-host { overflow: clip; }
 .arch-tab .arch-row .hint { grid-column: 2 / 4; color: var(--text-2); font-size: 12px; }
 .arch-tab .arch-row .loc { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent); text-decoration: none; }
 .arch-tab .arch-row .acts { display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+.arch-tab .arch-row .arch-uses { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 12px; }
+.arch-tab .arch-row .arch-uses .use { font-family: ui-monospace, Menlo, monospace; color: var(--accent); text-decoration: none; }
+.arch-tab .arch-row .arch-uses a.use:hover { text-decoration: underline; }
 .arch-tab .arch-row.error .sev { color: var(--danger); }
 .arch-tab .arch-row.warning .sev { color: var(--warn); }
 .arch-tab .arch-empty { padding: 40px 0; text-align: center; color: var(--text-2); }

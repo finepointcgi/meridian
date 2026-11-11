@@ -93,6 +93,7 @@ public sealed class DbModelWriter(ModelRepository m, Element database, string ca
         Set(c, DbFields.Identity, def.Identity);
         Set(c, DbFields.Generated, def.Generated);
         Set(c, DbFields.Collation, def.Collation);
+        if (def.DefaultName != null || def.Default == null) Set(c, DbFields.DefaultName, def.DefaultName);
         Comment(c, def.Comment);
     }
 
@@ -238,6 +239,8 @@ public sealed class DbModelWriter(ModelRepository m, Element database, string ca
         Set(e, FieldKeys.Signature, def.Signature);
         Set(e, DbFields.Returns, def.Returns);
         Set(e, DbFields.Language, def.Language);
+        Set(e, DbFields.Options, def.Options);
+        if (def.Body != null) Set(e, DbFields.Definition, def.Body);   // a source that only knows the signature keeps the body
         Comment(e, def.Comment);
     }
 

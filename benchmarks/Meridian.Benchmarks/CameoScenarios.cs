@@ -65,11 +65,15 @@ public static class CameoScenarios
 
         // ---------------------------------------------------------------- reports, auto diagrams, code sync
         time("HTML report (HtmlReport)", () => HtmlReport.Generate(m).Length);
-        time("SRS template report (HTML)", () =>
-        {
-            try { return ReportEngine.Generate(m, ReportTemplates.Srs(), ReportFormat.Html).Length; }
-            catch (OverflowException) { Console.WriteLine("  (SRS report: the document exceeds the 2 GB string limit)"); return -1; }
-        });
+        time("SRS template report (HTML)", () => ReportEngine.Generate(m, ReportTemplates.Srs(), ReportFormat.Html).Length);
+        // Whole-model template reports, streamed (docs/PERFORMANCE.md, "Reports"); MERIDIAN_HEAVY=1 HeavyReportTests does Word and PDF too.
+        foreach (var t in new[] { ReportTemplates.Sdd(), ReportTemplates.ModelOverview() })
+            time($"{t.Name} template report (HTML, streamed)", () =>
+            {
+                var prepared = ReportEngine.Prepare(m, t);
+                ReportEngine.Write(prepared, ReportFormat.Html, Stream.Null);
+                return (int)prepared.EstimatedPages;
+            });
         time("AutoDiagrammer plan (whole model)", () => AutoDiagrammer.Plan(m).Diagrams.Count);
         timeOnce("Code-sync apply (300 types)", copy => CodeModelMapper.Apply(copy, SyntheticCode(300), new CodeSyncOptions { RepoId = "gh:bench", Commit = "c1", RootPackage = "Flight Software" }).Added.Count);
 
@@ -77,6 +81,18 @@ public static class CameoScenarios
         if (!skip("store")) await StoreAsync("SQLite", () => Sqlite(), s);
         PostgresConnection = postgres;
         if (postgres != null && !skip("store")) await StoreAsync("PostgreSQL", () => (new PostgresStore(postgres), () => { }), s);
+
+        // ---------------------------------------------------------------- element history (HistoryScenarios.cs)
+        if (!skip("history"))
+        {
+            var (hs, cleanup) = Sqlite();
+            try { await HistoryScenarios.RunAsync("SQLite", hs, s); } finally { cleanup(); }
+            if (postgres != null)
+            {
+                var pgStore = new PostgresStore(postgres);
+                try { await HistoryScenarios.RunAsync("PostgreSQL", pgStore, s); } finally { await pgStore.DisposeAsync(); }
+            }
+        }
 
         // ---------------------------------------------------------------- collaboration session
         if (!skip("session")) await SessionAsync(s, 25);
@@ -92,6 +108,13 @@ public static class CameoScenarios
             SqliteConnection.ClearAllPools();
             foreach (var f in new[] { path, path + "-wal", path + "-shm" }) try { File.Delete(f); } catch (IOException) { }
         });
+    }
+
+    private static long Heap()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        return GC.GetTotalMemory(true);
     }
 
     private static void Line(string name, double ms, string note = "") => Console.WriteLine($"{name,-40} {ms,10:0.0}   {note}");
@@ -171,14 +194,18 @@ public static class CameoScenarios
             var hub = new CollaborationHub(store, NullLogger<CollaborationHub>.Instance);
             var tabs = new List<Workspace>();
             var join = new List<double>();
+            long heapAfterFirst = 0;
             for (var i = 0; i < clients; i++)
             {
                 var ws = new Workspace { User = user };
                 join.Add(await Ms(() => ws.JoinAsync(hub, project, ProjectRole.Owner)));
                 tabs.Add(ws);
+                if (i == 0) heapAfterFirst = Heap();
             }
+            var perTab = (Heap() - heapAfterFirst) / (double)(clients - 1);
             Line("Session: first tab join (load + replica)", join[0]);
             Line($"Session: next tab join (median of {clients - 1})", join.Skip(1).Order().ElementAt((clients - 1) / 2));
+            Line("Session: managed heap per further tab", 0, $"({perTab / 1024 / 1024:N1} MB)");
             var session = tabs[0].Session!;
             var lat = new List<double>();
             var t = Stopwatch.StartNew();
@@ -191,10 +218,37 @@ public static class CameoScenarios
             lat.Sort();
             Line($"Session: submit + relay to {clients - 1} replicas", t.Elapsed.TotalMilliseconds,
                  $"({s.Ops.Count:N0} ops; p50 {lat[lat.Count / 2]:0.000} ms, p95 {lat[lat.Count * 95 / 100]:0.000} ms, max {lat[^1]:0.0} ms)");
+            _ = ProjectFile.Serialize(tabs[0].Model);   // warm-up: joins no longer serialize, so this may be the first serialization
             Line("Session: snapshot", await Ms(() => { _ = session.Snapshot().Length; return Task.CompletedTask; }));
             Line("Session: persist", await Ms(session.PersistAsync));
             GC.Collect();
             Line($"Session: managed heap with {clients} tabs", 0, $"({GC.GetTotalMemory(true) / 1024 / 1024:N0} MB)");
+            // Unlocked conflicting edits (docs/COLLABORATION.md): tab 1 writes the same field as tab 0 right after it, so tab 0's
+            // relayed edit reaches tab 1 while tab 1's own edit is unconfirmed — tab 1 rewinds, applies and re-applies (a rebase).
+            var inbox = new Queue<Action>();
+            tabs[1].Dispatch = a => { inbox.Enqueue(a); return Task.CompletedTask; };
+            var hot = tabs[0].Model.OfKind(Meridian.Core.Model.ElementKind.Block).Take(500).Select(b => b.Id).ToList();
+            var rebase = new List<double>();
+            var local = new List<double>();
+            var all = Stopwatch.StartNew();
+            for (var i = 0; i < hot.Count; i++)
+            {
+                tabs[0].Model.Set(tabs[0].Model.Find(hot[i])!, Meridian.Core.Model.FieldKeys.Documentation, $"tab 0 #{i}");
+                var l = Stopwatch.GetTimestamp();
+                tabs[1].Model.Set(tabs[1].Model.Find(hot[i])!, Meridian.Core.Model.FieldKeys.Documentation, $"tab 1 #{i}");
+                local.Add(Stopwatch.GetElapsedTime(l).TotalMilliseconds);
+                var r = Stopwatch.GetTimestamp();
+                while (inbox.TryDequeue(out var a)) a();
+                rebase.Add(Stopwatch.GetElapsedTime(r).TotalMilliseconds);
+            }
+            local.Sort();
+            rebase.Sort();
+            if (Meridian.Serialization.ProjectFile.Serialize(tabs[1].Model) != session.Snapshot()) throw new InvalidOperationException("tab 1 diverged");
+            Line("Session: conflicting edit, local + submit", all.Elapsed.TotalMilliseconds,
+                 $"({hot.Count} edits; p50 {local[local.Count / 2]:0.000} ms, p95 {local[local.Count * 95 / 100]:0.000} ms)");
+            Line("Session: rebase under a relayed edit", rebase.Sum(),
+                 $"(p50 {rebase[rebase.Count / 2]:0.000} ms, p95 {rebase[rebase.Count * 95 / 100]:0.000} ms, max {rebase[^1]:0.0} ms; {tabs[1].Rebases} rebases)");
+            tabs[1].Dispatch = a => { a(); return Task.CompletedTask; };
             foreach (var ws in tabs) ws.Dispose();
         }
         finally { cleanup(); }

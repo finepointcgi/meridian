@@ -54,7 +54,7 @@ public partial class Workbench
         }
         await CreateProjectFrom(model, name);
         if (model.Diagrams.FirstOrDefault() is { } first && Ws.Model.Find(first.Id) is Core.Model.Diagram opened) Ws.Open(opened);
-        Ws.Log($"Imported {file.Name}: {report.Elements} elements, {report.Relationships} relationships, {report.Warnings.Count} warnings.");
+        Ws.Log($"Imported {file.Name}: {Plural.Of(report.Elements, "element")}, {Plural.Of(report.Relationships, "relationship")}, {Plural.Of(report.Warnings.Count, "warning")}.");
         foreach (var w in report.Warnings.Take(200)) Ws.Log("  warning: " + w);
         if (report.Warnings.Count > 0) OpenDock(3);
         Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);

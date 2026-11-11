@@ -57,6 +57,66 @@ public sealed class CollaborationTests(ServerFixture f) : E2ETest(f)
         await Ui.EventuallyAsync(async () => await a.CountsAsync() == await b.CountsAsync(), "both browsers should show the same model counts");
     }
 
+    /// <summary>
+    /// Both browsers rename the same element at the same moment, without a lock: the session orders the two renames, each tab
+    /// rebases its own under the one ordered first, and both end with the same name (docs/COLLABORATION.md).
+    /// </summary>
+    [E2EFact]
+    public async Task Two_browsers_rename_the_same_element_at_the_same_time_and_end_with_the_same_name()
+    {
+        var alice = await OpenAsync(F.Alice);
+        var a = alice.Page;
+        var project = "Rename race " + Guid.NewGuid().ToString("N")[..6];
+        await a.NewProjectAsync("Blank project", project);
+        await a.Locator("header.titlebar button.rbtn", new() { HasTextString = "Share" }).ClickAsync();
+        var share = a.MudDialog();
+        await share.GetByPlaceholder("Username").FillAsync(F.Bob.Username);
+        await share.GetByRole(AriaRole.Button, new() { Name = "Invite" }).ClickAsync();
+        await Expect(share.GetByText(F.Bob.DisplayName)).ToBeVisibleAsync();
+        await share.GetByRole(AriaRole.Button, new() { Name = "Done" }).ClickAsync();
+
+        var bob = await OpenAsync(F.Bob);
+        var b = bob.Page;
+        await b.ProjectMenuAsync("Projects…");
+        await b.MudDialog().GetByText(project).First.ClickAsync();
+        await bob.WaitForWorkbenchAsync(project);
+
+        await a.ShapeTileAsync("Block");
+        await a.Keyboard.TypeAsync("Contested", new() { Delay = 20 });
+        await a.Keyboard.PressAsync("Enter");
+        await Expect(b.Tree().GetByText("Contested", new() { Exact = true })).ToBeVisibleAsync();
+
+        // Both select it and type a new name; both commit at the same moment.
+        async Task<ILocator> NameField(IPage p)
+        {
+            await p.Tree().GetByText("Contested", new() { Exact = true }).ClickAsync();
+            var name = p.Inspector().GetByLabel("Name", new() { Exact = true });
+            await Expect(name).ToHaveValueAsync("Contested");
+            return name;
+        }
+        var na = await NameField(a);
+        var nb = await NameField(b);
+        await na.FillAsync("Named by Alice");
+        await nb.FillAsync("Named by Bob");
+        await Task.WhenAll(na.PressAsync("Tab"), nb.PressAsync("Tab"));
+
+        // One of the two names wins, the same one in both browsers; the other is gone from both.
+        async Task<string?> Shown(IPage p)
+        {
+            var alice = await p.Tree().GetByText("Named by Alice", new() { Exact = true }).CountAsync();
+            var bob = await p.Tree().GetByText("Named by Bob", new() { Exact = true }).CountAsync();
+            return (alice, bob) switch { (1, 0) => "Named by Alice", (0, 1) => "Named by Bob", _ => null };
+        }
+        await Ui.EventuallyAsync(async () => await Shown(a) is { } x && x == await Shown(b), "both browsers should show the same, single name");
+        var final = await Shown(a);
+        foreach (var p in new[] { a, b })
+        {
+            await p.Tree().GetByText(final!, new() { Exact = true }).ClickAsync();
+            await Expect(p.Inspector().GetByLabel("Name", new() { Exact = true })).ToHaveValueAsync(final!);
+        }
+        await Ui.EventuallyAsync(async () => await a.CountsAsync() == await b.CountsAsync(), "both browsers should show the same model counts");
+    }
+
     [E2EFact]
     public async Task Two_browsers_edit_the_same_SysML_text_and_one_apply_updates_both()
     {

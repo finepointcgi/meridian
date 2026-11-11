@@ -14,7 +14,7 @@ namespace Meridian.Serialization;
 /// <para>
 /// Format (MagicDraw 17.0.1 and later): an .mdzip is a zip of resources. The UML model is XMI (UML 2.5 + SysML 1.x profile
 /// applications as siblings of <c>uml:Model</c>) in entries ending with <c>com.nomagic.magicdraw.uml_model.model</c> and
-/// <c>…shared_model</c>. Each diagram is a <c>uml:Diagram</c> under <c>xmi:Extension/modelExtension/ownedDiagram</c> of its
+/// <c>…shared_model</c> (<c>uml_umodel.model</c> / <c>uml_umodel.shared_umodel</c> in later versions). Each diagram is a <c>uml:Diagram</c> under <c>xmi:Extension/modelExtension/ownedDiagram</c> of its
 /// owner; its <c>DiagramRepresentationObject</c> names the diagram type, and its symbols (<c>mdElement</c> views with
 /// <c>elementID</c>, <c>geometry</c>, <c>mdOwnedViews</c>, <c>linkFirstEndID</c>/<c>linkSecondEndID</c>) are either inline
 /// (.mdxml) or in the zip entry named by <c>binaryObject/@streamContentID</c>.
@@ -84,8 +84,9 @@ public static partial class MagicDrawImporter
     private static (ModelRepository, MagicDrawImportReport) FromZip(ZipArchive zip)
     {
         var entries = zip.Entries.Where(e => !string.IsNullOrEmpty(e.Name)).ToList();
-        var models = entries.Where(e => e.FullName.EndsWith("uml_model.model", StringComparison.OrdinalIgnoreCase)).ToList();
-        models.AddRange(entries.Where(e => e.FullName.EndsWith("uml_model.shared_model", StringComparison.OrdinalIgnoreCase)));
+        // "uml_model" (17.0.x / 18.x) and "uml_umodel" (later versions) entry names; the shared part holds the shared packages.
+        var models = entries.Where(e => e.FullName.EndsWith("uml_model.model", StringComparison.OrdinalIgnoreCase) || e.FullName.EndsWith("uml_umodel.model", StringComparison.OrdinalIgnoreCase)).ToList();
+        models.AddRange(entries.Where(e => e.FullName.EndsWith("uml_model.shared_model", StringComparison.OrdinalIgnoreCase) || e.FullName.EndsWith("uml_umodel.shared_umodel", StringComparison.OrdinalIgnoreCase)));
         if (models.Count == 0)
             // Older projects (and hand-made zips) hold one .mdxml / .xmi / .xml.
             models = entries.Where(e => Path.GetExtension(e.Name).ToLowerInvariant() is ".mdxml" or ".xmi" or ".xml" or ".uml")

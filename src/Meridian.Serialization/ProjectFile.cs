@@ -379,14 +379,14 @@ public static class ProjectFile
             if (ownerId == null) { root = el; continue; }
             var owner = byId[ownerId];
             el.Owner = owner;
-            owner.Children.Add(el);
+            owner.ChildList.Add(el);
         }
         foreach (var lib in libraries)
             foreach (var (_, id, _, ownerId) in lib.Dtos)
             {
                 if (ownerId == null || lib.Skipped.Contains(id) || !library.TryGetValue(id, out var el) || !library.TryGetValue(ownerId, out var owner)) continue;
                 el.Owner = owner;
-                owner.Children.Add(el);
+                owner.ChildList.Add(el);
             }
         var model = new ModelRepository(root ?? throw new FormatException("Empty project"));
         foreach (var m in missing.Values) model.RegisterMissing(m);

@@ -8,8 +8,9 @@ namespace Meridian.Serialization.CodeSync;
 /// classes, interfaces, enums, type aliases of object types and namespaces, with their properties, methods (parameters,
 /// overloads), <c>extends</c> / <c>implements</c> and constructor parameter properties. Folders become packages
 /// ("src/power/battery.ts" → package <c>src.power</c>); a <c>namespace</c> adds packages below that. Names resolve
-/// through the file's own declarations, relative imports (named, default, namespace, re-exports and <c>index.ts</c>
-/// barrels) and the declarations of script files (files without imports or exports are global). Decorators are ignored;
+/// through the file's own declarations, imports (named, default, namespace, type, re-exports and <c>index.ts</c>
+/// barrels), resolved through tsconfig / jsconfig and monorepo workspaces (<see cref="TypeScriptProject"/>), and the
+/// declarations of script files (files without imports or exports are global). Decorators are ignored;
 /// everything under <c>node_modules/</c> is skipped.
 /// </summary>
 public sealed class TypeScriptCodeReader : HandParsedCodeReader
@@ -20,6 +21,8 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
     {
         var p = "/" + (path ?? "").Replace('\\', '/').TrimStart('/');
         if (p.Contains("/node_modules/", StringComparison.OrdinalIgnoreCase)) return false;
+        // Project files that steer module resolution (tsconfig / jsconfig, package.json, pnpm-workspace.yaml) are read too.
+        if (TypeScriptProject.IsConfigFile(p)) return true;
         return p.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase)
             || p.EndsWith(".mts", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".cts", StringComparison.OrdinalIgnoreCase);
     }
@@ -36,7 +39,10 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
 
     internal override ParseSession CreateSession(IReadOnlyList<CodeFile> files) => new Session(files);
 
-    private sealed record Import(string? File, string Name, bool IsNamespace, bool IsAlias = false);
+    private sealed record Import(string? File, string Name, bool IsNamespace, bool IsAlias = false)
+    {
+        public int Line { get; init; }
+    }
 
     private sealed class TsFile(string path, string ns)
     {
@@ -56,12 +62,18 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
 
     private sealed class Session(IReadOnlyList<CodeFile> all) : ParseSession
     {
-        private readonly HashSet<string> _paths = all.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+        private readonly TypeScriptProject _project = new(all);
         private readonly Dictionary<string, TsFile> _files = new(StringComparer.Ordinal);
         private readonly Dictionary<string, List<string>> _globals = new(StringComparer.Ordinal);
 
         public override void Parse(CodeFile file, List<RawType> types, ParseIssues issues, CancellationToken ct)
         {
+            if (TypeScriptProject.IsConfigFile(file.Path))
+            {
+                // Read by the project when the session starts; only say when it could not be used.
+                if (_project.Problem(file.Path) is { } problem) issues.Add(1, problem);
+                return;
+            }
             var f = new TsFile(file.Path, FolderNamespace(file.Path));
             _files[file.Path] = f;
             var toks = Lexer.CLike(file.Content, typeScript: true);
@@ -74,9 +86,20 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                 }
         }
 
+        public override IEnumerable<(string Name, int Line)> Imports(RawType from) =>
+            from.Scope is Scope scope ? scope.File.Imports.Where(kv => kv.Value.Line > 0).Select(kv => (kv.Key, kv.Value.Line)) : [];
+
         public override string? Resolve(RawType from, string name)
         {
             if (from.Scope is not Scope scope) return null;
+            if (name.StartsWith(InlineImport, StringComparison.Ordinal))
+            {
+                // import("./battery").Battery: the module, then the exported name.
+                var close = name.IndexOf(")", StringComparison.Ordinal);
+                if (close < 0 || close + 2 > name.Length) return null;
+                var module = ResolveModule(scope.File.Path, name[InlineImport.Length..close]);
+                return module is null ? null : Export(module, name[(close + 2)..], 0, []);
+            }
             for (var k = scope.NsPath.Length; k >= 0; k--)
             {
                 var key = k == 0 ? name : string.Join(".", scope.NsPath.Take(k)) + "." + name;
@@ -108,7 +131,16 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
             var (first, rest) = Split(name);
             if (first == "default")
             {
-                if (f.DefaultExport == null) return null;
+                if (f.DefaultExport == null)
+                {
+                    // export { default } from "./battery" / export { Battery as default } [from "./battery"]
+                    if (f.ReExports.TryGetValue("default", out var dre) && dre.File != null)
+                        return Export(dre.File, dre.Name + (rest.Length > 0 ? "." + rest : ""), depth + 1, visited);
+                    if (!f.ExportAliases.TryGetValue("default", out var dlocal)) return null;
+                    name = dlocal + (rest.Length > 0 ? "." + rest : "");
+                    if (f.Locals.TryGetValue(name, out var dl)) return dl;
+                    return ViaImport(f, name, depth + 1, visited);
+                }
                 name = f.DefaultExport + (rest.Length > 0 ? "." + rest : "");
                 (first, rest) = Split(name);
             }
@@ -133,40 +165,20 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
             return dot < 0 ? (name, "") : (name[..dot], name[(dot + 1)..]);
         }
 
-        /// <summary>The scanned file a module specifier names (relative, root-relative or "@/" → "src/"), or null.</summary>
-        public string? ResolveModule(string fromPath, string spec)
-        {
-            if (string.IsNullOrWhiteSpace(spec)) return null;
-            string p;
-            if (spec.StartsWith("./", StringComparison.Ordinal) || spec.StartsWith("../", StringComparison.Ordinal) || spec is "." or "..")
-            {
-                var dir = fromPath.Contains('/') ? fromPath[..fromPath.LastIndexOf('/')] : "";
-                p = Normalize(dir.Length == 0 ? spec : dir + "/" + spec);
-            }
-            else if (spec.StartsWith("@/", StringComparison.Ordinal) || spec.StartsWith("~/", StringComparison.Ordinal)) p = Normalize("src/" + spec[2..]);
-            else p = Normalize(spec);
-            if (p.Length == 0 && !spec.StartsWith('.')) return null;
-            var stem = p;
-            foreach (var ext in new[] { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" })
-                if (stem.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) { stem = stem[..^ext.Length]; break; }
-            var prefix = stem.Length == 0 ? "" : stem + "/";
-            foreach (var c in new[] { p, stem + ".ts", stem + ".tsx", stem + ".d.ts", stem + ".mts", stem + ".cts", prefix + "index.ts", prefix + "index.tsx", prefix + "index.d.ts" })
-                if (_paths.Contains(c)) return c;
-            return null;
-        }
-
-        private static string Normalize(string path)
-        {
-            var parts = new List<string>();
-            foreach (var s in path.Replace('\\', '/').Split('/'))
-            {
-                if (s is "" or ".") continue;
-                if (s == "..") { if (parts.Count > 0) parts.RemoveAt(parts.Count - 1); continue; }
-                parts.Add(s);
-            }
-            return string.Join("/", parts);
-        }
+        /// <summary>The scanned file a module specifier names (relative, tsconfig baseUrl / paths / rootDirs, a workspace
+        /// package, "@/" → "src/", root-relative), or null for an external package (see <see cref="TypeScriptProject"/>).</summary>
+        public string? ResolveModule(string fromPath, string spec) => _project.Resolve(fromPath, spec);
     }
+
+    /// <summary>Prefix of an inline import type's name: <c>import("./battery").Battery</c>.</summary>
+    internal const string InlineImport = "import(";
+
+    private static readonly System.Text.RegularExpressions.Regex InlineImportText =
+        new("""import\("[^"]*"\)\.""", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>A type as written, without inline import prefixes: <c>import("@acme/log").Logger</c> shows as <c>Logger</c>.</summary>
+    internal static string CleanTypeText(string text) =>
+        text.Contains(InlineImport, StringComparison.Ordinal) ? InlineImportText.Replace(text, "") : text;
 
     /// <summary>"src/power/battery.ts" → "src.power" (dots inside folder names become '_').</summary>
     internal static string FolderNamespace(string path)
@@ -287,11 +299,11 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                 var k = j + 2;
                 if (k + 2 < end && toks[k].Is("require") && toks[k + 1].Is("(") && toks[k + 2].Kind == TokKind.String)
                 {
-                    f.Imports[name] = new Import(session.ResolveModule(f.Path, toks[k + 2].Text), "", IsNamespace: true);
+                    f.Imports[name] = new Import(session.ResolveModule(f.Path, toks[k + 2].Text), "", IsNamespace: true) { Line = toks[i].Line };
                     return k + 3;
                 }
                 var dotted = TypeExprs.NamesIn(toks, k, Math.Min(end, k + 1 + 2 * 32)).FirstOrDefault();
-                if (dotted != null) f.Imports[name] = new Import(null, dotted, false, IsAlias: true);
+                if (dotted != null) f.Imports[name] = new Import(null, dotted, false, IsAlias: true) { Line = toks[i].Line };
                 return k + 1;
             }
             var stop = j;
@@ -302,13 +314,13 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
             if (toks[p].Is("type") && p + 1 < stop && !toks[p + 1].Is(",") && !toks[p + 1].Is("from")) p++;
             if (p < stop && toks[p].Kind == TokKind.Ident && toks[p].Text != "from")
             {
-                f.Imports[toks[p].Text] = new Import(target, "default", false);
+                f.Imports[toks[p].Text] = new Import(target, "default", false) { Line = toks[i].Line };
                 p++;
                 if (p < stop && toks[p].Is(",")) p++;
             }
             if (p + 2 < stop && toks[p].Is("*") && toks[p + 1].Is("as") && toks[p + 2].Kind == TokKind.Ident)
             {
-                f.Imports[toks[p + 2].Text] = new Import(target, "", IsNamespace: true);
+                f.Imports[toks[p + 2].Text] = new Import(target, "", IsNamespace: true) { Line = toks[i].Line };
                 p += 3;
             }
             if (p < stop && toks[p].Is("{"))
@@ -317,7 +329,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                 foreach (var (a, b) in TypeExprs.SplitTopLevel(toks, p + 1, close, false))
                 {
                     var (exported, local) = Binding(a, b);
-                    if (exported != null) f.Imports[local!] = new Import(target, exported, false);
+                    if (exported != null) f.Imports[local!] = new Import(target, exported, false) { Line = a < b ? toks[a].Line : toks[i].Line };
                 }
             }
             return stop + 1;
@@ -622,7 +634,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                 {
                     // static { … } initialization block
                     var c = TypeExprs.Matching(toks, i, end);
-                    t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, c));
+                    t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, c));
                     i = Math.Min(end, c + 1);
                     continue;
                 }
@@ -662,14 +674,14 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                         var re = TypeSpanEnd(i + 1, end, stopAtBrace: true);
                         var p = i + 1;
                         ret = TypeExprs.Parse(toks, ref p, re, python: false);
-                        retText = TypeExprs.Text(toks, i + 1, re);
+                        retText = CleanTypeText(TypeExprs.Text(toks, i + 1, re));
                         i = re;
                     }
                     var hasBody = false;
                     if (i < end && toks[i].Is("{"))
                     {
                         var bclose = TypeExprs.Matching(toks, i, end);
-                        t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, bclose));
+                        t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, bclose));
                         i = Math.Min(end, bclose + 1);
                         hasBody = true;
                     }
@@ -677,7 +689,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                     {
                         foreach (var (param, propMods, line) in pars)
                         {
-                            if (propMods == null) { if (param.Type != null) t.BodyRefs.AddRange(param.Type.Names()); continue; }
+                            if (propMods == null) { if (param.Type != null) t.BodyRefs.AddRange(param.Type.Uses(line, CodeDependencyKind.Param)); continue; }
                             t.Members.Add(new RawMember
                             {
                                 Name = param.Name, Kind = CodeMemberKind.Property, Type = param.Type, TypeText = param.TypeText,
@@ -717,13 +729,13 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                     var te = TypeSpanEnd(i + 1, end, stopAtBrace: false);
                     var p = i + 1;
                     type = TypeExprs.Parse(toks, ref p, te, python: false);
-                    typeText = TypeExprs.Text(toks, i + 1, te);
+                    typeText = CleanTypeText(TypeExprs.Text(toks, i + 1, te));
                     i = te;
                 }
                 if (i < end && toks[i].Is("="))
                 {
                     var ie = InitEnd(i + 1, end);
-                    t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, i + 1, ie));
+                    t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, ie));
                     if (type == null && i + 2 < ie && toks[i + 1].Is("new") && toks[i + 2].Kind == TokKind.Ident)
                     {
                         // Inferred from "= new Battery(…)".
@@ -731,7 +743,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                         var ne = p;
                         while (ne < ie && !toks[ne].Is("(")) ne++;
                         type = TypeExprs.Parse(toks, ref p, ne, python: false);
-                        typeText = TypeExprs.Text(toks, i + 2, ne);
+                        typeText = CleanTypeText(TypeExprs.Text(toks, i + 2, ne));
                     }
                     i = ie;
                 }
@@ -795,7 +807,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                         var re = TypeSpanEnd(i + 1, end, stopAtBrace: false);
                         var p = i + 1;
                         ret = TypeExprs.Parse(toks, ref p, re, python: false);
-                        retText = TypeExprs.Text(toks, i + 1, re);
+                        retText = CleanTypeText(TypeExprs.Text(toks, i + 1, re));
                         i = re;
                     }
                     if (mods.Contains("get") || mods.Contains("set"))
@@ -823,7 +835,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                         var te = TypeSpanEnd(i + 1, end, stopAtBrace: false);
                         var p = i + 1;
                         type = TypeExprs.Parse(toks, ref p, te, python: false);
-                        typeText = TypeExprs.Text(toks, i + 1, te);
+                        typeText = CleanTypeText(TypeExprs.Text(toks, i + 1, te));
                         i = te;
                     }
                     else if (i < end && !toks[i].Is(";") && !toks[i].Is(",") && toks[i].Line == nameTok.Line)
@@ -879,10 +891,10 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                     var te = TypeSpanEnd(k + 1, b, stopAtBrace: false);
                     var p = k + 1;
                     type = TypeExprs.Parse(toks, ref p, te, python: false);
-                    text = TypeExprs.Text(toks, k + 1, te);
+                    text = CleanTypeText(TypeExprs.Text(toks, k + 1, te));
                     k = te;
                 }
-                if (k < b && toks[k].Is("=")) t.BodyRefs.AddRange(TypeExprs.NamesIn(toks, k + 1, b));
+                if (k < b && toks[k].Is("=")) t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, k + 1, b));
                 list.Add((new RawParam(name, type, text), mods, line));
             }
             return list;

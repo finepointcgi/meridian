@@ -243,6 +243,62 @@ public class CoSimulationTests
         Assert.NotNull(r.Error);
     }
 
+    /// <summary>A stand-in unit: constant outputs, records the inputs of every step.</summary>
+    private sealed class StubUnit(double[] outputs) : ICoSimUnit
+    {
+        public List<double[]> Inputs { get; } = new();
+        public bool HasState => true;
+        public bool TerminateRequested => false;
+        public double[] Initialize(double start, double stop, double[] inputs) { Inputs.Add(inputs); return outputs; }
+        public double[] Step(double t, double h, double[] inputs) { Inputs.Add(inputs); return outputs; }
+        public double[] Evaluate(double t, double[] inputs) => outputs;
+        public IReadOnlyList<string> DrainLog() => [];
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public void Compatible_Units_Across_A_Connector_Are_Converted()
+    {
+        var rig = new Rig();
+        var lag = rig.Part("lag", rig.ImportXml(TestFmus.LagDescription("lag", "km")));
+        var gain = rig.Part("gain", rig.ImportXml(TestFmus.GainDescription("gain", "m")));
+        rig.Connect(lag, "y", gain, "u");
+        var plan = CoSimulation.Plan(rig.M, rig.System);
+        Assert.False(plan.HasErrors, string.Join("\n", plan.Problems.Select(p => p.Message)));
+        Assert.Contains(plan.Problems, p => p.Severity == CoSimSeverity.Info && p.Message.Contains("converted from km to m (× 1000)"));
+        var conn = Assert.Single(plan.Connections);
+        Assert.Equal(1000, conn.Scale, 9);
+
+        var units = new Dictionary<string, StubUnit> { ["lag"] = new([2.5]), ["gain"] = new([0]) };
+        var r = CoSimulation.Run(rig.M, plan, new CoSimOptions { Stop = 0.1, Step = 0.05 }, (part, _) => units[part.Name]);
+        Assert.True(r.Completed, r.Error);
+        Assert.All(units["gain"].Inputs.Skip(1), i => Assert.Equal(2500, i[0], 9));   // 2.5 km arrive as 2500 m
+
+        // Temperatures convert with an offset.
+        Assert.Equal(273.15, Units.Convert(0, "degC", "K")!.Value, 9);
+    }
+
+    [Fact]
+    public void An_Fmu_That_Cannot_Change_Its_Step_Size_Rejects_A_Shortened_Last_Step()
+    {
+        var rig = new Rig();
+        var xml = TestFmus.LagDescription("lag", "m").Replace("canHandleVariableCommunicationStepSize=\"true\"", "canHandleVariableCommunicationStepSize=\"false\"")
+            .Replace("<ModelVariables>", "<DefaultExperiment startTime=\"0\" stopTime=\"4\" stepSize=\"0.2\"/><ModelVariables>");
+        var block = rig.ImportXml(xml);
+        Assert.Equal("false", block.Get(FieldKeys.TagPrefix + "fmi.variableStepSize"));
+        rig.Part("lag", block);
+        var plan = CoSimulation.Plan(rig.M, rig.System);
+        Assert.Equal(0.2, plan.SuggestedStep);
+        Assert.Equal(4, plan.SuggestedStop);
+        var r = CoSimulation.Run(rig.M, plan, new CoSimOptions { Stop = 1, Step = 0.3 }, (_, _) => throw new InvalidOperationException("must not start FMUs"));
+        Assert.False(r.Completed);
+        Assert.Contains("cannot change its communication step size", r.Error);
+        Assert.Contains("1.2 s", r.Error);
+        // A whole number of steps is fine.
+        r = CoSimulation.Run(rig.M, plan, new CoSimOptions { Stop = 1.2, Step = 0.3 }, (_, _) => new StubUnit([0]));
+        Assert.True(r.Completed, r.Error);
+    }
+
     [Fact]
     public void Plan_Reports_Wiring_Problems()
     {

@@ -14,6 +14,8 @@ public enum NodeShape
     Timeline, TimeMarker, DurationMarker, InteractionUse, InlineInteraction,
     // Appended: history, entry / exit point and terminate pseudostates (drawn by subtype)
     Pseudostate,
+    // Appended: fault tree events (drawn by event kind) and gates (AND / OR / vote)
+    FaultEvent, FaultGate,
 }
 
 /// <summary>A palette entry: an element or relationship kind, optionally with a subtype (BPMN, ArchiMate…).</summary>
@@ -37,6 +39,9 @@ public static class Metamodel
         ElementKind.Transition, ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate, ElementKind.Connector,
         ElementKind.Message, ElementKind.Binding, ElementKind.BpmnFlow, ElementKind.ArchiRelation, ElementKind.ForeignKey, ElementKind.Line,
         ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes, ElementKind.CommunicationLink,
+        ElementKind.Link,
+        ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath,
+        ElementKind.FaultTreeLink, ElementKind.Mitigate,
     };
 
     private static readonly HashSet<ElementKind> Classifiers = new()
@@ -45,6 +50,7 @@ public static class Metamodel
         ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock,
         ElementKind.Actor, ElementKind.UseCase, ElementKind.Requirement, ElementKind.TestCase,
         ElementKind.Activity, ElementKind.StateMachine, ElementKind.Interaction, ElementKind.Table, ElementKind.Stereotype,
+        ElementKind.Node, ElementKind.Device, ElementKind.ExecutionEnvironment, ElementKind.Artifact, ElementKind.DeploymentSpecification,
     };
 
     private static readonly HashSet<ElementKind> StructuralClassifiers = new()
@@ -67,9 +73,11 @@ public static class Metamodel
     private static readonly HashSet<ElementKind> PackageMembers = new()
     {
         ElementKind.BpmnPool, ElementKind.BpmnLane, ElementKind.BpmnNode, ElementKind.ArchiElement, ElementKind.Profile, ElementKind.Shape,
-        ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule,
+        ElementKind.TableView, ElementKind.QueryView, ElementKind.ValidationRule, ElementKind.RelationMap,
         ElementKind.Feature, ElementKind.Configuration, ElementKind.TradeStudy,
         ElementKind.Sequence, ElementKind.Routine,
+        ElementKind.InstanceSpecification,
+        ElementKind.FailureMode, ElementKind.FaultTreeEvent, ElementKind.FaultTreeGate,
     };
 
     /// <summary>Kinds that carry no name of their own in normal use.</summary>
@@ -78,6 +86,8 @@ public static class Metamodel
         ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
         ElementKind.InitialState, ElementKind.FinalState, ElementKind.Comment, ElementKind.CombinedFragment, ElementKind.Shape,
         ElementKind.DurationConstraint, ElementKind.TimeConstraint, ElementKind.InteractionOperand, ElementKind.Pseudostate,
+        ElementKind.Slot,
+        ElementKind.FaultTreeGate,
     };
 
     public static readonly IReadOnlyList<string> FragmentOperators = ["alt", "opt", "loop", "par", "break", "critical", "neg", "seq", "strict"];
@@ -113,19 +123,27 @@ public static class Metamodel
             ElementKind.Enumeration => child is ElementKind.EnumerationLiteral or ElementKind.Operation,
             ElementKind.Interface or ElementKind.InterfaceBlock => child is ElementKind.Property or ElementKind.Operation or ElementKind.Port,
             ElementKind.Class or ElementKind.Block or ElementKind.Component or ElementKind.ConstraintBlock or ElementKind.DataType or ElementKind.ValueType =>
-                child is ElementKind.Property or ElementKind.Operation or ElementKind.Port || IsStructuralClassifier(child) || IsBehavior(child),
+                child is ElementKind.Property or ElementKind.Operation or ElementKind.Port || IsStructuralClassifier(child) || IsBehavior(child)
+                || child == ElementKind.FailureMode && owner is ElementKind.Class or ElementKind.Block or ElementKind.Component,
             ElementKind.Actor or ElementKind.UseCase => child is ElementKind.Property or ElementKind.Operation || IsBehavior(child),
             ElementKind.Interaction => child is ElementKind.Lifeline or ElementKind.CombinedFragment or ElementKind.TimingLifeline
                 or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.CommunicationLifeline,
             ElementKind.CombinedFragment => child is ElementKind.InteractionOperand,
             ElementKind.Requirement => child is ElementKind.Requirement,  // requirement containment
             ElementKind.TestCase => child is ElementKind.Activity,
-            ElementKind.Activity => IsActivityNode(child) && !IsPin(child) || child == ElementKind.Partition,
-            ElementKind.Action => IsPin(child),
+            ElementKind.Activity => IsActivityNode(child) && !IsPin(child) || child is ElementKind.Partition or ElementKind.FailureMode,
+            ElementKind.Action => IsPin(child) || child == ElementKind.FailureMode,
+            ElementKind.Property or ElementKind.Operation => child == ElementKind.FailureMode,   // parts and functions fail too
             ElementKind.StateMachine => IsVertex(child),
             ElementKind.State => IsVertex(child),
             ElementKind.Table => child is ElementKind.Column or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Trigger,
             ElementKind.Feature => child == ElementKind.Feature,   // feature tree by containment
+            ElementKind.InstanceSpecification => child is ElementKind.Slot or ElementKind.InstanceSpecification,   // slots and nested part instances
+            // Deployment: nodes nest (a device holding an execution environment holding another); artifacts nest artifacts.
+            ElementKind.Node or ElementKind.Device or ElementKind.ExecutionEnvironment =>
+                Deployment.DeploymentModel.IsNode(child) || child is ElementKind.Property or ElementKind.Operation or ElementKind.Port,
+            ElementKind.Artifact => child is ElementKind.Artifact or ElementKind.Property or ElementKind.Operation,
+            ElementKind.DeploymentSpecification => child == ElementKind.Property,
             _ => false,
         };
     }
@@ -137,7 +155,7 @@ public static class Metamodel
         return rel switch
         {
             ElementKind.Satisfy => req(target) && !req(source) ? null : "Satisfy must go from a design element to a Requirement",
-            ElementKind.Verify => req(target) ? null : "Verify must target a Requirement",
+            ElementKind.Verify => req(target) || target == ElementKind.FailureMode ? null : "Verify must target a Requirement or a Failure Mode",
             ElementKind.DeriveReqt or ElementKind.Copy => req(source) && req(target) ? null : $"{rel} must connect two Requirements",
             ElementKind.Include or ElementKind.Extend => source == ElementKind.UseCase && target == ElementKind.UseCase ? null : $"{rel} must connect two Use Cases",
             ElementKind.Generalization => source == target && IsClassifier(source) ? null : "Generalization must connect two classifiers of the same kind",
@@ -161,6 +179,12 @@ public static class Metamodel
                 source == ElementKind.Feature && target == ElementKind.Feature ? null : $"{DisplayName(rel)} must connect two Features",
             ElementKind.CommunicationLink => source is ElementKind.CommunicationLifeline or ElementKind.Lifeline && target is ElementKind.CommunicationLifeline or ElementKind.Lifeline
                 ? null : "Communication links connect lifelines",
+            ElementKind.Link => source == ElementKind.InstanceSpecification && target == ElementKind.InstanceSpecification ? null : "Links connect two instance specifications",
+            ElementKind.Deployment or ElementKind.Manifestation or ElementKind.CommunicationPath => Deployment.DeploymentModel.CheckEnds(rel, source, target),
+            ElementKind.FaultTreeLink => source is ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate && target is ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate
+                ? null : "Fault tree links connect events and gates (from the output above to an input below)",
+            ElementKind.Mitigate => target == ElementKind.FailureMode && source != ElementKind.FailureMode && !IsRelationship(source)
+                ? null : "Mitigate goes from a requirement (or design element) to a Failure Mode",
             _ => null, // Dependency, Refine, Trace, Allocate: any to any
         };
     }
@@ -195,6 +219,18 @@ public static class Metamodel
             new(ElementKind.Partition), new(ElementKind.ObjectNode), new(ElementKind.ObjectNode, Subtypes.DataStore, "Data Store"),
             new(ElementKind.ObjectNode, Subtypes.CentralBuffer, "Central Buffer"), new(ElementKind.InputPin), new(ElementKind.OutputPin), new(ElementKind.Comment),
         ],
+        DiagramType.FaultTree =>
+        [
+            new(ElementKind.FaultTreeEvent, Safety.SafetyFields.Top, "Top event"),
+            new(ElementKind.FaultTreeEvent, Safety.SafetyFields.Intermediate, "Intermediate event"),
+            new(ElementKind.FaultTreeEvent, Safety.SafetyFields.Basic, "Basic event"),
+            new(ElementKind.FaultTreeEvent, Safety.SafetyFields.Undeveloped, "Undeveloped event"),
+            new(ElementKind.FaultTreeEvent, Safety.SafetyFields.House, "House event"),
+            new(ElementKind.FaultTreeGate, Safety.SafetyFields.And, "AND gate"),
+            new(ElementKind.FaultTreeGate, Safety.SafetyFields.Or, "OR gate"),
+            new(ElementKind.FaultTreeGate, Safety.SafetyFields.Vote, "Vote gate (k of n)"),
+            new(ElementKind.Comment),
+        ],
         _ when UafViewpoints.Of(t) is { } uaf => UafViewpoints.PaletteItems(uaf),
         _ => PaletteNodes(t).Select(k => new PaletteItem(k)).ToList(),
     };
@@ -217,10 +253,10 @@ public static class Metamodel
     public static IReadOnlyList<ElementKind> PaletteNodes(DiagramType t) => t switch
     {
         DiagramType.Class => [ElementKind.Package, ElementKind.Class, ElementKind.Interface, ElementKind.DataType, ElementKind.Enumeration, ElementKind.Component, ElementKind.Comment],
-        DiagramType.BlockDefinition => [ElementKind.Package, ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Enumeration, ElementKind.Actor, ElementKind.Comment],
+        DiagramType.BlockDefinition => [ElementKind.Package, ElementKind.Block, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.ConstraintBlock, ElementKind.Enumeration, ElementKind.Actor, ElementKind.InstanceSpecification, ElementKind.Comment],
         DiagramType.InternalBlock => [ElementKind.Property, ElementKind.Port, ElementKind.Comment],
         DiagramType.Parametric => [ElementKind.Property, ElementKind.Comment],
-        DiagramType.Requirement => [ElementKind.Requirement, ElementKind.TestCase, ElementKind.Block, ElementKind.UseCase, ElementKind.Comment],
+        DiagramType.Requirement => [ElementKind.Requirement, ElementKind.TestCase, ElementKind.Block, ElementKind.UseCase, ElementKind.FailureMode, ElementKind.Comment],
         DiagramType.UseCase => [ElementKind.Actor, ElementKind.UseCase, ElementKind.Block, ElementKind.Package, ElementKind.Comment],
         DiagramType.Activity => [ElementKind.Action, ElementKind.InitialNode, ElementKind.ActivityFinalNode, ElementKind.DecisionNode, ElementKind.ForkNode,
                                  ElementKind.Partition, ElementKind.ObjectNode, ElementKind.InputPin, ElementKind.OutputPin, ElementKind.Comment],
@@ -233,6 +269,10 @@ public static class Metamodel
         DiagramType.InteractionOverview => [ElementKind.InteractionUse, ElementKind.InlineInteraction, ElementKind.InitialNode, ElementKind.ActivityFinalNode,
                                             ElementKind.DecisionNode, ElementKind.ForkNode, ElementKind.Comment],
         DiagramType.Communication => [ElementKind.CommunicationLifeline, ElementKind.Comment],
+        DiagramType.Object => [ElementKind.InstanceSpecification, ElementKind.Block, ElementKind.Comment],
+        DiagramType.Deployment => [ElementKind.Node, ElementKind.Device, ElementKind.ExecutionEnvironment, ElementKind.Artifact, ElementKind.DeploymentSpecification,
+                                   ElementKind.Component, ElementKind.Package, ElementKind.Comment],
+        DiagramType.FaultTree => [ElementKind.FaultTreeEvent, ElementKind.FaultTreeGate, ElementKind.Comment],
         _ when UafViewpoints.Of(t) is { } uaf => uaf.Elements.Select(x => x.Kind).Distinct().Append(ElementKind.Comment).ToList(),
         _ => [],
     };
@@ -240,10 +280,10 @@ public static class Metamodel
     public static IReadOnlyList<ElementKind> PaletteEdges(DiagramType t) => t switch
     {
         DiagramType.Class => [ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization, ElementKind.Realization, ElementKind.Dependency],
-        DiagramType.BlockDefinition => [ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization, ElementKind.Realization, ElementKind.Dependency, ElementKind.Allocate],
+        DiagramType.BlockDefinition => [ElementKind.Association, ElementKind.Composition, ElementKind.Aggregation, ElementKind.Generalization, ElementKind.Realization, ElementKind.Dependency, ElementKind.Allocate, ElementKind.Link],
         DiagramType.InternalBlock => [ElementKind.Connector, ElementKind.ObjectFlow, ElementKind.Allocate],
         DiagramType.Parametric => [ElementKind.Binding],
-        DiagramType.Requirement => [ElementKind.DeriveReqt, ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.Trace, ElementKind.Copy],
+        DiagramType.Requirement => [ElementKind.DeriveReqt, ElementKind.Satisfy, ElementKind.Verify, ElementKind.Refine, ElementKind.Trace, ElementKind.Copy, ElementKind.Mitigate],
         DiagramType.UseCase => [ElementKind.Association, ElementKind.Include, ElementKind.Extend, ElementKind.Generalization],
         DiagramType.Activity => [ElementKind.ControlFlow, ElementKind.ObjectFlow, ElementKind.Allocate],
         DiagramType.StateMachine => [ElementKind.Transition],
@@ -253,6 +293,9 @@ public static class Metamodel
         DiagramType.FeatureModel => [ElementKind.FeatureDecomposition, ElementKind.Requires, ElementKind.Excludes],
         DiagramType.InteractionOverview => [ElementKind.ControlFlow],
         DiagramType.Communication => [ElementKind.CommunicationLink],
+        DiagramType.Object => [ElementKind.Link, ElementKind.Dependency],
+        DiagramType.Deployment => [ElementKind.Deployment, ElementKind.Manifestation, ElementKind.CommunicationPath, ElementKind.Dependency, ElementKind.Association],
+        DiagramType.FaultTree => [ElementKind.FaultTreeLink],
         _ when UafViewpoints.Of(t) is { } uaf => uaf.Links.Select(x => x.Kind).Distinct().ToList(),
         _ => [],
     };
@@ -265,7 +308,7 @@ public static class Metamodel
         DiagramType.StateMachine => owner == ElementKind.StateMachine,
         DiagramType.Sequence or DiagramType.Timing or DiagramType.Communication => owner == ElementKind.Interaction,
         DiagramType.InteractionOverview => owner == ElementKind.Activity,
-        DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard or DiagramType.FeatureModel => owner is ElementKind.Model or ElementKind.Package,
+        DiagramType.Bpmn or DiagramType.ArchiMate or DiagramType.Database or DiagramType.Whiteboard or DiagramType.FeatureModel or DiagramType.FaultTree => owner is ElementKind.Model or ElementKind.Package,
         _ => IsNamespace(owner),
     };
 
@@ -289,6 +332,9 @@ public static class Metamodel
         DiagramType.Timing => "timing",
         DiagramType.InteractionOverview => "io",
         DiagramType.Communication => "comm",
+        DiagramType.Object => "obj",
+        DiagramType.Deployment => "deploy",
+        DiagramType.FaultTree => "fta",
         _ when UafViewpoints.Of(t) is { } uaf => "uaf " + uaf.Code,
         _ => "diagram",
     };
@@ -330,6 +376,7 @@ public static class Metamodel
         ElementKind.TableView => "Table View",
         ElementKind.QueryView => "Query",
         ElementKind.ValidationRule => "Validation Rule",
+        ElementKind.RelationMap => "Relation Map",
         ElementKind.TradeStudy => "Trade Study",
         ElementKind.FeatureDecomposition => "Feature Decomposition",
         ElementKind.TimingLifeline => "Timing Lifeline",
@@ -342,6 +389,14 @@ public static class Metamodel
         ElementKind.InteractionOperand => "Operand",
         ElementKind.DbIndex => "Index",
         ElementKind.DbConstraint => "Constraint",
+        ElementKind.InstanceSpecification => "Instance",
+        ElementKind.ExecutionEnvironment => "Execution Environment",
+        ElementKind.DeploymentSpecification => "Deployment Specification",
+        ElementKind.CommunicationPath => "Communication Path",
+        ElementKind.FailureMode => "Failure Mode",
+        ElementKind.FaultTreeEvent => "Fault Tree Event",
+        ElementKind.FaultTreeGate => "Fault Tree Gate",
+        ElementKind.FaultTreeLink => "Fault Tree Link",
         _ => k.ToString(),
     };
 
@@ -361,6 +416,8 @@ public static class Metamodel
         DiagramType.Timing => "Timing Diagram",
         DiagramType.InteractionOverview => "Interaction Overview Diagram",
         DiagramType.Communication => "Communication Diagram",
+        DiagramType.Object => "Object Diagram",
+        DiagramType.FaultTree => "Fault Tree Diagram",
         _ when UafViewpoints.Of(t) is { } uaf => uaf.Name,
         _ => $"{t} Diagram",
     };
@@ -389,6 +446,11 @@ public static class Metamodel
         ElementKind.TradeStudy => "tradeStudy",
         ElementKind.Sequence => "sequence",
         ElementKind.Routine => "routine",
+        ElementKind.Device => "device",
+        ElementKind.ExecutionEnvironment => "executionEnvironment",
+        ElementKind.Artifact => "artifact",
+        ElementKind.DeploymentSpecification => "deployment spec",
+        ElementKind.FailureMode => "failureMode",
         _ => null,
     };
 
@@ -414,6 +476,8 @@ public static class Metamodel
         ElementKind.InteractionUse => NodeShape.InteractionUse,
         ElementKind.InlineInteraction => NodeShape.InlineInteraction,
         ElementKind.Pseudostate => NodeShape.Diamond,   // a choice; Notation.ShapeOf picks the shape of the other kinds
+        ElementKind.FaultTreeEvent => NodeShape.FaultEvent,
+        ElementKind.FaultTreeGate => NodeShape.FaultGate,
         _ => NodeShape.Rectangle,
     };
 
@@ -438,6 +502,8 @@ public static class Metamodel
         NodeShape.DurationMarker => (180, 40),
         NodeShape.InteractionUse => (200, 70),
         NodeShape.InlineInteraction => (280, 170),
+        NodeShape.FaultEvent => (160, 64),
+        NodeShape.FaultGate => (54, 60),
         _ when k == ElementKind.CommunicationLifeline => (150, 46),
         _ when k == ElementKind.Requirement => (220, 120),
         _ when k is ElementKind.Property or ElementKind.ObjectNode => (160, 60),
@@ -445,6 +511,10 @@ public static class Metamodel
         _ when k == ElementKind.Table => (200, 120),
         _ when k is ElementKind.Configuration or ElementKind.TradeStudy => (200, 110),
         _ when k == ElementKind.Feature => (140, 60),
+        _ when k == ElementKind.InstanceSpecification => (200, 100),
+        _ when Deployment.DeploymentModel.IsNode(k) => (220, 130),
+        _ when k is ElementKind.Artifact or ElementKind.DeploymentSpecification => (200, 76),
+        _ when k == ElementKind.FailureMode => (220, 120),
         _ => (180, 110),
     };
 
@@ -475,6 +545,12 @@ public static class Metamodel
         ElementKind.Requires => new(true, ArrowHead.Open, ArrowHead.None, "requires"),
         ElementKind.Excludes => new(true, ArrowHead.Open, ArrowHead.Open, "excludes"),
         ElementKind.CommunicationLink => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Link => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Deployment => new(true, ArrowHead.Open, ArrowHead.None, "deploy"),
+        ElementKind.Manifestation => new(true, ArrowHead.Open, ArrowHead.None, "manifest"),
+        ElementKind.CommunicationPath => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.FaultTreeLink => new(false, ArrowHead.None, ArrowHead.None, null),
+        ElementKind.Mitigate => new(true, ArrowHead.Open, ArrowHead.None, "mitigate"),
         _ => new(false, ArrowHead.None, ArrowHead.None, null),
     };
 
@@ -482,7 +558,7 @@ public static class Metamodel
     public static IReadOnlyList<string> EditableFields(ElementKind k)
     {
         var f = new List<string>();
-        if (k is not (ElementKind.Comment or ElementKind.CombinedFragment or ElementKind.InteractionOperand)) f.Add(FieldKeys.Name);
+        if (k is not (ElementKind.Comment or ElementKind.CombinedFragment or ElementKind.InteractionOperand or ElementKind.Slot)) f.Add(FieldKeys.Name);
         if (k is ElementKind.BpmnNode or ElementKind.ArchiElement or ElementKind.BpmnFlow or ElementKind.ArchiRelation or ElementKind.Shape or ElementKind.Line
             or ElementKind.Pseudostate or ElementKind.ObjectNode or ElementKind.Table or ElementKind.DbConstraint or ElementKind.Routine) f.Add(FieldKeys.Subtype);
         if (k == ElementKind.InteractionOperand) f.Add(FieldKeys.Guard);
@@ -510,6 +586,8 @@ public static class Metamodel
         f.AddRange(DataModeling.DbFields.EditableFields(k));
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
+        f.AddRange(DeploymentFields.EditableFields(k));
+        f.AddRange(Safety.SafetyFields.EditableFields(k).Where(x => x != FieldKeys.Subtype || !f.Contains(FieldKeys.Subtype)));
         f.AddRange(ExtFieldKeys.EditableFields(k));
         f.AddRange(InteractionNotation.EditableFields(k));
         f.Add(FieldKeys.Stereotypes);

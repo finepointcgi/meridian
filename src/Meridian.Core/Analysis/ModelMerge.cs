@@ -738,7 +738,7 @@ public static class ModelMerge
                 {
                     if (!made.TryGetValue(cid, out var c)) continue;
                     c.Owner = e;
-                    e.Children.Add(c);
+                    e.ChildList.Add(c);
                     Link(c);
                 }
             }

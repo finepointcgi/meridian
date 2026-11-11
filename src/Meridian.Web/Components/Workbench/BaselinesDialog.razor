@@ -34,10 +34,10 @@
                             <div class="d-flex align-center gap-2">
                                 <MudIcon Icon="@Icons.Material.Filled.Flag" Style="font-size:15px; color:var(--mud-palette-primary)" />
                                 <b style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis">@b.Name</b>
-                                <MudTooltip Text="Compare with the current model"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.CompareArrows" OnClick="() => CompareWithCurrent(baseline)" /></MudTooltip>
+                                <MudTooltip Text="Compare with the current model"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.CompareArrows" OnClick="() => CompareWithCurrent(baseline)" aria-label="Compare with the current model" /></MudTooltip>
                                 @if (Ws.Role == ProjectRole.Owner)
                                 {
-                                    <MudTooltip Text="Delete baseline"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(baseline)" /></MudTooltip>
+                                    <MudTooltip Text="Delete baseline"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(baseline)" aria-label="Delete baseline" /></MudTooltip>
                                 }
                             </div>
                             <div class="dim">v@(b.VersionNumber) on @b.BranchName · @b.CreatedBy · @b.CreatedAt.ToLocalTime().ToString("MMM d, yyyy HH:mm")</div>

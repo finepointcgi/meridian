@@ -1,3 +1,4 @@
+@inject IDialogService ConfirmDialogs
 @using Meridian.Data
 @inject IMeridianStore Db
 @inject Workspace Ws
@@ -37,7 +38,7 @@
                                 <MudSelectItem Value="ProjectRole.Editor">Editor</MudSelectItem>
                                 <MudSelectItem Value="ProjectRole.Owner">Owner</MudSelectItem>
                             </MudSelect>
-                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PersonRemove" OnClick="() => Remove(member)" />
+                            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.PersonRemove" OnClick="() => Remove(member)" aria-label="Remove member" title="Remove member" />
                         }
                         else
                         {
@@ -100,6 +101,8 @@
     private async Task Remove(ProjectMember m)
     {
         if (_members.Count(x => x.Role == ProjectRole.Owner) == 1 && m.Role == ProjectRole.Owner) { _error = "A project needs at least one owner."; return; }
+        if (await ConfirmDialogs.ShowMessageBox($"Remove {m.User.DisplayName}?", $"{m.User.DisplayName} can no longer open this project. You can add them again later.",
+                yesText: "Remove", cancelText: "Cancel") != true) return;
         await Db.RemoveMemberAsync(ProjectId, m.User.Id);
         await Audit.RecordAsync(Meridian.Web.Admin.AuditActions.MemberRemove, Ws.User, ProjectId, Ws.Session?.Name, target: m.User.Username);
         await Reload();

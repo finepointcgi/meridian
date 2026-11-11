@@ -291,7 +291,19 @@ public sealed unsafe class Fmi2Instance : FmuInstance
     public override bool DoStep(double t, double h)
     {
         var fn = (delegate* unmanaged[Cdecl]<IntPtr, double, double, int, int>)Sym("fmi2DoStep");
-        Check(fn(Handle, t, h, 1), "fmi2DoStep");
+        var status = fn(Handle, t, h, 1);
+        if (status == 2 /* fmi2Discard */)
+        {
+            // A slave that wants to end the simulation returns Discard and reports fmi2Terminated (= 3) as true.
+            var getBool = (delegate* unmanaged[Cdecl]<IntPtr, int, int*, int>)Sym("fmi2GetBooleanStatus");
+            var terminated = 0;
+            if (getBool(Handle, 3, &terminated) == 0 && terminated != 0)
+            {
+                AddLog("[info] fmi2DoStep: the FMU asked to end the simulation (fmi2Terminated)");
+                return true;
+            }
+        }
+        Check(status, "fmi2DoStep");
         return false;
     }
 

@@ -1,0 +1,15 @@
+@inherits WorkspaceComponent
+
+@* A used project's source opened at its pinned version or baseline (docs/LIBRARIES.md): a read-only historical view. *@
+@if (Ws.Pinned is { } pin)
+{
+    <div class="pinned-banner" role="status" data-testid="pinned-view">
+        <MudIcon Icon="@Icons.Material.Outlined.History" />
+        <span class="t"><b>@pin.Label</b> <span class="dim">· @pin.ProjectName · read-only</span></span>
+        <button class="pinned-latest" @onclick="Latest" data-testid="pinned-latest">Go to latest</button>
+    </div>
+}
+
+@code {
+    private Task Latest() => Shell?.GoToLatest() ?? Task.CompletedTask;
+}

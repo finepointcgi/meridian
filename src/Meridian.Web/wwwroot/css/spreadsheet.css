@@ -1,0 +1,57 @@
+/* Spreadsheet (Excel / CSV) import dialog: source preview, column mapping, change review. */
+
+.ss-dialog .mud-dialog-content { display: flex; flex-direction: column; gap: 10px; }
+.ss-steps { display: flex; align-items: center; gap: 4px; }
+.ss-steps .ss-filename { margin-left: 10px; }
+.ss-step { font: 500 12px Inter, sans-serif; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); cursor: pointer; }
+.ss-step.on { background: var(--sel); color: var(--text); border-color: var(--accent); }
+.ss-step.dis { opacity: .45; cursor: default; }
+
+.ss-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ss-row label, .ss-grid2 label { display: inline-flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); }
+.ss-grid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 14px; margin: 6px 0 10px; }
+.ss-grid2 label.ss-check, .ss-row label.ss-check { flex-direction: row; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.ss-dim { color: var(--text-3); font-size: 12px; }
+
+.ss-sel, .ss-text, .ss-num, .ss-paste {
+    font: 13px Inter, sans-serif; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong);
+    border-radius: 6px; padding: 4px 6px; min-height: 28px;
+}
+.ss-text { min-width: 160px; }
+.ss-num { width: 70px; }
+.ss-paste { width: 100%; resize: vertical; font-family: Menlo, Consolas, monospace; font-size: 12px; }
+.ss-details { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ss-details .ss-sel, .ss-details .ss-text { min-height: 26px; padding: 2px 5px; font-size: 12px; }
+
+.ss-file { cursor: pointer; display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 4px 12px; white-space: nowrap; }
+.ss-file > * { flex-direction: row; }
+.ss-file input[type=file] { display: none; }
+
+.ss-preview { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.ss-dialog .tt th { top: 0; }
+.ss-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ss-table td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.ss-table .ss-ln { color: var(--text-3); width: 36px; text-align: right; }
+.ss-table tr.ss-head td { font-weight: 600; background: color-mix(in srgb, var(--accent, #4f8cff) 10%, transparent); }
+.ss-table tr.ss-skip td { opacity: .5; }
+.ss-columns tr.ignored td { opacity: .55; }
+.ss-columns .ss-colname { font-weight: 600; white-space: nowrap; }
+.ss-columns .ss-sample { color: var(--text-3); max-width: 200px; white-space: nowrap; }
+.ss-review tr.off td { opacity: .5; }
+.ss-review .diff-kind.removed { background: rgba(255, 107, 107, .16); color: var(--danger); }
+.ss-errors summary, .ss-export summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); padding: 4px 0; }
+.ss-errors summary a { margin-left: 10px; }
+.ss-errors tr.ss-err td:last-child { color: var(--danger); }
+.ss-export { border-top: 1px solid var(--border); padding-top: 8px; }
+.ss-export .ss-row { margin: 6px 0; }
+.ss-export .ss-row label { flex-direction: row; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-2); }
+.ss-query { flex: 1; min-width: 260px; }
+.ss-empty { color: var(--text-3); font-size: 13px; line-height: 1.5; padding: 10px 2px; }
+
+/* The model tree while a spreadsheet is dragged over it. */
+[data-sheet-drop].sheet-drop-over { outline: 2px dashed var(--accent, #4f8cff); outline-offset: -4px; }
+
+@media (max-width: 700px) {
+    .ss-steps .ss-filename { display: none; }
+    .ss-grid2 { grid-template-columns: 1fr; }
+}

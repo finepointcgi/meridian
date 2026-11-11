@@ -36,8 +36,8 @@
                         @if (project.Role == ProjectRole.Owner)
                         {
                             <span @onclick:stopPropagation="true" class="d-flex">
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" />
-                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(project)" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => Rename(project)" aria-label="Rename" title="Rename" />
+                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Delete" OnClick="() => Delete(project)" aria-label="Delete" title="Delete" />
                             </span>
                         }
                     </div>

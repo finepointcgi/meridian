@@ -1,0 +1,198 @@
+@using Meridian.Core.Instances
+@inherits WorkspaceComponent
+@inject IJSRuntime JS
+
+@* The Cameo "instance table": the instances of a classifier as rows, a column per feature, editable slot values. *@
+<div class="gt inst-table" data-testid="instance-table">
+    <div class="gt-bar">
+        <MudIcon Icon="@Icons.Material.Outlined.DataObject" Style="font-size:18px; color:var(--accent-2)" />
+        <span class="gt-lbl" style="font-weight:600">Instances of</span>
+        <select class="gt-select" value="@Classifier.Id" @onchange="e => SwitchClassifier((string?)e.Value)" title="Classifier" data-testid="instance-classifier">
+            @foreach (var c in Classifiers())
+            {
+                <option value="@c.Id">@c.DisplayName</option>
+            }
+        </select>
+        <label class="gt-lbl" title="Also list instances nested in other instances (part instances)">
+            <input type="checkbox" checked="@_nested" @onchange="e => _nested = e.Value is true" /> nested
+        </label>
+        <span class="gt-sep"></span>
+        <button class="gt-btn" disabled="@Ws.ReadOnly" @onclick="AddRow" title="New instance of @Classifier.DisplayName with its part instances" data-testid="instance-add"><MudIcon Icon="@Icons.Material.Outlined.PlaylistAdd" />Add</button>
+        <button class="gt-btn" disabled="@(Ws.ReadOnly || SelectedRow == null)" @onclick="DuplicateRow" title="Duplicate the selected instance (with its part instances)" data-testid="instance-duplicate"><MudIcon Icon="@Icons.Material.Outlined.ContentCopy" />Duplicate</button>
+        <button class="gt-btn" disabled="@(SelectedRow == null)" @onclick="ShowDiagram" title="Show the selected instance on an object diagram"><MudIcon Icon="@Icons.Material.Outlined.Schema" />Object diagram</button>
+        <span style="flex:1"></span>
+        <button class="gt-btn" @onclick="ExportCsv" title="Export as CSV"><MudIcon Icon="@Icons.Material.Outlined.FileDownload" />CSV</button>
+        <button class="gt-btn" @onclick="ExportXlsx" title="Export as Excel workbook"><MudIcon Icon="@Icons.Material.Outlined.GridOn" />XLSX</button>
+    </div>
+    @{ var table = InstanceTable.Build(Ws.Model, Classifier, _nested); }
+    <div class="gt-status">
+        <span data-testid="instance-count">@Plural.Of(table.Rows.Count, "instance")</span>
+        @if (_error != null) { <span class="gt-error" data-testid="instance-error"><MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" /> @_error</span> }
+        else { <span style="color:var(--text-3)">Values take units (1.5 t), enumeration literals and instances by name, or =expression. Empty clears the slot.</span> }
+        <GuideLink Page="@Meridian.Web.Hosting.UserGuide.Pages.Instances" />
+    </div>
+    <div class="gt-scroll">
+        <table class="gt-table">
+            <thead>
+                <tr>
+                    <th class="gt-num">#</th>
+                    <th class="gt-h">Instance</th>
+                    @foreach (var col in table.Columns)
+                    {
+                        <th class="gt-h" title="@Ws.Model.TypeDisplayName(col.Feature)">@col.Header</th>
+                    }
+                    <th class="gt-act"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var r = 0; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    var inst = row.Instance;
+                    var nested = inst.Owner?.Kind == ElementKind.InstanceSpecification;
+                    var editable = !Ws.ReadOnly && Ws.CanEdit(inst);
+                    <tr @key="inst.Id" class="@(ReferenceEquals(Ws.Selected, inst) ? "sel" : "")" @onclick="() => Ws.Select(inst)" data-instance="@row.Label">
+                        <td class="gt-num">@(r + 1)</td>
+                        <td>
+                            @if (editable && !nested)
+                            {
+                                <input class="gt-cell strong" value="@inst.Name" @onchange="ev => Rename(inst, (string?)ev.Value)" spellcheck="false" data-testid="instance-name" />
+                            }
+                            else
+                            {
+                                <span class="gt-ro" style="font-weight:600">@row.Label</span>
+                            }
+                        </td>
+                        @for (var i = 0; i < table.Columns.Count; i++)
+                        {
+                            var col = table.Columns[i];
+                            var value = row.Cells[i];
+                            var bad = _errorCell == (inst.Id, col.Feature.Id);
+                            <td>
+                                @if (!editable)
+                                {
+                                    <span class="gt-ro">@value</span>
+                                }
+                                else if (col.EnumValued)
+                                {
+                                    <select class="gt-cell" value="@value" @onchange="ev => Commit(inst, col.Feature, (string?)ev.Value)" data-feature="@col.Feature.Name">
+                                        <option value="">@(DefaultOf(col.Feature) is { Length: > 0 } dv ? $"({dv})" : "")</option>
+                                        @foreach (var lit in Ws.Model.ResolveType(col.Feature)!.OwnedElements.Where(l => l.Kind == ElementKind.EnumerationLiteral))
+                                        {
+                                            <option value="@lit.Name">@lit.Name</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    <input class="gt-cell" style="@(bad ? "box-shadow:inset 0 0 0 1px var(--danger)" : "")" value="@value" placeholder="@DefaultOf(col.Feature)" spellcheck="false" data-feature="@col.Feature.Name"
+                                           title="@(col.InstanceValued ? $"Instances of {Ws.Model.TypeDisplayName(col.Feature)} by name" : col.Unit != null ? $"In {col.Unit} (other units are converted)" : Ws.Model.TypeDisplayName(col.Feature))"
+                                           @onchange="ev => Commit(inst, col.Feature, (string?)ev.Value)" />
+                                }
+                            </td>
+                        }
+                        <td class="gt-act">
+                            @if (editable && !nested)
+                            {
+                                <span class="gt-del" title="Delete @inst.DisplayName and its part instances" @onclick:stopPropagation="true" @onclick="() => DeleteRow(inst)" data-testid="instance-delete"><MudIcon Icon="@Icons.Material.Outlined.DeleteOutline" /></span>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (table.Rows.Count == 0)
+                {
+                    <tr><td colspan="@(table.Columns.Count + 3)" style="color:var(--text-3); padding:14px">No instances of @Classifier.DisplayName yet. <span class="link" @onclick="AddRow">Create one</span> (with its part instances), or use “Create instance of…” on the block.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Element Classifier { get; set; } = default!;
+
+    private bool _nested = true;
+    private string? _error;
+    private (string, string)? _errorCell;
+
+    private Element? SelectedRow => Ws.Selected is { Kind: ElementKind.InstanceSpecification } s && InstanceModel.Classifiers(Ws.Model, s).Any(c => InstanceModel.Conforms(Ws.Model, c, Classifier)) ? s : null;
+
+    private IEnumerable<Element> Classifiers() =>
+        Ws.Model.AllElements.Where(e => InstanceModel.CanClassify(e.Kind) && e.Kind is not ElementKind.Enumeration || ReferenceEquals(e, Classifier))
+            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase);
+
+    private static string DefaultOf(Element feature) => feature.Get(FieldKeys.DefaultValue);
+
+    private void SwitchClassifier(string? id)
+    {
+        if (Ws.Model.Find(id) is not { } c || ReferenceEquals(c, Classifier)) return;
+        Ws.OpenView(ViewTabKind.Instances, c);
+    }
+
+    private void Commit(Element instance, Element feature, string? text)
+    {
+        try
+        {
+            InstanceModel.SetValue(Ws.Model, instance, feature, text);
+            _error = null;
+            _errorCell = null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = $"{InstanceTable.PathOf(instance)}.{feature.Name}: {ex.Message}";
+            _errorCell = (instance.Id, feature.Id);
+            Ws.SetStatus(_error);
+        }
+    }
+
+    private void Rename(Element instance, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Trim() == instance.Name) return;
+        Ws.Model.Rename(instance, name.Trim());
+    }
+
+    private void AddRow()
+    {
+        if (Ws.ReadOnly) return;
+        try
+        {
+            var inst = InstanceModel.CreateInstanceTree(Ws.Model, Classifier);
+            Ws.Select(inst, syncCanvas: false);
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private void DuplicateRow()
+    {
+        if (SelectedRow is not { } row || Ws.ReadOnly) return;
+        Ws.Select(InstanceModel.Duplicate(Ws.Model, row), syncCanvas: false);
+    }
+
+    private void DeleteRow(Element instance)
+    {
+        try { InstanceModel.Delete(Ws.Model, instance); }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+    }
+
+    private void ShowDiagram()
+    {
+        if (SelectedRow is { } row) Shell.ShowOnObjectDiagram(row);
+    }
+
+    private string FileName(string ext) => string.Concat($"{Classifier.Name} instances.{ext}".Split(Path.GetInvalidFileNameChars()));
+
+    private async Task ExportCsv()
+    {
+        var csv = InstanceTable.Build(Ws.Model, Classifier, _nested).ToCsv();
+        var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+        await JS.InvokeVoidAsync("meridian.download", FileName("csv"), "text/csv", Convert.ToBase64String(bytes));
+    }
+
+    private async Task ExportXlsx()
+    {
+        var (header, rows) = InstanceTable.Build(Ws.Model, Classifier, _nested).Grid();
+        var sheetName = string.Concat(Classifier.Name.Where(ch => !"[]:*?/\\".Contains(ch)));
+        var bytes = Meridian.Serialization.Xlsx.Write(new Meridian.Serialization.Xlsx.Sheet(sheetName.Length == 0 ? "Instances" : sheetName[..Math.Min(31, sheetName.Length)], header, rows));
+        await JS.InvokeVoidAsync("meridian.download", FileName("xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Convert.ToBase64String(bytes));
+    }
+}

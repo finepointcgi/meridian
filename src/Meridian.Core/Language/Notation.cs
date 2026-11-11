@@ -45,6 +45,8 @@ public static class Notation
         : kind == ElementKind.Shape ? Subtypes.ShapeSize(subtype ?? "")
         : kind == ElementKind.Pseudostate ? Pseudostates.Size(string.IsNullOrEmpty(subtype) ? Pseudostates.Choice : subtype)
         : kind == ElementKind.ObjectNode && subtype == Subtypes.DataStore ? (160, 70)
+        : kind == ElementKind.FaultTreeEvent && subtype is Safety.SafetyFields.Basic or Safety.SafetyFields.Undeveloped or Safety.SafetyFields.House ? (150, 104)
+        : kind == ElementKind.FaultTreeEvent && string.IsNullOrEmpty(subtype) ? (150, 104)
         : Metamodel.DefaultSize(kind);
 
     /// <summary>Snaps a small shape (port, pin) so its centre lies on the nearest border of its container.</summary>
@@ -144,6 +146,14 @@ public static class Notation
             name = e.Get(FieldKeys.Body);
             keyword = null;
         }
+        else if (e.Kind == ElementKind.FailureMode)
+        {
+            comps.AddRange(Safety.SafetyNotation.FailureModeCompartments(model, e));
+        }
+        else if (e.Kind == ElementKind.FaultTreeGate)
+        {
+            name = Safety.FaultTree.GateSymbol(e, model);
+        }
         else if (e.Kind == ElementKind.Action && !string.IsNullOrEmpty(e.Get(FieldKeys.Body)))
         {
             comps.Add(new Compartment(null, [e.Get(FieldKeys.Body)]));
@@ -156,8 +166,17 @@ public static class Notation
         else if (Metamodel.IsStructuralClassifier(e.Kind) && e.Kind != ElementKind.Actor)
         {
             AddFeatureCompartments(model, e, comps, diagramType);
+            if (Safety.SafetyNotation.FailureModesCompartment(e) is { } fmc) comps.Add(fmc);
+        }
+        else if (e.Kind == ElementKind.InstanceSpecification)
+        {
+            // UML instance: "name : Type" (drawn underlined) and a slot compartment "feature = value".
+            name = Instances.InstanceModel.Label(model, e);
+            var slots = Instances.InstanceModel.Slots(e).Select(s => Instances.InstanceModel.SlotLine(model, s)).ToList();
+            if (slots.Count > 0) comps.Add(new Compartment(null, slots));
         }
 
+        Deployment.DeploymentModel.AddCompartments(model, e, comps);   // nodes and artifacts: value properties, file, manifests
         if (ShapeOf(e) == NodeShape.Rectangle) AddTraceCompartments(model, e, comps);
         VariabilityNotation.Decorate(model, e, ref keyword, comps);
         return new NodeContent(keyword, name, e.IsAbstract, comps);
@@ -169,7 +188,10 @@ public static class Notation
     /// </summary>
     public static IReadOnlyList<(string Title, ElementKind Kind, bool Outgoing)> TraceSlots(ElementKind k) => k == ElementKind.Requirement
         ? [("satisfiedBy", ElementKind.Satisfy, false), ("verifiedBy", ElementKind.Verify, false), ("refinedBy", ElementKind.Refine, false),
-           ("derivedFrom", ElementKind.DeriveReqt, true), ("derived", ElementKind.DeriveReqt, false), ("tracedTo", ElementKind.Trace, true)]
+           ("derivedFrom", ElementKind.DeriveReqt, true), ("derived", ElementKind.DeriveReqt, false), ("tracedTo", ElementKind.Trace, true),
+           ("mitigates", ElementKind.Mitigate, true)]
+        : k == ElementKind.FailureMode
+        ? [("mitigatedBy", ElementKind.Mitigate, false), ("verifiedBy", ElementKind.Verify, false), ("allocatedTo", ElementKind.Allocate, true), ("tracedTo", ElementKind.Trace, true)]
         : [("satisfies", ElementKind.Satisfy, true), ("verifies", ElementKind.Verify, true), ("refines", ElementKind.Refine, true),
            ("allocatedTo", ElementKind.Allocate, true), ("allocatedFrom", ElementKind.Allocate, false), ("tracedTo", ElementKind.Trace, true)];
 
@@ -376,6 +398,7 @@ public static class Notation
         boundsOf ??= n => n.Bounds;
         // Database diagrams: foreign keys run from column row to column row.
         if (DataModeling.DbNotation.ColumnRoute(d, e, boundsOf, waypoints) is { } columns) return columns;
+        if (Safety.SafetyNotation.TreeRoute(e, boundsOf, waypoints) is { } tree) return tree;
         // Diagrams with a routing style (new diagrams, or chosen in their properties) use the edge router.
         if (EdgeRouter.TryRoute(d, e, boundsOf, waypoints) is { } routed) return routed;
         var wps = waypoints ?? e.Waypoints;
