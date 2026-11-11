@@ -58,6 +58,8 @@
   items:
   - name: Import and export
     href: import-export.md
+  - name: Spreadsheet import (Excel / CSV)
+    href: spreadsheet-import.md
   - name: Integrations (Jira, DOORS, Polarion, webhooks)
     href: integrations.md
   - name: Code sync and architecture checks

@@ -92,6 +92,7 @@ public partial class Workbench
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
+        list.AddRange(SpreadsheetPaletteCommands());   // Workbench.Spreadsheet.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {

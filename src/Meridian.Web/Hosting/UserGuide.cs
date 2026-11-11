@@ -36,6 +36,7 @@ public static class UserGuide
         public const string GettingStarted = "getting-started";
         public const string Migration = "migration";
         public const string ImportExport = "import-export";
+        public const string SpreadsheetImport = "spreadsheet-import";
         public const string Requirements = "requirements";
         public const string Verification = "verification";
         public const string Plugins = "plugins";

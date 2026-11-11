@@ -9,6 +9,7 @@
 | Project menu → **Paste Mermaid…** | imports Mermaid text, for example from an AI assistant, with a preview ([Mermaid](#mermaid)) |
 | Project menu → **Export ▸** **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG / Mermaid**, **Copy diagram as Mermaid** | exports |
 | Right-click a diagram tab → **Export ▸** | SVG, PNG, image or Mermaid of that diagram |
+| Project menu → **Spreadsheet (Excel / CSV)…**, or drop a sheet on the model explorer | any element kind from Excel or CSV with a column mapping, re-import with a review, export with the same mapping ([Spreadsheet import](spreadsheet-import.md)) |
 | Ribbon **Requirements → Exchange** | ReqIF, CSV and Excel import and export, re-import with preview, renumbering |
 | Ribbon **Generate** | report, SysML v2, XMI, C# code, **Formats** for Word / PDF, BPMN, ArchiMate, ReqIF and SQL DDL, and **Plugins** (plugin exporters and importers) |
 
@@ -132,8 +133,9 @@ Headers are matched by name, quoted fields and embedded newlines are supported, 
 `Verification Method`, `Risk`, `Rationale`, `Documentation`, one `Attr: <name>` column per custom attribute, plus
 `Parent Id`, `Satisfied By` and `Verified By`.
 
-Edit the sheet (or have a stakeholder edit it), then **Re-import Excel / CSV with preview…**. Meridian matches rows to
-requirements by id and shows a reviewable diff:
+Edit the sheet (or have a stakeholder edit it), then **Import / re-import Excel / CSV…**: the
+[spreadsheet import](spreadsheet-import.md) dialog opens with the **Requirements** preset (change the mapping there if
+your sheet has other columns). Meridian matches rows to requirements by id and shows a reviewable diff:
 
 - **Added** and **Changed** rows (with every field change, old → new) are accepted by default;
 - requirements **not in the sheet** are listed too, but deleting them must be ticked explicitly;

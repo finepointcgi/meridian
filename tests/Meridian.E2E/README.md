@@ -47,6 +47,7 @@ MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreensh
 | `DrawingTests` | shapes panel, rename by typing (also very fast typing), move, undo/redo, quick-connect arrow drag, fill colour, delete; whiteboard shapes and lines |
 | `RequirementsTests` | new requirement, Inspector attributes, satisfy link from the traceability table, coverage, suspect link and clearing it |
 | `TablesTests` | text query, open as table, inline cell edit, save the view |
+| `SpreadsheetImportTests` | parts-list `.xlsx` into the Vehicle sample with the BOM preset, then an edited sheet dropped on the model tree and its change review |
 | `BranchTests` | new branch, edit, switch to main, conflicting merge, resolve, verify |
 | `ReviewTests` | share with a second user, request a review, live notification bell, approve, vote notification |
 | `SysmlTextTests` | edit SysML v2 text, apply, tree updates, error reporting, undo |
