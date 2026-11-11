@@ -44,6 +44,8 @@
   href: code-sync.md
 - name: AI assistant
   href: ai-assistant.md
+- name: AI assistants (MCP)
+  href: mcp.md
 - name: Settings and theming
   href: settings.md
 - name: Keyboard shortcuts
