@@ -41,7 +41,7 @@ public partial class Workbench
             var existing = ProjectFile.Deserialize(await Meridian.Web.Services.VersionControl.HeadJsonAsync(Db, Hub, match.Id, null));
             var packages = MagicDrawImporter.SuggestPackages(existing, used);
             if (packages.Count == 0) continue;
-            var (removed, retyped, linked) = MagicDrawImporter.UseLibraries(model, report, existing, packages);
+            var (removed, retyped, linked) = MagicDrawImporter.UseLibraries(model, report, existing, packages, used, match.Name);
             Ws.Log($"“{used.Name}” will be used from “{match.Name}”: {removed} copied elements left out, {retyped} types and {linked} relationships linked to it.");
             var latest = (await Db.ListBranchVersionsAsync(match.Id, null)).Select(v => v.Number).DefaultIfEmpty(0).Max();
             chosen.Add(new CameoUsage(match.Id, match.Name, packages, latest > 0 ? LibraryPinKind.Version : LibraryPinKind.Branch,

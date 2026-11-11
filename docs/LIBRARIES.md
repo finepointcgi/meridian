@@ -136,8 +136,15 @@ it — removing warns when elements still refer to it (the references are kept a
 
 ## Cameo import
 
-`MagicDrawImporter` records the used projects (modules) an `.mdzip` refers to: `href`s to other `.mdzip` files (standard
-SysML / UML profiles excluded), the project metadata's project usages and the used-project proxies. Types from them are kept
+`MagicDrawImporter` records the used projects (modules) an `.mdzip` refers to: the project metadata
+(`com.nomagic.ci.metamodel.project` / `project.xmi`: `projectUsages` with `usedProjectURI`, `LOCAL_PROJECT_ID` properties and
+`mountPoints` whose `mountedPoint` names the mounted shared package; the project's own `sharePoints`), the used-project proxies
+(`proxy.local__…`, `proxy.twcloud__…`) and `href`s into other projects (`…mdzip#id`, `local:/…`, `twcloud:/…`). URIs map to
+display names (`MagicDrawImporter.UsedProjectName`: file name for local / file URIs, the `projectName` query parameter or
+"Teamwork Cloud project <id>" for Teamwork Cloud). Standard profiles (by module name, or by mounting the SysML / UML Standard
+Profile root package ids) go to `MagicDrawImportReport.StandardProfiles`, not `UsedProjects`. Each used project's `Outcome` is
+`Referenced`, `Copied` (a mounted shared package is in the file) or `Linked` (set by `UseLibraries` when its `used` argument is
+given); `SuggestPackages` prefers the mounted shared packages. Types from them are kept
 by name and relationships to them are kept aside, as before. When a used project already exists in Meridian — same Cameo
 project id (`md:projectId` on the imported root) or the same name — **Open a file as a new project** offers to **use the
 existing project instead of copying**: copies of its packages are left out of the new project, features typed by its
@@ -173,5 +180,6 @@ and a throwaway Testcontainers PostgreSQL.
 - A participant who can't read a library sees references to it as missing references; operations of others that create new
   references to library elements reach such a participant only on their next resynchronisation.
 - "Open in source project" opens the source project's main line, whatever the pin.
-- The Cameo import recognises used projects from `href`s, project metadata and proxies; the module's own copy rules
-  (shared packages, read-only flags) are not interpreted.
+- The Cameo import recognises used projects from `href`s, project metadata and proxies; read-only flags and auto-load options
+  of a usage are not interpreted. Cameo's project metadata format is not published: the names read are those seen in
+  exported projects, and anything missing falls back to the references in the model.
