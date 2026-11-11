@@ -12,7 +12,7 @@
     </TitleContent>
     <DialogContent>
         <div class="link-dlg deploy-dlg">
-            <div class="link-hint" data-testid="deploy-hint">@Hint()</div>
+            <div class="link-hint"><span data-testid="deploy-hint">@Hint()</span> <GuideLink Page="@Meridian.Web.Hosting.UserGuide.Pages.DeploymentDiagrams" /></div>
             <input class="link-search" data-testid="deploy-search" placeholder="Search nodes, devices and execution environments…" value="@_query" @oninput="e => _query = e.Value?.ToString()" />
             <div class="link-list">
                 @foreach (var n in Matches())
