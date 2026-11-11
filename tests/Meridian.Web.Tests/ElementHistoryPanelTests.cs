@@ -83,22 +83,28 @@ public sealed class ElementHistoryPanelTests : TestContext, IAsyncLifetime
 
         var cut = RenderComponent<ElementHistoryPanel>(p => p.Add(x => x.Element, engine));
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("[data-testid=hist-entry]").Count), TimeSpan.FromSeconds(10));
-        var entries = cut.FindAll("[data-testid=hist-entry]");
-        Assert.Contains("v2", entries[0].TextContent);
-        Assert.Contains("Rename to Motor", entries[0].TextContent);
-        Assert.Contains("Ann", entries[0].TextContent);
-        Assert.Contains("Documentation, Name", entries[0].TextContent);
-        Assert.Contains("First version", entries[1].TextContent);
-        Assert.Empty(cut.FindAll("[data-testid=hist-uncommitted]"));
+        cut.WaitForAssertion(() =>
+        {
+            var entries = cut.FindAll("[data-testid=hist-entry]");
+            Assert.Contains("v2", entries[0].TextContent);
+            Assert.Contains("Rename to Motor", entries[0].TextContent);
+            Assert.Contains("Ann", entries[0].TextContent);
+            Assert.Contains("Documentation, Name", entries[0].TextContent);
+            Assert.Contains("First version", entries[1].TextContent);
+            Assert.Empty(cut.FindAll("[data-testid=hist-uncommitted]"));
+        }, TimeSpan.FromSeconds(10));
 
         // The diff of v2: before/after per field, text as an inline word diff.
         Retry(() => cut.FindAll("[data-testid=hist-entry]")[0].Click());
         cut.WaitForAssertion(() => Assert.Equal(2, cut.FindAll("[data-testid=hist-field]").Count), TimeSpan.FromSeconds(10));
-        var name = cut.Find("[data-testid=hist-field][data-key=name]");
-        Assert.Contains("Engine", name.TextContent);
-        Assert.Contains("Motor", name.TextContent);
-        Assert.NotNull(name.QuerySelector(".w-removed"));
-        Assert.NotNull(name.QuerySelector(".w-added"));
+        cut.WaitForAssertion(() =>
+        {
+            var name = cut.Find("[data-testid=hist-field][data-key=name]");
+            Assert.Contains("Engine", name.TextContent);
+            Assert.Contains("Motor", name.TextContent);
+            Assert.NotNull(name.QuerySelector(".w-removed"));
+            Assert.NotNull(name.QuerySelector(".w-added"));
+        }, TimeSpan.FromSeconds(10));
 
         // Compare v1 with the current model and restore the old name: one undoable edit through the session.
         Retry(() => cut.FindAll("[data-testid=hist-entry]")[1].Click());
@@ -106,8 +112,11 @@ public sealed class ElementHistoryPanelTests : TestContext, IAsyncLifetime
         Retry(() => cut.Find("[data-testid=hist-compare-current]").Click());
         cut.WaitForAssertion(() => Assert.NotNull(cut.Find("[data-testid=hist-field][data-key=name] [data-testid=hist-restore]")), TimeSpan.FromSeconds(10));
         Retry(() => cut.Find("[data-testid=hist-field][data-key=name] [data-testid=hist-restore]").Click());
-        Assert.Equal("Engine", engine.Name);
-        Assert.Equal("Engine", ProjectFile.Deserialize(ws.Session!.Snapshot()).Find(engine.Id)!.Name);   // the session got the edit
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Equal("Engine", engine.Name);
+            Assert.Equal("Engine", ProjectFile.Deserialize(ws.Session!.Snapshot()).Find(engine.Id)!.Name);   // the session got the edit
+        }, TimeSpan.FromSeconds(10));
 
         // Now the element differs from the last commit: an "Uncommitted" entry with who did it.
         cut.WaitForAssertion(() => Assert.Contains("Uncommitted (current session)", cut.Find("[data-testid=hist-uncommitted]").TextContent), TimeSpan.FromSeconds(10));
