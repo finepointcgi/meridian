@@ -24,6 +24,19 @@ public abstract class HandParsedCodeReader : ICodeReader
     /// <summary>Uses recorded per (type, target) in <see cref="CodeType.DependencyLocations"/>; the rest are only counted.</summary>
     public int MaxDependencyUsesPerTarget { get; init; } = CodeDependencyUses.DefaultMaxPerTarget;
 
+    /// <summary>Read method bodies into <see cref="CodeMember.Body"/> (behaviour diagrams from code).</summary>
+    public bool ReadBodies { get; init; } = true;
+
+    /// <summary>Body statements kept per read in total; later bodies are left out with a warning.</summary>
+    public int MaxTotalBodyStatements { get; init; } = CodeBodies.DefaultMaxTotalStatements;
+
+    /// <summary>Body statements still to be read in one <see cref="Read"/>.</summary>
+    private sealed class BodyBudget
+    {
+        public int Left;
+        public bool Cut;
+    }
+
     public abstract string Language { get; }
 
     public abstract bool Handles(string path);
@@ -105,16 +118,18 @@ public abstract class HandParsedCodeReader : ICodeReader
 
         session.Index = index;
         session.Finish();
+        var budget = new BodyBudget { Left = ReadBodies ? MaxTotalBodyStatements : 0 };
         var types = new List<CodeType>(index.Count);
         foreach (var t in index.Values.OrderBy(t => t.Symbol, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            types.Add(Build(t, session, ct));
+            types.Add(Build(t, session, budget, ct));
         }
+        if (budget.Cut) warnings.Add($"Method bodies were read up to {MaxTotalBodyStatements:N0} statements; the bodies of later methods were left out.");
         return new CodeModel(Language, types, warnings);
     }
 
-    private CodeType Build(RawType t, ParseSession session, CancellationToken ct)
+    private CodeType Build(RawType t, ParseSession session, BodyBudget budget, CancellationToken ct)
     {
         var cache = new Dictionary<string, string?>(StringComparer.Ordinal);
         var typeParams = new HashSet<string>(t.TypeParams, StringComparer.Ordinal);
@@ -196,6 +211,7 @@ public abstract class HandParsedCodeReader : ICodeReader
             var member = new CodeMember(m.Name, m.Kind, m.TypeText, info.Symbol, info.Many, m.Visibility)
             {
                 IsAbstract = m.IsAbstract, IsStatic = m.IsStatic, IsOptional = m.IsOptional || info.Optional, Doc = m.Doc, Line = m.Line,
+                Attributes = m.Attributes.Count == 0 ? [] : m.Attributes.Distinct().ToList(),
             };
             if (m.Kind == CodeMemberKind.Method)
             {
@@ -214,6 +230,27 @@ public abstract class HandParsedCodeReader : ICodeReader
             }
             else if (info.Symbol != null) memberTypes.Add(info.Symbol);
             members.Add(member);
+        }
+
+        // Method bodies: receivers resolved through the type's fields, the parameters, the locals and type names.
+        if (budget.Left > 0)
+        {
+            var fields = members.Where(x => x.Kind is CodeMemberKind.Field or CodeMemberKind.Property && x.TypeSymbol != null)
+                .GroupBy(x => x.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().TypeSymbol!, StringComparer.Ordinal);
+            var methodNames = t.Members.Where(x => x.Kind == CodeMemberKind.Method).Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
+            for (var k = 0; k < members.Count; k++)
+            {
+                var raw = t.Members.FirstOrDefault(x => x.Kind == CodeMemberKind.Method && x.Body != null && x.Name == members[k].Name && x.Line == members[k].Line);
+                if (members[k].Kind != CodeMemberKind.Method || raw?.Body is null) continue;
+                var pars = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var p in members[k].Parameters)
+                    if (p.TypeSymbol != null) pars[p.Name.TrimStart('*')] = p.TypeSymbol;
+                var body = CodeBodies.Capped(BodyResolver.Resolve(raw.Body, t.Symbol, methodNames, fields, pars, Resolve, ResolveChain));
+                var n = CodeBodies.Count(body.Statements);
+                if (n > budget.Left) { budget.Cut = true; budget.Left = 0; break; }
+                budget.Left -= n;
+                members[k] = members[k] with { Body = body };
+            }
         }
 
         var excluded = new HashSet<string>(memberTypes, StringComparer.Ordinal) { t.Symbol };
@@ -249,6 +286,8 @@ public abstract class HandParsedCodeReader : ICodeReader
             IsStatic = t.IsStatic,
             DependencyLocations = locations,
             OmittedDependencyLocations = omitted,
+            ExternalBases = t.Extends.Concat(t.Implements).Where(e => e.Name.Length > 0 && Resolve(e.Name) is null)
+                .Select(e => e.Name[(e.Name.LastIndexOf('.') + 1)..]).Distinct(StringComparer.Ordinal).ToList(),
         };
     }
 }
@@ -348,6 +387,10 @@ internal sealed class RawMember
     public int Line { get; init; }
     /// <summary>The file it is declared in when that is not the owning type's (declaration merging across files).</summary>
     public string? File { get; set; }
+    /// <summary>Methods: the body as parsed (receivers not yet resolved); null when not read.</summary>
+    public RawBody? Body { get; set; }
+    /// <summary>Annotation / decorator names ("GetMapping", "app.get").</summary>
+    public List<string> Attributes { get; init; } = [];
 }
 
 internal sealed record RawParam(string Name, TypeExpr? Type, string TypeText, CodeParameterDirection Direction = CodeParameterDirection.In);

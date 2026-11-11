@@ -195,6 +195,171 @@ public class CodeSyncBehaviourTests
         Assert.Empty(m.Types[0].ExternalBases);
     }
 
+    // ================================================================ hand-parsed readers
+
+    [Fact]
+    public void TypeScript_body_tree_resolves_fields_parameters_and_locals()
+    {
+        var m = new TypeScriptCodeReader().Read([
+            new CodeFile("src/battery.ts", "export class Battery { level = 0; isLow(): boolean { return this.level < 0.2; } charge(w: number): void { this.level += w } }"),
+            new CodeFile("src/controller.ts", """
+                import { Battery } from "./battery";
+                export class Controller {
+                  private main: Battery = new Battery();
+                  async balance(spare: Battery, rounds: number): Promise<number> {
+                    let charged = 0
+                    for (const b of [this.main, spare]) {
+                      if (b.isLow()) {
+                        b.charge(5);
+                        charged++;
+                      } else if (rounds > 2) {
+                        continue;
+                      } else {
+                        spare.charge(1);
+                      }
+                    }
+                    const extra = new Battery();
+                    try {
+                      await extra.charge(1);
+                    } catch (e) {
+                      console.log(e);
+                      throw new Error("failed");
+                    } finally {
+                      this.log("done");
+                    }
+                    switch (charged) {
+                      case 0: this.log("none"); break;
+                      default: return charged;
+                    }
+                    return -1;
+                  }
+                  log(text: string) { console.log(text); }
+                }
+                """)]);
+        var body = m.Types.Single(t => t.Name == "Controller").Members.Single(x => x.Name == "balance").Body!;
+        var s = body.Statements;
+        Assert.Equal(CodeStatementKind.Assign, s[0].Kind);
+        Assert.Equal(CodeLoopKind.ForEach, s[1].Loop);
+        Assert.Equal("b in [this.main, spare]", s[1].Text);
+        var ifs = Assert.Single(s[1].Body);
+        Assert.Equal("b.isLow()", ifs.Text);
+        Assert.Empty(ifs.Calls);
+        Assert.Null(ifs.Body[0].ReceiverType);   // the loop variable's type is not known…
+        Assert.Equal("charge", ifs.Body[0].Method);
+        Assert.Equal(CodeStatementKind.If, ifs.Else.Single().Kind);
+        Assert.Equal("src.Battery", ifs.Else.Single().Else.Single().ReceiverType);   // …a parameter's is
+        Assert.Equal(CodeStatementKind.Create, s[2].Kind is CodeStatementKind.Assign ? CodeStatementKind.Create : s[2].Kind);
+        var tr = s[3];
+        Assert.Equal(CodeStatementKind.Try, tr.Kind);
+        Assert.True(tr.Body[0].IsAwait);
+        Assert.Equal("src.Battery", tr.Body[0].ReceiverType);   // a local with "new Battery()"
+        Assert.Equal("", tr.Branches.Single().Label);
+        Assert.Equal("Error", tr.Branches[0].Body[1].Method);
+        Assert.Equal("src.Controller", tr.Finally.Single().ReceiverType);
+        Assert.Equal(["0", "default"], s[4].Branches.Select(b => b.Label));
+        Assert.Single(s[4].Branches[0].Body);   // break dropped
+        Assert.Equal(CodeStatementKind.Return, s[^1].Kind);
+    }
+
+    [Fact]
+    public void Java_body_tree_reads_loops_switch_try_and_synchronized()
+    {
+        var m = new JavaCodeReader().Read([
+            new CodeFile("src/main/java/sat/Battery.java", "package sat; public class Battery { public boolean isLow() { return true; } public void charge(int w) { } }"),
+            new CodeFile("src/main/java/sat/Controller.java", """
+                package sat;
+                import java.util.List;
+                public class Controller {
+                    private final List<Battery> batteries;
+                    private final Battery main = new Battery();
+                    @GetMapping("/balance")
+                    public int balance(Battery spare) {
+                        int charged = 0;
+                        for (Battery b : batteries) {
+                            if (b.isLow()) { b.charge(5); charged++; }
+                        }
+                        while (charged < 3) { spare.charge(1); charged++; }
+                        do { main.charge(1); } while (main.isLow());
+                        synchronized (this) { log("locked"); }
+                        try { main.charge(2); } catch (IllegalStateException | IllegalArgumentException e) { return -1; } finally { log("done"); }
+                        switch (charged) { case 1: case 2: log("few"); break; default: throw new IllegalStateException("x"); }
+                        return charged;
+                    }
+                    void log(String s) { System.out.println(s); }
+                }
+                """)]);
+        var balance = m.Types.Single(t => t.Name == "Controller").Members.Single(x => x.Name == "balance");
+        Assert.Contains("GetMapping", balance.Attributes);
+        var s = balance.Body!.Statements;
+        Assert.Equal(["Assign", "Loop", "Loop", "Loop", "Lock", "Try", "Switch", "Return"], s.Select(x => x.Kind.ToString()));
+        Assert.Equal("b in batteries", s[1].Text);
+        Assert.Equal("sat.Battery", s[1].Body.Single().Body[0].ReceiverType);   // "Battery b" of the for-each
+        Assert.Equal("sat.Battery", s[2].Body[0].ReceiverType);               // a parameter
+        Assert.Equal(CodeLoopKind.Do, s[3].Loop);
+        Assert.Equal("sat.Battery", s[3].Body[0].ReceiverType);               // a field
+        Assert.Equal("sat.Controller", s[4].Body[0].ReceiverType);            // log(...) is this.log
+        Assert.Equal("IllegalStateException | IllegalArgumentException", s[5].Branches.Single().Label);
+        Assert.Equal(["1, 2", "default"], s[6].Branches.Select(b => b.Label));
+        Assert.Equal("IllegalStateException", s[6].Branches[1].Body.Single().Method);
+    }
+
+    [Fact]
+    public void Python_body_tree_reads_blocks_by_indentation()
+    {
+        var m = new PythonCodeReader().Read([
+            new CodeFile("lander/battery.py", "class Battery:\n    def is_low(self) -> bool:\n        return True\n    def charge(self, w: int) -> None:\n        pass\n"),
+            new CodeFile("lander/controller.py", """
+                from lander.battery import Battery
+
+                class Controller:
+                    def __init__(self) -> None:
+                        self.main = Battery()
+
+                    async def balance(self, spare: Battery, rounds: int) -> int:
+                        charged = 0
+                        for b in [self.main, spare]:
+                            if b.is_low():
+                                spare.charge(5)
+                            elif rounds > 2:
+                                continue
+                            else:
+                                self.main.charge(1)
+                        extra = Battery()
+                        try:
+                            await extra.charge(1)
+                        except (IOError, ValueError) as e:
+                            raise RuntimeError("failed")
+                        finally:
+                            self.log("done")
+                        with open("x") as f: f.write("y")
+                        while charged < 3: charged += 1
+                        match charged:
+                            case 0:
+                                self.log("none")
+                            case _:
+                                return charged
+                        return -1
+
+                    def log(self, text: str) -> None:
+                        print(text)
+                """)]);
+        var s = m.Types.Single(t => t.Name == "Controller").Members.Single(x => x.Name == "balance").Body!.Statements;
+        Assert.Equal(["Assign", "Loop", "Assign", "Try", "Using", "Loop", "Switch", "Return"], s.Select(x => x.Kind.ToString()));
+        var ifs = s[1].Body.Single();
+        Assert.Equal("b.is_low()", ifs.Text);
+        Assert.Equal("lander.battery.Battery", ifs.Body.Single().ReceiverType);   // a parameter
+        var elif = ifs.Else.Single();
+        Assert.Equal("rounds > 2", elif.Text);
+        Assert.Equal("lander.battery.Battery", elif.Else.Single().ReceiverType);   // self.main (an attribute)
+        Assert.Equal("lander.battery.Battery", s[3].Body.Single().ReceiverType);    // extra = Battery()
+        Assert.True(s[3].Body.Single().IsAwait);
+        Assert.Equal("IOError, ValueError", s[3].Branches.Single().Label);
+        Assert.Equal("RuntimeError", s[3].Branches[0].Body.Single().Method);
+        Assert.Equal("lander.controller.Controller", s[3].Finally.Single().ReceiverType);
+        Assert.Single(s[4].Body);   // the single-line with body
+        Assert.Equal(["0", "default"], s[6].Branches.Select(b => b.Label));
+    }
+
     // ================================================================ mapping
 
     private static readonly CodeSyncOptions Options = new() { RepoId = "repo", Commit = "c1", Behaviour = CodeBehaviourMode.OnDemand };

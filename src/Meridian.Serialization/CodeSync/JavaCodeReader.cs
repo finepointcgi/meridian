@@ -202,6 +202,7 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                     doc ??= t.Doc;
                     i += 2;
                     while (i + 1 < end && toks[i].Is(".") && toks[i + 1].Kind == TokKind.Ident) i += 2;
+                    mods.Add("@" + toks[i - 1].Text);   // the annotation's simple name (entry points: @GetMapping, @Test)
                     if (i < end && toks[i].Is("(")) i = Math.Min(end, TypeExprs.Matching(toks, i, end) + 1);
                     continue;
                 }
@@ -408,12 +409,15 @@ public sealed class JavaCodeReader : HandParsedCodeReader
                     var bodyStart = i;
                     i = SkipThrowsAndBody(t, i, end);
                     var hasBody = false;
-                    for (var q = bodyStart; q < i; q++) if (toks[q].Is("{")) { hasBody = true; break; }
+                    var open = -1;
+                    for (var q = bodyStart; q < i; q++) if (toks[q].Is("{")) { hasBody = true; open = q; break; }
                     t.Members.Add(new RawMember
                     {
                         Name = nameTok.Text, Kind = CodeMemberKind.Method, Type = type, TypeText = typeText,
                         Visibility = Visibility(mods, inInterface), Params = pars, IsStatic = isStatic,
                         IsAbstract = mods.Contains("abstract") || (inInterface && !hasBody && !isStatic), Doc = doc, Line = nameTok.Line,
+                        Body = open >= 0 ? new CLikeBodyParser(toks, typeScript: false).Parse(open + 1, Math.Min(TypeExprs.Matching(toks, open, end), end)) : null,
+                        Attributes = mods.Where(x => x.StartsWith('@')).Select(x => x[1..]).ToList(),
                     });
                     continue;
                 }

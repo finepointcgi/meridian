@@ -678,10 +678,12 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                         i = re;
                     }
                     var hasBody = false;
+                    RawBody? body = null;
                     if (i < end && toks[i].Is("{"))
                     {
                         var bclose = TypeExprs.Matching(toks, i, end);
                         t.BodyRefs.AddRange(TypeExprs.RefsIn(toks, i + 1, bclose));
+                        body = new CLikeBodyParser(toks, typeScript: true).Parse(i + 1, Math.Min(bclose, end));
                         i = Math.Min(end, bclose + 1);
                         hasBody = true;
                     }
@@ -717,7 +719,7 @@ public sealed class TypeScriptCodeReader : HandParsedCodeReader
                     {
                         Name = name, Kind = CodeMemberKind.Method, Type = ret, TypeText = retText, Visibility = Visibility(mods, name),
                         Params = pars.Select(x => x.Param).ToList(), IsStatic = mods.Contains("static"), IsAbstract = mods.Contains("abstract"),
-                        Doc = doc, Line = nameTok.Line,
+                        Doc = doc, Line = nameTok.Line, Body = body,
                     });
                     continue;
                 }

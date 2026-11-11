@@ -472,10 +472,14 @@ public sealed class PythonCodeReader : HandParsedCodeReader
                 });
                 return;
             }
+            var slice = new List<(int, List<Tok>)>(Math.Max(0, bodyEnd - bodyStart));
+            for (var b = bodyStart; b < bodyEnd; b++) slice.Add((lines[b].Indent, lines[b].Toks));
             t.Members.Add(new RawMember
             {
                 Name = name, Kind = CodeMemberKind.Method, Type = ret, TypeText = retText, Visibility = Visibility(name), Params = pars,
                 IsStatic = isStatic || isClassMethod, IsAbstract = isAbstract, Doc = doc, Line = nameTok.Line,
+                Body = new PythonBodyParser(slice).Parse(0, slice.Count, colon + 1 < toks.Count ? toks : null, colon + 1),
+                Attributes = decoratorNames.Where(x => x.Length > 0).ToList(),
             });
         }
 
