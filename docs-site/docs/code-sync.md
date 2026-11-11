@@ -54,6 +54,32 @@ Meridian matches elements by their code symbol, so a second sync changes only wh
 stereotypes, tagged values, hand-made elements and hand-made relationships are left alone. Running the same code twice
 changes nothing.
 
+## Activity and sequence diagrams from code
+
+Code sync also reads method bodies and draws **behaviour** from them, in a **Behaviour** package inside each namespace's
+package:
+
+- an **activity diagram** per method: an action for each call (linked to the called operation), decisions and merges
+  for `if`, `switch` and `catch`, loops as a decision with a back edge, and final nodes for `return` and `throw`
+  («exception»);
+- a **sequence diagram** per entry point: a lifeline for each object the method calls (named after the field, parameter or
+  variable that holds it), messages for the calls, followed three levels deep, `alt` fragments for `if` / `switch`, `loop`
+  fragments for loops and `break` fragments for `catch`.
+
+Choose which methods get them with **Behaviour diagrams** in the repository's settings:
+
+| Setting | Diagrams |
+| --- | --- |
+| Off | none |
+| On demand | only when you ask: right-click an operation that came from code (or use the Inspector or ⌘K) and choose **Generate activity from code** or **Generate sequence from code** |
+| Entry points | activities for public methods with branches, loops or many calls, sequences for controllers, endpoints, handlers, hosted services and the public API of each namespace; at most 20 activities and 10 sequences per namespace and 300 in total |
+| All public methods | for every public method (at most 300 new per sync) |
+
+New connections use *Entry points*; connections made before this existed use *On demand*. Every behaviour diagram is kept
+up to date on the next sync: a changed method body updates its diagrams in place and shows in **Code changes** like any other
+change, and shapes you moved stay where you put them. C# is read completely; TypeScript, Java and Python are read as well as
+their hand-written readers can (see `docs/CODE-SYNC.md` for the limits).
+
 ## Submodules
 
 If the repository uses git submodules, Meridian reads their code too. Each submodule is read at the commit the

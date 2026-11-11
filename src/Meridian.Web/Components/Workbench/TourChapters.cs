@@ -193,7 +193,8 @@ public static class TourChapters
         new("Deployment diagrams", "Nodes, devices and artifacts; drawing a line from an artifact to a node deploys it.", "analysis"),
         new("Relation map, find & replace", "Explore everything connected to an element; search and replace across the whole model (⇧⌘F).", "analysis"),
         new("History, spreadsheets & printing", "Per-element history with diffs, Excel/CSV import for any element, and multi-page PDF printing (⌘P).", "analysis"),
-        new("Editing together", "Several people can change the same element at once without locks; everyone ends up with the same model.", "team"),
+        new("Behaviour from code", "Code sync draws activity and sequence diagrams from method bodies: for entry points, or for any operation on demand.", "code"),
+        new("Editing together","Several people can change the same element at once without locks; everyone ends up with the same model.", "team"),
         new("Coming from Cameo or EA?", "A short chapter on where the containment tree, specification window and menus went.", ComingFrom),
     ];
 

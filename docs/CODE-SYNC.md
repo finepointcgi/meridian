@@ -208,6 +208,128 @@ the rest per target. The output therefore grows with the number of dependencies,
 stored before this existed reads back with no locations. The architecture checks use them to point at the lines that
 break a rule ([ARCHITECTURE-CHECKS.md](ARCHITECTURE-CHECKS.md)); the model mapping does not.
 
+## Behaviour from code
+
+Besides structure, every reader reads **method bodies** into a small control-flow tree, `CodeMember.Body`
+(`Meridian.Core.CodeSync.CodeBody`, in `CodeBodyContracts.cs`). Code sync turns those into **activity diagrams** and
+**sequence diagrams**. The tree has one `CodeStatement` per statement, each with its source line:
+
+| Kind | Holds |
+|---|---|
+| `Call` | receiver as written (`battery`, `this`, `Battery`), `ReceiverType` (the scanned type, when resolved), `Method`, `Operation` (the exact overload, C#), `Arguments`, `ArgumentCount`, `IsAwait`, `IsStatic` |
+| `Create` | `new T(…)`; `Method` is the type, `ReceiverType` the scanned type |
+| `Assign` | `Text` is the target; when the value is a call, the call fields hold it |
+| `Return`, `Yield` | `Text` is the value; when it is a call, the call fields hold it |
+| `Throw` | `Text` is the expression, `Method` the exception type created |
+| `If` | `Text` is the condition, `Body` the then block, `Else` the else block (an else-if is one `If` in it) |
+| `Switch` | `Text` is the subject, `Branches` the cases (`case 1, 2`, `default`) |
+| `Loop` | `Loop` = `For` / `ForEach` / `While` / `Do`, `Text` the header (`b in batteries`), `Body` |
+| `Try` | `Body`, `Branches` = catch clauses (label = exception type, "" for any), `Finally` |
+| `Using`, `Lock` | `Text` is the resource, `Body` |
+| `Other` | short text (`break`, `continue`, `i++` …) |
+
+Calls of scanned types nested in a statement (conditions, arguments, LINQ lambdas) are listed in `Calls`, in evaluation
+order. Texts are cut at 80 characters, and a method keeps at most 300 statements (nested ones and calls included); the rest
+are counted in `CodeBody.Omitted` and drawn as a "+N more" action. A read keeps at most 2,000,000 statements in total
+(`MaxTotalBodyStatements`); later bodies are left out with a warning, so memory stays bounded on very large code. Readers
+take `ReadBodies = false` to skip bodies. Types also get `Attributes` (attribute, annotation and decorator names) and
+`ExternalBases` (base types that are not scanned, such as `BackgroundService`), and members get `Attributes`. All of it is
+optional: stored code models from before read back without bodies, and `CodeModelJson` writes the new parts without empty
+lists or default values.
+
+### How bodies map to the model
+
+Generated behaviours live in a **Behaviour** package inside the namespace package of the method's type (it is created when
+needed and removed when empty). Each behaviour carries `code.symbol` = `act:Type.Method(int)` or `seq:Type.Method(int)`,
+`specification` = the operation's id (UML `Behavior.specification`; the metamodel lets a block own a behaviour, but not an
+operation), `code.hash` and the other `code.*` keys. Nodes, flows and messages carry `code.key`, a stable key built from the
+path of the statement (its parents and a slug of what it is, numbered among equal siblings), so inserting a statement keeps
+the keys of all the others.
+
+**Activity** (`CodeActivityPlanner`):
+
+| Code | Activity |
+|---|---|
+| method start / end | initial node / activity final node |
+| call (statement, assignment of a call) | action named `receiver.Method()`; field `operation` = the called operation when it resolves to a scanned type (a CallOperationAction) |
+| run of other simple statements (assignments, creations, `++`) | one action named after the first, "… (+N)" |
+| `if` / `else if` / `else` | one decision node, a branch per condition guarded by its text, `[else]`; a merge node (decision node) when more than one path continues |
+| `switch` | decision with a branch per case (`[1, 2]`, `[default]`, `[else]` when there is no default) and a merge |
+| `for`, `foreach`, `while` | decision guarded by the loop header into the body, a back edge to the decision, `[else]` out; `break` leaves, `continue` goes back |
+| `do … while` | merge node, body, decision `[condition]` back to the merge, `[else]` out |
+| `try` / `catch` / `finally` | the try block, then a decision `[ok]` / `[catch IOException]` into each handler, a merge, then the finally block (the metamodel has no exception handler or interruptible region, so a handler is a guarded branch) |
+| `using`, `lock` | an action `using x` / `lock x`, then the body |
+| `return` | (the call, if any, then) an activity final node |
+| `throw` | an activity final node with «exception», named after the exception type (the metamodel has no flow final node) |
+
+The diagram is laid out top to bottom: a decision's branches side by side below it, the merge below the longest branch,
+loop bodies under their decision.
+
+**Sequence** (`CodeSequencePlanner`): a `caller` lifeline sends the entry call (`Balance(rounds)`) to a lifeline of the
+method's type. The body is followed depth first into the scanned types it calls, up to **3 levels** and **60 messages**
+(`CodeSyncOptions.BehaviourLimits`); calls of an interface method follow its only scanned implementation.
+
+| Code | Sequence |
+|---|---|
+| object called | a lifeline per receiver: named after the field, property, parameter or local (`charger : ICharger`), typed by its block; `this` calls are self messages; static calls go to a lifeline of the type |
+| call | synchronous message `Method(args)`; an awaited call is an asynchronous message |
+| non-void method (other object) | reply message named after the return type |
+| `if` / `else if` / `else`, `switch` | `alt` fragment with an operand per branch, guarded (`opt` for a lone `if`); fragments without messages are left out |
+| loop | `loop` fragment guarded by the header |
+| `catch` | `break` fragment guarded `catch IOException`; the try and finally blocks are inline |
+| deeper calls, recursion, the message cap | not followed; a comment on the diagram says so |
+
+Calls to types that are not scanned (framework, packages) are not messages.
+
+### Which methods get diagrams
+
+Each repository connection has a **Behaviour diagrams** setting (under *Model*, `CodeRepoConfig.BehaviourDiagrams`):
+
+| Setting | What happens |
+|---|---|
+| **Off** | nothing; existing behaviours are left alone |
+| **On demand** (the default for connections made before the setting existed) | no automatic diagrams. *Generate activity from code* and *Generate sequence from code* on an operation that came from code (its context menu on the tree and the canvas, the Inspector's *Behaviour from code* section, and ⌘K with the operation selected) build one from the code the last sync stored for the connection (the architecture check keeps it, `ArchitectureStore`) |
+| **Entry points** (the default for new connections) | activities for public methods with real control flow (at least one branch or loop, or at least 5 calls); sequences for entry points: endpoint methods (`[HttpGet]`, `[Route]`, `@GetMapping` …, or a body that calls `MapGet` / `MapPost` …), controllers and handlers (by attribute `[ApiController]`, by base type such as `ControllerBase`, `BackgroundService`, `IHostedService`, `IRequestHandler`, or by a name ending in Controller, Handler, Endpoint(s), Consumer, Worker, HostedService or Job), `ExecuteAsync` / `StartAsync` / `StopAsync` of hosted services, `static Main`, and public methods of types nothing else in their namespace calls that call into other scanned types. Tests are left out (`[Fact]`, `[Theory]`, `[Test]`, `[TestMethod]`, `test_…`, types named …Test(s)). At most **20 activities and 10 sequences per namespace and 300 in total** per sync; the busiest methods (branches and loops count three times as much as calls) come first, and a warning in the run says how many were skipped |
+| **All public methods** | an activity for every public method with a body and a sequence for every one that calls a scanned type, at most 300 new ones per sync |
+
+Every behaviour that exists is brought up to date on each sync, in any setting but Off, whether it was generated
+automatically or on demand. The caps only limit new ones.
+
+### Re-syncs, review and layout
+
+- Running the same code again changes nothing: a behaviour whose `code.hash` (everything it says, without lines and
+  positions) is unchanged is not touched, beyond keeping `code.file` and `code.line` current.
+- When a method's body changes, its activity and sequence are updated **in place**: elements whose key still exists keep
+  their id and are changed only where their name or guard changed; new statements add elements, gone ones are removed.
+  The behaviour itself is reported as changed. In *Code changes* the behaviour, its nodes, flows and messages are listed like
+  structure elements, and the diagram highlights them (green added, amber changed). *Show on diagram* opens a behaviour's
+  own diagram.
+- Layout: when nobody moved anything on a generated diagram since the last sync (`code.layout` holds a hash of the shapes'
+  places), it is laid out afresh. Otherwise shapes keep the places people gave them; new shapes go to their planned place.
+  Fragments and message heights of sequences are always recomputed.
+- When the method disappears (on a full snapshot), its behaviours are deleted, or marked `code.removed` when someone added
+  their own elements to them. Behaviour elements never appear on the structure diagrams code sync refreshes.
+- The architecture checks ignore behaviours; they read only structure.
+
+### Limits per language
+
+| Language | Bodies read | Calls resolved through |
+|---|---|---|
+| C# (Roslyn) | everything above, accurately; expression-bodied members; local functions are skipped (their calls appear, unresolved); switch expressions and lambdas stay inside their statement | the semantic model: this, base, static, extension methods, fields, properties, parameters, locals, `var`, LINQ lambda parameters (the core library, LINQ and the collections are referenced); NuGet types are not resolved |
+| TypeScript | class methods (not functions outside classes, not the implementation behind overload signatures, not arrow-function properties); `if`, `for` / `for…of` / `for…in`, `while`, `do`, `switch`, `try`, `return`, `throw`, `break`, `continue`, calls, assignments, `new`; statements without semicolons end at a line break | `this`, `this.field`, parameters and locals with a type annotation or `new T()`; `for…of` variables have no known type |
+| Java | methods (not constructors, lambdas or anonymous classes as bodies); as TypeScript plus enhanced `for (T x : xs)`, `synchronized`, try-with-resources, multi-catch and `->` cases; method annotations | `this`, fields, parameters, locals declared with a type or `new T()`, plain calls of the type's own methods; class-level annotations are not read |
+| Python | methods (not `__init__` and other dunder methods, not properties); `if` / `elif` / `else`, `for`, `while`, `try` / `except` / `else` / `finally`, `with`, `match` / `case`, `return`, `raise`, `yield`, single-line bodies after a colon; decorators as attributes | `self`, `self.attr`, annotated parameters, locals annotated or assigned `Class(…)`, `with Class(…) as x`; calling a class is a creation |
+
+The hand parsers never fail on a body they do not understand: what they cannot place becomes an `Other` statement.
+
+### Performance
+
+Reading Meridian's own `src` (452 files, 1,419 types, 5,522 method bodies with 58,377 statements) took 4.0 s without
+bodies and 5.9 s with them (1.45×); mapping with *Entry points* (217 activities, 83 sequences) took 0.6 s instead of
+0.2 s, so a whole sync took 1.52× as long. A re-sync of the same code took 0.4 s and changed nothing. The packed code the
+architecture check stores grew from 837 KB to 2.5 MB. Measure it with
+`dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --code-sync src`.
+
 ## Reviewing code changes
 
 ### Where the changes go

@@ -19,6 +19,12 @@ if (args.Length == 2 && args[0] == "--dump")
     ProjectFile.Save(m, args[1]);
     return;
 }
+if (args.Length == 2 && args[0] == "--code-sync")
+{
+    // Code sync of a folder's C# code: reading with and without method bodies, mapping with and without behaviour diagrams.
+    CodeSyncBench.Run(args[1]);
+    return;
+}
 if (args.Contains("--quick"))
 {
     var scale = args.SkipWhile(a => a != "--scale").Skip(1).Select(s => double.Parse(s, CultureInfo.InvariantCulture)).FirstOrDefault(1.0);
