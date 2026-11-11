@@ -103,6 +103,8 @@
     private static string Hint(string provider) => provider switch
     {
         LiveProviders.MySql => "Server=db.example.com;Database=shop;User ID=reader;Password=…",
+        LiveProviders.SqlServer => "Server=db.example.com,1433;Database=shop;User ID=reader;Password=…;Encrypt=True",
+        LiveProviders.Oracle => "Data Source=db.example.com:1521/FREEPDB1;User Id=reader;Password=…",
         LiveProviders.Sqlite => "Data Source=/path/to/file.db",
         _ => "Host=db.example.com;Database=shop;Username=reader;Password=…;SSL Mode=Require",
     };
