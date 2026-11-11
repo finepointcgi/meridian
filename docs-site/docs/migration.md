@@ -62,6 +62,7 @@ can always compare against it.
 | Teamwork Cloud: commit, update | edits are **saved live**; **Commit** records a version; collaborators see changes in real time |
 | Teamwork Cloud: branches, merge | **Branches & merge…**: branches per project, three-way merge with conflict resolution |
 | Teamwork Cloud: element locking | optional **Lock for editing** / **Lock with contents** (server) |
+| Teamwork Cloud: element history (who changed an element, compare its revisions) | right-click ▸ **History…** or the inspector's **History** section: every commit that changed the element, with field diffs, restore of one field and the model at that version ([details](version-control.md#element-history)) |
 | Teamwork Cloud: permissions on packages | right-click a package ▸ **Permissions…**: none, read, edit or manage per person or team ([details](permissions.md)) |
 | Containment tree context menu: Create Element ▸, Create Diagram ▸ | the same: right-click ▸ **New element ▸** and **New diagram ▸** |
 | Help ▸ Keyboard shortcuts | **Help (?) ▸ Keyboard & mouse** ([details](keyboard-shortcuts.md)) |
@@ -97,6 +98,7 @@ can always compare against it.
 | MDG Technologies, UML profiles | **profiles and stereotypes**, and **plugins** for behaviour |
 | Document generation (RTF / DOCX templates) | **Word / PDF from template** with section presets |
 | Baselines and Compare | **Baselines…** with compare and CSV export, and **Version history** compare |
+| Element audit / auditing (who changed an element and when, before and after) | **History…** on any element: author, date and changed fields per commit, before / after diffs, restore one field ([details](version-control.md#element-history)) |
 | Shared packages, package imports across repositories, Reusable Asset Service | **Used projects…**: reuse a package of another project read-only, pinned, with update review ([details](libraries.md)) |
 | Version control (SVN, Git, TFS packages) | built-in **commits, branches and merge** for the whole project |
 | Security and user locks | **project roles** (owner, editor, viewer) and optional **element locks** |

@@ -53,6 +53,8 @@ public static class VersionControl
         await session.PersistAsync();
         var json = session.Snapshot();
         var result = await db.CommitBranchVersionAsync(session.ProjectId, session.BranchId, message.Trim(), json, author);
+        Data.History.ElementHistoryIndexer.For(db).VersionCommitted(session.ProjectId, result.Id, json);   // element history, in the background
+        session.ClearUncommitted();
         await session.VersionCommittedAsync(result.Number, message.Trim(), json, authorAccount);   // webhooks, "library changed upstream" notices
         return result;
     }
@@ -114,6 +116,9 @@ public static class VersionControl
 
         var json = ProjectFile.Serialize(merged);
         var version = await db.CommitBranchVersionAsync(plan.ProjectId, plan.Target.BranchId, message.Trim(), json, author);
+        // Element history attributes what the merge brought in to this commit, with the source branch.
+        await db.SetVersionKindAsync(plan.ProjectId, version.Id, Data.History.HistoryVersionKind.Merge, plan.Source.Name);
+        Data.History.ElementHistoryIndexer.For(db).VersionCommitted(plan.ProjectId, version.Id, json);
         if (hub.Find(plan.ProjectId, plan.Target.BranchId) is { } live)
         {
             live.Replace(json, author ?? Guid.Empty, $"Merged “{plan.Source.Name}” into “{plan.Target.Name}” (v{version.Number})");

@@ -156,6 +156,7 @@ public sealed partial class ProjectSession
             MarkDirty();
             _lastEditor = userId;
             _stale.Clear();
+            ForgetUncommitted();   // element history (ProjectSession.History.cs)
             foreach (var (id, p) in _participants)
             {
                 _rejecting.Remove(id);

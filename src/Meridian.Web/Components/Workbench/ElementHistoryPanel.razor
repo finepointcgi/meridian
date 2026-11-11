@@ -1,0 +1,400 @@
+@using Meridian.Data
+@using Meridian.Data.History
+@using Meridian.Serialization.History
+@inherits WorkspaceComponent
+@inject IMeridianStore Db
+
+@* Element history (docs-site version control, "Element history"): who changed this element and when, with field diffs. *@
+<div class="hist @(Compact ? "compact" : "")" data-testid="element-history">
+    <div class="hist-bar">
+        <label title="Also show relationships that start or end at this element">
+            <input type="checkbox" checked="@_relationships" @onchange="ToggleRelationships" data-testid="hist-relationships" /> Relationships
+        </label>
+        <label title="Show changes made on every branch, not only the history of this one">
+            <input type="checkbox" checked="@_allBranches" @onchange="ToggleBranches" data-testid="hist-all-branches" /> All branches
+        </label>
+        <span class="grow"></span>
+        <button class="hist-icon" title="Refresh" aria-label="Refresh history" @onclick="Reload">↻</button>
+    </div>
+
+    @if (_progress is { Complete: false } p && p.Total > 0)
+    {
+        <div class="hist-indexing" role="status" data-testid="hist-indexing">
+            Indexing history… @p.Indexed of @p.Total versions
+            <div class="hist-bar-track"><div style="width:@(p.Total == 0 ? 0 : p.Indexed * 100 / p.Total)%"></div></div>
+        </div>
+    }
+    @if (_problem != null)
+    {
+        <div class="hist-note">@_problem</div>
+    }
+
+    <ol class="hist-list">
+        @if (_uncommitted is { } u)
+        {
+            <li class="hist-entry uncommitted @(_mode == Mode.Uncommitted ? "on" : "")" @onclick="SelectUncommitted" data-testid="hist-uncommitted">
+                <div class="hist-head">
+                    <span class="hist-v">now</span>
+                    <span class="hist-kind k-@u.Change.ToString().ToLowerInvariant()">@KindText(u.Change)</span>
+                    <span class="hist-msg">Uncommitted (current session)</span>
+                </div>
+                <div class="hist-meta">@(_uncommittedBy is { } who ? $"{who.UserName} · {Ago(who.At)}" : "not committed yet")</div>
+                @if (u.Fields.Count > 0) { <div class="hist-fields">@Fields(u.Fields)</div> }
+            </li>
+        }
+        @foreach (var entry in Shown)
+        {
+            var e = entry;
+            <li class="hist-entry @(ReferenceEquals(_selected, e) ? "on" : "") @(e.IsConnected ? "connected" : "")" @onclick="() => Select(e)" data-testid="hist-entry">
+                <div class="hist-head">
+                    <span class="hist-v">v@(e.Version.Number)</span>
+                    <span class="hist-kind k-@e.Change.ToString().ToLowerInvariant()">@(e.PresentSinceFirst ? "First version" : KindText(e.Change))</span>
+                    <span class="hist-msg">@e.Version.Message</span>
+                </div>
+                <div class="hist-meta">
+                    @Author(e.Version) · <span title="@e.Version.CreatedAt.ToLocalTime().ToString("f")">@e.Version.CreatedAt.ToLocalTime().ToString("MMM d, yyyy HH:mm")</span>
+                    @if (e.Version.Kind == HistoryVersionKind.Merge)
+                    {
+                        <span class="hist-tag merge">Merged from “@(e.Version.MergeSource ?? "a branch")”</span>
+                    }
+                    else if (e.Version.Kind == HistoryVersionKind.CodeSync) { <span class="hist-tag">Code sync</span> }
+                    else if (e.Version.Kind == HistoryVersionKind.System) { <span class="hist-tag">System</span> }
+                    @if (_allBranches || e.Version.BranchName != Ws.BranchName) { <span class="hist-tag branch">@e.Version.BranchName</span> }
+                </div>
+                @if (e.IsConnected) { <div class="hist-rel">@e.Label</div> }
+                @if (e.IsDiagramRow) { <div class="hist-fields">@(e.Change == ElementChangeKind.AddedToDiagram ? "Shown on" : "Removed from") “@e.DiagramName”</div> }
+                else if (e.Fields.Count > 0) { <div class="hist-fields">@Fields(e.Fields)</div> }
+            </li>
+        }
+        @if (!_loading && _history is { } h && h.Entries.Count == 0 && _uncommitted is null && _problem is null)
+        {
+            <li class="hist-empty">@(h.Progress.Total == 0 ? "No versions committed yet. Commit one to start this element's history." : "No recorded changes.")</li>
+        }
+        @if (_loading && _history is null) { <li class="hist-empty">Loading history…</li> }
+    </ol>
+
+    @if (_mode != Mode.None)
+    {
+        <div class="hist-diff" data-testid="hist-diff">
+            <div class="hist-diff-head">
+                <b>@DiffTitle</b>
+                <span class="grow"></span>
+                @if (_selected is { IsDiagramRow: false } sel && _mode != Mode.Uncommitted)
+                {
+                    <button class="hist-btn @(_mode == Mode.Changes ? "on" : "")" @onclick="() => ShowChanges(sel)" data-testid="hist-changes">Changes</button>
+                    <button class="hist-btn @(_mode == Mode.Current ? "on" : "")" @onclick="() => CompareWithCurrent(sel)" data-testid="hist-compare-current">Compare with current</button>
+                }
+                @if (_selected is { } at && Host != null)
+                {
+                    <button class="hist-btn" @onclick="() => ShowModel(at)" data-testid="hist-show-model">Show model at v@(at.Version.Number)</button>
+                }
+            </div>
+            @if (_selected is { IsDiagramRow: true } dr)
+            {
+                <div class="hist-note">
+                    @(dr.Change == ElementChangeKind.AddedToDiagram ? "Shown on" : "Removed from") “@dr.DiagramName” in v@(dr.Version.Number).
+                    @if (Ws.Model.Find(dr.DiagramId) is Diagram d) { <button class="hist-btn" @onclick="() => Ws.Open(d)">Open diagram</button> }
+                </div>
+            }
+            else if (_diffLoading) { <div class="hist-note">Reading the versions…</div> }
+            else if (_diff is { } diff)
+            {
+                @if (diff.Note != null) { <div class="hist-note">@diff.Note</div> }
+                @if (diff.Rows.Count == 0 && diff.Note is null) { <div class="hist-note">No field differences.</div> }
+                <table class="hist-table">
+                    @foreach (var row in diff.Rows)
+                    {
+                        var r = row;
+                        <tr data-testid="hist-field" data-key="@r.Key">
+                            <th>@r.Label</th>
+                            <td>
+                                @if (r.Words is { } words)
+                                {
+                                    <span class="hist-words">
+                                        @foreach (var w in words)
+                                        {
+                                            <span class="w-@w.Op.ToString().ToLowerInvariant()">@w.Text</span>
+                                        }
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="hist-before">@r.BeforeText</span><span class="hist-arrow"> → </span><span class="hist-after">@r.AfterText</span>
+                                }
+                            </td>
+                            <td class="hist-act">
+                                @if (CanRestore(r) is { } target)
+                                {
+                                    <button class="hist-btn" title="@RestoreTitle" @onclick="() => Restore(target, r)" @onclick:stopPropagation="true" data-testid="hist-restore">Restore</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </table>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The element whose history is shown (an element of the workspace's model).</summary>
+    [Parameter, EditorRequired] public Element? Element { get; set; }
+    /// <summary>Narrow layout (the inspector).</summary>
+    [Parameter] public bool Compact { get; set; }
+    /// <summary>The workbench, for "Show model at this version" (dialogs don't receive the cascading one).</summary>
+    [Parameter] public Workbench? Host { get; set; }
+    /// <summary>Called after the panel opened another view (a dialog closes itself).</summary>
+    [Parameter] public EventCallback OnLeave { get; set; }
+
+    private enum Mode { None, Changes, Current, Uncommitted }
+
+    private ElementHistory? _history;
+    private IndexProgress? _progress;
+    private UncommittedChange? _uncommitted;
+    private Meridian.Web.Services.ProjectSession.UncommittedEdit? _uncommittedBy;
+    private ElementHistoryEntry? _selected;
+    private ElementDiff? _diff;
+    private Mode _mode;
+    private bool _loading, _diffLoading, _relationships, _allBranches, _checking;
+    private string? _problem;
+    private string? _loadedFor;
+    private VersionReader? _reader;
+    private (Guid Project, Guid? Branch) _line;
+    private int _generation;
+
+    private ElementHistoryIndexer Indexer => ElementHistoryIndexer.For(Db);
+
+    /// <summary>The entries, without "first version" when the element turned out to be new since the last commit.</summary>
+    private IEnumerable<ElementHistoryEntry> Shown =>
+        (_history?.Entries ?? []).Where(e => !(e.PresentSinceFirst && _uncommitted?.Change == ElementChangeKind.Added));
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Indexer.ProgressChanged += OnProgress;
+    }
+
+    public override void Dispose()
+    {
+        Indexer.ProgressChanged -= OnProgress;
+        base.Dispose();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var line = (Ws.Session?.ProjectId ?? Guid.Empty, Ws.Session?.BranchId);
+        if (Element?.Id == _loadedFor && line == _line) return;
+        _line = line;
+        _reader = null;
+        _selected = null;
+        _mode = Mode.None;
+        await Load();
+    }
+
+    protected override void OnWorkspaceChanged()
+    {
+        // Edits change what is uncommitted (cheap after the first check: the last commit is cached for this element).
+        if (!_loading && !_checking && _history != null) _ = InvokeAsync(CheckUncommitted);
+    }
+
+    private void OnProgress(Guid project, IndexProgress p)
+    {
+        if (project != _line.Project) return;
+        _ = InvokeAsync(async () =>
+        {
+            _progress = p;
+            if (p is { Complete: true, Running: false }) await Load();
+            else StateHasChanged();
+        });
+    }
+
+    private async Task Reload()
+    {
+        _reader = null;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        var generation = ++_generation;
+        _loadedFor = Element?.Id;
+        _problem = null;
+        if (Element is null || Ws.Session is not { } s) { _history = null; return; }
+        if (Ws.Pinned != null) { _history = ElementHistory.Empty; _problem = "History isn't shown in a historical view. Go to latest first."; return; }
+        _loading = true;
+        try
+        {
+            var history = await ElementHistoryService.LoadAsync(Db, s.ProjectId, s.BranchId, Element, Ws.Model, Ws.Access, _relationships, _allBranches);
+            if (generation != _generation) return;
+            _history = history;
+            _progress = history.Progress;
+            if (_selected != null) _selected = history.Entries.FirstOrDefault(e => e.Version.Id == _selected.Version.Id && e.ElementId == _selected.ElementId && e.Change == _selected.Change);
+            if (_selected is null && _mode is Mode.Changes or Mode.Current) _mode = Mode.None;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException)
+        {
+            _problem = "History is not available right now: " + ex.Message;
+        }
+        finally { if (generation == _generation) _loading = false; }
+        StateHasChanged();
+        await CheckUncommitted();
+    }
+
+    private async Task CheckUncommitted()
+    {
+        if (Element is not { } e || Ws.Session is not { } s || _history is null || _checking || !Ws.Model.Contains(e)) return;
+        _checking = true;
+        try
+        {
+            _reader ??= new VersionReader(Db, s.ProjectId, Ws.Access);
+            var change = await ElementHistoryService.UncommittedAsync(_reader, _history.Head, e, Ws.Model);
+            var by = s.LastUncommittedEdit(e.Id);
+            if (Same(change, _uncommitted) && by == _uncommittedBy) return;
+            if (change is null && _mode == Mode.Uncommitted) _mode = Mode.None;
+            (_uncommitted, _uncommittedBy) = (change, by);
+            if (_mode == Mode.Uncommitted) await LoadUncommittedDiff();
+            StateHasChanged();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException or System.Text.Json.JsonException or FormatException)
+        {
+            _uncommitted = null;
+        }
+        finally { _checking = false; }
+    }
+
+    private async Task ToggleRelationships(ChangeEventArgs a)
+    {
+        _relationships = a.Value is true;
+        await Load();
+    }
+
+    private async Task ToggleBranches(ChangeEventArgs a)
+    {
+        _allBranches = a.Value is true;
+        await Load();
+    }
+
+    private async Task Select(ElementHistoryEntry e)
+    {
+        _selected = e;
+        if (e.IsDiagramRow) { _mode = Mode.Changes; _diff = null; return; }
+        await ShowChanges(e);
+    }
+
+    private async Task ShowChanges(ElementHistoryEntry e) => await Diff(Mode.Changes, r => ElementHistoryService.DiffAsync(r, e));
+
+    private async Task CompareWithCurrent(ElementHistoryEntry e) =>
+        await Diff(Mode.Current, r => ElementHistoryService.CompareWithCurrentAsync(r, e.Version.Id, e.ElementId, Ws.Model));
+
+    private async Task SelectUncommitted()
+    {
+        _selected = null;
+        _mode = Mode.Uncommitted;
+        await LoadUncommittedDiff();
+    }
+
+    private async Task LoadUncommittedDiff()
+    {
+        if (_history?.Head is { } head && Element is { } e)
+            await Diff(Mode.Uncommitted, r => ElementHistoryService.CompareWithCurrentAsync(r, head.Id, e.Id, Ws.Model));
+        else
+        {
+            _diff = new ElementDiff([], null, null, "Nothing committed yet: everything about this element is new.");
+            _mode = Mode.Uncommitted;
+        }
+    }
+
+    private async Task Diff(Mode mode, Func<VersionReader, Task<ElementDiff>> load)
+    {
+        if (Ws.Session is not { } s) return;
+        _mode = mode;
+        _diffLoading = true;
+        _diff = null;
+        StateHasChanged();
+        try
+        {
+            _reader ??= new VersionReader(Db, s.ProjectId, Ws.Access);
+            _diff = await load(_reader);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException or System.Text.Json.JsonException or FormatException)
+        {
+            _diff = new ElementDiff([], null, null, "Couldn't read that version: " + ex.Message);
+        }
+        finally { _diffLoading = false; }
+    }
+
+    private string DiffTitle => _mode switch
+    {
+        Mode.Uncommitted => $"Uncommitted changes since {(_history?.Head is { } h ? $"v{h.Number}" : "the start")}",
+        Mode.Current when _selected is { } s => $"v{s.Version.Number} → current model",
+        _ when _selected is { } s => $"v{s.Version.Number} · {s.Version.Message}",
+        _ => "",
+    };
+
+    private string RestoreTitle => _mode switch
+    {
+        Mode.Uncommitted => $"Set this field back to its value in v{_history?.Head?.Number}",
+        _ when _selected is { } s => $"Restore this field to its value in v{s.Version.Number}",
+        _ => "Restore this field",
+    };
+
+    /// <summary>The value "Restore" writes: the field's value in the selected version (or the last commit).</summary>
+    private string? RestoreValue(FieldDiffRow r) => _mode == Mode.Changes ? r.After : r.Before;
+
+    /// <summary>The version the restored value comes from (to check that what it refers to still exists).</summary>
+    private FlatModel? RestoreSource => _mode == Mode.Changes ? _diff?.After : _diff?.Before;
+
+    private Element? CanRestore(FieldDiffRow r)
+    {
+        if (!r.Restorable || Ws.ReadOnly || Ws.Pinned != null) return null;
+        if (_mode == Mode.Changes && _selected?.Change == ElementChangeKind.Removed) return null;
+        var id = _mode == Mode.Uncommitted ? Element?.Id : _selected?.ElementId;
+        return Ws.Model.Find(id) is { } target && Ws.CanEdit(target) && target.Get(r.Key) != (RestoreValue(r) ?? "") ? target : null;
+    }
+
+    private void Restore(Element target, FieldDiffRow r)
+    {
+        try
+        {
+            FieldDiff.Restore(Ws.Model, target, r.Key, RestoreValue(r), RestoreSource);   // one undoable edit, sent to the session like any other
+            Ws.SetStatus($"Restored {r.Label} of {target.DisplayName}");
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private async Task ShowModel(ElementHistoryEntry e)
+    {
+        if (Host is null) return;
+        await OnLeave.InvokeAsync();
+        await Host.ShowModelAtVersion(e.Version.Id, e.Version.Number, e.ElementId);
+    }
+
+    private static bool Same(UncommittedChange? a, UncommittedChange? b) =>
+        a is null ? b is null : b is not null && a.Change == b.Change && a.Fields.SequenceEqual(b.Fields);
+
+    private static string KindText(ElementChangeKind k) => k switch
+    {
+        ElementChangeKind.Added => "Added",
+        ElementChangeKind.Changed => "Changed",
+        ElementChangeKind.Removed => "Removed",
+        ElementChangeKind.Moved => "Moved",
+        ElementChangeKind.AddedToDiagram => "On diagram",
+        ElementChangeKind.RemovedFromDiagram => "Off diagram",
+        _ => k.ToString(),
+    };
+
+    private static string Fields(IReadOnlyList<string> keys) => string.Join(", ", keys.Select(FieldDiff.LabelOf));
+
+    private static string Author(HistoryVersion v) => v.Kind switch
+    {
+        HistoryVersionKind.System when v.AuthorId is null => "System",
+        HistoryVersionKind.CodeSync when v.AuthorId is null => "Code sync",
+        _ => v.Author,
+    };
+
+    private static string Ago(DateTime at)
+    {
+        var d = DateTime.UtcNow - at;
+        return d.TotalMinutes < 1 ? "just now" : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min ago" : $"{(int)d.TotalHours} h ago";
+    }
+}
