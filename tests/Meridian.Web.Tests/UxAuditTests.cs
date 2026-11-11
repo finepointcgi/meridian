@@ -94,7 +94,7 @@ public sealed class UxAuditTests : TestContext
                 Assert.True(documented.Contains(keys), $"“{keys}” ({section.Title}) is in Help ▸ Keyboard & mouse but not in keyboard-shortcuts.md");
         // The global shortcuts meridian.js and settings.js handle are all listed.
         var global = KeyboardShortcuts.All[0].Rows.Select(r => r.Keys).ToList();
-        foreach (var k in new[] { "⌘K", "⌘S", "⌘O", "⌘F", "⌘,", "⌘Z", "⇧⌘Z or ⌘Y", "F7" }) Assert.Contains(k, global);
+        foreach (var k in new[] { "⌘K", "⌘S", "⌘O", "⌘F", "⇧⌘F", "⌘,", "⌘Z", "⇧⌘Z or ⌘Y", "F7" }) Assert.Contains(k, global);
     }
 
     [Fact]

@@ -93,6 +93,7 @@ public partial class Workbench
         list.AddRange(MermaidPaletteCommands());
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
+        list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
@@ -251,6 +252,7 @@ public partial class Workbench
             case "Save" or "SaveAs": await Save(); break;
             case "Open": await OpenProjects(); break;
             case "Find": await FocusSearch(); break;
+            case "FindReplace": OpenFindReplace(); break;
             case "Palette": if (_palette != null) await _palette.Show(); break;
             case "Settings": await OpenSettings(); break;
             case "Undo": Undo(); break;

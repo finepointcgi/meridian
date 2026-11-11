@@ -436,6 +436,12 @@ public abstract partial class StoreContract
         Assert.Equal(ann, comments[0].Author);
         IsRecentUtc(comments[0].CreatedAt);
 
+        // Only the author can change a comment's text (find and replace).
+        Assert.False(await s.UpdateCommentBodyAsync(root, ben.Id, "hijacked"));
+        Assert.True(await s.UpdateCommentBodyAsync(root, ann.Id, "Is this right now, @ben?"));
+        Assert.Equal("Is this right now, @ben?", (await s.ListCommentsAsync(pid))[0].Body);
+        Assert.True(await s.UpdateCommentBodyAsync(root, ann.Id, "Is this right, @ben?"));
+
         await s.SetCommentResolvedAsync(root, true);
         Assert.True((await s.ListCommentsAsync(pid))[0].Resolved);
         await s.SetCommentResolvedAsync(root, false);

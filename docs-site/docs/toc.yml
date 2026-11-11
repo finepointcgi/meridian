@@ -38,6 +38,8 @@
     href: verification.md
   - name: Tables and queries
     href: tables-queries.md
+  - name: Find and replace
+    href: find-replace.md
   - name: Simulation
     href: simulation.md
   - name: Variants and trade studies

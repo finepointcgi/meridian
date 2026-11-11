@@ -45,6 +45,8 @@ public interface IMeridianStore
     Task<long> AddCommentAsync(Guid projectId, string elementId, Guid author, string body);
     Task SetCommentResolvedAsync(long commentId, bool resolved);
     Task DeleteCommentAsync(long commentId);
+    /// <summary>Changes the text of a comment, only when <paramref name="author"/> wrote it (find and replace). False when nothing changed.</summary>
+    Task<bool> UpdateCommentBodyAsync(long commentId, Guid author, string body);
 
     // ---------------------------------------------------------------- reviews, threaded replies, @mentions & notifications (Reviews.cs)
 

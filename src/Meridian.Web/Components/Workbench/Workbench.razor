@@ -245,6 +245,7 @@
             <div class="ritems">
                 <MudTooltip Text="Generic table: any element kind as rows, chosen columns, inline editing"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Table) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Table)"><MudIcon Icon="@Icons.Material.Outlined.TableChart" /><span class="t">Generic table</span></button></MudTooltip>
                 <MudTooltip Text="Model query / search builder"><button class="rbtn @(TablesTabActive(TablesPanel.Mode.Query) ? "on" : "")" @onclick="() => ToggleTables(TablesPanel.Mode.Query)"><MudIcon Icon="@Icons.Material.Outlined.ManageSearch" /><span class="t">Query</span></button></MudTooltip>
+                <MudTooltip Text="Find and replace across the model (⌘⇧F)"><button class="rbtn @(_dockOpen && _dock == FindDock ? "on" : "")" data-testid="ribbon-find-replace" @onclick="() => ToggleDock(FindDock)"><MudIcon Icon="@Icons.Material.Outlined.FindReplace" /><span class="t">Find &amp; replace</span></button></MudTooltip>
                 <MudTooltip Text="@(LibState.Updates.Count > 0 ? $"{Plural.Of(LibState.Updates.Count, "used project update")} available — review" : "Used projects (shared libraries): check for updates")">
                     <button class="rbtn lib-rbtn" disabled="@(Ws.Session == null)" data-testid="ribbon-libraries" data-tour="used-projects"
                             @onclick="@(() => LibState.Updates.Count > 0 ? UpdateUsedProject() : CheckLibraryUpdates())">
@@ -431,6 +432,7 @@
                     <span class="dock-tab dock-tab-link @(VerificationTabActive ? "on" : "")" data-testid="dock-verification" @onclick="OpenVerification" title="Simulation-driven requirement verification (opens as a tab next to the diagrams)">
                         <MudIcon Icon="@Icons.Material.Outlined.Rule" /><span class="dl">Verification</span>
                     </span>
+                    @DockTab(FindDock, "Find", Icons.Material.Outlined.FindReplace, null, "Find and replace (⌘⇧F)")
                     @DockTab(12, "SysML text", Icons.Material.Outlined.Code, null, "SysML v2 text editor")
                     @DockTab(AssistantDock, "Assistant", Icons.Material.Outlined.AutoAwesome, null, "AI assistant")
                     @DockTab(3, "Output", Icons.Material.Outlined.Terminal, null)
@@ -453,6 +455,7 @@
                             case 10: <ScriptPanel />; break;
                             case 11: <VariantsPanel />; break;
                             case 12: <SysmlTextPanel State="_sysml" />; break;
+                            case FindDock: <FindReplacePanel State="_find" />; break;
                             case AssistantDock: <AssistantPanel Launcher="_assistant" />; break;
                             default: <pre class="output">@string.Join("\n", Ws.Output)</pre>; break;
                         }

@@ -297,6 +297,15 @@ public sealed partial class PostgresStore : IMeridianStore, IAsyncDisposable
 
     public Task DeleteCommentAsync(long commentId) => ExecAsync("delete from comments where id = $1", commentId);
 
+    public async Task<bool> UpdateCommentBodyAsync(long commentId, Guid author, string body)
+    {
+        await using var cmd = _ds.CreateCommand("update comments set body = $3 where id = $1 and author = $2");
+        cmd.Parameters.Add(new() { Value = commentId });
+        cmd.Parameters.Add(new() { Value = author });
+        cmd.Parameters.Add(new() { Value = body });
+        return await cmd.ExecuteNonQueryAsync() > 0;
+    }
+
     // =============================================================== helpers
 
     private async Task ExecAsync(string sql, params object[] args)

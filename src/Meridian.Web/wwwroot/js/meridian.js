@@ -239,7 +239,7 @@ window.meridian = (() => {
         let name = null;
         if (k === "s") name = e.shiftKey ? "SaveAs" : "Save";
         else if (k === "o") name = "Open";
-        else if (k === "f") name = "Find";
+        else if (k === "f") name = e.shiftKey ? "FindReplace" : "Find";
         else if (k === "k") name = "Palette";
         else if (k === "z" && !inText) name = e.shiftKey ? "Redo" : "Undo";
         else if (k === "y" && !inText) name = "Redo";

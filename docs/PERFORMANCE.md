@@ -44,6 +44,7 @@ dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --filter '*'
 MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests --filter Heavy_200k_Budgets
 MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests -c Release --filter HeavyReportTests --logger "console;verbosity=detailed"   # whole-model reports, prints the numbers below
 MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Web.Tests -c Release --filter CameoUiTimings      # MERIDIAN_HEAVY_ELEMENTS=500000
+MERIDIAN_HEAVY=1 dotnet test tests/Meridian.Tests -c Release --filter Heavy_200k_Find_Replace --logger "console;verbosity=detailed"   # find and replace, prints the numbers below
 # Concurrency load test (runs in the normal suite for 30 s; longer / bigger with):
 MERIDIAN_LOAD_SECONDS=300 MERIDIAN_LOAD_CLIENTS=50 MERIDIAN_LOAD_ELEMENTS=200000 dotnet test tests/Meridian.Web.Tests --filter ConcurrencyLoadTests
 ```
@@ -102,6 +103,25 @@ derive an activity from a use case 17–22 ms, code-sync apply (300 types) 76–
 | Session: op apply + relay to 24 tabs, p95 | 0.06 ms | 0.34 ms |
 | Session: rebase of a pending edit under a relayed one, p95 | 0.004 ms | – |
 | Model tree first render / reveal deepest element | 55 / 14 ms | – |
+
+## Find and replace
+
+`FindReplace` (docs-site/docs/find-replace.md) walks the containment tree once on the UI thread (no field reads), then
+matches the fields on the thread pool and streams hits back. Plain text uses `IndexOf` with ordinal comparison; regular
+expressions are compiled once and run with a 250 ms per-call timeout. Results stop at 10,000 matches. Numbers from
+`Heavy_200k_Find_Replace_Budgets` (200,000 elements, Release, M4 Pro):
+
+| Search | Matches | Time |
+|---|---:|---:|
+| Plain, no match | 0 | 23 ms |
+| Plain, "pump" (names, docs, requirements, values, tags, notes) | 2,753 | 37 ms |
+| Plain, match case + whole word | 1,421 | 26 ms |
+| Plain, "e" (stops at the 10,000 cap) | 10,006 | 14 ms |
+| Regex `\bmass\w*` | 8,006 | 54 ms |
+| Every field category | 2,753 | 30 ms |
+| Replace 5,000 names as one undo step / undo it | 5,000 | 12 ms / < 1 ms |
+
+Rendering is paged (200 elements at a time) so the browser never builds 10,000 rows at once.
 
 ## Reports
 

@@ -43,6 +43,7 @@ public static class UserGuide
         public const string CodeSync = "code-sync";
         public const string Database = "database";
         public const string Mermaid = "mermaid";
+        public const string FindReplace = "find-replace";
     }
 
     /// <summary>The guide folder: <c>Meridian:GuidePath</c>, else <c>guide</c> next to the content root or the app, else (Development) docs-site/_site.</summary>
