@@ -82,6 +82,18 @@ public static class CameoScenarios
         PostgresConnection = postgres;
         if (postgres != null && !skip("store")) await StoreAsync("PostgreSQL", () => (new PostgresStore(postgres), () => { }), s);
 
+        // ---------------------------------------------------------------- element history (HistoryScenarios.cs)
+        if (!skip("history"))
+        {
+            var (hs, cleanup) = Sqlite();
+            try { await HistoryScenarios.RunAsync("SQLite", hs, s); } finally { cleanup(); }
+            if (postgres != null)
+            {
+                var pgStore = new PostgresStore(postgres);
+                try { await HistoryScenarios.RunAsync("PostgreSQL", pgStore, s); } finally { await pgStore.DisposeAsync(); }
+            }
+        }
+
         // ---------------------------------------------------------------- collaboration session
         if (!skip("session")) await SessionAsync(s, 25);
     }

@@ -1,0 +1,19 @@
+@* "History…" from an element's context menu: the element history panel in a dialog. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.History" />
+            <MudText Typo="Typo.h6">History of @(Element?.DisplayName)</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <ElementHistoryPanel Element="Element" Host="Host" OnLeave="() => MudDialog.Close()" />
+    </DialogContent>
+    <DialogActions><MudButton OnClick="() => MudDialog.Close()">Close</MudButton></DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Element? Element { get; set; }
+    [Parameter] public Workbench? Host { get; set; }
+}

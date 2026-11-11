@@ -423,6 +423,7 @@ public partial class Workbench
         m.AddRange(DerivationMenuEntries(e));    // Workbench.Derivation.cs
         m.Add(MenuEntry.Do("Impact analysis", () => ImpactAnalysis(e)));
         if (e is not Diagram && e.Kind != ElementKind.Model) m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(e)));   // Workbench.RelationMap.cs
+        m.AddRange(HistoryMenuEntries(e));   // element history (Workbench.History.cs)
         if (e.Owner != null) m.Add(MenuEntry.Async("Request review…", () => RequestReview([e])));
         if (e.Kind is ElementKind.Package or ElementKind.Model)
             m.Add(MenuEntry.Async("Import requirements CSV here…", () => { _csvTarget = e; return PickFile("file-csv"); }));
@@ -447,6 +448,7 @@ public partial class Workbench
             m.Add(MenuEntry.Do("Select in containment tree", () => Navigate(el)));
             m.Add(MenuEntry.Do("Display related elements", () => c.DisplayRelated(n)));
             m.Add(MenuEntry.Do("Relation map", () => OpenRelationMap(el)));   // Workbench.RelationMap.cs
+            m.AddRange(HistoryMenuEntries(el));   // element history (Workbench.History.cs)
             if (c.Diagram.DiagramType is DiagramType.InternalBlock or DiagramType.Parametric && el.Kind == ElementKind.Property)
             {
                 m.Add(MenuEntry.Do("Show ports on border", () => c.ShowPortsOf(n)));
@@ -478,6 +480,7 @@ public partial class Workbench
         if (r.Edge is { } edge)
         {
             m.Add(MenuEntry.Do("Select in containment tree", () => Navigate(edge.Relationship)));
+            m.AddRange(HistoryMenuEntries(edge.Relationship));
             m.Add(MenuEntry.Do("Straighten path", c.StraightenSelectedEdge));
             m.Add(MenuEntry.Sep());
         }

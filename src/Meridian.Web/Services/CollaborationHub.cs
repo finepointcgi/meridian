@@ -296,6 +296,7 @@ public sealed partial class ProjectSession : IDisposable
         Sequence++;
         MarkDirty();
         _lastEditor = userId;
+        TrackUncommitted(participantId, userId, op);   // who edited what since the last commit (ProjectSession.History.cs)
         foreach (var (id, p) in _participants)
             if (id != participantId) Relay(id, p.Client, op, Sequence, probes);
     }
@@ -333,6 +334,7 @@ public sealed partial class ProjectSession : IDisposable
             MarkDirty();
             _lastEditor = userId;
             _stale.Clear();
+            ForgetUncommitted();   // a restore replaces everything: element history compares with the last commit instead
             foreach (var (id, p) in _participants) p.Client.Reset(SnapshotLocked(id, modelJson));   // filtered per participant
         }
     }

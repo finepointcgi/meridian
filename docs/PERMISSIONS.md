@@ -95,6 +95,9 @@ placeholders. The server never sends them hidden data:
 - **REST API** (`/api/projects/{id}/commits/{commit}/…`, head and stored versions) and **OSLC** responses are filtered
   per caller.
 - **Version history, baselines and reviews** filter stored versions before comparing or downloading them.
+- **Element history** (`ElementHistoryService`) is only shown for elements in the user's filtered model; index rows from
+  when the element (or a connected relationship, or a diagram) sat in a package the user can't see now, or that is gone,
+  are left out, and diffs are read from versions redacted for the user (`VersionReader`).
 - **Notifications**: comments on elements a user can't see don't notify them.
 - **Code-change reviews** (they show main's whole model) and **merging** are unavailable to them; the architecture
   check runs on their filtered model but doesn't store or post its result.

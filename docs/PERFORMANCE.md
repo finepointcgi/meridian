@@ -180,6 +180,45 @@ cancellation mid-stream, progress, the estimate, split per package, scope, hidde
 the diagram cache (`ReportStreamingTests`), the download endpoint's checks (`ReportDownloadTests` in the web suite), the
 dialog's progress, background mode, warning and cancel (bUnit), the desktop save bridge, and a real browser download (E2E).
 
+## Element history
+
+Element history ("who changed this and when", docs-site version control) reads a per-element change index instead of stored
+versions. When a version is committed, `VersionControl.CommitAsync` hands the committed JSON to `ElementHistoryIndexer`,
+which compares it with its parent in the background: both versions are read with `FlatModel` (a forward-only
+`Utf8JsonReader` pass that keeps ids, owners, relationship ends, names and a 64-bit hash per field, no object graph) and the
+changed elements are written to `element_changes` in one transaction. The parsed parent of each line stays cached (105 MB at
+200k, the two most recently committed lines, dropped after five minutes idle), so a commit costs one parse. Field values are
+read from the two versions only when a diff is opened (`VersionReader`, redacted for the viewer).
+
+`MERIDIAN_HISTORY_VERSIONS=100 dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --quick --elements 200000 --only history`
+(`HistoryScenarios.cs`): 100 versions of the 200k project, each changing ~25 elements (a requirement renamed every fifth
+version, its text every seventh, a «satisfy» added every tenth). PostgreSQL was run with 25 versions (`--postgres`; 100
+versions of 17 MB each filled the Docker VM's disk). Other test suites were running on the machine at the same time.
+
+| Scenario | SQLite (100 versions) | PostgreSQL (25 versions) |
+|---|---:|---:|
+| Commit a version (unchanged by this feature) | 116 ms | 721 ms |
+| Added to the commit path (hand the JSON to the indexer) | < 0.01 ms (max 2 ms) | < 0.01 ms |
+| Index one commit, in the background (parse 240, compare 40, write 3 ms) | 300 ms (p95 435) | 274 ms (p95 326) |
+| **Open an element's history, indexed** (52 entries incl. relationships) | **0.4 ms** | **1.8 ms** |
+| … for a viewer with a hidden package | 0.4 ms | 2.0 ms |
+| Open a diff (read two versions) | 1.0 s | 0.83 s |
+| … redacted for a viewer with a hidden package (deserialize + redact) | 1.7 s | 1.4 s |
+| Uncommitted check (last commit vs the live element, first time; then cached) | 358 ms | 382 ms |
+| Backfill (lazy, background, resumable), per version | 1.13 s | 0.81 s |
+| Parse a version with `FlatModel` / deserialize it with `ProjectFile` | 257–296 / 471–605 ms | |
+
+The backfill runs once per project (the first time someone opens a history), oldest version first, one transaction per
+version; the panel shows its progress, and an interrupted backfill continues where it stopped. Its cost is reading each stored
+version (SQLite decompression ~100 ms, PostgreSQL `jsonb` to text ~200 ms) and parsing it; the per-version average is about
+twice a single commit's cost because the 80 MB strings churn a 2 GB benchmark heap (gen 2 collections). The first version of a
+project stores no rows (an element without an "added" row is shown as present since the first version), so the index grows
+with what commits change, not with the model: ~25 rows per version here.
+
+On SQLite, `element_change_versions` keeps a copy of each version's author and date: in `project_versions` they come after
+the multi-megabyte model column, and reading them made listing 100 versions take ~250 ms (SQLite walks the row's overflow
+pages to reach later columns).
+
 ## Concurrency load test
 
 `tests/Meridian.Web.Tests/ConcurrencyLoadTests.cs`: 25 in-process tabs (real `Workspace` replicas, each draining its inbox on
@@ -212,6 +251,9 @@ whole-model snapshot. Delivery maxima are isolated stalls of a few seconds under
 
 ## Known limits
 
+- **Element history diffs read two stored versions** (~1 s at 200k, ~1.5 s for a viewer with hidden packages, who gets
+  versions redacted for them); the timeline itself opens in a few milliseconds. Indexing existing versions the first time takes
+  ~1 s per version at 200k, in the background.
 - **PDF reports keep the laid-out document in memory** (QuestPDF needs every page for page numbers and the table of
   contents): ~1 GB for the 7,000-page SDD of the 200k project. Very large PDFs are best split per package.
 - **Word reports of diagram-heavy models** spend most of their time rasterising PNG fallbacks (~25 ms each at 80 dpi);

@@ -206,6 +206,25 @@ public interface IMeridianStore
     /// <summary>Moves a usage's pin and/or mount point.</summary>
     Task UpdateProjectUsageAsync(Guid usageId, Core.Libraries.LibraryPinKind pinKind, string pinValue, string? mountPointId);
     Task RemoveProjectUsageAsync(Guid usageId);
+
+    // ---------------------------------------------------------------- element history: per-element change index (see History/ElementChanges.cs)
+    // One row per element a commit added, changed, removed, moved or put on / took off a diagram, so "history of element X" needs no
+    // stored version to be read. Filled by History.ElementHistoryIndexer; see docs-site version control, "Element history".
+
+    /// <summary>Every version of a project, oldest first, with what the change index knows about it.</summary>
+    Task<IReadOnlyList<History.HistoryVersion>> ListHistoryVersionsAsync(Guid projectId);
+    /// <summary>Records what kind of commit a version is (e.g. a merge and its source branch); wins over what indexing guesses.</summary>
+    Task SetVersionKindAsync(Guid projectId, long versionId, History.HistoryVersionKind kind, string? mergeSource);
+    /// <summary>
+    /// Stores the changes of one version (replacing any partial rows) and marks it indexed, in one transaction. Returns false when
+    /// another process indexed it first or the version is gone.
+    /// </summary>
+    Task<bool> SaveElementChangesAsync(Guid projectId, long versionId, long? parentVersionId, History.HistoryVersionKind kind, string? mergeSource,
+                                       IReadOnlyList<Serialization.History.ElementChange> changes);
+    /// <summary>The index rows of one element (and, with <paramref name="includeConnected"/>, of relationships with it as an end).</summary>
+    Task<IReadOnlyList<History.ElementChangeRow>> ListElementChangesAsync(Guid projectId, string elementId, bool includeConnected);
+    /// <summary>Forgets a project's change index (it is rebuilt on the next history request).</summary>
+    Task ResetElementChangesAsync(Guid projectId);
 }
 
 /// <summary>Account rules and password hashing shared by every store.</summary>

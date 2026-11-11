@@ -112,6 +112,7 @@ public sealed partial class SqliteStore : IMeridianStore
         await MigrateCodeSyncRunsAsync();   // code-sync review runs (SqliteStore.CodeSync.cs)
         await MigratePermissionsAsync();   // per-package permissions (SqliteStore.Permissions.cs)
         await MigrateUsagesAsync();   // used projects / shared model libraries (SqliteStore.Usages.cs)
+        await MigrateElementChangesAsync();   // element history change index (SqliteStore.ElementChanges.cs)
     }
 
     // =============================================================== users

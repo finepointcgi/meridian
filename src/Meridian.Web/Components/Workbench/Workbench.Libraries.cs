@@ -126,7 +126,9 @@ public partial class Workbench
     public async Task GoToLatest()
     {
         if (Ws.Pinned is not { } pin) return;
+        var line = Ws.HistoricalLine;   // "Show model at this version" (element history) returns to the line it came from
         await OpenProject(pin.ProjectId);
+        if (line is { IsMain: false }) await SwitchBranch(line);
     }
 
     private IEnumerable<CommandPalette.Command> LibraryPaletteCommands()

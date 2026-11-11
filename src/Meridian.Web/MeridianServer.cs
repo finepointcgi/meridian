@@ -99,6 +99,8 @@ public static class MeridianServer
 
         var meridianDb = app.Services.GetRequiredService<IMeridianStore>();
         await meridianDb.MigrateAsync();
+        Meridian.Data.History.ElementHistoryIndexer.For(meridianDb).OnError = (project, ex) =>   // element history index (built in the background)
+            app.Logger.LogWarning(ex, "Indexing element history of project {Project} failed; it is retried on the next request", project);
         var localUser = host.LocalMode ? await EnsureLocalUser(meridianDb) : null;
 
         // Development only: seed test accounts from appsettings.Development.json (DevSeed:Users).
