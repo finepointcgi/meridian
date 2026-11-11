@@ -76,8 +76,8 @@ public sealed class IssueTrackerConfig
     public string? Validate()
     {
         if (!TrackerTypes.All.Contains(Type)) return "Choose a tracker type.";
-        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && !(u.Scheme == Uri.UriSchemeHttp && u.IsLoopback)))
-            return "The base URL must be an absolute https:// URL.";
+        if (!Uri.TryCreate(BaseUrl?.Trim(), UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp) || u.Host.Length == 0)
+            return "The base URL must be an absolute http:// or https:// URL.";
         if (string.IsNullOrWhiteSpace(Project)) return $"Enter the {TrackerTypes.ProjectLabel(Type).ToLowerInvariant()}.";
         if (Type == TrackerTypes.GitHub && Project.Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).Length != 2) return "The repository must look like owner/repo.";
         if (Type == TrackerTypes.GitLab && !GitLabTracker.IsProjectRef(Project.Trim())) return "The project must be a path like group/project (subgroups allowed) or a numeric project id.";
