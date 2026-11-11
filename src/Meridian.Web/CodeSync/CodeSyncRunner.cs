@@ -262,6 +262,7 @@ public sealed partial class CodeSyncRunner(
             RemoveDeleted = request.IsFullSnapshot,
             Submodules = request.Submodules.Where(s => s.Fetched).ToList(),
             Artifacts = connection?.DeploymentArtifacts ?? CodeArtifactMode.None,
+            CollapseRootNamespace = connection?.CollapseRootNamespace ?? true,
         };
         var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
         ct.ThrowIfCancellationRequested();
@@ -275,7 +276,8 @@ public sealed partial class CodeSyncRunner(
             return new CodeSyncOutcome(CodeSyncStatus.NoChanges, nothing, null, runId);
         }
 
-        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection));
+        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
+            codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
         model.OpEmitted -= ops.Add;
         var list = ChangeList(before, model, changes, refresh);
         var message = CommitMessage(request);

@@ -179,10 +179,7 @@ public partial class Workbench
     }
 
     /// <summary>Connect to a database…: Integrations ▸ Databases.</summary>
-    public Task ConnectToDatabase() =>
-        Dialogs.ShowAsync<IntegrationsDialog>("Integrations",
-            new DialogParameters<IntegrationsDialog> { { x => x.InitialTab, IntegrationsDialog.DatabasesTab } },
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    public Task ConnectToDatabase() => IntegrationsDialog.ShowDatabasesAsync(Dialogs);
 
     // ------------------------------------------------------------------ editing
 

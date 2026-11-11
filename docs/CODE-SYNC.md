@@ -21,6 +21,7 @@ undo step**:
 |---|---|---|
 | repository | Package `CodeSyncOptions.RootPackage` (default `Code`, `A::B` for nesting) | created if missing; never removed |
 | namespace `Sat.Power` | nested Packages `Sat` › `Power` | symbol `ns:Sat.Power`; removed once empty |
+| namespace dependencies | «use» Dependency between the packages the package overview shows | symbol `pkgdep:Sat.Comms->Sat.Power`, aggregated from the type relationships between them; `code.cycle = true` (and a note in the documentation) when part of a cycle; architecture checks ignore them like every code-made element |
 | class, struct, record | Block | nested types are owned by their outer block |
 | interface | InterfaceBlock | nested types of an interface go to the namespace package |
 | enum | Enumeration with EnumerationLiterals | |
@@ -38,6 +39,17 @@ undo step**:
 
 Members that are not `public` are skipped unless `IncludeNonPublic` is set. A skipped member still counts as a usage
 (Dependency) when its type is one of the scanned types.
+
+**Collapse common root namespace** (repository setting, on by default, `CodeSyncOptions.CollapseRootNamespace`): when every
+namespace starts with one segment, and that segment is named like the model package (case-insensitive) or no type is in
+the global namespace, that segment gets no package. Its sub-namespaces and its own types go straight into the model
+package, so a repository whose package and root namespace are both `Meridian` reads `Meridian › Core`, not
+`Meridian › Meridian › Core`. Namespace symbols stay the full namespace (`ns:Meridian.Core`), so a project synced before the
+setting (or with it toggled) is migrated on its next sync by moving packages: element ids, diagrams and hand-made content
+stay, and anything else the old `Meridian` package held moves into the model package before the empty package is removed.
+
+Validation rule MER-002 (unique sibling names) tells operations apart by their parameter types, as UML does: overloads
+are fine, only two operations with the same name and the same parameter directions and types are reported.
 
 Every element and relationship that code sync creates carries `code.symbol`, `code.file`, `code.line`, `code.repo` and
 `code.commit`. Symbols are fully qualified with the generic arity (`Sat.Power.Battery`, `Sat.Box`1`). Members use
@@ -213,7 +225,13 @@ Each push that is applied:
   the IBD of its block, a new child to a package or block drawn as a container — placed in free space below what is already
   there. Shapes people positioned never move (a container may grow to hold a new child);
 - creates diagrams for new namespaces and blocks with the auto-diagrammer (a structure diagram per new package, an IBD per new
-  block with parts). Each repository connection has a **Create diagrams for new packages and classes** switch (on by
+  block with at least two parts typed by scanned classes: a block whose only part is one class, or whose members are all
+  framework, collection-of-value or interface typed, gets none, as its package's structure diagram already shows it. On
+  Meridian's own repository this cut the IBDs from 377 to 171). The first sync, and any sync that adds namespaces while
+  there is none, also makes one **package overview** (`<root> – package overview`, under the root package): the top-level
+  namespaces, and the level below while that stays at 40 packages or fewer, with the derived «use» dependencies; those in a
+  cycle are drawn red. Later syncs keep it in step in place (packages added and removed, dependencies drawn) without
+  moving shapes, and a later Auto-diagram run updates it rather than adding another. Each repository connection has a **Create diagrams for new packages and classes** switch (on by
   default, under *Model* in its settings). The model root's `codeSync.autoDiagrams` field (`true` or `false`) overrides the
   switch when it is set, and the settings say so;
 - commits the result on the branch as `Code sync: <short sha> <first line of the commit message>` (authored by the system);

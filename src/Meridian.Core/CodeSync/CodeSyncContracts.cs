@@ -225,6 +225,19 @@ public sealed record CodeSyncOptions
     public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
     /// <summary>Deployment artifacts that «manifest» the synced code, so it can be deployed to nodes. Off by default.</summary>
     public CodeArtifactMode Artifacts { get; init; } = CodeArtifactMode.None;
+    /// <summary>
+    /// Leave out the package of the namespace every type shares, so "Meridian ▸ Meridian ▸ Core" reads "Meridian ▸ Core":
+    /// when all namespaces start with one segment and either it equals <see cref="RootPackage"/>'s name (case-insensitive)
+    /// or no type is outside it, that segment's children go straight under the root package. Namespace symbols
+    /// ("ns:Meridian.Core") do not change, so turning it on or off moves packages rather than replacing them. On by default.
+    /// </summary>
+    public bool CollapseRootNamespace { get; init; } = true;
+    /// <summary>
+    /// Keep «use» dependencies between the namespace packages the package overview shows (see
+    /// <see cref="CodeModelMapper.OverviewPackages"/>), aggregated from the code dependencies between their types. They carry
+    /// the symbol "pkgdep:A->B" (A, B namespaces) so re-syncs update them. On by default.
+    /// </summary>
+    public bool PackageDependencies { get; init; } = true;
 }
 
 /// <summary>Which deployment artifacts code sync keeps for a repository (each «manifest»s the package it stands for).</summary>

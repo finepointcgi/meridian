@@ -245,6 +245,37 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         Assert.Equal(CodeSyncStatus.NoChanges, again.Status);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_Sync_Collapses_The_Root_Namespace_Per_Connection_And_Draws_A_Package_Overview(bool collapse)
+    {
+        var conn = new IntegrationConnection(Guid.NewGuid(), _project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
+            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", CollapseRootNamespace = collapse }.ToJson(), null, DateTime.UtcNow);
+        await _db.SaveIntegrationAsync(conn);
+        var runner = new CodeSyncRunner(_db, _hub, [new Meridian.Serialization.CodeSync.CSharpCodeReader()], new CodeModelApplier(), _events, NullLogger<CodeSyncRunner>.Instance);
+        var files = new[]
+        {
+            new CodeFile("src/Power/Battery.cs", "namespace Sat.Power;\npublic class Battery { public double Capacity { get; set; } }"),
+            new CodeFile("src/Comms/Radio.cs", "namespace Sat.Comms;\npublic class Radio { public Sat.Power.Battery Supply { get; set; } }"),
+        };
+        var outcome = await runner.RunAsync(Request() with { ConnectionId = conn.Id, Files = files, IsFullSnapshot = true });
+        Assert.Contains("new diagram", outcome.Summary);
+
+        var branch = Assert.Single(await _db.ListBranchesAsync(_project), b => b.Name == CodeSyncRunner.BranchNameFor("acme/sat"));
+        var model = ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(_db, _hub, _project, branch.Id));
+        var root = Assert.Single(model.OfKind(ElementKind.Package), p => p.Name == "sat");
+        var power = Assert.Single(model.AllElements, e => e.Get(CodeFieldKeys.Symbol) == "ns:Sat.Power");
+        Assert.Equal(collapse ? "sat" : "Sat", power.Owner!.Name);
+        var overview = Assert.Single(model.Diagrams, d => d.DiagramType == DiagramType.Package);
+        Assert.Equal("sat – package overview", overview.Name);
+        Assert.Same(root, overview.Owner);
+        var dep = Assert.Single(overview.Edges).Relationship;
+        Assert.Equal("pkgdep:Sat.Comms->Sat.Power", dep.Get(CodeFieldKeys.Symbol));   // the sub-namespaces are shown either way
+        Assert.Equal(collapse ? 2 : 3, overview.Nodes.Count);
+        Assert.Contains((await _db.ListCodeSyncRunsAsync(_project)).Single().Changes, c => c.ElementId == overview.Id && c.Kind == CodeSyncChangeKind.Added);
+    }
+
     [Fact]
     public async Task Runs_Of_One_Project_Are_Serialized()
     {
@@ -807,6 +838,127 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         await UiAsync(_ann, ProjectRole.Owner, null);
         var empty = RenderComponent<CodeChangesTab>();
         Assert.Contains("Connect a repository", empty.Find("button.chg-connect").TextContent);
+    }
+
+    // ================================================================ Integrations dialog: tabs by key, review link, token label
+
+    /// <summary>Everything the Integrations dialog and its panels need, and a dialog provider to open it in.</summary>
+    private async Task<(Workspace Ws, IRenderedComponent<MudBlazor.MudDialogProvider> Dialogs, CodeSync.Hosts.CodeSyncHostService Hosts)> IntegrationsUiAsync()
+    {
+        var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
+        var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var hosts = new CodeSync.Hosts.CodeSyncHostService(_db, integrations, factory, new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new CodeSync.Hosts.CodeSyncQueue(), new CodeSync.Hosts.CodeSyncRateLimiter(), config, NullLogger<CodeSync.Hosts.CodeSyncHostService>.Instance);
+        var hostInfo = new MeridianHostInfo(false, Path.GetTempPath(), null);
+        var webhookOptions = new Integrations.WebhookOptions();
+        Services.AddSingleton(integrations);
+        Services.AddSingleton(hosts);
+        Services.AddSingleton(hostInfo);
+        Services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(config);
+        Services.AddSingleton(new Integrations.WebhookDispatcher(new Integrations.ProjectEvents(webhookOptions), _db, integrations, factory, webhookOptions, NullLogger<Integrations.WebhookDispatcher>.Instance));
+        Services.AddSingleton(new Integrations.Requirements.RequirementsToolService(_db, integrations, factory, new ServiceCollection().BuildServiceProvider(), NullLogger<Integrations.Requirements.RequirementsToolService>.Instance));
+        Services.AddSingleton(new Integrations.Databases.DatabaseConnectionService(integrations, _db, hostInfo, config));
+        var (ws, _) = await UiAsync(_ann, ProjectRole.Owner, null);
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        return (ws, RenderComponent<MudBlazor.MudDialogProvider>(), hosts);
+    }
+
+    private static string ActiveTab(IRenderedComponent<MudBlazor.MudDialogProvider> dialogs) => dialogs.Find(".mud-tab.mud-tab-active").TextContent.Trim();
+
+    public static TheoryData<string, string> IntegrationEntryPoints => new()
+    {
+        { "menu", "Issue trackers" },
+        { "code-repositories", "Code repositories" },   // ⌘K "Connect a code repository…"
+        { "databases", "Databases" },                   // "Connect to a database…" (menu and ⌘K)
+        { "requirements-tools", "DOORS & Polarion" },   // ⌘K "Connect DOORS Next or Polarion…"
+    };
+
+    [Theory]
+    [MemberData(nameof(IntegrationEntryPoints))]
+    public async Task Each_Integrations_Entry_Point_Opens_Its_Own_Tab(string entry, string tab)
+    {
+        var (_, dialogs, _) = await IntegrationsUiAsync();
+        var service = Services.GetRequiredService<MudBlazor.IDialogService>();
+        await dialogs.InvokeAsync(() => entry switch
+        {
+            "code-repositories" => IntegrationsDialog.ShowCodeRepositoriesAsync(service),
+            "databases" => IntegrationsDialog.ShowDatabasesAsync(service),
+            "requirements-tools" => IntegrationsDialog.ShowRequirementsToolsAsync(service),
+            _ => IntegrationsDialog.ShowAsync(service),
+        });
+        dialogs.WaitForAssertion(() => Assert.Equal(tab, ActiveTab(dialogs)));
+        // The drawn order is the order the keys are listed in (so the first render already shows the right tab).
+        Assert.Equal(["Issue trackers", "Webhooks", "DOORS & Polarion", "Code repositories", "Databases"],
+            dialogs.FindAll(".mud-tab").Select(t => t.TextContent.Trim()));
+        Assert.Equal(IntegrationsDialog.TabOrder.Length, dialogs.FindAll(".mud-tab").Count);
+    }
+
+    [Fact]
+    public async Task The_Empty_What_Changed_Tab_Opens_Code_Repositories()
+    {
+        var (_, dialogs, _) = await IntegrationsUiAsync();
+        var empty = RenderComponent<CodeChangesTab>();
+        await empty.InvokeAsync(() => empty.Find("button.chg-connect").Click());
+        dialogs.WaitForAssertion(() => Assert.Equal("Code repositories", ActiveTab(dialogs)));
+        Assert.Contains("No code repository connected", dialogs.Markup);
+    }
+
+    [Fact]
+    public async Task The_Review_Link_Of_A_Synced_Repository_Closes_Integrations_And_Opens_Code_Changes()
+    {
+        var (ws, dialogs, hosts) = await IntegrationsUiAsync();
+        var saved = await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat" }, "token");
+        var row = (await _db.FindIntegrationAsync(saved.Connection.Id))!;
+        var cfg = CodeSync.Hosts.CodeRepoConfig.Parse(row.ConfigJson);
+        cfg.LastSync = new() { At = DateTime.UtcNow, Commit = "abcdef1234", Status = "awaiting-review", Summary = "1 added", ReviewUrl = "/?project=x&panel=code-changes" };
+        await _db.SaveIntegrationAsync(row with { ConfigJson = cfg.ToJson() });
+
+        await dialogs.InvokeAsync(() => IntegrationsDialog.ShowCodeRepositoriesAsync(Services.GetRequiredService<MudBlazor.IDialogService>()));
+        dialogs.WaitForAssertion(() => Assert.Contains("Changes to review", dialogs.Markup));
+        Assert.Null(ws.ActiveView);
+        dialogs.Find("a.code-repo-review").Click();
+        dialogs.WaitForAssertion(() => Assert.Empty(dialogs.FindAll(".mud-dialog")));
+        Assert.Equal(ViewTabKind.CodeChanges, ws.ActiveView?.Kind);
+    }
+
+    [Theory]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitHub, null, true, true, true, "Access token (Contents: read, Commit statuses: write, Pull requests: write)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitHub, null, false, false, true, "Access token (Contents: read)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitHub, null, true, false, true, "Access token (Contents: read, Commit statuses: write)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitHub, null, false, true, false, "Access token (Contents: read, Pull requests: read)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitLab, null, false, false, true, "Access token (scope: read_api)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitLab, null, false, true, true, "Access token (scope: api)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.GitLab, null, true, false, false, "Access token (scope: api)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.Bitbucket, null, false, false, true, "Access token (Repositories: read) or username:app-password")]
+    [InlineData(CodeSync.Hosts.GitHostKind.Bitbucket, null, true, true, true, "Access token (Repositories: write, Pull requests: write) or username:app-password")]
+    [InlineData(CodeSync.Hosts.GitHostKind.Bitbucket, null, false, true, false, "Access token (Repositories: read, Pull requests: read) or username:app-password")]
+    [InlineData(CodeSync.Hosts.GitHostKind.Bitbucket, "https://git.example.com", false, false, true, "HTTP access token (Repository: read)")]
+    [InlineData(CodeSync.Hosts.GitHostKind.Bitbucket, "https://git.example.com", true, false, false, "HTTP access token (Repository: write)")]
+    public void The_Token_Label_Lists_Only_What_The_Settings_Need(CodeSync.Hosts.GitHostKind host, string? baseUrl, bool status, bool previews, bool comments, string label)
+    {
+        var cfg = new CodeSync.Hosts.CodeRepoConfig
+        {
+            Host = host, BaseUrl = baseUrl ?? CodeSync.Hosts.CodeRepoConfig.DefaultBaseUrl(host),
+            PostStatus = status, PreviewPullRequests = previews, CommentOnPullRequests = comments,
+        };
+        Assert.Equal(label, cfg.TokenLabel);
+    }
+
+    [Fact]
+    public async Task The_Token_Field_Follows_The_Status_And_Pull_Request_Switches()
+    {
+        var (_, _, hosts) = await IntegrationsUiAsync();
+        await hosts.SaveAsync(_project, null, null, new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", PostStatus = false, PreviewPullRequests = false }, "token");
+        var cut = RenderComponent<CodeRepositoriesPanel>(p => p.Add(x => x.CanManage, true));
+        cut.WaitForAssertion(() => Assert.NotEmpty(cut.FindAll("button.code-repo-edit")));
+        cut.Find("button.code-repo-edit").Click();
+        cut.WaitForAssertion(() => Assert.Contains("Access token (Contents: read)", cut.Markup));
+        Assert.DoesNotContain("Commit statuses", cut.Markup);
+        Assert.Contains("Collapse common root namespace", cut.Markup);
+
+        cut.FindAll(".mud-switch").First(s => s.TextContent.Contains("Post a commit status")).QuerySelector("input")!.Change(true);
+        cut.WaitForAssertion(() => Assert.Contains("Access token (Contents: read, Commit statuses: write)", cut.Markup));
     }
 
     [Fact]

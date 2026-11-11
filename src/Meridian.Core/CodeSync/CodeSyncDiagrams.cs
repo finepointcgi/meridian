@@ -20,19 +20,38 @@ public static class CodeSyncDiagrams
     private const double RowGap = 40;
     private const double WrapWidth = 900;
 
-    /// <summary>Adds new elements to the diagrams they belong on and (optionally) diagrams new packages and blocks.</summary>
-    public static DiagramRefreshResult Refresh(ModelRepository m, CodeSyncChanges changes, bool createDiagrams)
+    /// <summary>A block gets its own "internal structure" IBD from code sync only with at least this many parts typed by scanned classes.</summary>
+    public const int MinIbdParts = 2;
+
+    /// <summary>Stroke of a package dependency that is part of a cycle on the package overview.</summary>
+    public const string CycleStroke = "#d32f2f";
+
+    /// <summary>
+    /// Adds new elements to the diagrams they belong on and (optionally) diagrams new packages and blocks. With
+    /// <paramref name="codeRoot"/> (the repository's root package) it also keeps the "&lt;root&gt; – package overview": made
+    /// when namespaces are added and <paramref name="createDiagrams"/> is on, and kept in step (packages added and removed,
+    /// the derived «use» dependencies, cycles in red) once it exists.
+    /// </summary>
+    public static DiagramRefreshResult Refresh(ModelRepository m, CodeSyncChanges changes, bool createDiagrams, Element? codeRoot = null)
     {
         var addedIds = changes.Added.ToHashSet(StringComparer.Ordinal);
         var added = changes.Added.Select(m.Find).OfType<Element>().ToList();
         var shapes = added.Where(e => e is not Relationship && e is not Diagram && !Notation.IsBorderShape(e))
                           .OrderBy(e => e.AncestorsAndSelf().Count()).ToList();
         var relationships = added.OfType<Relationship>().ToList();
-        if (shapes.Count == 0 && relationships.Count == 0) return DiagramRefreshResult.None;
+        var overviewKey = codeRoot is not null && m.Contains(codeRoot) ? AutoDiagrammer.KeyFor(DiagramType.Package, codeRoot) : null;
+        var overview = overviewKey is not null && !changes.IsEmpty ? RefreshOverview(m, codeRoot!, overviewKey, added, createDiagrams) : default;
+        if (shapes.Count == 0 && relationships.Count == 0 && overview.Diagram is null) return DiagramRefreshResult.None;
 
         var updated = new List<Diagram>();
         var count = 0;
-        foreach (var d in m.Diagrams.Where(d => !addedIds.Contains(d.Id)).ToList())
+        if (overview is { Diagram: { } od, Created: false })
+        {
+            updated.Add(od);
+            count += overview.Shapes;
+        }
+        // The overview is kept by RefreshOverview: the generic pass would nest deeper packages into it.
+        foreach (var d in m.Diagrams.Where(d => !addedIds.Contains(d.Id) && !(overviewKey is not null && ReferenceEquals(d.Owner, codeRoot) && d.Get(AutoDiagrammer.MarkerKey) == overviewKey)).ToList())
         {
             var fresh = ShowNewElements(m, d, shapes);
             var edges = 0;
@@ -45,8 +64,74 @@ public static class CodeSyncDiagrams
         }
 
         var created = createDiagrams ? CreateDiagrams(m, shapes) : [];
+        if (overview is { Diagram: { } nd, Created: true }) created.Insert(0, nd);
         return new DiagramRefreshResult(updated, created, count);
     }
+
+    /// <summary>
+    /// The package overview of a code-sync root package: built with the auto-diagrammer's package overview (the packages of
+    /// <see cref="CodeModelMapper.OverviewPackages"/>) when namespaces were added and there is none yet; otherwise updated in
+    /// place, without moving what is there: packages no longer shown are taken off, new ones placed in free space
+    /// (inside their parent package when it is shown), dependencies drawn and cycles marked.
+    /// </summary>
+    private static (Diagram? Diagram, bool Created, int Shapes) RefreshOverview(ModelRepository m, Element root, string key, IReadOnlyList<Element> added, bool createDiagrams)
+    {
+        var existing = root.OwnedElements.OfType<Diagram>().FirstOrDefault(d => d.DiagramType == DiagramType.Package && d.Get(AutoDiagrammer.MarkerKey) == key);
+        var packages = CodeModelMapper.OverviewPackages(root);
+        if (existing is null)
+        {
+            if (!createDiagrams || packages.Count < 2 || !added.Any(e => CodeModelMapper.IsNamespacePackage(e) && root.IsAncestorOf(e))) return default;
+            Diagram d;
+            using (m.History.Transaction("Code sync: package overview"))
+            {
+                d = AutoDiagrammer.Build(m, AutoDiagrammer.PlanPackageOverview(m, root, packages));
+                MarkCycles(m, d);
+            }
+            return (d, true, d.Nodes.Count);
+        }
+
+        var want = packages.ToHashSet(ReferenceEqualityComparer.Instance);
+        var stale = existing.Nodes.Where(n => CodeModelMapper.IsNamespacePackage(n.Element) && !want.Contains(n.Element)).ToList();
+        if (stale.Count > 0) m.RemoveFromDiagram(existing, stale);
+        var fresh = new List<DiagramNode>();
+        var placer = new Placer(existing, fresh);
+        foreach (var p in packages.Where(p => !existing.Shows(p)))
+        {
+            var parent = p.Owner is { } owner && want.Contains(owner) ? existing.NodeFor(owner) : null;
+            var (w, h) = Notation.DefaultSizeOf(p);
+            fresh.Add(m.AddNode(existing, p, placer.Next(parent, w, h), showRelationships: false, parent));
+        }
+        var nested = fresh.Where(n => n.ParentId != null).ToList();
+        if (nested.Count > 0 && ContainerLayout.GrowToFit(existing, nested, n => n.Bounds) is { Count: > 0 } grow) m.SetBounds(existing, grow, "Code sync: fit containers");
+        var edges = 0;
+        foreach (var r in existing.Nodes.Select(n => n.Element).Distinct().SelectMany(m.RelationshipsOf).Distinct().ToList())
+            if (existing.EdgeFor(r) is null && AutoDiagrammer.EdgeAllowed(DiagramType.Package, r) && m.AddEdge(existing, r) is not null) edges++;
+        var marked = MarkCycles(m, existing);
+        if (fresh.Count > 0) EdgeRouter.Invalidate(existing);
+        return stale.Count + fresh.Count + edges + marked > 0 ? (existing, false, fresh.Count) : default;
+    }
+
+    /// <summary>Draws the package dependencies that are part of a cycle in <see cref="CycleStroke"/> (and the others as usual).</summary>
+    private static int MarkCycles(ModelRepository m, Diagram d)
+    {
+        var changed = 0;
+        foreach (var x in d.Edges.Where(x => x.Relationship.Get(CodeFieldKeys.Symbol).StartsWith(CodeModelMapper.PackageDependencyPrefix, StringComparison.Ordinal)).ToList())
+        {
+            var cycle = x.Relationship.Get(CodeModelMapper.CycleKey) == "true";
+            var stroke = x.Style.TryGetValue("stroke", out var s) ? s : null;
+            if (cycle && stroke is null) { m.SetEdgeStyle(d, x, "stroke", CycleStroke); changed++; }
+            else if (!cycle && stroke == CycleStroke) { m.SetEdgeStyle(d, x, "stroke", null); changed++; }
+        }
+        return changed;
+    }
+
+    /// <summary>
+    /// Whether a code block earns its own internal block diagram: at least <see cref="MinIbdParts"/> part properties typed
+    /// by scanned classes. A block whose only part is one other class (or whose members are all framework, collection-of-
+    /// value or interface typed, which are values and references, not parts) gets none: its BDD already shows that.
+    /// </summary>
+    public static bool WorthAnIbd(ModelRepository m, Element block) =>
+        AutoDiagrammer.Parts(m, block).Count(p => m.ResolveType(p) is { } t && t.Get(CodeFieldKeys.Symbol).Length > 0) >= MinIbdParts;
 
     /// <summary>
     /// Whether <paramref name="e"/> belongs on <paramref name="d"/>: it is a child of the diagram's context (a new block in
@@ -137,7 +222,9 @@ public static class CodeSyncDiagrams
         var owners = shapes.Where(e => e.Kind is ElementKind.Package or ElementKind.Block).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
         if (owners.Count == 0) return [];
         var plan = AutoDiagrammer.Plan(m, new AutoDiagramOptions { DerivePackageDependencies = false });
-        foreach (var p in plan.Diagrams) p.Selected = p.Existing is null && owners.Contains(p.Owner.Id) && p.Type != DiagramType.Package;
+        foreach (var p in plan.Diagrams)
+            p.Selected = p.Existing is null && owners.Contains(p.Owner.Id) && p.Type != DiagramType.Package
+                         && (p.Type != DiagramType.InternalBlock || p.Owner.Get(CodeFieldKeys.Symbol).Length == 0 || WorthAnIbd(m, p.Owner));
         if (!plan.Diagrams.Any(p => p.Selected)) return [];
         return AutoDiagrammer.Apply(m, plan, addDependencies: false).Created.ToList();
     }
