@@ -46,7 +46,7 @@ public sealed class ServerModelEdit : IAsyncDisposable
         await _gate.WaitAsync();
         try
         {
-            var model = ProjectFile.Deserialize(_session.SnapshotFor(_participant));
+            var model = _session.ReplicaFor(_participant);
             var ops = new List<ModelOp>();
             model.OpEmitted += ops.Add;
             var result = change(model);
@@ -67,10 +67,10 @@ public sealed class ServerModelEdit : IAsyncDisposable
     // Each edit starts from a fresh snapshot, so other participants' operations need no handling here.
     private sealed class Relay : ISessionClient
     {
-        public void Replaced(string modelJson, string message) { }
+        public void Replaced(SessionModel model, string message) { }
         public void RemoteOp(ModelOp op) { }
         public void PresenceChanged() { }
-        public void Reset(string modelJson) { }
+        public void Reset(SessionModel model) { }
         public void CommentsChanged() { }
     }
 }

@@ -67,7 +67,7 @@ public sealed partial class ModelRepository
     {
         if (!Contains(mountPoint)) mountPoint = Root;
         root.Owner = mountPoint;
-        mountPoint.Children.Add(root);
+        mountPoint.ChildList.Add(root);
         IndexRecursive(root);
         var mount = new LibraryMount(info, root, mountPoint);
         _libraryOf ??= new Dictionary<Element, LibraryMount>(ReferenceEqualityComparer.Instance);
