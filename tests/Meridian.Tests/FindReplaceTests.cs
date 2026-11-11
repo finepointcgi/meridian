@@ -38,6 +38,20 @@ public class FindReplaceTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Instance_Slot_Values_Are_Searched_Unless_They_Hold_Element_Ids()
+    {
+        var m = new ModelRepository("M");
+        var inst = m.Create(m.Root, ElementKind.InstanceSpecification, "vehicle1");
+        var literal = m.Create(inst, ElementKind.Slot, "");
+        m.Set(literal, Meridian.Core.Instances.InstanceFields.Value, "1600 kg");
+        var reference = m.Create(inst, ElementKind.Slot, "");
+        m.Set(reference, Meridian.Core.Instances.InstanceFields.ValueKind, "instance");
+        m.Set(reference, Meridian.Core.Instances.InstanceFields.Value, "kg-instance-id");
+        var hits = Fields(Find(m, "kg")).Where(f => f.Field.Key == Meridian.Core.Instances.InstanceFields.Value).Select(f => f.Element).ToList();
+        Assert.Equal([literal], hits);
+    }
+
+    [Fact]
     public void Whole_Word_Skips_Partial_Words()
     {
         var m = new ModelRepository("M");
