@@ -149,11 +149,14 @@ public class FindReplacePanelTests : TestContext
         cut.Find("[data-testid=fr-regex]").Click();
         Type(cut, "fr-find", "e");
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Truncated), Wait);
-        Assert.Contains("refine your search", cut.Find("[data-testid=fr-truncated]").TextContent);
-        // Only the first page of elements is rendered.
-        Assert.Equal(FindReplacePanel.PageSize, cut.FindAll("[data-testid=fr-group]").Count);
+        // The panel re-renders after the search finishes on another thread: wait for each rendered state.
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Contains("refine your search", cut.Find("[data-testid=fr-truncated]").TextContent);
+            Assert.Equal(FindReplacePanel.PageSize, cut.FindAll("[data-testid=fr-group]").Count);   // only the first page of elements
+        }, Wait);
         cut.Find("[data-testid=fr-show-more]").Click();
-        Assert.Equal(Math.Min(state.Hits.Count, 2 * FindReplacePanel.PageSize), cut.FindAll("[data-testid=fr-group]").Count);
+        cut.WaitForAssertion(() => Assert.Equal(Math.Min(state.Hits.Count, 2 * FindReplacePanel.PageSize), cut.FindAll("[data-testid=fr-group]").Count), Wait);
     }
 
     [Fact]
