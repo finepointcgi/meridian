@@ -23,6 +23,7 @@ public static class UiKinds
         ElementKind.Operation => "#8a5a00",
         ElementKind.Feature or ElementKind.Configuration or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes => "#8e44ad",
         ElementKind.TradeStudy => "#d35400",
+        ElementKind.FailureMode or ElementKind.Mitigate or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate or ElementKind.FaultTreeLink => "#c0392b",
         _ => "#6b7586",
     };
 
@@ -37,6 +38,7 @@ public static class UiKinds
         ElementKind.Comment => "”", ElementKind.InitialNode or ElementKind.InitialState => "●", ElementKind.ActivityFinalNode or ElementKind.FinalState => "◉",
         ElementKind.DecisionNode => "◇", ElementKind.ForkNode => "▬", ElementKind.Pseudostate => "◇", ElementKind.InteractionOperand => "┄",
         ElementKind.Feature => "F", ElementKind.Configuration => "Cf", ElementKind.TradeStudy => "TS",
+        ElementKind.FailureMode => "FM", ElementKind.FaultTreeEvent => "Ev", ElementKind.FaultTreeGate => "G",
         _ when Metamodel.IsRelationship(k) => "→",
         _ => "•",
     };
@@ -56,6 +58,8 @@ public static class UiKinds
             return string.IsNullOrEmpty(t) ? e.DisplayName : $"{e.DisplayName} : {t}";
         }
         if (e.Kind == ElementKind.Operation) return e.DisplayName + (e.Get(FieldKeys.Signature) is { Length: > 0 } s ? s : "()");
+        if (e.Kind == ElementKind.FaultTreeGate)
+            return $"{Meridian.Core.Safety.FaultTree.GateSymbol(e, m)} gate" + (string.IsNullOrEmpty(e.Name) ? "" : $" {e.Name}");
         if (e.Kind == ElementKind.Comment) { var b = e.Get(FieldKeys.Body); return "“" + (b.Length > 40 ? b[..40] + "…" : b) + "”"; }
         return e.DisplayName;
     }
@@ -146,6 +150,11 @@ public static class UiKinds
         ElementKind.InlineInteraction => MudBlazor.Icons.Material.Outlined.SwapVert,
         ElementKind.CommunicationLifeline => MudBlazor.Icons.Material.Outlined.CropSquare,
         ElementKind.CommunicationLink => MudBlazor.Icons.Material.Outlined.HorizontalRule,
+        ElementKind.FailureMode => MudBlazor.Icons.Material.Outlined.ReportProblem,
+        ElementKind.FaultTreeEvent => MudBlazor.Icons.Material.Outlined.CropLandscape,
+        ElementKind.FaultTreeGate => MudBlazor.Icons.Material.Outlined.Merge,
+        ElementKind.FaultTreeLink => MudBlazor.Icons.Material.Outlined.HorizontalRule,
+        ElementKind.Mitigate => MudBlazor.Icons.Material.Outlined.Shield,
         _ => MudBlazor.Icons.Material.Outlined.ArrowRightAlt,
     };
 
@@ -183,6 +192,12 @@ public static class UiKinds
         (ElementKind.ArchiRelation, "access") => MudBlazor.Icons.Material.Outlined.MoreHoriz,
         (ElementKind.ArchiRelation, "influence") => MudBlazor.Icons.Material.Outlined.TrendingUp,
         (ElementKind.ArchiRelation, "triggering" or "flow") => MudBlazor.Icons.Material.Outlined.DoubleArrow,
+        (ElementKind.FaultTreeEvent, "basic") => MudBlazor.Icons.Material.Outlined.RadioButtonUnchecked,
+        (ElementKind.FaultTreeEvent, "undeveloped") => MudBlazor.Icons.Material.Outlined.Diamond,
+        (ElementKind.FaultTreeEvent, "house") => MudBlazor.Icons.Material.Outlined.Home,
+        (ElementKind.FaultTreeGate, "and") => MudBlazor.Icons.Material.Outlined.Merge,
+        (ElementKind.FaultTreeGate, "or") => MudBlazor.Icons.Material.Outlined.CallMerge,
+        (ElementKind.FaultTreeGate, "vote") => MudBlazor.Icons.Material.Outlined.HowToVote,
         _ => Icon(k),
     };
 
@@ -216,6 +231,7 @@ public static class UiKinds
         DiagramType.Timing => MudBlazor.Icons.Material.Outlined.Timeline,
         DiagramType.InteractionOverview => MudBlazor.Icons.Material.Outlined.Schema,
         DiagramType.Communication => MudBlazor.Icons.Material.Outlined.Hub,
+        DiagramType.FaultTree => MudBlazor.Icons.Material.Outlined.AccountTree,
         _ when UafViewpoints.IsUaf(t) => MudBlazor.Icons.Material.Outlined.Widgets,
         _ => MudBlazor.Icons.Material.Outlined.Class,
     };

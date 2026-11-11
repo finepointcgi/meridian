@@ -213,6 +213,8 @@ public sealed class DocResolver
             case ElementListBlock l: List(l, sc); break;
             case StatisticsBlock s: Statistics(s, sc); break;
             case ValidationBlock v: Validation(v, sc); break;
+            case FmeaBlock f: FmeaTable(f, sc); break;
+            case FaultTreeBlock ft: FaultTreeTables(ft, sc); break;
             case PageBreakBlock: Emit(new PageBreakNode()); break;
         }
     }
@@ -608,6 +610,49 @@ public sealed class DocResolver
         if (list.Count == 0) { Emit(ParagraphNode.Plain("No validation issues were found.")); return; }
         Emit(new TableNode(NewCaption("Table", Sub(Default(v.Caption, "Validation issues"), sc), Ref(v, sc)), ["Severity", "Rule", "Element", "Message"],
             list.Select(i => (IReadOnlyList<string>)[i.Severity.ToString(), i.RuleId, i.Element.QualifiedName, i.Message]).ToList(), [0.8, 1, 2, 3], Compact: true));
+    }
+
+    private void FmeaTable(FmeaBlock f, Scope sc)
+    {
+        var scope = f.CurrentElementOnly ? sc.Current : null;
+        var rows = Core.Safety.Fmea.Rows(_m, scope)
+            .Where(r => r.Rpn >= f.MinRpn || f.MinRpn <= 0)
+            .Where(r => !f.HighRiskOnly || Core.Safety.Fmea.IsHighRisk(_m, r.FailureMode)).ToList();
+        if (rows.Count == 0) { Emit(ParagraphNode.Plain("No failure modes.")); return; }
+        Emit(new TableNode(NewCaption("Table", Sub(Default(f.Caption, "FMEA worksheet"), sc), Ref(f, sc)),
+            ["Item", "Failure mode", "Effect", "Cause", "S", "O", "D", "RPN", "AP", "Recommended actions", "Mitigated by"],
+            rows.Select(r =>
+            {
+                var c = Core.Safety.Fmea.Cells(r);
+                return (IReadOnlyList<string>)[c[0], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[11], c[14]];
+            }).ToList(), [1.2, 1.4, 1.6, 1.6, 0.35, 0.35, 0.35, 0.5, 0.4, 1.6, 1.4], Compact: true));
+    }
+
+    private void FaultTreeTables(FaultTreeBlock b, Scope sc)
+    {
+        var key = string.IsNullOrWhiteSpace(b.TopEvent) ? null : Sub(b.TopEvent, sc);
+        var tops = key != null
+            ? _m.OfKind(ElementKind.FaultTreeEvent).Where(e => e.Id == key || string.Equals(e.Name, key, StringComparison.OrdinalIgnoreCase)).Take(1).ToList()
+            : sc.Current is { Kind: ElementKind.FaultTreeEvent } cur ? [cur] : Core.Safety.FaultTree.TopEvents(_m).ToList();
+        if (tops.Count == 0) { Emit(ParagraphNode.Plain("No fault tree found.")); return; }
+        foreach (var top in tops)
+        {
+            var r = Core.Safety.FaultTree.Analyze(_m, top);
+            string P(double p) => Core.Safety.SafetyFields.Format(p);
+            Emit(new TableNode(NewCaption("Table", Sub(Default(b.Caption, $"Fault tree analysis: {top.DisplayName}"), sc), Ref(b, sc)), ["Measure", "Value"],
+            [
+                ["Top event", top.DisplayName],
+                ["Probability (exact)", r.Probability is { } p ? P(p) : "—"],
+                ["Rare-event approximation", P(r.RareEvent)],
+                ["Min-cut upper bound", P(r.MinCutUpperBound)],
+                ["Minimal cut sets", r.CutSets.Count.ToString(CultureInfo.InvariantCulture) + (r.Truncated ? "+" : "")],
+                ["Basic events", r.BasicEvents.Count.ToString(CultureInfo.InvariantCulture)],
+            ], [2, 2], Compact: true, KeyValue: true));
+            if (r.CutSets.Count > 0)
+                Emit(new TableNode(NewCaption("Table", $"Minimal cut sets: {top.DisplayName}", null), ["#", "Order", "Basic events", "Probability"],
+                    r.CutSets.Take(Math.Max(1, b.MaxCutSets)).Select((c, i) => (IReadOnlyList<string>)[(i + 1).ToString(CultureInfo.InvariantCulture), c.Order.ToString(CultureInfo.InvariantCulture),
+                        string.Join(", ", c.Events.Select(e => e.DisplayName)), P(c.Probability)]).ToList(), [0.4, 0.5, 4, 1], Compact: true));
+        }
     }
 
     private static string Default(string? s, string fallback) => string.IsNullOrWhiteSpace(s) ? fallback : s;

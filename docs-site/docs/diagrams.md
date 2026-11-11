@@ -14,7 +14,7 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 | Block definition | `bdd` | package | blocks, interface blocks, value types, constraint blocks, enumerations, actors; association, composition, aggregation, generalization, realization, dependency, allocate |
 | Internal block | `ibd` | block | parts, ports, connectors, item flows, allocate |
 | Parametric | `par` | block | value properties, constraint properties and their parameters, binding connectors |
-| Requirement | `req` | package | requirements, test cases, blocks, use cases; derive, satisfy, verify, refine, trace, copy |
+| Requirement | `req` | package | requirements, test cases, blocks, use cases, failure modes; derive, satisfy, verify, refine, trace, copy, mitigate |
 | Use case | `uc` | package | actors, use cases, subject blocks; association, include, extend, generalization |
 | Activity | `act` | activity | actions, initial/final nodes, decisions/merges, forks/joins, swimlanes, object nodes, pins; control and object flows |
 | State machine | `stm` | state machine | states (also composite), initial and final states, pseudostates (choice, junction, fork, join, shallow / deep history, entry / exit point, terminate), transitions |
@@ -26,6 +26,7 @@ explorer's context menu. Meridian creates the diagram *for the selection*:
 | Entity-relationship | `erd` | package | tables, columns, foreign keys |
 | Feature model | `fm` | package | features, configurations; feature decomposition, requires, excludes |
 | Whiteboard | `board` | package | free shapes, sticky notes and lines |
+| Fault tree | `fta` | package | top, intermediate, basic, undeveloped and house events; AND, OR and k-of-n vote gates; fault tree links (see [Safety and reliability](safety.md)) |
 
 Every diagram can also hold comments and the general shapes from [Drawing basics](drawing.md).
 

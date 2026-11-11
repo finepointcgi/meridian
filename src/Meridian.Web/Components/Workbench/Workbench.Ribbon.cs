@@ -22,6 +22,7 @@ public partial class Workbench
         yield return ("review", "Review");
         yield return ("views", "Model views");
         yield return ("simulate", "Simulate");
+        yield return ("safety", "Safety");
         yield return ("generate", "Generate");
         yield return ("extend", "Extend");
         yield return ("ai", "AI");

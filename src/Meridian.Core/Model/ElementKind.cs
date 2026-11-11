@@ -140,6 +140,12 @@ public enum ElementKind
     Sequence,               // sequence generator in a schema
     Routine,                // stored procedure (subtype "procedure") or function (subtype "function"): signature only
     Trigger,                // trigger on its owning table: db.timing, db.events
+    // Safety & reliability (appended: keep existing ordinals stable). See Meridian.Core.Safety and docs/SAFETY.md.
+    FailureMode,            // FMEA row: owned by (or allocated to) a block, part or function; fmea.* fields
+    FaultTreeEvent,         // fault tree event; subtype: top / intermediate / basic / undeveloped / house; fta.* fields
+    FaultTreeGate,          // fault tree gate; subtype: and / or / vote (k-of-n, fta.k)
+    FaultTreeLink,          // fault tree edge: parent (event or gate, above) -> child input (event or gate, below)
+    Mitigate,               // requirement (or design element) mitigates a failure mode
 }
 
 public enum DiagramType
@@ -172,6 +178,7 @@ public enum DiagramType
     UafProjects,
     UafStandards,
     UafActualResources,
+    FaultTree,
 }
 
 public static class FieldKeys

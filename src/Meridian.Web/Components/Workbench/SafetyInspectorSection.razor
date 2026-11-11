@@ -1,0 +1,156 @@
+@* Inspector section for safety & reliability (docs/SAFETY.md): a failure mode's FMEA ratings with its RPN and action
+   priority; a fault tree event's kind, represented element and probability; a gate's kind and k. *@
+@using Meridian.Core.Safety
+@inherits WorkspaceComponent
+
+@if (E is { } e && Ws.Model.Contains(e) && e.Kind is ElementKind.FailureMode or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate)
+{
+    var editable = !Ws.ReadOnly && Ws.CanEdit(e);
+    <div class="safety-inspector" data-testid="safety-inspector">
+        @if (e.Kind == ElementKind.FailureMode)
+        {
+            var row = Fmea.Row(Ws.Model, e);
+            <div class="section-title">FMEA <span class="grow"></span></div>
+            <div class="d-flex align-center gap-2 mb-2" data-testid="fmea-score">
+                <span class="rpn-badge @RpnClass(row.Rpn)" title="Risk priority number = S × O × D">RPN @(row.Rpn?.ToString() ?? "—")</span>
+                <span class="ap-badge ap-@Fmea.Label(row.Priority)" title="AIAG-VDA action priority">AP @(row.Priority is null ? "—" : Fmea.Label(row.Priority))</span>
+                <span style="font-size:12px; color:var(--text-3)">@(row.Item is { } item ? $"of {item.DisplayName}" : "not on a block / part / function")</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px">
+                @Rating(e, SafetyFields.Severity, "S", editable)
+                @Rating(e, SafetyFields.Occurrence, "O", editable)
+                @Rating(e, SafetyFields.Detection, "D", editable)
+            </div>
+            @Text(e, SafetyFields.Function, editable)
+            @Text(e, SafetyFields.Effect, editable, multi: true)
+            @Text(e, SafetyFields.Cause, editable, multi: true)
+            @Text(e, SafetyFields.Controls, editable, multi: true)
+            @Text(e, SafetyFields.Actions, editable, multi: true)
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px">
+                @Text(e, SafetyFields.ActionOwner, editable)
+                <MudSelect @key="@(e.Id + SafetyFields.ActionStatus)" T="string" Label="Action status" Value="@e.Get(SafetyFields.ActionStatus)" ValueChanged="v => Set(e, SafetyFields.ActionStatus, v)"
+                           Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable">
+                    <MudSelectItem Value="@("")">—</MudSelectItem>
+                    @foreach (var s in SafetyFields.ActionStatuses) { <MudSelectItem Value="@s">@s</MudSelectItem> }
+                </MudSelect>
+            </div>
+            <div class="section-title" style="margin-top:8px">Reliability <span class="grow"></span></div>
+            @Probability(e, editable)
+            var events = SafetyTrace.EventsFor(Ws.Model, e);
+            if (events.Count > 0)
+            {
+                <div style="font-size:12px; margin:4px 2px">In fault trees:
+                    @foreach (var ev in events) { var x = ev; <span class="link mr-2" @onclick="() => Shell.Navigate(x)">@x.DisplayName</span> }
+                </div>
+            }
+        }
+        else if (e.Kind == ElementKind.FaultTreeEvent)
+        {
+            var kind = SafetyFields.EventKind(e);
+            <div class="section-title">Fault tree event <span class="grow"></span></div>
+            <MudSelect @key="@(e.Id + "kind")" T="string" Label="Event kind" Value="@kind" ValueChanged="v => Set(e, FieldKeys.Subtype, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable" data-testid="fta-event-kind">
+                <MudSelectItem Value="@SafetyFields.Top">Top event</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.Intermediate">Intermediate event</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.Basic">Basic event</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.Undeveloped">Undeveloped event</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.House">House event</MudSelectItem>
+            </MudSelect>
+            <MudSelect @key="@(e.Id + SafetyFields.Ref)" T="string" Label="Represents (failure mode, block, part, function)" Value="@e.Get(SafetyFields.Ref)" ValueChanged="v => Set(e, SafetyFields.Ref, v)"
+                       Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable" MaxHeight="420"
+                       ToStringFunc="@(v => string.IsNullOrEmpty(v) ? "(none)" : Ws.Model.Find(v)?.DisplayName ?? v)">
+                <MudSelectItem Value="@("")">(none)</MudSelectItem>
+                @foreach (var c in RefCandidates()) { <MudSelectItem Value="@c.Id">@RefLabel(c)</MudSelectItem> }
+            </MudSelect>
+            @if (Ws.Model.Find(e.Get(SafetyFields.Ref)) is { } target)
+            {
+                <div style="font-size:12px; margin:4px 2px">Go to <span class="link" @onclick="() => Shell.Navigate(target)">@target.QualifiedName</span></div>
+            }
+            @if (kind == SafetyFields.House)
+            {
+                <MudSwitch @key="@(e.Id + SafetyFields.HouseState)" T="bool" Value="@(e.Get(SafetyFields.HouseState) == "true")" ValueChanged="@(v => SetHouse(e, v))"
+                           Color="Color.Primary" Size="Size.Small" Label="Occurs (true)" Disabled="!editable" />
+            }
+            else if (kind is SafetyFields.Basic or SafetyFields.Undeveloped)
+            {
+                @Probability(e, editable)
+            }
+            else
+            {
+                var p = FaultTree.CachedProbability(Ws.Model, e);
+                <div class="d-flex align-center gap-2" style="margin:6px 2px; font-size:12.5px">
+                    <span>P = <b>@(p is { } pv ? SafetyFields.Format(pv) : "—")</b></span>
+                    <span class="grow"></span>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Outlined.Calculate" OnClick="() => Shell.AnalyzeFaultTree(e)" data-testid="inspector-analyze">Analyze</MudButton>
+                </div>
+            }
+        }
+        else
+        {
+            var kind = SafetyFields.GateKind(e);
+            <div class="section-title">Fault tree gate <span class="grow"></span></div>
+            <MudSelect @key="@(e.Id + "gate")" T="string" Label="Gate" Value="@kind" ValueChanged="v => Set(e, FieldKeys.Subtype, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="!editable" data-testid="fta-gate-kind">
+                <MudSelectItem Value="@SafetyFields.And">AND — all inputs</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.Or">OR — any input</MudSelectItem>
+                <MudSelectItem Value="@SafetyFields.Vote">Vote — at least k of n inputs</MudSelectItem>
+            </MudSelect>
+            @if (kind == SafetyFields.Vote)
+            {
+                <MudTextField @key="@(e.Id + SafetyFields.K)" T="string" Label="@($"k (of {FaultTree.Inputs(Ws.Model, e).Count} inputs)")" Value="@e.Get(SafetyFields.K)" ValueChanged="v => Set(e, SafetyFields.K, v?.Trim())"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Number" Disabled="!editable" />
+            }
+            var p = FaultTree.CachedProbability(Ws.Model, e);
+            <div style="margin:6px 2px; font-size:12.5px">Output P = <b>@(p is { } pv ? SafetyFields.Format(pv) : "—")</b> · @FaultTree.Inputs(Ws.Model, e).Count inputs</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    internal static string RpnClass(int? rpn) => rpn switch { null => "none", >= 200 => "high", >= 100 => "med", _ => "low" };
+
+    private IEnumerable<Element> RefCandidates() =>
+        Ws.Model.AllElements.Where(x => x.Kind is ElementKind.FailureMode or ElementKind.Block or ElementKind.Property or ElementKind.Activity or ElementKind.Action or ElementKind.Component)
+            .OrderBy(x => x.Kind == ElementKind.FailureMode ? 0 : 1).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void SetHouse(Element e, bool v) => Set(e, SafetyFields.HouseState, v ? "true" : "false");
+
+    private static string RefLabel(Element c) =>
+        $"{c.DisplayName}  ·  {Metamodel.DisplayName(c.Kind)}" + (c.Owner is { } o && o.Kind is not (ElementKind.Package or ElementKind.Model) ? $" of {o.Name}" : "");
+
+    private void Set(Element e, string key, string? value)
+    {
+        if (!Ws.Model.Contains(e)) return;
+        try { Ws.Model.Set(e, key, value); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private RenderFragment Rating(Element e, string key, string label, bool editable) => __builder =>
+    {
+        <MudSelect @key="@(e.Id + key)" T="string" Label="@label" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                   Disabled="!editable" title="@SafetyFields.Help(key)" data-testid="@("rating-" + label)">
+            <MudSelectItem Value="@("")">—</MudSelectItem>
+            @for (var i = 1; i <= 10; i++) { var v = i.ToString(System.Globalization.CultureInfo.InvariantCulture); <MudSelectItem Value="@v">@v</MudSelectItem> }
+        </MudSelect>
+    };
+
+    private RenderFragment Text(Element e, string key, bool editable, bool multi = false) => __builder =>
+    {
+        <MudTextField @key="@(e.Id + key)" T="string" Label="@SafetyFields.Label(key)" Value="@e.Get(key)" ValueChanged="v => Set(e, key, v)"
+                      Lines="@(multi ? 2 : 1)" AutoGrow="multi" MaxLines="8" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="!editable" HelperText="@SafetyFields.Help(key)" />
+    };
+
+    private RenderFragment Probability(Element e, bool editable) => __builder =>
+    {
+        @Text(e, SafetyFields.Probability, editable)
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px">
+            @Text(e, SafetyFields.FailureRate, editable)
+            @Text(e, SafetyFields.ExposureTime, editable)
+        </div>
+        var p = e.Kind == ElementKind.FailureMode ? SafetyFields.OwnProbability(e) : FaultTree.ProbabilityOf(Ws.Model, e);
+        <div style="font-size:12px; margin:2px 2px 6px; color:var(--text-3)">
+            Effective P = <b style="color:var(--text)">@(p is { } pv ? SafetyFields.Format(pv) : "—")</b>
+            @if (e.Kind == ElementKind.FaultTreeEvent && SafetyFields.OwnProbability(e) is null && p is not null) { <span> (from the represented failure mode)</span> }
+        </div>
+    };
+}

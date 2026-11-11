@@ -142,6 +142,7 @@ public static class XmiExchange
         FieldKeys.Unique, FieldKeys.FkColumns, FieldKeys.RefColumns,
         Core.Analysis.ViewFields.Query, Core.Analysis.ViewFields.Columns, Core.Analysis.ViewFields.Severity, Core.Analysis.ViewFields.Message,
         .. ExtFieldKeys.All,
+        .. Core.Safety.SafetyFields.All,
         .. InteractionNotation.All,
         // Requirement management attributes and test verdicts.
         ReqFields.Priority, ReqFields.Status, ReqFields.Owner, ReqFields.Rationale, ReqFields.VerificationMethod, ReqFields.Risk,
@@ -160,7 +161,8 @@ public static class XmiExchange
         or ElementKind.FeatureDecomposition or ElementKind.Requires or ElementKind.Excludes
         or ElementKind.TimingLifeline or ElementKind.DurationConstraint or ElementKind.TimeConstraint or ElementKind.InteractionUse
         or ElementKind.InlineInteraction or ElementKind.CommunicationLifeline or ElementKind.CommunicationLink
-        or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Sequence or ElementKind.Routine or ElementKind.Trigger;
+        or ElementKind.DbIndex or ElementKind.DbConstraint or ElementKind.Sequence or ElementKind.Routine or ElementKind.Trigger
+        or ElementKind.FailureMode or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate or ElementKind.FaultTreeLink or ElementKind.Mitigate;
     private static XAttribute Type(string t) => new(Xmi + "type", "uml:" + t);
 
     private static void Emit(ModelRepository m, XElement parent, Element e, List<XElement> st, XElement ext)

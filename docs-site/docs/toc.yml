@@ -24,6 +24,8 @@
   href: variants-trade-studies.md
 - name: Simulation
   href: simulation.md
+- name: Safety and reliability (FMEA, fault trees)
+  href: safety.md
 - name: Reports and documents
   href: document-generation.md
 - name: Import and export

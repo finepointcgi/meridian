@@ -51,6 +51,16 @@ public static class ConnectorRules
         // Packages: dependency.
         if (source == ElementKind.Package || target == ElementKind.Package) Add(ElementKind.Dependency);
 
+        // Safety: requirements mitigate failure modes (whichever way the line was drawn); test cases verify them; fault tree links.
+        if (target == ElementKind.FailureMode && source != ElementKind.FailureMode) { if (source == ElementKind.TestCase) Add(ElementKind.Verify); Add(ElementKind.Mitigate); }
+        if (source == ElementKind.FailureMode && target != ElementKind.FailureMode)
+        {
+            if (target == ElementKind.TestCase) Add(ElementKind.Verify, reverse: true);
+            if (Req(target)) Add(ElementKind.Mitigate, reverse: true);
+            if (Structure(target) || Behavior(target)) Add(ElementKind.Allocate);
+        }
+        Add(ElementKind.FaultTreeLink);
+
         // Requirements.
         if (Req(source) && Req(target)) { Add(ElementKind.DeriveReqt); Add(ElementKind.Refine); Add(ElementKind.Copy); Add(ElementKind.Trace); }
         if (source == ElementKind.TestCase && Req(target)) Add(ElementKind.Verify);
@@ -103,6 +113,7 @@ public static class ConnectorRules
             Add(ElementKind.Realization);
         }
 
+
         // Other notations with one connector kind.
         Add(ElementKind.ForeignKey);
         Add(ElementKind.FeatureDecomposition);
@@ -125,6 +136,6 @@ public static class ConnectorRules
 
     /// <summary>Elements whose notation has its own connectors only (no generic dependency/trace lines).</summary>
     private static bool IsSpecialized(ElementKind k) => k is ElementKind.BpmnNode or ElementKind.BpmnPool or ElementKind.BpmnLane or ElementKind.ArchiElement
-        or ElementKind.Feature or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
+        or ElementKind.Feature or ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate or ElementKind.Lifeline or ElementKind.CommunicationLifeline or ElementKind.TimingLifeline
         or ElementKind.InitialNode or ElementKind.ActivityFinalNode or ElementKind.DecisionNode or ElementKind.ForkNode or ElementKind.InitialState or ElementKind.FinalState;
 }
