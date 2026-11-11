@@ -142,6 +142,7 @@ public static class CodeModelMapper
                 }
             foreach (var r in rels) EnsureRelationship(r.Symbol, r.Kind, r.From, r.Source, r.Target, r.Multiplicity);
             EnsureArtifacts();
+            EnsureBehaviour();
 
             RemoveGone();
             RemoveEmptyPackages();
@@ -242,6 +243,7 @@ public static class CodeModelMapper
             {
                 if (!IsOurs(e)) continue;
                 var s = e.Get(CodeFieldKeys.Symbol);
+                if (CodeBehaviourMapper.IsBehaviourSymbol(s)) continue;   // kept by the behaviour pass (CodeBehaviourMapper)
                 if (!_existing.TryAdd(s, e))
                     _warnings.Add($"Several elements carry the code symbol {s}; only '{_existing[s].QualifiedName}' is kept in sync.");
             }
@@ -471,6 +473,16 @@ public static class CodeModelMapper
                 var artifact = Ensure(symbol, ElementKind.Artifact, pkg, pkg.Name, [], null, null);
                 EnsureRelationship($"manifest:{symbol}->{(key.Length == 0 ? "root" : key)}", ElementKind.Manifestation, null, artifact, pkg, null);
             }
+        }
+
+        /// <summary>Activities and interactions from method bodies (<see cref="CodeBehaviourMapper"/>), in the same undo step.</summary>
+        private void EnsureBehaviour()
+        {
+            var b = CodeBehaviourMapper.Sync(m, code, o);
+            _added.AddRange(b.Added);
+            foreach (var id in b.Changed)
+                if (m.Find(id) is { } e) Changed(e);
+            _warnings.AddRange(b.Warnings);
         }
 
         private void EnsureRelationship(string symbol, ElementKind kind, CodeType? from, Element source, Element target, string? multiplicity)

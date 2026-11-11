@@ -37,6 +37,11 @@ public sealed record CodeMember(string Name, CodeMemberKind Kind, string TypeNam
     public string? Doc { get; init; }
     /// <summary>1-based line of the member's name; 0 when unknown (the type's line is used).</summary>
     public int Line { get; init; }
+    /// <summary>Methods: the body as a small control-flow tree (CodeBodyContracts.cs); null when the reader did not read
+    /// bodies or the method has none.</summary>
+    public CodeBody? Body { get; init; }
+    /// <summary>Attribute / annotation / decorator names on the member, without "Attribute" ("HttpGet", "Fact").</summary>
+    public IReadOnlyList<string> Attributes { get; init; } = [];
 }
 
 public enum CodeParameterDirection { In, Out, InOut, Return }
@@ -69,6 +74,10 @@ public sealed record CodeType(
     /// <summary>Uses left out of <see cref="DependencyLocations"/> by the per-target cap, by target symbol (only the
     /// targets that were capped).</summary>
     public IReadOnlyDictionary<string, int> OmittedDependencyLocations { get; init; } = CodeDependencyUses.NoneOmitted;
+    /// <summary>Attribute / annotation / decorator names on the type, without "Attribute" ("ApiController").</summary>
+    public IReadOnlyList<string> Attributes { get; init; } = [];
+    /// <summary>Base types and interfaces that are not scanned types, by simple name ("BackgroundService", "IHostedService").</summary>
+    public IReadOnlyList<string> ExternalBases { get; init; } = [];
 
     /// <summary>The recorded uses of <paramref name="target"/>, sorted by file and line.</summary>
     public IEnumerable<CodeDependencyUse> LocationsOf(string target) =>
@@ -225,6 +234,10 @@ public sealed record CodeSyncOptions
     public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
     /// <summary>Deployment artifacts that «manifest» the synced code, so it can be deployed to nodes. Off by default.</summary>
     public CodeArtifactMode Artifacts { get; init; } = CodeArtifactMode.None;
+    /// <summary>Which methods get activity and sequence diagrams from their bodies (CodeBehaviourMapper).</summary>
+    public CodeBehaviourMode Behaviour { get; init; } = CodeBehaviourMode.OnDemand;
+    /// <summary>Limits of the behaviour diagrams (depth, messages, caps).</summary>
+    public CodeBehaviourLimits BehaviourLimits { get; init; } = new();
 }
 
 /// <summary>Which deployment artifacts code sync keeps for a repository (each «manifest»s the package it stands for).</summary>

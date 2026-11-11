@@ -26,6 +26,12 @@ public sealed class CSharpCodeReader : ICodeReader
     /// <summary>Uses recorded per (type, target) in <see cref="CodeType.DependencyLocations"/>; the rest are only counted.</summary>
     public int MaxDependencyUsesPerTarget { get; init; } = CodeDependencyUses.DefaultMaxPerTarget;
 
+    /// <summary>Read method bodies into <see cref="CodeMember.Body"/> (behaviour diagrams from code).</summary>
+    public bool ReadBodies { get; init; } = true;
+
+    /// <summary>Body statements kept per read in total; later bodies are left out with a warning.</summary>
+    public int MaxTotalBodyStatements { get; init; } = CodeBodies.DefaultMaxTotalStatements;
+
     public string Language => "csharp";
 
     public bool Handles(string path) =>
@@ -90,7 +96,7 @@ public sealed class CSharpCodeReader : ICodeReader
         "ImmutableDictionary", "IImmutableDictionary", "FrozenDictionary",
     };
 
-    private static readonly SymbolDisplayFormat TypeDisplay = SymbolDisplayFormat.MinimallyQualifiedFormat
+    internal static readonly SymbolDisplayFormat TypeDisplay = SymbolDisplayFormat.MinimallyQualifiedFormat
         .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     public CodeModel Read(IReadOnlyList<CodeFile> files, CancellationToken ct = default)
@@ -159,11 +165,13 @@ public sealed class CSharpCodeReader : ICodeReader
 
         // Pass 2: members, inheritance, usage.
         var types = new List<CodeType>(decls.Count);
+        var budget = new BodyBudget(ReadBodies ? MaxTotalBodyStatements : 0);
         foreach (var info in decls.Values.OrderBy(i => i.Key, StringComparer.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
-            types.Add(BuildType(info, decls, MaxDependencyUsesPerTarget, ct));
+            types.Add(BuildType(info, decls, MaxDependencyUsesPerTarget, budget, compilation.GetSemanticModel, ct));
         }
+        if (budget.Exhausted) warnings.Add($"Method bodies were read up to {MaxTotalBodyStatements:N0} statements; the bodies of later methods were left out.");
         return new CodeModel(Language, types, warnings);
     }
 
@@ -176,8 +184,14 @@ public sealed class CSharpCodeReader : ICodeReader
 
     private static IEnumerable<MetadataReference> CoreReferences()
     {
-        var location = typeof(object).Assembly.Location;
-        if (!string.IsNullOrEmpty(location) && File.Exists(location)) yield return MetadataReference.CreateFromFile(location);
+        // The core library, plus LINQ and the collections, so lambdas in LINQ calls bind (their calls resolve in bodies).
+        foreach (var assembly in new[] { typeof(object).Assembly, typeof(Enumerable).Assembly, typeof(Queue<>).Assembly })
+        {
+            var location = assembly.Location;
+            if (!string.IsNullOrEmpty(location) && File.Exists(location)) yield return MetadataReference.CreateFromFile(location);
+        }
+        var runtime = Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location) ?? "", "System.Runtime.dll");
+        if (File.Exists(runtime)) yield return MetadataReference.CreateFromFile(runtime);
     }
 
     /// <summary>"Ns.Outer`1.Inner": namespace, containing types and the type, with generic arity.</summary>
@@ -197,7 +211,7 @@ public sealed class CSharpCodeReader : ICodeReader
     private static string DisplayName(INamedTypeSymbol t) =>
         t.Arity > 0 ? $"{t.Name}<{string.Join(", ", t.TypeParameters.Select(p => p.Name))}>" : t.Name;
 
-    private static CodeType BuildType(TypeInfo info, Dictionary<string, TypeInfo> scanned, int maxUses, CancellationToken ct)
+    private static CodeType BuildType(TypeInfo info, Dictionary<string, TypeInfo> scanned, int maxUses, BodyBudget budget, Func<SyntaxTree, bool, SemanticModel> modelOf, CancellationToken ct)
     {
         var sym = info.Symbol;
         var ordered = info.Declarations
@@ -279,7 +293,8 @@ public sealed class CSharpCodeReader : ICodeReader
                     members.Add(new CodeMember(md.Name, CodeMemberKind.Method, md.ReturnType.ToDisplayString(TypeDisplay), ts, many, Visibility(md.DeclaredAccessibility))
                     {
                         Parameters = parameters, IsStatic = md.IsStatic, IsAbstract = md.IsAbstract && sym.TypeKind != TypeKind.Interface,
-                        Doc = MemberDoc(md), Line = MemberLine(md),
+                        Doc = MemberDoc(md), Line = MemberLine(md), Attributes = AttributeNames(md),
+                        Body = budget.Remaining > 0 ? MethodBody(md, Scanned, budget, modelOf, ct) : null,
                     });
                     break;
                 }
@@ -337,7 +352,45 @@ public sealed class CSharpCodeReader : ICodeReader
             IsStatic = sym.IsStatic,
             DependencyLocations = locations,
             OmittedDependencyLocations = omitted,
+            Attributes = AttributeNames(sym),
+            ExternalBases = (sym.BaseType is { SpecialType: SpecialType.None } eb && Scanned(eb) is null ? [eb] : Array.Empty<INamedTypeSymbol>())
+                .Concat(sym.Interfaces.Where(i => Scanned(i) is null)).Select(x => x.Name).Where(n => n.Length > 0).Distinct().ToList(),
         };
+    }
+
+    /// <summary>Statements still to be read in one <see cref="Read"/> (bounded memory on very large code).</summary>
+    private sealed class BodyBudget(int total)
+    {
+        public int Remaining { get; private set; } = total;
+        public bool Exhausted { get; private set; }
+
+        public CodeBody? Take(CodeBody? body)
+        {
+            if (body is null) return null;
+            var n = CodeBodies.Count(body.Statements);
+            if (n > Remaining) { Exhausted = true; Remaining = 0; return null; }
+            Remaining -= n;
+            return body;
+        }
+    }
+
+    private static CodeBody? MethodBody(IMethodSymbol md, Func<ITypeSymbol?, string?> scanned, BodyBudget budget, Func<SyntaxTree, bool, SemanticModel> modelOf, CancellationToken ct)
+    {
+        foreach (var r in md.DeclaringSyntaxReferences.OrderBy(r => r.SyntaxTree.FilePath, StringComparer.Ordinal).ThenBy(r => r.Span.Start))
+        {
+            if (r.GetSyntax(ct) is not BaseMethodDeclarationSyntax decl || decl.Body is null && decl.ExpressionBody is null) continue;
+            return budget.Take(new CSharpBodyReader(modelOf(r.SyntaxTree, false), scanned, ct).Read(decl));
+        }
+        return null;
+    }
+
+    /// <summary>Attribute names without the "Attribute" suffix, in declaration order.</summary>
+    private static IReadOnlyList<string> AttributeNames(ISymbol s)
+    {
+        var attrs = s.GetAttributes();
+        if (attrs.Length == 0) return [];
+        return attrs.Select(a => a.AttributeClass?.Name ?? "").Where(n => n.Length > 0)
+            .Select(n => n.EndsWith("Attribute", StringComparison.Ordinal) && n.Length > 9 ? n[..^9] : n).Distinct().ToList();
     }
 
     /// <summary>How the type named at <paramref name="node"/> is used: created, called, a member / parameter / return type,

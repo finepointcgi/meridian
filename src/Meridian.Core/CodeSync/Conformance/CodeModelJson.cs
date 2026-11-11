@@ -14,7 +14,23 @@ public static class CodeModelJson
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false,
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver { Modifiers = { Compact } },
     };
+
+    /// <summary>Method bodies and the newer optional lists are written without empty lists and default values, so they
+    /// stay small; reading fills them back in from the property defaults. Older JSON (without them) reads unchanged.</summary>
+    private static void Compact(System.Text.Json.Serialization.Metadata.JsonTypeInfo info)
+    {
+        var body = info.Type == typeof(CodeStatement) || info.Type == typeof(CodeBranch) || info.Type == typeof(CodeBody);
+        foreach (var p in info.Properties)
+        {
+            if (p.PropertyType != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(p.PropertyType) &&(body || p.Name is "Attributes" or "ExternalBases"))
+                p.ShouldSerialize = (_, v) => v is System.Collections.ICollection { Count: > 0 };
+            else if (body && p.PropertyType == typeof(bool)) p.ShouldSerialize = (_, v) => v is true;
+            else if (body && p.PropertyType == typeof(int) && p.Name is "ArgumentCount" or "Omitted") p.ShouldSerialize = (_, v) => v is not 0;
+            else if (body && p.PropertyType == typeof(CodeLoopKind?)) p.ShouldSerialize = (_, v) => v is not null;
+        }
+    }
 
     public static string Serialize(CodeModel code) => JsonSerializer.Serialize(code, Options);
 

@@ -24,7 +24,8 @@ public static class CodeSyncDiagrams
     public static DiagramRefreshResult Refresh(ModelRepository m, CodeSyncChanges changes, bool createDiagrams)
     {
         var addedIds = changes.Added.ToHashSet(StringComparer.Ordinal);
-        var added = changes.Added.Select(m.Find).OfType<Element>().ToList();
+        // Behaviour from code draws its own diagrams (CodeBehaviourMapper); its elements stay off the structure diagrams.
+        var added = changes.Added.Select(m.Find).OfType<Element>().Where(e => !CodeBehaviourMapper.IsGenerated(e)).ToList();
         var shapes = added.Where(e => e is not Relationship && e is not Diagram && !Notation.IsBorderShape(e))
                           .OrderBy(e => e.AncestorsAndSelf().Count()).ToList();
         var relationships = added.OfType<Relationship>().ToList();
@@ -32,7 +33,7 @@ public static class CodeSyncDiagrams
 
         var updated = new List<Diagram>();
         var count = 0;
-        foreach (var d in m.Diagrams.Where(d => !addedIds.Contains(d.Id)).ToList())
+        foreach (var d in m.Diagrams.Where(d => !addedIds.Contains(d.Id) && !CodeBehaviourMapper.IsGenerated(d)).ToList())
         {
             var fresh = ShowNewElements(m, d, shapes);
             var edges = 0;
