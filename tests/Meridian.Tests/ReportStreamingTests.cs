@@ -25,12 +25,16 @@ public class ReportStreamingTests
     /// <summary>Deterministic (ids included), with packages, requirements, diagrams and two big diagrams: ~1,200 elements.</summary>
     private static ModelRepository Small() => LargeModelGenerator.Generate(new LargeModelOptions { Scale = 0.02, UseCases = 10, BreakdownDepth = 3, LargeDiagrams = 2 });
 
-    /// <summary>The built-ins as they were before matrices could hide empty rows and columns.</summary>
+    /// <summary>The built-ins as they were at a847aca, when the golden hashes below were taken: matrices without hidden empty
+    /// rows and columns, and the VCRM table without the "Criteria" column (added later with several criteria per requirement).</summary>
     private static DocTemplate AsBefore(DocTemplate t)
     {
         foreach (var s in t.AllSections())
             foreach (var b in Flatten(s.Blocks))
+            {
                 if (b is TraceMatrixBlock m) m.HideEmpty = false;
+                if (b is TableBlock table) table.Columns.RemoveAll(c => c.Key == "verificationCriteria");
+            }
         return t;
     }
 
@@ -89,6 +93,32 @@ public class ReportStreamingTests
         {
             if (html != null) Assert.Equal(html, Hash(Ids(Encoding.UTF8.GetString(ReportEngine.Generate(SampleModels.Vehicle(), Builtin(name), ReportFormat.Html, options: Fixed)))));
             Assert.Equal(word, Hash(WordXml(ReportEngine.Generate(SampleModels.Vehicle(), Builtin(name), ReportFormat.Docx, options: Fixed))));
+        }
+    }
+
+    /// <summary>
+    /// The current VCRM (with the "Criteria" column): its baseline was computed with the in-memory pipeline
+    /// (<see cref="ReportEngine.GenerateBuffered"/>) after the column was added, which also showed the column was the only
+    /// change (without it the output still hashes to the a847aca values above).
+    /// </summary>
+    [Fact]
+    public void Current_Vcrm_Matches_Its_In_Memory_Baseline()
+    {
+        var t = Builtin("Verification Cross-Reference Matrix / Test Report");
+        Assert.True(t.AllSections().SelectMany(s => Flatten(s.Blocks)).OfType<TableBlock>().Any(), "the VCRM table");
+        foreach (var s in t.AllSections())
+            foreach (var b in Flatten(s.Blocks))
+                if (b is TableBlock table && table.Caption == "VCRM" && table.Columns.All(c => c.Key != "verificationCriteria"))
+                    table.Columns.Insert(6, new("verificationCriteria", "Criteria"));
+        (string Model, Func<ModelRepository> Make, string Html, string Word)[] baselines =
+        [
+            ("small", Small, "386a550535542577", "14778a3f94c53648"),
+            ("vehicle", SampleModels.Vehicle, "cab010b2539a51ea", "f808bb62b09ddee9"),
+        ];
+        foreach (var (model, make, html, word) in baselines)
+        {
+            Assert.True(html == Hash(Ids(Encoding.UTF8.GetString(ReportEngine.Generate(make(), t, ReportFormat.Html, options: Fixed)))), $"{model}: HTML");
+            Assert.True(word == Hash(WordXml(ReportEngine.Generate(make(), t, ReportFormat.Docx, options: Fixed))), $"{model}: Word");
         }
     }
 

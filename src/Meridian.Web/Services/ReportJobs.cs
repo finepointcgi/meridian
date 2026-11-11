@@ -93,6 +93,10 @@ public sealed class ReportJobService : IDisposable
     /// <summary>Raised (on a worker thread, at most a few times a second per job) when a job's progress or state changes.</summary>
     public event Action<ReportJob>? Changed;
 
+    /// <summary>Every progress report, unthrottled, raised synchronously on the job's worker thread (after <see cref="Changed"/>
+    /// handling): for logging and metrics; a handler that blocks holds the job.</summary>
+    public event Action<ReportJob, ReportProgress>? Progress;
+
     public ReportJobService(ILogger<ReportJobService>? log = null, int concurrency = 2, string? directory = null)
     {
         _log = log ?? (ILogger)NullLogger.Instance;
@@ -284,6 +288,7 @@ public sealed class ReportJobService : IDisposable
             if (p.Sections > 0) { job.Section = p.Section; job.Sections = p.Sections; }
             if (p.Elements > 0) job.Elements = p.Elements;
             service.Raise(job);
+            service.Progress?.Invoke(job, p);
         }
     }
 }

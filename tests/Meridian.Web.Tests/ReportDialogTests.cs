@@ -76,25 +76,46 @@ public class ReportDialogTests : TestContext
     {
         UseBigModel();
         var provider = await OpenDialog(ReportTemplates.ModelOverview().Name);
-        Click(provider, "Generate");
-        // Sized first, then started as a background job: progress with sections and elements, and a note that it is safe to close.
-        provider.WaitForAssertion(() => Assert.NotNull(provider.Find(".report-background-note")), TimeSpan.FromSeconds(60));
-        var job = Assert.Single(_jobs.JobsFor(null));
-        Assert.True(job.Background);
-        Assert.True(job.EstimatedPages > ReportEngine.BackgroundPages, $"{job.EstimatedPages} pages");
-        provider.WaitForAssertion(() =>
+        // The document takes ~2 s to write, too quick to catch "mid-generation" by polling the markup. Hold the job's worker
+        // thread at its first progress report from the writing pass, so the test sees a running job and cancels it for sure.
+        using var hold = new ManualResetEventSlim();
+        using var held = new ManualResetEventSlim();
+        void Pause(ReportJob j, Meridian.Serialization.Reports.ReportProgress p)
         {
-            Assert.Matches(@"Section \d+ of \d+ · [\d,]+ elements", provider.Find(".report-progress-detail").TextContent);
-            Assert.Contains("blocks", provider.Find(".report-progress-text").TextContent);
-        }, TimeSpan.FromSeconds(60));
-        Assert.Contains(provider.FindAll("button"), b => b.TextContent.Trim() == "Close");   // it can be left running
+            if (!p.Phase.Contains("blocks") || held.IsSet) return;
+            held.Set();
+            hold.Wait(TimeSpan.FromSeconds(60));
+        }
+        _jobs.Progress += Pause;
+        try
+        {
+            Click(provider, "Generate");
+            // Sized first, then started as a background job: progress with sections and elements, and a note that it is safe to close.
+            Assert.True(held.Wait(TimeSpan.FromSeconds(60)), "the job never reported writing progress");
+            var job = Assert.Single(_jobs.JobsFor(null));
+            Assert.True(job.Background);
+            Assert.True(job.EstimatedPages > ReportEngine.BackgroundPages, $"{job.EstimatedPages} pages");
+            provider.WaitForAssertion(() =>
+            {
+                Assert.NotNull(provider.Find(".report-background-note"));
+                Assert.Matches(@"Section \d+ of \d+ · [\d,]+ elements", provider.Find(".report-progress-detail").TextContent);
+                Assert.Contains("blocks", provider.Find(".report-progress-text").TextContent);
+            }, TimeSpan.FromSeconds(30));
+            Assert.Contains(provider.FindAll("button"), b => b.TextContent.Trim() == "Close");   // it can be left running
 
-        Click(provider, "Cancel generation");
-        await _jobs.WhenDone(job).WaitAsync(TimeSpan.FromSeconds(60));
-        Assert.Equal(ReportJobState.Cancelled, job.State);
-        provider.WaitForAssertion(() => Assert.Contains("Generation cancelled.", provider.Markup), TimeSpan.FromSeconds(10));
-        Assert.Null(_jobs.FileOf(job));
-        Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "meridian.downloadUrl");
+            Click(provider, "Cancel generation");
+            hold.Set();
+            await _jobs.WhenDone(job).WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.Equal(ReportJobState.Cancelled, job.State);
+            provider.WaitForAssertion(() => Assert.Contains("Generation cancelled.", provider.Markup), TimeSpan.FromSeconds(10));
+            Assert.Null(_jobs.FileOf(job));
+            Assert.DoesNotContain(JSInterop.Invocations, i => i.Identifier == "meridian.downloadUrl");
+        }
+        finally
+        {
+            hold.Set();
+            _jobs.Progress -= Pause;
+        }
     }
 
     [Fact]
