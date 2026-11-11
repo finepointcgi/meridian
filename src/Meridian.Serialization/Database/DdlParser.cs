@@ -16,6 +16,9 @@ public sealed partial class DdlParser
     private readonly DbCatalog _catalog;
     private string _currentSchema;
     private List<SqlToken> _t = new();
+    private string _src = "";
+    /// <summary>Triggers whose table is not in the script (kept for <see cref="ParseModule"/>).</summary>
+    private readonly List<(string? Schema, string Table, DbTriggerDef Trigger)> _looseTriggers = new();
     private int _p;
     private int _end;
     private readonly HashSet<string> _declared = new(StringComparer.OrdinalIgnoreCase);
@@ -48,6 +51,22 @@ public sealed partial class DdlParser
         return p._catalog;
     }
 
+    /// <summary>
+    /// Parses one stored CREATE FUNCTION / PROCEDURE / TRIGGER statement as a database catalog keeps it (pg_get_functiondef,
+    /// sys.sql_modules, ALL_SOURCE with "CREATE OR REPLACE " in front). The trigger's table need not be defined.
+    /// </summary>
+    public static (DbRoutineDef? Routine, DbTriggerDef? Trigger, string? TriggerTable) ParseModule(string sql, string dialect)
+    {
+        var p = new DdlParser(dialect, "database");
+        // One statement: a batch end after it keeps T-SQL bodies without BEGIN … END (and Oracle blocks) in one piece.
+        p.Run(sql.TrimEnd() + (dialect switch { "sqlserver" => "\nGO\n", "oracle" => "\n/\n", _ => "" }));
+        var routine = p._catalog.Schemas.SelectMany(s => s.Routines).FirstOrDefault();
+        var tableTrigger = p._catalog.AllTables.SelectMany(t => t.Triggers.Select(tg => (t.Name, tg))).FirstOrDefault();
+        if (tableTrigger.tg != null) return (routine, tableTrigger.tg, tableTrigger.Name);
+        var loose = p._looseTriggers.FirstOrDefault();
+        return (routine, loose.Trigger, loose.Table);
+    }
+
     [GeneratedRegex(@"^\s*GO\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)] private static partial Regex GoPattern();
     [GeneratedRegex(@"\bAUTO_INCREMENT\b|\bENGINE\s*=|`|\bUNSIGNED\b", RegexOptions.IgnoreCase)] private static partial Regex MySqlPattern();
     [GeneratedRegex(@"\bAUTOINCREMENT\b|\bWITHOUT\s+ROWID\b|\bPRAGMA\b", RegexOptions.IgnoreCase)] private static partial Regex SqlitePattern();
@@ -68,7 +87,7 @@ public sealed partial class DdlParser
 
     private void Run(string sql)
     {
-        _t = SqlTokenizer.Tokenize(sql, hashComments: _dialect == "mysql");
+        _t = SqlTokenizer.Tokenize(sql, _dialect == "mysql", out _src);
         var hasBatches = _t.Any(x => x.Kind == SqlTokenKind.BatchEnd);
         var i = 0;
         while (i < _t.Count)
@@ -90,7 +109,9 @@ public sealed partial class DdlParser
     private int StatementEnd(int i, bool hasBatches)
     {
         var routine = IsRoutineStart(i);
-        if (routine && hasBatches)
+        // T-SQL bodies need no semicolons and Oracle declarations end in them: a routine runs to its GO / "/". MySQL's
+        // DELIMITER blocks also end in a batch mark, but a routine after DELIMITER ; is closed by its own END and semicolon.
+        if (routine && hasBatches && _dialect != "mysql")
         {
             for (var k = i; k < _t.Count; k++) if (_t[k].Kind == SqlTokenKind.BatchEnd) return k;
             return _t.Count;
@@ -109,8 +130,9 @@ public sealed partial class DdlParser
                 else if (t.Is("END") && depth > 0)
                 {
                     depth--;
-                    // END IF / END LOOP / END WHILE close their own blocks, not BEGIN.
+                    // END IF / END LOOP / END WHILE close their own blocks, not BEGIN; END CASE closes the CASE counted above.
                     if (k + 1 < _t.Count && (_t[k + 1].Is("IF") || _t[k + 1].Is("LOOP") || _t[k + 1].Is("WHILE") || _t[k + 1].Is("REPEAT"))) depth++;
+                    else if (k + 1 < _t.Count && _t[k + 1].Is("CASE")) k++;
                 }
             }
             if (t.IsSymbol(";") && depth == 0 && parens == 0) return k;
@@ -484,6 +506,7 @@ public sealed partial class DdlParser
             {
                 _p++;
                 col.Default = Expression();
+                col.DefaultName = constraintName;
                 constraintName = null;
                 continue;
             }
@@ -785,61 +808,175 @@ public sealed partial class DdlParser
         list.Add(td);
     }
 
+    /// <summary>MySQL routine characteristics (between the parameters / RETURNS and the body).</summary>
+    private static readonly HashSet<string> MySqlCharacteristics = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "COMMENT", "LANGUAGE", "NOT", "DETERMINISTIC", "CONTAINS", "NO", "READS", "MODIFIES", "SQL", "SECURITY", "DEFINER", "INVOKER", "DATA",
+    };
+
+    /// <summary>
+    /// CREATE FUNCTION / PROCEDURE: the signature, return type and language, the characteristics written around the body
+    /// (<see cref="DbRoutineDef.Options"/>) and the body itself, verbatim (<see cref="DbRoutineDef.Body"/>): PostgreSQL's
+    /// dollar-quoted (or quoted) text or SQL-standard BEGIN ATOMIC / RETURN body, everything after AS in T-SQL, after IS / AS in
+    /// Oracle, and from the first statement (usually BEGIN) in MySQL.
+    /// </summary>
     private void Routine(string kind)
     {
+        Accept("IF"); Accept("NOT"); Accept("EXISTS");
         var (schema, name) = QualifiedName();
         var r = new DbRoutineDef { Name = name, Kind = kind };
         if (Peek().IsSymbol("("))
         {
             var close = Close(_p);
-            r.Signature = "(" + SqlTokenizer.Text(_t, _p + 1, close) + ")";
+            r.Signature = "(" + OneLine(Verbatim(_p + 1, close)) + ")";
             _p = close + 1;
         }
         else
         {
             // T-SQL: parameters without parentheses, up to AS / WITH.
             var from = _p;
-            while (_p < _end && !Peek().Is("AS") && !Peek().Is("WITH") && !Peek().Is("BEGIN") && !Peek().Is("RETURNS")) _p++;
-            r.Signature = "(" + SqlTokenizer.Text(_t, from, _p) + ")";
+            while (_p < _end && !Peek().Is("AS") && !Peek().Is("WITH") && !Peek().Is("BEGIN") && !Peek().Is("RETURNS") && !Peek().Is("FOR")
+                   && !(_dialect == "oracle" && (Peek().Is("IS") || Peek().Is("RETURN") || Peek().Is("AUTHID")))) _p++;
+            r.Signature = "(" + OneLine(Verbatim(from, _p)) + ")";
         }
+        var options = new List<string>();
         while (_p < _end)
         {
-            var t = Next();
-            if (t.Is("RETURNS") || t.Is("RETURN") && kind == DbFields.Function && r.Returns == null)
+            var t = Peek();
+            if (t.Is("RETURNS") && !(r.Returns != null && Ahead(1).Is("NULL")) || t.Is("RETURN") && kind == DbFields.Function && r.Returns == null && _dialect != "postgresql")
             {
+                _p++;
                 if (Peek().Is("TABLE") && Ahead(1).IsSymbol("(")) { _p++; var close = Close(_p); r.Returns = "TABLE(" + SqlTokenizer.Text(_t, _p + 1, close) + ")"; _p = close + 1; }
+                else if (Peek().Kind == SqlTokenKind.Word && Peek().Text.StartsWith('@') && Ahead(1).Is("TABLE"))
+                {
+                    // T-SQL multi-statement table function: RETURNS @t TABLE (…)
+                    var from = _p;
+                    _p += 2;
+                    if (Peek().IsSymbol("(")) _p = Close(_p) + 1;
+                    r.Returns = SqlTokenizer.Text(_t, from, _p);
+                }
                 else r.Returns = DataType();
+                continue;
             }
-            else if (t.Is("LANGUAGE")) r.Language = Next().Text.ToLowerInvariant();
-            else if (t.Is("AS") || t.Is("IS") || t.Is("BEGIN")) break;
+            if (t.Is("LANGUAGE") && Ahead(1).IsName)
+            {
+                _p++;
+                r.Language = Next().Text.ToLowerInvariant();
+                continue;
+            }
+            if (_dialect == "postgresql" && t.Is("AS") && Ahead(1).Kind == SqlTokenKind.String)
+            {
+                _p++;
+                r.Body = Next().Text;
+                if (Accept(",") && Peek().Kind == SqlTokenKind.String) _p++;   // AS 'obj_file', 'link_symbol'
+                continue;
+            }
+            if (_dialect == "mysql" && (t.Is("CHARSET") || t.Is("COLLATE") || t.Is("CHARACTER") && Ahead(1).Is("SET")))
+            {
+                var n = t.Is("CHARACTER") ? 3 : 2;   // RETURNS varchar(20) CHARSET utf8mb4
+                options.Add(SqlTokenizer.Text(_t, _p, _p + n));
+                _p += n;
+                continue;
+            }
+            if (_dialect == "sqlserver" && t.Is("EXECUTE") && Ahead(1).Is("AS"))
+            {
+                // WITH EXECUTE AS OWNER | CALLER | SELF | 'user'
+                options.Add(SqlTokenizer.Text(_t, _p, _p + 3));
+                _p += 3;
+                continue;
+            }
+            if (t.Is("AS") || t.Is("IS"))
+            {
+                r.Body = Verbatim(_p + 1, _end);
+                break;
+            }
+            var bodyStarts = t.Is("BEGIN") || _dialect == "postgresql" && t.Is("RETURN") && r.Returns != null
+                             || _dialect == "mysql" && t.Kind == SqlTokenKind.Word && !MySqlCharacteristics.Contains(t.Text) && !t.Is("RETURNS");
+            if (bodyStarts)
+            {
+                r.Body = Verbatim(_p, _end);
+                break;
+            }
+            // A characteristic / attribute: keep it as written.
+            var start = _p;
+            _p++;
+            if (Peek().IsSymbol("(")) _p = Close(_p) + 1;
+            else if (_dialect == "mysql" && t.Is("COMMENT") && Peek().Kind == SqlTokenKind.String) _p++;
+            options.Add(SqlTokenizer.Text(_t, start, _p));
         }
+        // Option words separated by commas (T-SQL WITH a, b) read better without the leading WITH's own comma noise.
+        var opts = string.Join(" ", options).Replace(" ,", ",").Trim();
+        r.Options = opts.Length == 0 ? null : opts;
+        if (_dialect == "mysql" && r.Options is { } mo && Regex.Match(mo, @"\bCOMMENT\s+'((?:[^']|'')*)'", RegexOptions.IgnoreCase) is { Success: true } cm)
+            r.Comment = cm.Groups[1].Value.Replace("''", "'");
         var s = _catalog.Schema(schema);
         s.Routines.RemoveAll(x => DbCatalog.Eq(x.Name, name));
         s.Routines.Add(r);
     }
 
+    /// <summary>
+    /// CREATE TRIGGER for every dialect: timing, events, table and level from the header, and the action verbatim
+    /// (<see cref="DbTriggerDef.Action"/>): from WHEN / EXECUTE in PostgreSQL, after AS in T-SQL, the statement after FOR EACH
+    /// ROW in MySQL, from WHEN / DECLARE / BEGIN in Oracle and SQLite.
+    /// </summary>
     private void Trigger()
     {
+        Accept("IF"); Accept("NOT"); Accept("EXISTS");
         var (_, name) = QualifiedName();
         var tg = new DbTriggerDef { Name = name };
         string? tableSchema = null, tableName = null;
         var events = new List<string>();
         while (_p < _end)
         {
-            var t = Next();
-            if (t.Is("BEFORE") || t.Is("AFTER")) tg.Timing = t.Text.ToUpperInvariant();
-            else if (t.Is("INSTEAD") && Accept("OF")) tg.Timing = "INSTEAD OF";
-            else if (t.Is("FOR") && (Peek().Is("INSERT") || Peek().Is("UPDATE") || Peek().Is("DELETE"))) tg.Timing = "AFTER";   // T-SQL FOR = AFTER
-            else if (t.Is("INSERT") || t.Is("UPDATE") || t.Is("DELETE") || t.Is("TRUNCATE")) { events.Add(t.Text.ToUpperInvariant()); if (Peek().Is("OF")) { _p++; while (Peek().IsName && !Peek().Is("ON") && !Peek().Is("OR")) { _p++; Accept(","); } } }
-            else if (t.Is("ON") && tableName == null) (tableSchema, tableName) = QualifiedName();
-            else if (t.Is("EACH")) tg.Level = Next().Text.ToUpperInvariant();
-            else if (t.Is("EXECUTE") && (Peek().Is("FUNCTION") || Peek().Is("PROCEDURE"))) { tg.Action = SqlTokenizer.Text(_t, _p - 1, _end); break; }
-            else if (t.Is("AS") || t.Is("BEGIN")) { tg.Action = SqlTokenizer.Text(_t, _p - 1, Math.Min(_end, _p + 40)); break; }
+            var t = Peek();
+            // MySQL: after FOR EACH ROW [FOLLOWS | PRECEDES other] comes the body, whatever statement it starts with.
+            if (_dialect == "mysql" && tg.Level != null && tableName != null && !t.Is("FOLLOWS") && !t.Is("PRECEDES")) { tg.Action = Verbatim(_p, _end); break; }
+            if (t.Is("BEFORE") || t.Is("AFTER")) { _p++; tg.Timing = t.Text.ToUpperInvariant(); }
+            else if (t.Is("INSTEAD") && Ahead(1).Is("OF")) { _p += 2; tg.Timing = "INSTEAD OF"; }
+            else if (t.Is("FOR") && Ahead(1).Is("EACH")) { _p += 2; tg.Level = Next().Text.ToUpperInvariant(); }
+            else if (t.Is("FOR") && (Ahead(1).Is("ROW") || Ahead(1).Is("STATEMENT"))) { _p++; tg.Level = Next().Text.ToUpperInvariant(); }
+            else if (t.Is("FOR") && _dialect == "sqlserver") { _p++; tg.Timing = "AFTER"; }   // T-SQL FOR = AFTER
+            else if (t.Is("INSERT") || t.Is("UPDATE") || t.Is("DELETE") || t.Is("TRUNCATE"))
+            {
+                _p++;
+                events.Add(t.Text.ToUpperInvariant());
+                if (Peek().Is("OF")) { _p++; while (Peek().IsName && !Peek().Is("ON") && !Peek().Is("OR")) { _p++; Accept(","); } }
+            }
+            else if (t.Is("OR") || t.IsSymbol(",")) _p++;
+            else if (t.Is("ON") && tableName == null) { _p++; (tableSchema, tableName) = QualifiedName(); }
+            else if (t.Is("REFERENCING"))
+            {
+                Warn(_p, $"trigger {name}: the REFERENCING clause is not kept");
+                _p++;
+                while (_p < _end && !Peek().Is("FOR") && !Peek().Is("WHEN") && !Peek().Is("BEGIN") && !Peek().Is("DECLARE") && !Peek().Is("EXECUTE")) _p++;
+            }
+            else if (t.Is("FOLLOWS") || t.Is("PRECEDES")) { _p++; NameParts(); }
+            else if (t.Is("ENABLE") || t.Is("DISABLE") || t.Is("DEFERRABLE") || t.Is("ROW") && tg.Level == null) _p++;
+            else if (t.Is("NOT") && (Ahead(1).Is("DEFERRABLE") || Ahead(1).Is("FOR"))) _p += Ahead(1).Is("FOR") ? 3 : 2;   // NOT DEFERRABLE, NOT FOR REPLICATION
+            else if (t.Is("INITIALLY") || t.Is("FROM")) { _p++; NameParts(); }
+            else if (t.Is("WITH") && _dialect == "sqlserver")
+            {
+                // WITH ENCRYPTION | EXECUTE AS … | APPEND, up to the timing or AS
+                _p++;
+                while (_p < _end && !Peek().Is("FOR") && !Peek().Is("AFTER") && !Peek().Is("INSTEAD") && !(Peek().Is("AS") && !_t[_p - 1].Is("EXECUTE"))) _p++;
+            }
+            else if (t.Is("AS") && _dialect != "postgresql") { tg.Action = Verbatim(_p + 1, _end); break; }
+            else if (t.Is("WHEN") || t.Is("EXECUTE") || t.Is("BEGIN") || t.Is("DECLARE") || t.Is("CALL") || t.Is("COMPOUND"))
+            {
+                tg.Action = Verbatim(_p, _end);
+                break;
+            }
+            else _p++;
         }
         if (events.Count > 0) tg.Events = string.Join(", ", events);
         if (tableName == null) { Warn(_p, $"trigger {name}: no table; skipped"); return; }
         var table = _catalog.FindSchema(tableSchema ?? _currentSchema)?.FindTable(tableName) ?? _catalog.FindTable(null, tableName);
-        if (table == null) { Warn(_p, $"trigger {name}: table {tableName} is not defined in the script; skipped"); return; }
+        if (table == null)
+        {
+            _looseTriggers.Add((tableSchema, tableName, tg));
+            Warn(_p, $"trigger {name}: table {tableName} is not defined in the script; skipped");
+            return;
+        }
         table.Triggers.RemoveAll(x => DbCatalog.Eq(x.Name, name));
         table.Triggers.Add(tg);
     }
@@ -904,9 +1041,10 @@ public sealed partial class DdlParser
             // T-SQL default constraint: ADD CONSTRAINT DF_x DEFAULT (0) FOR col
             if (Peek().Is("CONSTRAINT") && Ahead(2).Is("DEFAULT"))
             {
+                var dfName = Ahead(1).Text;
                 _p += 3;
                 var expr = Expression();
-                if (Accept("FOR") && table.FindColumn(Next().Text) is { } col) col.Default = expr.Trim();
+                if (Accept("FOR") && table.FindColumn(Next().Text) is { } col) { col.Default = expr.Trim(); col.DefaultName = dfName; }
                 return;
             }
             TableElement(table, schema, _end);
@@ -1095,6 +1233,20 @@ public sealed partial class DdlParser
     private void SkipWords(params string[] words)
     {
         while (words.Any(w => Peek().Is(w))) _p++;
+    }
+
+    /// <summary>Text with its whitespace (line breaks too) collapsed to single spaces.</summary>
+    private static string OneLine(string? s) => s == null ? "" : Regex.Replace(s, @"\s+", " ").Trim();
+
+    /// <summary>The script text of tokens [from, to) as written (comments and layout inside kept), or null when empty.</summary>
+    private string? Verbatim(int from, int to)
+    {
+        to = Math.Min(to, _t.Count);
+        // A trailing ";" ends the statement, except in Oracle where it belongs to the PL/SQL block ("END;").
+        while (to > from && (_t[to - 1].Kind == SqlTokenKind.BatchEnd || _t[to - 1].Offset < 0 || _dialect != "oracle" && _t[to - 1].IsSymbol(";"))) to--;
+        if (from >= to || _t[from].Offset < 0) return null;
+        var text = _src[_t[from].Offset.._t[to - 1].End].Trim();
+        return text.Length == 0 ? null : text;
     }
 
     private string Snippet(int from)

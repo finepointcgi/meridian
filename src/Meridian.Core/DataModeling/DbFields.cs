@@ -40,7 +40,7 @@ public static class DbFields
     /// <summary>Tables: name of the primary key constraint.</summary>
     public const string PkName = "db.pkName";
 
-    /// <summary>Views: the SELECT of the view; routines: the body if known.</summary>
+    /// <summary>Views: the SELECT of the view; routines: the body (see <see cref="DbRoutineDef.Body"/>); triggers: the action.</summary>
     public const string Definition = "db.definition";
 
     /// <summary>Columns: identity / auto increment: "always", "byDefault" or "autoIncrement".</summary>
@@ -75,6 +75,11 @@ public static class DbFields
     public const string Returns = "db.returns";
     public const string BaseType = "db.baseType";
     public const string Language = "db.language";
+    /// <summary>Routines: characteristics written between the signature and the body (STABLE, SECURITY DEFINER, DETERMINISTIC …).</summary>
+    public const string Options = "db.options";
+
+    /// <summary>Columns: the name of the default's constraint (SQL Server), so migrations can drop it.</summary>
+    public const string DefaultName = "db.defaultName";
 
     // Triggers
     public const string Timing = "db.timing";     // BEFORE / AFTER / INSTEAD OF
@@ -122,7 +127,7 @@ public static class DbFields
                 yield return Definition; yield return PkName; yield return QualifiedName;
                 break;
             case ElementKind.Column:
-                yield return Identity; yield return Generated; yield return Collation; yield return QualifiedName;
+                yield return Identity; yield return Generated; yield return Collation; yield return DefaultName; yield return QualifiedName;
                 break;
             case ElementKind.ForeignKey:
                 yield return OnDelete; yield return OnUpdate;
@@ -137,7 +142,7 @@ public static class DbFields
                 yield return FieldKeys.SqlType; yield return Start; yield return Increment; yield return MinValue; yield return MaxValue; yield return Cycle;
                 break;
             case ElementKind.Routine:
-                yield return FieldKeys.Signature; yield return Returns; yield return Language; yield return Definition;
+                yield return FieldKeys.Signature; yield return Returns; yield return Language; yield return Options; yield return Definition;
                 break;
             case ElementKind.Trigger:
                 yield return Timing; yield return Events; yield return Level; yield return Definition;
@@ -174,6 +179,8 @@ public static class DbFields
         Returns => "Returns",
         BaseType => "Base type",
         Language => "Language",
+        Options => "Options",
+        DefaultName => "Default constraint name",
         Timing => "Timing",
         Events => "Events",
         Level => "For each",
@@ -191,6 +198,8 @@ public static class DbFields
         Expression => "e.g. amount > 0",
         Generated => "Expression of a computed column",
         QualifiedName => "Used to match this element when the database is imported again",
+        Options => "e.g. STABLE SECURITY DEFINER, DETERMINISTIC, WITH SCHEMABINDING",
+        DefaultName => "SQL Server: the DEFAULT constraint's name, used to drop it in migration scripts",
         _ => null,
     };
 }

@@ -12,6 +12,9 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+    <PackageReference Include="Testcontainers.MsSql" Version="4.16.0" />
+    <PackageReference Include="Testcontainers.Oracle" Version="4.16.0" />
+    <PackageReference Include="Testcontainers.MySql" Version="4.16.0" />
     <!-- Test-only: extracts text / page sizes from generated PDFs (report generation tests). -->
     <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- Test-only: parses .gitlab-ci.yml and the GitHub workflows to keep the two CI definitions in step. -->

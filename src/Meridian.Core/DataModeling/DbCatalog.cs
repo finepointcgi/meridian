@@ -58,6 +58,8 @@ public sealed class DbSchemaDef
 public sealed class DbTableDef
 {
     public string Name { get; set; } = "";
+    /// <summary>Id of the model element it was read from (model extracts only): same id + another name = a rename.</summary>
+    public string? Id { get; set; }
     /// <summary>"" (table), "view" or "materializedView".</summary>
     public string Kind { get; set; } = "";
     public string? Comment { get; set; }
@@ -81,10 +83,14 @@ public sealed class DbTableDef
 public sealed class DbColumnDef
 {
     public string Name { get; set; } = "";
+    /// <summary>Id of the model element it was read from (model extracts only): same id + another name = a rename.</summary>
+    public string? Id { get; set; }
     /// <summary>The full type as written, e.g. "varchar(200)" or "numeric(10,2)".</summary>
     public string Type { get; set; } = "";
     public bool Nullable { get; set; } = true;
     public string? Default { get; set; }
+    /// <summary>Name of the default's constraint (SQL Server keeps defaults as named constraints), when known.</summary>
+    public string? DefaultName { get; set; }
     /// <summary>"always", "byDefault" or "autoIncrement".</summary>
     public string? Identity { get; set; }
     public string? Generated { get; set; }
@@ -160,6 +166,13 @@ public sealed class DbRoutineDef
     public string? Returns { get; set; }
     public string? Language { get; set; }
     public string? Comment { get; set; }
+    /// <summary>
+    /// The body as the source wrote it: what follows AS in T-SQL, the dollar-quoted text in PostgreSQL, the BEGIN … END of
+    /// MySQL, the declarations and block after IS / AS in Oracle. Null when only the signature is known.
+    /// </summary>
+    public string? Body { get; set; }
+    /// <summary>Characteristics between the signature and the body (e.g. "STABLE SECURITY DEFINER", "DETERMINISTIC READS SQL DATA", "WITH SCHEMABINDING").</summary>
+    public string? Options { get; set; }
 }
 
 public sealed class DbTriggerDef
@@ -171,6 +184,9 @@ public sealed class DbTriggerDef
     public string Events { get; set; } = "INSERT";
     /// <summary>ROW or STATEMENT.</summary>
     public string? Level { get; set; }
-    /// <summary>The action (e.g. "EXECUTE FUNCTION audit()").</summary>
+    /// <summary>
+    /// The action as the source wrote it, after the header: "EXECUTE FUNCTION audit()" (PostgreSQL, with a WHEN (…) in front
+    /// when there is one), the T-SQL batch after AS, MySQL's statement or BEGIN … END, Oracle's and SQLite's [WHEN …] block.
+    /// </summary>
     public string? Action { get; set; }
 }
