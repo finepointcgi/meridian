@@ -18,6 +18,7 @@ public static class KeyboardShortcuts
             ("⌘O", "projects"),
             ("⌘F", "find (focus the model explorer search)"),
             ("⇧⌘F", "find and replace across the model"),
+            ("⌘P", "print / PDF of the active diagram"),
             ("⌘,", "settings"),
             ("⌘Z", "undo"),
             ("⇧⌘Z or ⌘Y", "redo"),

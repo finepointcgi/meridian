@@ -61,6 +61,7 @@
                     <MudMenuItem Icon="@Icons.Material.Outlined.Image" OnClick="ExportSvg" Disabled="Ws.Active == null">Export diagram as SVG</MudMenuItem>
                     <MudMenuItem Icon="@Icons.Material.Outlined.Photo" OnClick="ExportImage" Disabled="Ws.Active == null">Export diagram as PNG…</MudMenuItem>
                     <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyDiagramImage" Disabled="Ws.Active == null">Copy diagram as image</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Print" OnClick="PrintDiagram" Disabled="Ws.Active == null">Print / PDF…</MudMenuItem>
                     <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="ExportMermaid" Disabled="!CanExportMermaid" title="Activity, state machine, sequence, block definition and requirement diagrams">Export diagram as Mermaid (.mmd)</MudMenuItem>
                     <MudMenuItem Icon="@Icons.Material.Outlined.ContentCopy" OnClick="CopyMermaid" Disabled="!CanExportMermaid">Copy diagram as Mermaid</MudMenuItem>
                 </MudMenu>

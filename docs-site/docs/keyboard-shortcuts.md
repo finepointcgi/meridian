@@ -12,6 +12,7 @@ menu shows a short version of this page inside Meridian.
 | ⌘O | projects |
 | ⌘F | find (focus the model explorer search) |
 | ⇧⌘F | find and replace across the model ([Find and replace](find-replace.md)) |
+| ⌘P | print / PDF of the active diagram ([page setup and preview](printing.md)) |
 | ⌘, | settings |
 | ⌘Z | undo |
 | ⇧⌘Z or ⌘Y | redo |

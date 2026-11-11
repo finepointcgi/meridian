@@ -175,16 +175,33 @@ window.meridian = (() => {
     },
     // A file the server streams (reports: GET api/reports/{id}/file). The browser downloads it directly, chunk by chunk;
     // the desktop host fetches it with the single-use ticket in the URL and writes it to the file the user picks.
-    downloadUrl: (name, url) => {
+    // open: the desktop host opens the saved file afterwards (a printed PDF, as its web view has no print dialog).
+    downloadUrl: (name, url, open) => {
       const href = new URL(url, document.baseURI).href;
       if (typeof window.external?.sendMessage === "function") {
-        window.external.sendMessage(JSON.stringify({ command: "save-url", name, url: href }));
+        window.external.sendMessage(JSON.stringify({ command: "save-url", name, url: href, open: !!open }));
         return;
       }
       const a = Object.assign(document.createElement("a"), { href, download: name });
       document.body.appendChild(a); a.click(); a.remove();
     },
     openUrl: url => window.open(new URL(url, document.baseURI).href, "_blank", "noopener"),
+    // Diagram printing: the print-optimised page (@page CSS, no scripts) in a hidden, sandboxed frame, then its print dialog.
+    printHtml: html => new Promise(resolve => {
+      const frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+      frame.setAttribute("aria-hidden", "true");
+      frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+      frame.onload = () => {
+        resolve();   // print() blocks until its dialog closes: answer the server first
+        setTimeout(() => {
+          try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+          finally { setTimeout(() => frame.remove(), 60000); }
+        }, 0);
+      };
+      frame.srcdoc = html;
+      document.body.appendChild(frame);
+    }),
     openHtml: html => {
       const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
       window.open(url, "_blank");
@@ -241,6 +258,7 @@ window.meridian = (() => {
         else if (k === "o") name = "Open";
         else if (k === "f") name = e.shiftKey ? "FindReplace" : "Find";
         else if (k === "k") name = "Palette";
+        else if (k === "p" && !e.shiftKey && !e.altKey) name = "Print";
         else if (k === "z" && !inText) name = e.shiftKey ? "Redo" : "Undo";
         else if (k === "y" && !inText) name = "Redo";
         if (name) { e.preventDefault(); dotnet.invokeMethodAsync("OnShortcut", name); }

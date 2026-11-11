@@ -57,6 +57,7 @@ can always compare against it.
 | Product line / variability | **Variants**: feature models, presence conditions, configurations, variant export |
 | Trade-off analysis | **Trade studies** with weights, utility curves and sensitivity |
 | Report Wizard / document templates | **Generate → Formats → Word / PDF document from template**, and the HTML **Report** |
+| File ▸ Print, Print Preview, Page Setup (fit to N pages, scale, print diagrams of a package) | **Print / PDF…** (⌘P): paper, margins, fit to one page / N × M pages / fixed scale, overlap and registration marks, header and footer fields, preview with page thumbnails; vector PDF, PNG pages or the browser's print dialog; **Print diagrams…** for a package with a contents page ([details](printing.md)) |
 | Macros (Groovy, JavaScript, Jython) | **Script console** (C#) |
 | Plugins (Java Open API) | **.NET plugins** (`IMeridianPlugin`) |
 | SysML v2 textual notation | **SysML v2 text** editor, live-synced with the model |
@@ -97,6 +98,7 @@ can always compare against it.
 | Preferences, visual styles | **Settings** (⌘,) with light / dark / system themes and accent colours ([details](settings.md)) |
 | MDG Technologies, UML profiles | **profiles and stereotypes**, and **plugins** for behaviour |
 | Document generation (RTF / DOCX templates) | **Word / PDF from template** with section presets |
+| Page Setup, Print Preview, print a diagram across pages | **Print / PDF…** (⌘P) with paper, scaling, overlap, header and footer fields and a page preview; **Print diagrams…** for a package ([details](printing.md)) |
 | Baselines and Compare | **Baselines…** with compare and CSV export, and **Version history** compare |
 | Shared packages, package imports across repositories, Reusable Asset Service | **Used projects…**: reuse a package of another project read-only, pinned, with update review ([details](libraries.md)) |
 | Version control (SVN, Git, TFS packages) | built-in **commits, branches and merge** for the whole project |

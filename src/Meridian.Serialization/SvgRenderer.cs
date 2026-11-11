@@ -126,7 +126,8 @@ public static partial class SvgRenderer
 
     /// <param name="theme">Colours (light by default).</param>
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
-    public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false)
+    /// <param name="frame">Draw the SysML diagram frame and its header (printing can leave it off).</param>
+    public static string Render(ModelRepository model, Diagram d, double margin = 24, SvgTheme? theme = null, bool transparent = false, bool frame = true)
     {
         // Effective bounds measure each shape's compartments; routing asks for every obstacle once per path, so compute each once.
         var memo = new Dictionary<DiagramNode, Bounds>(ReferenceEqualityComparer.Instance);
@@ -151,9 +152,9 @@ public static partial class SvgRenderer
         sb.Append(t.Defs);
         if (!transparent) sb.Append($"<rect x=\"{F(minX)}\" y=\"{F(minY)}\" width=\"{F(maxX - minX)}\" height=\"{F(maxY - minY)}\" fill=\"{t.Background}\"/>");
         // Whiteboards are free drawing: no SysML diagram frame.
-        if (d.DiagramType != DiagramType.Whiteboard)
+        if (frame && d.DiagramType != DiagramType.Whiteboard)
             sb.Append($"<rect x=\"{F(minX + 4)}\" y=\"{F(minY + 4)}\" width=\"{F(maxX - minX - 8)}\" height=\"{F(maxY - minY - 8)}\" fill=\"none\" stroke=\"#8a93a3\"/>");
-        RenderHeader(sb, d, minX + 4, minY + 4, t);
+        if (frame) RenderHeader(sb, d, minX + 4, minY + 4, t);
         RenderBody(sb, model, d, bounds, null, t, null, routes);   // the routes just computed (same view, same bounds)
         sb.Append("</svg>");
         return sb.ToString();
