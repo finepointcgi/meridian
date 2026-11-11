@@ -91,6 +91,8 @@ themes, Auto-diagram and one-click SDD (0.4).
   Every change is shown as a diff you apply or discard. Runs on Claude (API key), ★ a local model (Ollama, LM Studio
   or any OpenAI-compatible server) or ★ Claude Code with your own login.
   ([guide](docs-site/docs/ai-assistant.md), [reference](docs/AI.md))
+- **AI assistants over MCP** (team server): Hearth, Claude Code and other MCP clients read your models with read-only
+  tools at `/api/mcp`, using a personal access token and your package permissions. ([guide](docs-site/docs/mcp.md))
 - **Simulation**: step through activities and state machines.
 - **Safety & reliability**: FMEA worksheet on blocks, parts and functions (S/O/D, RPN, AIAG-VDA action priority,
   mitigating requirements, verifying tests, CSV) and fault tree diagrams (AND / OR / k-of-n gates) with minimal cut sets,

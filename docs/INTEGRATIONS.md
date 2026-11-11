@@ -316,6 +316,9 @@ avatar menu → **API tokens…** (server mode) to create (shown once) and revok
 * Send it as `Authorization: Bearer mrd_…`, or as the Basic password (`username:mrd_…`) for tools that only speak Basic.
 * Tokens are 256-bit random values; only their SHA-256 hash and a 12-character display prefix are stored
   (`api_tokens` table); revoked tokens stop working immediately. A token has its owner's access to every project.
+* Tokens are also how AI clients connect to the MCP server at `/api/mcp` (read-only tools, filtered by package
+  permissions, audited as `mcp.tool`; `src/Meridian.Web/Integrations/McpEndpoints.cs`, user guide `docs-site/docs/mcp.md`).
+  It accepts tokens only: no cookie, no Basic password.
 
 ## 6. Code repositories (code sync)
 

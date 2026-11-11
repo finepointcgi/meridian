@@ -12,6 +12,8 @@
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.Playwright" Version="1.64.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <!-- The official MCP C# client (MIT), test only: proves real MCP clients such as Hearth can use /api/mcp. -->
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.3.1" />
     <!-- The concurrency load test's PostgreSQL run (a throwaway container on a random port). -->
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />

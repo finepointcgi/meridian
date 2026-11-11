@@ -27,9 +27,10 @@ public static class AuditActions
         ProjectExport = "project.export", MemberSet = "project.member-set", MemberRemove = "project.member-remove",
         PermissionSet = "project.permission-set", PermissionRemove = "project.permission-remove";
     public const string VersionCommit = "version.commit", VersionRestore = "version.restore";
+    public const string McpTool = "mcp.tool";   // an AI client read the model over MCP (docs-site/docs/mcp.md)
     public const string BackupDownload = "backup.download", BackupScheduled = "backup.scheduled", BackupRestore = "backup.restore", AuditExport = "audit.export";
 
-    public static readonly string[] Prefixes = ["login.", "sso.", "user.", "org.", "team.", "project.", "version.", "backup.", "audit."];
+    public static readonly string[] Prefixes = ["login.", "sso.", "user.", "org.", "team.", "project.", "version.", "backup.", "audit.", "mcp."];
 }
 
 public sealed class AuditLog(IMeridianStore db, ILogger<AuditLog> log) : IAuditLog
