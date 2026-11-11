@@ -55,6 +55,8 @@ public static class CodeModelJson
             Interfaces = t.Interfaces ?? [],
             Members = t.Members ?? [],
             Dependencies = t.Dependencies ?? [],
+            DependencyLocations = t.DependencyLocations ?? [],
+            OmittedDependencyLocations = t.OmittedDependencyLocations ?? CodeDependencyUses.NoneOmitted,
         }).ToList(),
         Warnings = c.Warnings ?? [],
     };
