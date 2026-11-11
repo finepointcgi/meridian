@@ -126,16 +126,24 @@ public class FindReplacePanelTests : TestContext
         Type(cut, "fr-replace", "Valve");
         Type(cut, "fr-find", "Pump");
         cut.WaitForAssertion(() => Assert.True(!state.Running && state.Matches == 2), Wait);
-        var ro = cut.Find("[data-testid=fr-row].ro");
-        Assert.Contains("Find only", ro.TextContent);
-        Assert.True(ro.QuerySelector("input")!.HasAttribute("disabled"));
-        Assert.Contains("1 read-only", cut.Find("[data-testid=fr-status]").TextContent);
+        // The panel re-renders after the background search: wait for each rendered state.
+        cut.WaitForAssertion(() =>
+        {
+            var ro = cut.Find("[data-testid=fr-row].ro");
+            Assert.Contains("Find only", ro.TextContent);
+            Assert.True(ro.QuerySelector("input")!.HasAttribute("disabled"));
+            Assert.Contains("1 read-only", cut.Find("[data-testid=fr-status]").TextContent);
+        }, Wait);
 
         cut.Find("[data-testid=fr-replace-all]").Click();
-        var rows = cut.FindAll(".fr-diff tbody tr");
-        Assert.All(rows, r => Assert.Contains("skipped", r.ClassName));
-        Assert.Contains(rows, r => r.TextContent.Contains("already has a Block named “Valve”"));
-        Assert.True(cut.Find("[data-testid=fr-apply]").HasAttribute("disabled"));
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".fr-diff tbody tr");
+            Assert.NotEmpty(rows);
+            Assert.All(rows, r => Assert.Contains("skipped", r.ClassName));
+            Assert.Contains(rows, r => r.TextContent.Contains("already has a Block named “Valve”"));
+            Assert.True(cut.Find("[data-testid=fr-apply]").HasAttribute("disabled"));
+        }, Wait);
     }
 
     [Fact]
