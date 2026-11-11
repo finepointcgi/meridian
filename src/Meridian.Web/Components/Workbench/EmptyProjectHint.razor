@@ -1,10 +1,25 @@
 @inherits WorkspaceComponent
+@using Meridian.Web.CodeSync
+@inject IServiceProvider Services
 
-@* Shown in the canvas area when no diagram is open. A project without diagrams gets one-click ways to start. *@
+@* Shown in the canvas area when no diagram is open. A project without diagrams gets one-click ways to start; a (nearly)
+   empty main whose code waits on a code-sync review branch says so, with the way there. *@
 <div class="empty-hint empty-project" data-testid="empty-project">
     <div style="max-width:520px">
         <MudIcon Icon="@Icons.Material.Outlined.Schema" Style="font-size:52px; opacity:.45" />
-        @if (HasDiagrams)
+        @if (CodeWaiting is { } review)
+        {
+            <h3>Your code is on the review branch</h3>
+            <div data-testid="empty-code-waiting">@CodeReviewNotice.Text(review) on <b>@review.Branch.Name</b>. Open the branch to look at it, or accept it into main.</div>
+            <div class="empty-actions">
+                <button class="empty-action primary" data-action="@OpenCodeBranch" @onclick="() => Run(OpenCodeBranch)"><MudIcon Icon="@Icons.Material.Outlined.CallSplit" />Open the code branch</button>
+                @if (!Ws.ReadOnly && Ws.User is not null)
+                {
+                    <button class="empty-action" data-action="@AcceptCode" @onclick="() => Run(AcceptCode)"><MudIcon Icon="@Icons.Material.Outlined.MergeType" />Accept all into main</button>
+                }
+            </div>
+        }
+        else if (HasDiagrams)
         {
             <h3>No diagram open</h3>
             <div>Double-click a diagram in the explorer, or create one from the Diagram toolbar group.</div>
@@ -35,7 +50,11 @@
 </div>
 
 @code {
-    public const string AutoDiagram = "auto-diagram", Mermaid = "mermaid", OpenFile = "open-file", Sample = "sample";
+    public const string AutoDiagram = "auto-diagram", Mermaid = "mermaid", OpenFile = "open-file", Sample = "sample",
+        OpenCodeBranch = "open-code-branch", AcceptCode = "accept-code";
+
+    /// <summary>At most this many elements (besides the root and diagrams) still counts as a nearly empty project.</summary>
+    public const int NearlyEmpty = 10;
 
     /// <summary>Called with one of the action names (<see cref="AutoDiagram"/>, <see cref="Mermaid"/>, …).</summary>
     [Parameter] public EventCallback<string> OnAction { get; set; }
@@ -46,4 +65,40 @@
     private bool HasElements => Ws.Model.AllElements.Any(e => e is not Diagram && !ReferenceEquals(e, Ws.Model.Root));
 
     private Task Run(string action) => OnAction.InvokeAsync(action);
+
+    private CodeSyncState? _state;
+    private bool _resolved;
+    /// <summary>Resolved once (a disposed circuit has no services left to look up).</summary>
+    private CodeSyncState? State
+    {
+        get
+        {
+            if (!_resolved) (_state, _resolved) = (Services.GetService(typeof(CodeSyncState)) as CodeSyncState, true);
+            return _state;
+        }
+    }
+
+    /// <summary>The newest code review waiting while this line is (nearly) empty: the code is there, not here.</summary>
+    private CodeSyncReview? CodeWaiting =>
+        State is { } st && st.NoticeFor(null) is { Count: > 0 } waiting
+        && Ws.Model.AllElements.Count(e => e is not Diagram && !ReferenceEquals(e, Ws.Model.Root)) <= NearlyEmpty
+            ? waiting[0] : null;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        if (State is { } st)
+        {
+            st.Changed += OnState;
+            if (!st.Loaded) _ = st.ReloadAsync();
+        }
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    public override void Dispose()
+    {
+        if (_state is { } st) st.Changed -= OnState;
+        base.Dispose();
+    }
 }

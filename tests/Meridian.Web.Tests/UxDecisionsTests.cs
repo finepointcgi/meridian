@@ -220,7 +220,10 @@ public sealed class UxDecisionsTests : TestContext, IAsyncLifetime
         var project = await _db.CreateProjectAsync("Vehicle", ProjectFile.Serialize(SampleModels.Vehicle()), owner.Id);
         var review = new CodeSyncReviewService(_db, _hub, _events, NullLogger<CodeSyncReviewService>.Instance);
         var runner = new CodeSyncRunner(_db, _hub, [new Reader()], new AddBattery(), _events, NullLogger<CodeSyncRunner>.Instance);
-        await runner.RunAsync(new CodeSyncRequest(project, Guid.NewGuid(), "acme/sat", "main", "01c0ffee" + new string('0', 32), "https://git.example/acme/sat/commit/01",
+        var connection = Guid.NewGuid();   // reviews its first import too, so the push waits on the review branch
+        await _db.SaveIntegrationAsync(new IntegrationConnection(connection, project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
+            new CodeSync.Hosts.CodeRepoConfig { ReviewFirstImport = true }.ToJson(), null, DateTime.UtcNow));
+        await runner.RunAsync(new CodeSyncRequest(project, connection, "acme/sat", "main", "01c0ffee" + new string('0', 32), "https://git.example/acme/sat/commit/01",
             "Dana Dev", "Add battery", [new CodeFile("src/Battery.cs", "class Battery {}")], IsFullSnapshot: true));
 
         var ws = new Workspace { User = owner };

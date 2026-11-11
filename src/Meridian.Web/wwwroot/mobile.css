@@ -93,6 +93,9 @@
   .app > .workbench > .center { position: absolute; inset: 0; border: none; border-radius: 0; box-shadow: none; grid-template-rows: minmax(0, 1fr); }
   .app > .workbench > .center > .tabstrip, .app > .workbench > .center > .crumbs, .app > .workbench > .center > .dock { display: none; }
   .diagram-host .minimap { display: none; }
+  .code-review-banner.desktop { display: none; }
+  .code-review-banner.compact { display: flex; position: fixed; z-index: 1060; top: auto; bottom: calc(var(--m-bottom) + 8px); transform: none;
+    left: max(8px, var(--m-safe-l)); right: max(8px, var(--m-safe-r)); max-width: none; }
   /* Tour chapters and What's new: a bottom sheet above the navigation bar (the inline position is for desktop). */
   .app > .tour .tour-spot { display: none; }
   .app > .tour .tour-card { left: max(8px, var(--m-safe-l)) !important; right: max(8px, var(--m-safe-r)) !important; top: auto !important;

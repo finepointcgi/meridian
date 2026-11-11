@@ -42,7 +42,7 @@
         <div class="chg-empty">
             <MudIcon Icon="@Icons.Material.Outlined.Difference" />
             <h3 style="justify-content:center">No code changes to review</h3>
-            <div>When code is pushed to a connected repository, the model changes it implies land on a <b>code-sync</b> branch and appear here for review.</div>
+            <div>A repository's first sync goes straight into main. After that, when code is pushed to a connected repository, the model changes it implies land on a <b>code-sync</b> branch and appear here for review.</div>
             @if (!Ws.ReadOnly && Ws.Session is not null)
             {
                 <div class="empty-actions">
@@ -229,33 +229,11 @@
 
     private async Task Accept()
     {
-        if (Ws.Session is not { } s || Ws.User is not { } me) return;
         _busy = true;
         try
         {
-            var ids = _selected.ToList();
-            var result = await Review.AcceptAsync(s.ProjectId, null, ids, me);
-            while (result.NeedsResolution is { } pending)
-            {
-                var dialog = await Dialogs.ShowAsync<MergeDialog>("Accept code changes", new DialogParameters<MergeDialog> { { x => x.Plan, pending.Plan } },
-                    new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true });
-                if (await dialog.Result is not { Canceled: false, Data: MergeDialog.Decision decision })
-                {
-                    Snackbar.Add("Nothing more was accepted; the changes are still waiting for review.", Severity.Info);
-                    return;
-                }
-                try { result = await Review.CompleteAcceptAsync(pending, decision.Merged, me); }
-                catch (MergeOutdatedException ex)
-                {
-                    Snackbar.Add(ex.Message, Severity.Info);
-                    result = await Review.AcceptAsync(s.ProjectId, null, ids, me);
-                }
-            }
-            _selected.Clear();
-            Ws.Log(result.Message);
-            Snackbar.Add(result.Message, Severity.Success);
+            if (await CodeReviewNotice.AcceptAsync(Ws, Review, Dialogs, Snackbar, null, _selected.ToList())) _selected.Clear();
         }
-        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Warning); }
         finally
         {
             _busy = false;

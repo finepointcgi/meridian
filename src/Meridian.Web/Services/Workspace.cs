@@ -198,6 +198,9 @@ public sealed partial class Workspace : IDisposable, ISessionClient
     public Settings.UserPreferences Preferences { get; set; } = new();
     /// <summary>Asks the user to confirm (title, message); set by the workbench. Null: no confirmation possible.</summary>
     public Func<string, string, Task<bool>>? Confirm { get; set; }
+    /// <summary>As <see cref="Confirm"/>, with the confirming button's text (title, message, button): "Accept" rather than
+    /// "Delete". Set by the workbench; when null, <see cref="Confirm"/> is used.</summary>
+    public Func<string, string, string, Task<bool>>? ConfirmAction { get; set; }
     /// <summary>Raised when the favourites change (they are saved with the user's preferences).</summary>
     public event Action? FavoritesChanged;
     public HashSet<string> Favorites { get; } = new();

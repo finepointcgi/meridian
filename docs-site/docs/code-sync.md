@@ -1,7 +1,8 @@
 # Code sync
 
-Connect a GitHub or GitLab repository and Meridian keeps a part of the model in step with the code. Each push updates a
-**review branch** of the model, never `main`. You look at what changed, then accept all or some of it into `main`.
+Connect a GitHub or GitLab repository and Meridian keeps a part of the model in step with the code. The first sync
+imports the code straight into `main`, so you see it at once. After that, each push updates a **review branch** of the
+model, never `main`. You look at what changed, then accept all or some of it into `main`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/code-changes-dark.png">
@@ -21,6 +22,8 @@ Connect a GitHub or GitLab repository and Meridian keeps a part of the model in 
    - **Folders to include** (for example `src/Domain, src/Shared`). Empty means the whole repository.
    - **Model package**: the package the code goes into. By default it is named after the repository.
    - **Sync on every push to the branch** and **Post a commit status (meridian/model)**.
+   - **Review the first import too** (off by default): the first sync waits for review like later ones, instead of
+     going straight into `main`.
    - **Deployment artifacts**: *None* (default), *One for the repository* or *One per top-level package*: artifacts that
      «manifest» the synced packages, so you can deploy the code to nodes ([deployment diagrams](deployment-diagrams.md#deploying-code)).
 5. **Test connection**, then **Save**.
@@ -102,10 +105,33 @@ if they were part of the repository. Submodules inside submodules are read up to
 - Elements made from submodule code have a `code.submodule` field (`libs/core@<commit>`) that tells where they came
   from. Pull request previews and the architecture checks include submodule code.
 
+## The first import
+
+The first sync of a repository goes straight into `main` and is committed there as *Code sync: initial import of
+owner/repo at abc1234*. Anyone with `main` open sees the code arrive. The commit status on the git host says
+**Imported into main**. Each repository you connect gets its own first import.
+
+It goes to the review branch instead when:
+
+- **Review the first import too** is on;
+- `main` already has code from this repository;
+- the person the sync runs for (who pressed **sync**, or who connected the repository) can't edit `main`, or can't edit
+  every package the import touches. The run's summary says so.
+
 ## Review the changes
 
-When a push changes the model, the title bar shows **Code changes (N)**. Click it, or use the **Code ▸ Changes** ribbon
-button, or ⌘K "Code changes".
+When a push changes the model, `main` shows a banner at the top of the canvas, for example *12 code changes from
+acme/vehicle are waiting for review (commit abc1234)*, with:
+
+- **Open the code branch**: switches to the review branch with **Code changes** open;
+- **Accept all into main**: accepts all of them after you confirm (owners and editors);
+- **Dismiss** (×): hides the banner for you until a new push arrives.
+
+On a phone the banner is shorter and has no accept button. If `main` is still (nearly) empty, the empty-project hint
+says **Your code is on the review branch**, with the same buttons.
+
+The title bar also shows **Code changes (N)**. Click it, or use the **Code ▸ Changes** ribbon button, or ⌘K "Code
+changes".
 
 **Code changes** lists, per review branch:
 

@@ -45,4 +45,7 @@ public partial class Workbench
 
     private async Task<bool> ConfirmAsync(string title, string message) =>
         await Dialogs.ShowMessageBox(title, message, yesText: "Delete", cancelText: "Cancel") == true;
+
+    private async Task<bool> ConfirmActionAsync(string title, string message, string action) =>
+        await Dialogs.ShowMessageBox(title, message, yesText: action, cancelText: "Cancel") == true;
 }

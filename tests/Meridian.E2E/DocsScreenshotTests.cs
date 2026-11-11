@@ -201,7 +201,7 @@ public sealed class DocsScreenshotTests(ServerFixture f) : E2ETest(f)
             return new CodeSyncChanges([battery.Id], [vehicle.Id], [], []);
         });
         var outcome = await F.App.Services.GetRequiredService<ICodeSyncRunner>().RunAsync(new CodeSyncRequest(
-            project, Guid.NewGuid(), "acme/vehicle", "main", "0123456789abcdef0123456789abcdef01234567", "https://git.example/acme/vehicle/commit/0123456",
+            project, await CodeSyncE2E.ReviewFirstAsync(F.App.Services, project, "acme/vehicle"), "acme/vehicle", "main", "0123456789abcdef0123456789abcdef01234567", "https://git.example/acme/vehicle/commit/0123456",
             "Dana Dev", "Add battery model", [new CodeFile("src/Battery.cs", "class Battery {}")], IsFullSnapshot: true));
         Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
         var badge = p.Locator("[data-testid=code-changes-badge]");

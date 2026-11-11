@@ -133,6 +133,7 @@ public partial class Workbench
     {
         Ws.Dispatch = a => InvokeAsync(a);
         Ws.Confirm = ConfirmAsync;
+        Ws.ConfirmAction = ConfirmActionAsync;
         Ws.AskLinkAssociation = AskLinkAssociationAsync;   // Workbench.Instances.cs
         Ws.Changed += OnWorkspaceChanged;
         var user = (await Auth.GetAuthenticationStateAsync()).User;

@@ -442,6 +442,48 @@ public sealed class CodeSyncHostServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task An_Initial_Import_Reports_Imported_Into_Main_And_Runs_For_The_User_Who_Connected_Or_Synced()
+    {
+        var tgz = TestArchives.TarGz(("acme-sat-a1b2c3d/src/Battery.cs", "namespace Sat; public class Battery {}"));
+        var handler = new FakeHandler((req, _) =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url == $"https://api.github.com/repos/acme/sat/tarball/{Sha}") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(tgz) };
+            if (url == "https://api.github.com/repos/acme/sat/commits/main") return FakeHandler.Json(new JsonObject
+            {
+                ["sha"] = Sha, ["html_url"] = "https://github.com/acme/sat/commit/a1b2",
+                ["commit"] = new JsonObject { ["message"] = "Head", ["author"] = new JsonObject { ["name"] = "Ann" } },
+            }.ToJsonString());
+            if (url.StartsWith("https://api.github.com/repos/acme/sat/statuses/")) return FakeHandler.Json("{}", HttpStatusCode.Created);
+            return FakeHandler.Json("""{"message":"Not Found"}""", HttpStatusCode.NotFound);
+        });
+        var runner = new FakeRunner(new CodeSyncOutcome(CodeSyncStatus.Accepted, "Imported into main: 2 added", $"/?project={_project}", Guid.NewGuid()));
+        var (svc, queue) = Create(handler, runner);
+        var connector = Guid.NewGuid();
+        var saved = await svc.SaveAsync(_project, null, null, GitHub(), Token, connector);
+        Assert.Equal(connector, CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).ConnectedBy);
+        await svc.SaveAsync(_project, saved.Connection.Id, null, GitHub(), "", Guid.NewGuid());   // editing keeps who connected it
+        Assert.Equal(connector, CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).ConnectedBy);
+
+        // "Sync now" runs for whoever pressed it; without one, for who connected the repository (as webhooks do).
+        var presser = Guid.NewGuid();
+        await svc.SyncNowAsync(_project, saved.Connection.Id, presser);
+        Assert.True(queue.TryDequeue(out var job));
+        var outcome = await svc.ProcessAsync(job!);
+        Assert.Equal(presser, Assert.Single(runner.Requests).TriggeredBy);
+        Assert.Equal("accepted", CodeRepoConfig.Parse((await _db.FindIntegrationAsync(saved.Connection.Id))!.ConfigJson).LastSync!.Status);
+        await svc.SyncNowAsync(_project, saved.Connection.Id);
+        Assert.True(queue.TryDequeue(out var job2));
+        Assert.Equal(connector, job2!.TriggeredBy);
+
+        Assert.Equal(CodeSyncStatus.Accepted, outcome.Status);
+        var final = handler.Requests.Where(r => r.Request.Method == HttpMethod.Post).Select(r => JsonNode.Parse(r.Body!)!).Last();
+        Assert.Equal("success", (string)final["state"]!);   // nothing waits for review
+        Assert.StartsWith("Imported into main", (string)final["description"]!);
+        Assert.Equal($"https://meridian.test/?project={_project}", (string)final["target_url"]!);
+    }
+
+    [Fact]
     public async Task Pipeline_Reports_Failure_To_GitLab_Without_A_Runner_And_On_Fetch_Errors()
     {
         var tgz = TestArchives.TarGz(("sat-b1b2/Panel.cs", "class Panel {}"));

@@ -121,6 +121,12 @@ public sealed partial class CodeRepoConfig
     /// <summary>The behaviour setting in effect: <see cref="BehaviourDiagrams"/>, else on demand.</summary>
     [JsonIgnore]
     public Meridian.Core.CodeSync.CodeBehaviourMode EffectiveBehaviour => BehaviourDiagrams ?? Meridian.Core.CodeSync.CodeBehaviourMode.OnDemand;
+    /// <summary>"Review the first import too": the first sync goes to the review branch like later ones. Off by default:
+    /// the first import of a repository goes straight into main (docs/CODE-SYNC.md, "The first import").</summary>
+    public bool ReviewFirstImport { get; set; }
+    /// <summary>Who connected the repository (kept by the server, never taken from the form). Webhook syncs are done for
+    /// this user, and the initial import's commit names them.</summary>
+    public Guid? ConnectedBy { get; set; }
     /// <summary>Also read the code of git submodules (archives leave it out): each is fetched at the commit the
     /// repository pins it to and merged in under its path (docs/CODE-SYNC.md, "Submodules").</summary>
     public bool IncludeSubmodules { get; set; } = true;

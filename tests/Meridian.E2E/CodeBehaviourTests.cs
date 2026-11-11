@@ -53,7 +53,7 @@ public sealed class CodeBehaviourTests(ServerFixture f) : E2ETest(f)
         var db = F.App.Services.GetRequiredService<IMeridianStore>();
         var alice = (await db.FindUserAsync(F.Alice.Username))!;
         var project = (await db.ListProjectsAsync(alice.Id)).Single(x => x.Name == name).Id;
-        var connection = Guid.NewGuid();
+        var connection = await CodeSyncE2E.ReviewFirstAsync(F.App.Services, project, "acme/sat");
         var files = new[] { new CodeFile("src/Power.cs", Source) };
 
         // The real reader and mapper, with "Entry points" (what a new connection gets).
@@ -99,7 +99,7 @@ public sealed class CodeBehaviourTests(ServerFixture f) : E2ETest(f)
         var alice = (await db.FindUserAsync(F.Alice.Username))!;
         var project = (await db.ListProjectsAsync(alice.Id)).Single(x => x.Name == name).Id;
         var connection = Guid.NewGuid();
-        var config = new CodeRepoConfig { Host = GitHostKind.GitHub, Owner = "acme", Repo = "sat", PostStatus = false, PreviewPullRequests = false, BehaviourDiagrams = CodeBehaviourMode.OnDemand };
+        var config = new CodeRepoConfig { Host = GitHostKind.GitHub, Owner = "acme", Repo = "sat", PostStatus = false, PreviewPullRequests = false, BehaviourDiagrams = CodeBehaviourMode.OnDemand, ReviewFirstImport = true };
         await db.SaveIntegrationAsync(new IntegrationConnection(connection, project, CodeRepoKinds.CodeRepo, "acme/sat", config.ToJson(), null, DateTime.UtcNow));
         var files = new[] { new CodeFile("src/PowerDepth.cs", Source) };
         var code = new CSharpCodeReader().Read(files);

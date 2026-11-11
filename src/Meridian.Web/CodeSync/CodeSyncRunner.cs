@@ -34,7 +34,8 @@ public sealed class CodeSyncEvents
 /// <summary>
 /// Applies a push to a project's code-sync review branch (<c>code-sync/&lt;repo&gt;</c>): reads the files, maps them
 /// onto the branch's model, adds new elements to the diagrams that show their context (and diagrams new namespaces /
-/// blocks when the project allows it), commits the result on the branch and records a run for review.
+/// blocks when the project allows it), commits the result on the branch and records a run for review. A repository's
+/// first import goes straight into main instead (<see cref="IsFirstImport"/>), unless the connection asks to review it.
 /// Runs of one project are serialized; review decisions take the same lock.
 /// </summary>
 public sealed partial class CodeSyncRunner(
@@ -89,7 +90,7 @@ public sealed partial class CodeSyncRunner(
     public Task<CodeSyncOutcome> RunAsync(CodeSyncRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return RunCoreAsync(request, BranchNameFor(request.RepoDisplay), ct);
+        return RunCoreAsync(request, BranchNameFor(request.RepoDisplay), preview: false, ct);
     }
 
     /// <summary>
@@ -101,7 +102,7 @@ public sealed partial class CodeSyncRunner(
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pullRequest);
-        return RunCoreAsync(request, PreviewBranchNameFor(request.RepoDisplay, pullRequest), ct);
+        return RunCoreAsync(request, PreviewBranchNameFor(request.RepoDisplay, pullRequest), preview: true, ct);
     }
 
     /// <summary>
@@ -175,7 +176,7 @@ public sealed partial class CodeSyncRunner(
         public bool Created;
     }
 
-    private async Task<CodeSyncOutcome> RunCoreAsync(CodeSyncRequest request, string branchName, CancellationToken ct)
+    private async Task<CodeSyncOutcome> RunCoreAsync(CodeSyncRequest request, string branchName, bool preview, CancellationToken ct)
     {
         var gate = LockFor(request.ProjectId);
         await gate.WaitAsync(ct);
@@ -183,7 +184,7 @@ public sealed partial class CodeSyncRunner(
         var runId = Guid.NewGuid();
         try
         {
-            var outcome = await RunLockedAsync(request, branchName, runId, branch, ct);
+            var outcome = await RunLockedAsync(request, branchName, preview, runId, branch, ct);
             events.Completed(request, outcome);
             return outcome;
         }
@@ -222,7 +223,7 @@ public sealed partial class CodeSyncRunner(
         }
     }
 
-    private async Task<CodeSyncOutcome> RunLockedAsync(CodeSyncRequest request, string branchName, Guid runId, RunBranch runBranch, CancellationToken ct)
+    private async Task<CodeSyncOutcome> RunLockedAsync(CodeSyncRequest request, string branchName, bool preview, Guid runId, RunBranch runBranch, CancellationToken ct)
     {
         if (await db.LoadProjectAsync(request.ProjectId) is null) throw new InvalidOperationException("That project no longer exists.");
 
@@ -239,6 +240,23 @@ public sealed partial class CodeSyncRunner(
         var code = reader.Read(files, ct);
         ct.ThrowIfCancellationRequested();
 
+        var connection = await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson) : null;
+        var runs = await db.ListCodeSyncRunsAsync(request.ProjectId, 500);
+
+        // The first import of a repository goes straight into main (unless the connection asks to review it too).
+        string? note = null;
+        if (!preview)
+        {
+            if (hub.Find(request.ProjectId, null) is { } openMain) await openMain.PersistAsync();
+            var mainJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, null);
+            if (IsFirstImport(request, connection, runs, mainJson))
+            {
+                var first = await ImportIntoMainAsync(request, code, connection, runs, mainJson, branchName, runId, ct);
+                if (first.Outcome is { } done) return done;
+                note = first.Note;   // could not go into main: review it on the branch, and say why
+            }
+        }
+
         // The review branch: found, or made from main's head. It accumulates runs until they are accepted.
         var branch = (await db.ListBranchesAsync(request.ProjectId)).FirstOrDefault(b => b.Name == branchName);
         var created = branch is null;
@@ -247,14 +265,42 @@ public sealed partial class CodeSyncRunner(
 
         if (hub.Find(request.ProjectId, branchId) is { } open) await open.PersistAsync();
         var headJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, branchId);
+        var mapped = Map(request, code, connection, runs, headJson, ct);
+        if (mapped.IsEmpty)
+        {
+            if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
+            runBranch.Id = null;
+            var nothing = $"No model changes from {Short(request.Commit)}.";
+            await RecordAsync(request, runId, created ? null : branchId, CodeSyncRunStatus.NoChanges, nothing, [], 0, 0, 0);
+            return new CodeSyncOutcome(CodeSyncStatus.NoChanges, nothing, null, runId);
+        }
+
+        var message = CommitMessage(request);
+        var json = await WriteAsync(request.ProjectId, branchId, headJson, mapped.Model, mapped.Ops);
+        await db.CommitBranchVersionAsync(request.ProjectId, branchId, message, json, null);
+
+        var (list, added, changed, removed, summary) = Describe(mapped, code);
+        if (note is not null) summary = $"{summary} — {note}";
+        await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
+        return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
+    }
+
+    /// <summary>What one mapping did to a copy of a line's head: the model, its operations and what changed.</summary>
+    private sealed record Mapped(ModelRepository Before, ModelRepository Model, List<ModelOp> Ops, CodeSyncChanges Changes, DiagramRefreshResult Refresh)
+    {
+        public bool IsEmpty => Changes.IsEmpty && Refresh.Created.Count == 0;
+    }
+
+    /// <summary>Maps the code onto a copy of <paramref name="headJson"/> and refreshes the diagrams that show it.</summary>
+    private Mapped Map(CodeSyncRequest request, CodeModel code, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string headJson, CancellationToken ct)
+    {
         var before = ProjectFile.Deserialize(headJson);
         var model = ProjectFile.Deserialize(headJson);
-        // Every change the sync makes, as replicable operations: applied to the live branch they keep concurrent edits.
+        // Every change the sync makes, as replicable operations: applied to the live line they keep concurrent edits.
         var ops = new List<ModelOp>();
         model.OpEmitted += ops.Add;
 
         var root = model.Root;
-        var connection = await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson) : null;
         var options = new CodeSyncOptions
         {
             // The project's override, else the repository connection's root package (defaults to the repository name).
@@ -268,7 +314,7 @@ public sealed partial class CodeSyncRunner(
             Behaviour = connection?.EffectiveBehaviour ?? CodeBehaviourMode.OnDemand,
             CollapseRootNamespace = connection?.CollapseRootNamespace ?? true,
             // The diagrams earlier runs of this repository made: only those may be cleaned up as trivial.
-            SyncedDiagrams = (await db.ListCodeSyncRunsAsync(request.ProjectId, 500)).Where(r => r.ConnectionId == request.ConnectionId)
+            SyncedDiagrams = runs.Where(r => r.ConnectionId == request.ConnectionId)
                 .SelectMany(r => r.Changes).Where(c => c.Kind == CodeSyncChangeKind.Added && c.ElementKind == nameof(ElementKind.Diagram))
                 .Select(c => c.ElementId).ToHashSet(StringComparer.Ordinal),
         };
@@ -279,31 +325,146 @@ public sealed partial class CodeSyncRunner(
         // existed gets it on its next sync.
         var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
             codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
-        if (changes.IsEmpty && refresh.Created.Count == 0)
-        {
-            if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
-            runBranch.Id = null;
-            var nothing = $"No model changes from {Short(request.Commit)}.";
-            await RecordAsync(request, runId, created ? null : branchId, CodeSyncRunStatus.NoChanges, nothing, [], 0, 0, 0);
-            return new CodeSyncOutcome(CodeSyncStatus.NoChanges, nothing, null, runId);
-        }
-
         model.OpEmitted -= ops.Add;
-        var list = ChangeList(before, model, changes, refresh);
-        var message = CommitMessage(request);
-        var json = await WriteAsync(request.ProjectId, branchId, headJson, model, ops);
-        await db.CommitBranchVersionAsync(request.ProjectId, branchId, message, json, null);
+        return new Mapped(before, model, ops, changes, refresh);
+    }
 
+    /// <summary>The change list, counts and summary of a mapping ("3 added; 2 structure, 1 activity diagram (1 warnings)").</summary>
+    private static (List<CodeSyncRunChange> List, int Added, int Changed, int Removed, string Summary) Describe(Mapped m, CodeModel code)
+    {
+        var list = ChangeList(m.Before, m.Model, m.Changes, m.Refresh);
         int added = list.Count(c => c.Kind == CodeSyncChangeKind.Added), changed = list.Count(c => c.Kind == CodeSyncChangeKind.Changed),
             removed = list.Count(c => c.Kind == CodeSyncChangeKind.Removed);
-        // Every diagram the run made on the branch: structure diagrams from the refresh, behaviour diagrams from the mapping.
-        var made = changes.Added.Select(model.Find).OfType<Diagram>().Concat(refresh.Created).DistinctBy(d => d.Id).ToList();
+        // Every diagram the run made: structure diagrams from the refresh, behaviour diagrams from the mapping.
+        var made = m.Changes.Added.Select(m.Model.Find).OfType<Diagram>().Concat(m.Refresh.Created).DistinctBy(d => d.Id).ToList();
         var (structure, activity, sequence) = DiagramCounts(made);
-        var diagrams = DiagramSummary(structure, activity, sequence, changes.TrivialDiagramsRemoved);
+        var diagrams = DiagramSummary(structure, activity, sequence, m.Changes.TrivialDiagramsRemoved);
         var summary = Summary(added, changed, removed) + (diagrams.Length > 0 ? "; " + diagrams : "")
-                      + (changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
-        await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
-        return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
+                      + (m.Changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({m.Changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
+        return (list, added, changed, removed, summary);
+    }
+
+    /// <summary>
+    /// A connection's first import: it never had an accepted run, main holds none of its code (no element carries its
+    /// <see cref="CodeFieldKeys.Repo"/>), and it does not ask to review the first import too
+    /// (<see cref="Hosts.CodeRepoConfig.ReviewFirstImport"/>).
+    /// </summary>
+    public static bool IsFirstImport(CodeSyncRequest request, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string mainJson)
+    {
+        if (connection?.ReviewFirstImport == true) return false;
+        if (runs.Any(r => r.ConnectionId == request.ConnectionId && r.Status == CodeSyncRunStatus.Accepted)) return false;
+        var repo = request.ConnectionId.ToString();
+        return !ProjectFile.Deserialize(mainJson).AllElements.Any(e => e.Get(CodeFieldKeys.Repo) == repo);
+    }
+
+    /// <summary>The commit message of a first import ("Code sync: initial import of acme/sat at 1a2b3c4 (connected by Ann)").</summary>
+    public static string InitialImportMessage(CodeSyncRequest r, string? connectedBy) =>
+        $"Code sync: initial import of {r.RepoDisplay} at {Short(r.Commit)}{(connectedBy is { Length: > 0 } who ? $" (connected by {who})" : "")}";
+
+    /// <summary>
+    /// Applies a first import straight to main, as the system, through the live session when main is open (everyone sees it
+    /// at once) and committed as a version of main. The run is recorded as accepted. A review branch left by an earlier
+    /// unaccepted attempt is deleted (or, while someone has it open, put back to main). Returns the outcome, or a note
+    /// saying why the import must be reviewed instead (the user it runs for may not edit main).
+    /// </summary>
+    private async Task<(CodeSyncOutcome? Outcome, string? Note)> ImportIntoMainAsync(CodeSyncRequest request, CodeModel code, Hosts.CodeRepoConfig? connection,
+        IReadOnlyList<CodeSyncRunRecord> runs, string mainJson, string branchName, Guid runId, CancellationToken ct)
+    {
+        var user = request.TriggeredBy;
+        string? who = null;
+        if (user is { } u)
+        {
+            who = (await db.GetUserAsync(u))?.User.DisplayName ?? "the user who started the sync";
+            if (await db.RoleOfAsync(request.ProjectId, u) is not (ProjectRole.Editor or ProjectRole.Owner))
+                return (null, $"waiting for review because {who} can't edit main");
+        }
+
+        var mapped = Map(request, code, connection, runs, mainJson, ct);
+        if (mapped.IsEmpty) return (null, null);   // nothing to import: the usual "no changes" run
+        var refused = $"waiting for review because {who} can't change every package of main the import touches";
+        if (user is { } actor)
+        {
+            try { await PackagePermissions.EnsureCanReplaceAsync(db, request.ProjectId, actor, mapped.Before, mapped.Model); }
+            catch (PermissionDeniedException) { return (null, refused); }
+        }
+
+        var connectedBy = connection?.ConnectedBy is { } cb ? (await db.GetUserAsync(cb))?.User.DisplayName : who;
+        var message = InitialImportMessage(request, connectedBy);
+        try { await WriteMainAsync(request.ProjectId, mainJson, mapped, message, user); }
+        catch (PermissionDeniedException) { return (null, refused); }
+
+        await DiscardLeftoverBranchAsync(request, runs, branchName);
+        var (list, added, changed, removed, summary) = Describe(mapped, code);
+        var accepted = list.Select(c => c with { State = CodeSyncChangeState.Accepted }).ToList();
+        summary = $"Imported into main: {summary}";
+        await RecordAsync(request, runId, null, CodeSyncRunStatus.Accepted, summary, accepted, added, changed, removed);
+        return (new CodeSyncOutcome(CodeSyncStatus.Accepted, summary, MainUrl(request.ProjectId), runId), null);
+    }
+
+    /// <summary>
+    /// Writes a mapping onto main and commits it (no author: the system). Main open: the operations go through its live
+    /// session (permission-checked for <paramref name="user"/>), which is then committed. Main closed: the stored head is
+    /// replaced (or, if it moved since it was read, the operations are replayed onto it) while no session can open it.
+    /// Returns the version number.
+    /// </summary>
+    private async Task<int> WriteMainAsync(Guid projectId, string readJson, Mapped mapped, string message, Guid? user)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            if (hub.Find(projectId, null) is { } live)
+            {
+                var view = user is { } u ? await PackagePermissions.ViewForAsync(db, projectId, u) : null;
+                live.ApplySystemOps(mapped.Ops, null, view);
+                return (await VersionControl.CommitAsync(db, live, message, null)).Number;
+            }
+            string? written = null;
+            var done = await hub.ChangeClosedLineAsync<bool>(projectId, null, message, stored =>
+            {
+                if (stored == readJson) written = ProjectFile.Serialize(mapped.Model);
+                else
+                {
+                    var current = ProjectFile.Deserialize(stored);
+                    foreach (var op in mapped.Ops) current.ApplyRemote(op);
+                    written = ProjectFile.Serialize(current);
+                }
+                return Task.FromResult<(string Json, bool Result)?>((written, true));
+            });
+            if (done is { } d && written is not null)
+            {
+                Data.History.ElementHistoryIndexer.For(db).VersionCommitted(projectId, d.VersionId, written);
+                await hub.LibraryNoticesAsync(projectId, null, d.Version, written);
+                return d.Version;
+            }
+            // Someone opened main meanwhile: write through the live session.
+        }
+        throw new InvalidOperationException("Main could not be updated; try the sync again.");
+    }
+
+    /// <summary>
+    /// After a first import into main: the review branch an earlier, unaccepted attempt left behind goes (its open runs
+    /// are closed as superseded). While someone has it open it is kept, put back to main's new head.
+    /// </summary>
+    private async Task DiscardLeftoverBranchAsync(CodeSyncRequest request, IReadOnlyList<CodeSyncRunRecord> runs, string branchName)
+    {
+        if ((await db.ListBranchesAsync(request.ProjectId)).FirstOrDefault(b => b.Name == branchName) is not { } branch) return;
+        var onBranch = runs.Where(r => r.BranchId == branch.Id).ToList();
+        if (onBranch.Any(r => r.ConnectionId != request.ConnectionId)) return;   // another repository's review: not ours to remove
+        foreach (var run in onBranch.Where(r => r.IsOpen))
+            await db.UpdateCodeSyncRunAsync(run.Id, CodeSyncRunStatus.NoChanges,
+                CodeSyncRuns.Clip($"{run.Summary.Split(" — ")[0]} — superseded by the initial import into main", 1000)!, run.ChangesJson);
+        try { await VersionControl.DeleteBranchAsync(db, hub, request.ProjectId, branch.Id); }
+        catch (InvalidOperationException ex)
+        {
+            log.LogInformation("Kept code-sync branch {Branch} of project {Project} after the initial import: {Reason}", branchName, request.ProjectId, ex.Message);
+            var main = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, null);
+            if (hub.Find(request.ProjectId, branch.Id) is { } live)
+            {
+                live.Replace(main, Guid.Empty, "The code was imported into main; this review branch now matches main.");
+                await live.PersistAsync();
+            }
+            else await db.SaveBranchAsync(branch.Id, main, null);
+            await db.SetBranchBaseAsync(branch.Id, main, null);
+        }
     }
 
     /// <summary>
@@ -395,6 +556,9 @@ public sealed partial class CodeSyncRunner(
     /// <summary>The workbench on the review branch with "What changed" open; absolute when Meridian:PublicUrl is set.</summary>
     public string ReviewUrl(Guid projectId, Guid branchId) =>
         Integrations.DeepLink.ForBranch(config?["Meridian:PublicUrl"] ?? "", projectId, branchId, Integrations.DeepLink.CodeChangesPanel);
+
+    /// <summary>The workbench on main (where a first import lands); absolute when Meridian:PublicUrl is set.</summary>
+    public string MainUrl(Guid projectId) => $"{(config?["Meridian:PublicUrl"] ?? "").TrimEnd('/')}/?project={projectId}";
 
     public static string CommitMessage(CodeSyncRequest r)
     {

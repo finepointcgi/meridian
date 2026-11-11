@@ -85,9 +85,9 @@ public static class TourChapters
         [
             new(".titlebar .project", Icons.Material.Outlined.Extension, "Connect a repository",
                 "Project menu ▸ <b>Integrations</b> ▸ <b>Code repositories</b> connects a GitHub, GitLab or Bitbucket repository (C#, TypeScript, Java or Python, submodules included). " +
-                "Each push updates a <b>review branch</b>, never main, and pull requests get a preview."),
+                "The first sync imports the code straight into main. After that each push updates a <b>review branch</b>, and pull requests get a preview."),
             new(".titlebar .chg-badge, [data-tour=code-group]", Icons.Material.Outlined.Difference, "Code changes",
-                "When code changes wait for review, <b>Code changes (N)</b> shows in the title bar and a <b>Code</b> tab joins the ribbon. It lists what each push added, changed and removed."),
+                "When code changes wait for review, a banner on main says so, <b>Code changes (N)</b> shows in the title bar and a <b>Code</b> tab joins the ribbon. It lists what each push added, changed and removed."),
             new(".diagram-host", Icons.Material.Outlined.Highlight, "Accept or reject",
                 "Diagrams outline added elements in green, changed ones in amber and removed ones as dashed ghosts. Tick changes, then <b>Accept selected</b> to merge them into main, or <b>Reject selected</b>."),
             new("[data-tour=code-group]", Icons.Material.Outlined.Rule, "Architecture checks",

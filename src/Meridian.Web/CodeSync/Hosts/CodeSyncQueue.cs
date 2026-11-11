@@ -7,11 +7,13 @@ namespace Meridian.Web.CodeSync.Hosts;
 /// <summary>
 /// One sync to run: a commit of a connection, from a webhook or the "Sync now" button. With <see cref="PullRequest"/>
 /// it is the head of that pull / merge request, synced into its preview branch; <see cref="ClosePreview"/> instead
-/// removes the preview (the pull request was merged or closed, as <see cref="Merged"/> says).
+/// removes the preview (the pull request was merged or closed, as <see cref="Merged"/> says). <see cref="TriggeredBy"/> is the
+/// Meridian user it runs for (who pressed "Sync now", else who connected the repository).
 /// </summary>
 public sealed record CodeSyncJob(
     Guid ProjectId, Guid ConnectionId, string Branch, string Commit, string? CommitUrl, string? Author, string? Message, string Trigger,
-    int? PullRequest = null, string? PullRequestTitle = null, string? PullRequestUrl = null, bool ClosePreview = false, bool Merged = false)
+    int? PullRequest = null, string? PullRequestTitle = null, string? PullRequestUrl = null, bool ClosePreview = false, bool Merged = false,
+    Guid? TriggeredBy = null)
 {
     /// <summary>Jobs with the same key replace each other while they wait.</summary>
     public (Guid Connection, int PullRequest) Key => (ConnectionId, PullRequest ?? 0);

@@ -76,7 +76,8 @@ public sealed class CodeSyncHostService(
     /// Creates or updates a connection. An empty <paramref name="newToken"/> keeps the stored token. A new connection
     /// gets a webhook secret, returned once in the result.
     /// </summary>
-    public async Task<CodeRepoSaveResult> SaveAsync(Guid projectId, Guid? id, string? name, CodeRepoConfig config, string? newToken)
+    /// <param name="userId">Who saves it: recorded as <see cref="CodeRepoConfig.ConnectedBy"/> when the connection is new.</param>
+    public async Task<CodeRepoSaveResult> SaveAsync(Guid projectId, Guid? id, string? name, CodeRepoConfig config, string? newToken, Guid? userId = null)
     {
         config = config.Clone();
         config.Normalize();
@@ -92,6 +93,7 @@ public sealed class CodeSyncHostService(
         config.LastSync = stored?.LastSync;
         config.PullRequests = stored?.PullRequests ?? [];
         config.Submodules = stored?.Submodules ?? [];
+        config.ConnectedBy = existing is null ? userId : stored?.ConnectedBy;
         // New connections draw behaviour diagrams for entry points unless the form chose otherwise.
         if (existing is null) config.BehaviourDiagrams ??= Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints;
         if (config.ProtectedWebhookSecret is null)
@@ -162,14 +164,16 @@ public sealed class CodeSyncHostService(
 
     // ---------------------------------------------------------------- triggers
 
-    /// <summary>"Sync now": resolves the branch head and queues it. Returns a short message for the UI.</summary>
-    public async Task<string> SyncNowAsync(Guid projectId, Guid connectionId, CancellationToken ct = default)
+    /// <summary>"Sync now": resolves the branch head and queues it, for <paramref name="userId"/> (else who connected the
+    /// repository). Returns a short message for the UI.</summary>
+    public async Task<string> SyncNowAsync(Guid projectId, Guid connectionId, Guid? userId = null, CancellationToken ct = default)
     {
         var c = await Find(projectId, connectionId);
         if (!limiter.TryAcquire(connectionId)) throw new GitHostException("Too many syncs for this repository; wait a minute.");
         var config = CodeRepoConfig.Parse(c.ConfigJson);
         var head = await Host(c).ResolveBranchHeadAsync(config.Branch, ct);
-        var job = new CodeSyncJob(projectId, connectionId, config.Branch, head.Sha, head.Url, head.Author, head.Message, "manual");
+        var job = new CodeSyncJob(projectId, connectionId, config.Branch, head.Sha, head.Url, head.Author, head.Message, "manual",
+            TriggeredBy: userId ?? config.ConnectedBy);
         if (!queue.TryEnqueue(job)) throw new GitHostException("The sync queue is full; try again shortly.");
         await SetLastSyncAsync(connectionId, head.Sha, "queued", "Queued");
         return $"Sync of {config.Branch} at {Short(head.Sha)} queued.";
@@ -229,7 +233,8 @@ public sealed class CodeSyncHostService(
         if (!GitHostBase.IsSha(push.After)) return new(400, "The push has no commit id.");
         if (!config.AutoSync) return new(202, "Ignored: automatic sync is off for this connection.");
 
-        var job = new CodeSyncJob(c.ProjectId, c.Id, config.Branch, push.After, push.CommitUrl, push.Author, push.Message, "webhook");
+        var job = new CodeSyncJob(c.ProjectId, c.Id, config.Branch, push.After, push.CommitUrl, push.Author, push.Message, "webhook",
+            TriggeredBy: config.ConnectedBy);
         if (!queue.TryEnqueue(job)) return new(503, "The sync queue is full; try again later.");
         await SetLastSyncAsync(c.Id, push.After, "queued", "Queued");
         return new(202, $"Queued {Short(push.After)}.");
@@ -324,6 +329,7 @@ public sealed class CodeSyncHostService(
             var request = new CodeSyncRequest(c.ProjectId, c.Id, host.RepoDisplay, job.Branch, job.Commit, job.CommitUrl, job.Author, job.Message, snapshot, IsFullSnapshot: true)
             {
                 Submodules = fetched.Pins,
+                TriggeredBy = job.TriggeredBy,
             };
             var outcome = await run(sp, request);
             if (snapshot.Skipped.Count > 0 && outcome.Status != CodeSyncStatus.Failed)

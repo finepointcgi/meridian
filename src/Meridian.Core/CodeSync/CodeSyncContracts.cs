@@ -290,6 +290,10 @@ public sealed record CodeSyncRequest(
     /// <summary>The repository's submodules at <see cref="Commit"/> (their code is in <see cref="Files"/> under their paths
     /// when fetched). Empty when the repository has none, or the caller does not look for them.</summary>
     public IReadOnlyList<CodeSubmodulePin> Submodules { get; init; } = [];
+
+    /// <summary>The Meridian user the sync is done for: who pressed "Sync now", else who connected the repository
+    /// (webhooks). Null when unknown. A first import goes into main only when this user may edit main.</summary>
+    public Guid? TriggeredBy { get; init; }
 }
 
 public enum CodeSyncStatus { Pending, NoChanges, AwaitingReview, Accepted, Failed }

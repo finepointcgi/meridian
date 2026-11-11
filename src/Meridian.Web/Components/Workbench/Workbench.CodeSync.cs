@@ -13,6 +13,22 @@ public partial class Workbench
     /// <summary>Opens (or shows) the "What changed" tab.</summary>
     public void OpenCodeChanges() => Ws.OpenView(ViewTabKind.CodeChanges);
 
+    /// <summary>The newest code-sync review waiting for review (null when none).</summary>
+    private Meridian.Web.CodeSync.CodeSyncReview? NewestCodeReview =>
+        (Services.GetService(typeof(Meridian.Web.CodeSync.CodeSyncState)) as Meridian.Web.CodeSync.CodeSyncState)?.Waiting.FirstOrDefault();
+
+    /// <summary>The empty project's "Open the code branch": the newest review branch, with "What changed" open.</summary>
+    public Task OpenCodeBranch() =>
+        NewestCodeReview is { } review ? CodeReviewNotice.OpenBranchAsync(this, Ws, review) : Task.CompletedTask;
+
+    /// <summary>The empty project's "Accept all into main" for the newest review (confirmation and conflict dialog as usual).</summary>
+    public async Task AcceptCodeIntoMain()
+    {
+        if (NewestCodeReview is not { } review || Services.GetService(typeof(Meridian.Web.CodeSync.CodeSyncReviewService)) is not Meridian.Web.CodeSync.CodeSyncReviewService service) return;
+        await CodeReviewNotice.AcceptAllAsync(Ws, service, Dialogs, Snackbar, review);
+        if (Services.GetService(typeof(Meridian.Web.CodeSync.CodeSyncState)) is Meridian.Web.CodeSync.CodeSyncState state) await state.ReloadAsync();
+    }
+
     public void ToggleCodeHighlights()
     {
         Ws.SetHighlightCodeChanges(!Ws.HighlightCodeChanges);

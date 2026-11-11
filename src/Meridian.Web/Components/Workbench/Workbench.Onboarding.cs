@@ -22,6 +22,8 @@ public partial class Workbench
         EmptyProjectHint.Mermaid => PasteMermaid(),
         EmptyProjectHint.OpenFile => PickFile("file-open"),
         EmptyProjectHint.Sample => OpenSample(),
+        EmptyProjectHint.OpenCodeBranch => OpenCodeBranch(),
+        EmptyProjectHint.AcceptCode => AcceptCodeIntoMain(),
         _ => Task.CompletedTask,
     };
 

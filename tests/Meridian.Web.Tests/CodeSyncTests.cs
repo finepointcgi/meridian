@@ -50,6 +50,10 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         _project = await _db.CreateProjectAsync("Vehicle", ProjectFile.Serialize(SampleModels.Vehicle()), _ann.Id);
         await _db.SetMemberAsync(_project, _ben.Id, ProjectRole.Editor);
         await _db.SetMemberAsync(_project, _vic.Id, ProjectRole.Viewer);
+        // These tests are about the review branch: the repository asks to review its first import too (a first import
+        // otherwise goes straight into main; CodeSyncFirstImportTests).
+        await _db.SaveIntegrationAsync(new IntegrationConnection(_connection, _project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
+            new CodeSync.Hosts.CodeRepoConfig { ReviewFirstImport = true }.ToJson(), null, DateTime.UtcNow));
     }
 
     public Task DisposeAsync()
@@ -111,6 +115,9 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
         m.Set(e, FieldKeys.Documentation, doc);
         return new CodeSyncChanges([], [e.Id], [], []);
     };
+
+    /// <summary>For the repository-settings tests: no connection besides the ones the test makes.</summary>
+    private Task ForgetReviewConnectionAsync() => _db.DeleteIntegrationAsync(_connection);
 
     private async Task<ModelRepository> MainAsync() => ProjectFile.Deserialize(await VersionControl.HeadJsonAsync(_db, _hub, _project, null));
 
@@ -251,7 +258,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     public async Task A_Sync_Collapses_The_Root_Namespace_Per_Connection_And_Draws_A_Package_Overview(bool collapse)
     {
         var conn = new IntegrationConnection(Guid.NewGuid(), _project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
-            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", CollapseRootNamespace = collapse }.ToJson(), null, DateTime.UtcNow);
+            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", CollapseRootNamespace = collapse, ReviewFirstImport = true }.ToJson(), null, DateTime.UtcNow);
         await _db.SaveIntegrationAsync(conn);
         var runner = new CodeSyncRunner(_db, _hub, [new Meridian.Serialization.CodeSync.CSharpCodeReader()], new CodeModelApplier(), _events, NullLogger<CodeSyncRunner>.Instance);
         var files = new[]
@@ -600,7 +607,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     public async Task The_Connection_Turns_Diagrams_For_New_Packages_Off()
     {
         var conn = new IntegrationConnection(Guid.NewGuid(), _project, CodeSync.Hosts.CodeRepoKinds.CodeRepo, "acme/sat",
-            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", AutoDiagrams = false }.ToJson(), null, DateTime.UtcNow);
+            new CodeSync.Hosts.CodeRepoConfig { Owner = "acme", Repo = "sat", AutoDiagrams = false, ReviewFirstImport = true }.ToJson(), null, DateTime.UtcNow);
         await _db.SaveIntegrationAsync(conn);
         _applier.Script.Enqueue(m =>
         {
@@ -714,6 +721,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     [Fact]
     public async Task Repository_Settings_Offer_Bitbucket_The_Model_Settings_And_List_Previews()
     {
+        await ForgetReviewConnectionAsync();
         var ws = await Open(_ann, ProjectRole.Owner);
         var model = ws.Model;
         model.Set(model.Root, CodeSyncRunner.AutoDiagramsField, "false");   // the project's override
@@ -845,6 +853,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     /// <summary>Everything the Integrations dialog and its panels need, and a dialog provider to open it in.</summary>
     private async Task<(Workspace Ws, IRenderedComponent<MudBlazor.MudDialogProvider> Dialogs, CodeSync.Hosts.CodeSyncHostService Hosts)> IntegrationsUiAsync()
     {
+        await ForgetReviewConnectionAsync();
         var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
         var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
         var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
@@ -1132,6 +1141,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     [Fact]
     public async Task Repository_Settings_List_The_Last_Syncs_Submodules_And_Save_Submodule_Settings()
     {
+        await ForgetReviewConnectionAsync();
         var ws = await Open(_ann, ProjectRole.Owner);
         var factory = new FakeHttpClientFactory(new FakeHandler((_, _) => FakeHandler.Json("{}")));
         var integrations = new Integrations.IntegrationService(_db, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(), factory);
@@ -1199,6 +1209,7 @@ public sealed class CodeSyncTests : TestContext, IAsyncLifetime
     [Fact]
     public async Task Behaviour_Setting_Is_Entry_Points_For_New_Connections_And_On_Demand_For_Existing_Ones()
     {
+        await ForgetReviewConnectionAsync();
         // A connection stored before the setting existed reads as "on demand".
         Assert.Equal(CodeBehaviourMode.OnDemand, CodeSync.Hosts.CodeRepoConfig.Parse("""{"owner":"acme","repo":"old"}""").EffectiveBehaviour);
         var hosts = Hosts();

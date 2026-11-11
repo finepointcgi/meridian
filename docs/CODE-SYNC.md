@@ -2,7 +2,8 @@
 
 A push to a connected GitHub, GitLab or Bitbucket repository updates a **review branch** of the model from the code. Diagrams that
 show changed elements are refreshed, the differences are highlighted, and an owner or editor accepts all or some of the
-changes into `main`.
+changes into `main`. The **first import** of a repository is the exception: it goes straight into `main`, so a new project
+shows its code at once (see [The first import](#the-first-import)).
 
 ## How code maps to the model
 
@@ -359,8 +360,9 @@ benchmark prints these sizes (`MERIDIAN_BENCH_DUMP=<name>` also lists the messag
 ### Where the changes go
 
 Every connected repository has its own review branch, named `code-sync/<repository>` (for example
-`code-sync/acme/sat-fsw`). The first push that changes the model creates it from `main`'s current head; later pushes
-**accumulate** on the same branch until they are reviewed. If `main` moves on in the meantime nothing needs rebasing: the
+`code-sync/acme/sat-fsw`). The first push after the first import (or the first push at all, with *Review the first import
+too* on) that changes the model creates it from `main`'s current head; later pushes **accumulate** on the same branch until
+they are reviewed. If `main` moves on in the meantime nothing needs rebasing: the
 accept is a normal three-way merge.
 
 Each push that is applied:
@@ -402,6 +404,33 @@ makes as replication operations (the same `ModelOp`s collaborators exchange). Wh
 operations are applied to the live session. Whatever people changed on the branch in the meantime stays, and they see the
 sync's changes arrive like a collaborator's. With nobody on the branch, the result is written to the store; if the stored
 head changed while the sync ran, the operations are replayed onto the new head instead of replacing it.
+
+### The first import
+
+A repository's first sync is applied **directly to `main`** instead of a review branch: connecting a repository to an empty
+project and syncing it shows the code on `main` straight away. A sync counts as the first import when all of these hold:
+
+- the connection never had an accepted run;
+- `main` holds none of its code (no element carries this connection's `code.repo`), so a project that already took an
+  import of the repository some other way reviews as usual;
+- the connection's **Review the first import too** switch (under *Model* in its settings, off by default) is off. Teams that
+  want a review even the first time turn it on.
+
+Each connected repository has its own first import: with two repositories in one project, each one's first sync goes into
+`main`. Pull request previews are never imported; they always use their preview branch.
+
+The import goes through the same path as any change to `main`: with `main` open, the sync's operations are applied to the
+live session (everyone sees them arrive, and their own edits stay), and the result is committed as a version of `main`,
+`Code sync: initial import of <owner/repo> at <short sha> (connected by <name>)`, authored by the system. The run is
+recorded as **Accepted** (with its changes marked accepted), so the sync history and the architecture checks see it, and
+the commit status the git host shows reads **Imported into main: …** (green, nothing to review). A review branch left by an
+earlier, unaccepted attempt (for example one made while *Review the first import too* was on) is deleted and its runs are
+closed as superseded; if someone has it open, it is kept and put back to `main`'s new head.
+
+The sync runs for a person: whoever pressed **Sync now**, else (webhooks) whoever connected the repository. Package
+permissions apply: when that person is not an owner or editor, or may not change every package of `main` the import touches,
+the import goes to the review branch as usual, and its summary says why (*waiting for review because Ben can't edit main*).
+A connection saved before Meridian recorded who connected it has no such person; its first import is applied as the system.
 
 **A failed sync leaves nothing behind.** When a sync fails (or is cancelled) after it created a new review or preview
 branch, that branch is deleted again and the failed run is recorded without a branch. An existing branch is never deleted.
@@ -497,7 +526,21 @@ branch open at that moment, the branch is kept (its runs are still closed) and c
 
 ### The review
 
-When a code-sync branch has changes waiting, the title bar shows **Code changes (N)** next to the branch picker. It opens
+When a code-sync branch has changes waiting, `main` (and any branch that is not a code-sync branch) shows a **banner** at
+the top of the canvas: *12 code changes from acme/sat-fsw are waiting for review (commit abc1234)*, one line per repository,
+with:
+
+- **Open the code branch** — switches to the review branch with Code changes open;
+- **Accept all into main** — the accept below for all of that branch's changes, after a confirmation; conflicts with edits on
+  `main` open the usual merge dialog. Owners and editors only; viewers see the banner without it;
+- **Dismiss** (×) — hides the banner for you, in this project, until a newer push arrives. It is kept in your preferences, so
+  it stays dismissed on other devices.
+
+On a phone the banner is a compact strip above the bottom bar with **Open** and dismiss; accepting needs a larger screen,
+as everywhere in code sync. A project whose `main` is (nearly) empty — ten elements or fewer — while code waits for review
+says so in place of the usual empty-project hint: *Your code is on the review branch*, with the same two buttons.
+
+The title bar also shows **Code changes (N)** next to the branch picker. It opens
 **Code changes**, a tab next to the diagrams (also on ⌘K “Code changes”, and in the *Code* ribbon group). The commit-status
 link a git host shows opens the project on the review branch with this tab open
 (`/?project=<id>&branch=<id>&panel=code-changes`).
@@ -539,7 +582,10 @@ status colours, so they read in light and dark mode.
 ### For integrators
 
 - `ICodeSyncRunner.RunAsync(CodeSyncRequest)` (the git-host integration calls it after fetching files) returns a
-  `CodeSyncOutcome`: `AwaitingReview` with the review link, `NoChanges`, or `Failed` with the reason. Runs of one project are
+  `CodeSyncOutcome`: `AwaitingReview` with the review link, `Accepted` ("Imported into main: …", linking to `main`) for a
+  first import, `NoChanges`, or `Failed` with the reason. `CodeSyncRequest.TriggeredBy` is the user the sync runs for
+  (permissions of a first import); `CodeRepoConfig.ReviewFirstImport` and `ConnectedBy` hold the switch and who connected
+  the repository; `CodeSyncRunner.IsFirstImport` decides. Runs of one project are
   serialized; review decisions take the same lock.
 - `IPullRequestPreviews` (implemented by `CodeSyncRunner`): `RunPreviewAsync(request, n)` syncs into the preview branch,
   `ClosePreviewAsync(project, repo, n, merged)` deletes it, and `PreviewChangesAsync(project, repo, n)` lists its net

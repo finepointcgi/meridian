@@ -41,6 +41,22 @@ public sealed class CodeSyncState : IDisposable
     /// <summary>The review of the branch being edited, if it is a code-sync branch with open runs.</summary>
     public CodeSyncReview? OnThisBranch => Reviews.FirstOrDefault(r => r.Branch.BranchId is { } b && b == _ws.BranchId);
 
+    /// <summary>Reviews with changes waiting to be accepted into main (pull request previews left out), newest push first.</summary>
+    public IReadOnlyList<CodeSyncReview> Waiting =>
+        Reviews.Where(r => !r.IsPreview && r.Changes.Count > 0).OrderByDescending(r => r.Runs.Max(x => x.CreatedAt)).ToList();
+
+    /// <summary>
+    /// The reviews the "waiting for review" notice shows on this line: on main or any branch that is not a code-sync
+    /// branch, the <see cref="Waiting"/> ones with a push newer than <paramref name="dismissedAt"/> (when the user dismissed
+    /// the notice). On a code-sync branch none: the branch is the review.
+    /// </summary>
+    public IReadOnlyList<CodeSyncReview> NoticeFor(DateTime? dismissedAt)
+    {
+        if (!Loaded || _ws.Session is null || _ws.Pinned is not null || CodeSyncRunner.IsReviewBranch(_ws.BranchName)) return [];
+        var waiting = Waiting;
+        return dismissedAt is { } at && waiting.All(r => r.Runs.Max(x => x.CreatedAt) <= at) ? [] : waiting;
+    }
+
     /// <summary>The last load failed with this message (shown by the tab).</summary>
     public string? Error { get; private set; }
 

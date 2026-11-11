@@ -53,8 +53,14 @@ public sealed class UserPreferences
     // ---------------------------------------------------------------- state that follows the user
     public List<string> Favorites { get; set; } = new();
     public Guid? LastProjectId { get; set; }
+    /// <summary>Project id → creation time (UTC) of the newest code-sync run waiting for review when the user dismissed
+    /// the "code changes waiting for review" banner of that project. It shows again once a newer run arrives.</summary>
+    public Dictionary<string, DateTime> CodeReviewsDismissed { get; set; } = new();
     /// <summary>Browser-stored settings (tour flag, last project) were imported once.</summary>
     public bool MigratedLocalStorage { get; set; }
+
+    /// <summary>Most projects whose code-review banner dismissal is remembered (the oldest are forgotten).</summary>
+    public const int MaxCodeReviewsDismissed = 200;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -92,6 +98,8 @@ public sealed class UserPreferences
         if (WhatsNewSeen is { Length: > 16 }) WhatsNewSeen = null;
         if (PrintSetup is { Length: > 8000 }) PrintSetup = null;
         Favorites = (Favorites ?? new()).Where(f => !string.IsNullOrEmpty(f) && f.Length <= 64).Distinct().Take(500).ToList();
+        CodeReviewsDismissed = (CodeReviewsDismissed ?? new()).Where(kv => Guid.TryParse(kv.Key, out _))
+            .OrderByDescending(kv => kv.Value).Take(MaxCodeReviewsDismissed).ToDictionary(kv => kv.Key, kv => kv.Value);
         return this;
     }
 

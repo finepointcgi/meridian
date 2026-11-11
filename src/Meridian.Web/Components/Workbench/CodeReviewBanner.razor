@@ -1,0 +1,98 @@
+@inherits WorkspaceComponent
+@using Meridian.Web.CodeSync
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject IServiceProvider Services
+
+@* Services are looked up, not injected: pages and tests without code sync render nothing here.
+   On main (and any branch that is not a code-sync branch): code pushed to a connected repository is waiting for review
+   on its code-sync branch (docs/CODE-SYNC.md). One row per repository. Viewers and phones get no "Accept" (deciding
+   needs an editor and a larger screen); "Dismiss" hides it for this user until a newer push arrives. *@
+@if (Shown is { Count: > 0 } shown)
+{
+    <div class="code-review-banner @(Compact ? "compact" : "desktop")" role="status" data-testid="code-review-banner">
+        @foreach (var r in shown)
+        {
+            var review = r;
+            <div class="crb-row" data-branch="@review.Branch.BranchId">
+                <MudIcon Icon="@Icons.Material.Outlined.Difference" />
+                <span class="t" title="@CodeReviewNotice.Text(review)">@CodeReviewNotice.Text(review)</span>
+                <button class="crb-btn primary" data-testid="code-review-open" disabled="@_busy" @onclick="() => Open(review)">@(Compact ? "Open" : "Open the code branch")</button>
+                @if (CanAccept)
+                {
+                    <button class="crb-btn" data-testid="code-review-accept" disabled="@_busy" @onclick="() => Accept(review)">Accept all into main</button>
+                }
+            </div>
+        }
+        <button class="crb-dismiss" data-testid="code-review-dismiss" aria-label="Dismiss until new code arrives" title="Dismiss until new code arrives" @onclick="() => Dismiss(shown)">
+            <MudIcon Icon="@Icons.Material.Filled.Close" />
+        </button>
+    </div>
+}
+
+@code {
+    /// <summary>The phone version: shorter, and without "Accept" (accepting needs a larger screen).</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private bool _busy;
+
+    private CodeSyncState? _state;
+    private bool _resolved;
+    /// <summary>Resolved once (a disposed circuit has no services left to look up).</summary>
+    private CodeSyncState? State
+    {
+        get
+        {
+            if (!_resolved) (_state, _resolved) = (Services.GetService(typeof(CodeSyncState)) as CodeSyncState, true);
+            return _state;
+        }
+    }
+    private CodeSyncReviewService? Review => Services.GetService(typeof(CodeSyncReviewService)) as CodeSyncReviewService;
+
+    /// <summary>On the desktop it sits over the canvas: not over a view tab (Code changes, tables…), whose toolbar it would cover.</summary>
+    private IReadOnlyList<CodeSyncReview> Shown =>
+        !Compact && Ws.ActiveView is not null ? [] : State?.NoticeFor(CodeReviewNotice.DismissedAt(Ws)) ?? [];
+
+    private bool CanAccept => !Compact && !Ws.ReadOnly && Ws.User is not null && Review is not null;
+
+    private Meridian.Web.Settings.ThemeService? Theme => Services.GetService(typeof(Meridian.Web.Settings.ThemeService)) as Meridian.Web.Settings.ThemeService;
+    private MobileUiState? Phone => Services.GetService(typeof(MobileUiState)) as MobileUiState;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        if (State is { } st)
+        {
+            st.Changed += OnState;
+            if (!st.Loaded) _ = st.ReloadAsync();
+        }
+    }
+
+    private void OnState() => _ = InvokeAsync(StateHasChanged);
+
+    private Task Open(CodeSyncReview review) => CodeReviewNotice.OpenBranchAsync(Shell, Ws, review, Compact ? Phone : null);
+
+    private async Task Accept(CodeSyncReview review)
+    {
+        if (Review is not { } service) return;
+        _busy = true;
+        try { await CodeReviewNotice.AcceptAllAsync(Ws, service, Dialogs, Snackbar, review); }
+        finally
+        {
+            _busy = false;
+            if (State is { } st) await st.ReloadAsync();
+        }
+    }
+
+    private async Task Dismiss(IReadOnlyList<CodeSyncReview> shown)
+    {
+        await CodeReviewNotice.DismissAsync(Ws, Theme, shown);
+        StateHasChanged();
+    }
+
+    public override void Dispose()
+    {
+        if (_state is { } st) st.Changed -= OnState;
+        base.Dispose();
+    }
+}

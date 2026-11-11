@@ -115,7 +115,7 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
     /// with <paramref name="message"/> (no author). No session can open the line meanwhile. Returns null when the line is open
     /// (change it through its live session), gone, or unchanged.
     /// </summary>
-    internal async Task<(int Version, T Result)?> ChangeClosedLineAsync<T>(Guid projectId, Guid? branchId, string message,
+    internal async Task<(int Version, long VersionId, T Result)?> ChangeClosedLineAsync<T>(Guid projectId, Guid? branchId, string message,
                                                                           Func<string, Task<(string Json, T Result)?>> change)
     {
         await _openGate.WaitAsync();
@@ -127,7 +127,7 @@ public sealed partial class CollaborationHub(IMeridianStore db, ILogger<Collabor
             if (branchId is { } branch) await db.SaveBranchAsync(branch, changed.Json, null);
             else await db.SaveProjectAsync(projectId, changed.Json, null);
             var version = await db.CommitBranchVersionAsync(projectId, branchId, message, changed.Json, null);
-            return (version.Number, changed.Result);
+            return (version.Number, version.Id, changed.Result);
         }
         finally { _openGate.Release(); }
     }
