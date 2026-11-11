@@ -37,6 +37,11 @@ public static class EaImporter
         }
         static string S(Dictionary<string, object?> row, string col) => row.TryGetValue(col, out var v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) ?? "" : "";
         static int I(Dictionary<string, object?> row, string col) => int.TryParse(S(row, col), out var v) ? v : 0;
+        // Columns that older or trimmed repositories may lack are read only when present.
+        HashSet<string> Columns(string table) => Query($"pragma table_info('{table}')").Select(r => S(r, "name")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var objectCols = Columns("t_object");
+        var connectorCols = Columns("t_connector");
+        string Opt(HashSet<string> cols, string col) => cols.Contains(col) ? ", " + col : "";
 
         var packages = Query("select Package_ID, Name, Parent_ID, Notes from t_package order by Package_ID");
         if (packages.Count == 0) throw new FormatException("No t_package table — this does not look like an Enterprise Architect repository.");
@@ -59,21 +64,26 @@ public static class EaImporter
                 remaining.Remove(p);
             }
 
-        var objects = Query("select Object_ID, Object_Type, Name, Alias, Note, Package_ID, Stereotype, ParentID, Classifier, Abstract, NType from t_object order by Object_ID");
+        var objects = Query("select Object_ID, Object_Type, Name, Alias, Note, Package_ID, Stereotype, ParentID, Classifier, Abstract, NType" + Opt(objectCols, "ea_guid") + " from t_object order by Object_ID");
+        var typeOfObject = objects.ToDictionary(o => I(o, "Object_ID"), o => S(o, "Object_Type"));
+        // Fork / join bars (EA "Synchronization") of state machines are pseudostates; in activities they are fork nodes.
+        var outgoing = Query("select Start_Object_ID from t_connector").GroupBy(r => I(r, "Start_Object_ID")).ToDictionary(g => g.Key, g => g.Count());
         var props = Query("select Object_ID, Property, Value, Notes from t_objectproperties")
             .GroupBy(r => I(r, "Object_ID")).ToDictionary(g => g.Key, g => g.ToList());
         var objById = new Dictionary<int, Element>();
+        var objByGuid = new Dictionary<string, Element>(StringComparer.OrdinalIgnoreCase);
         var typeRefs = new List<(Element e, int classifier)>();
         var helperContainers = new Dictionary<(Element pkg, ElementKind kind), Element>();
 
         Element ContainerFor(Element pkg, ElementKind childKind)
         {
             // EA lets actions/states live directly in packages; UML needs an owning activity / state machine.
-            var behaviorKind = Metamodel.IsActivityNode(childKind) || childKind == ElementKind.Partition ? ElementKind.Activity : ElementKind.StateMachine;
+            var behaviorKind = Metamodel.IsActivityNode(childKind) || childKind == ElementKind.Partition ? ElementKind.Activity
+                : childKind is ElementKind.Lifeline or ElementKind.CombinedFragment ? ElementKind.Interaction : ElementKind.StateMachine;
             if (!helperContainers.TryGetValue((pkg, behaviorKind), out var c))
             {
                 c = new Element(behaviorKind);
-                ModelRepository.SetFieldForLoad(c, FieldKeys.Name, $"{pkg.Name} {(behaviorKind == ElementKind.Activity ? "activity" : "states")}");
+                ModelRepository.SetFieldForLoad(c, FieldKeys.Name, $"{pkg.Name} {behaviorKind switch { ElementKind.Activity => "activity", ElementKind.Interaction => "interaction", _ => "states" }}");
                 model.AttachForLoad(pkg, c);
                 helperContainers[(pkg, behaviorKind)] = c;
             }
@@ -84,17 +94,21 @@ public static class EaImporter
         var pendingParents = new List<(Element e, int parentId, Element pkg)>();
         foreach (var o in objects)
         {
-            var kind = MapObject(S(o, "Object_Type"), S(o, "Stereotype"), I(o, "NType"));
+            var inStateMachine = typeOfObject.GetValueOrDefault(I(o, "ParentID")) is "StateMachine" or "State";
+            var kind = MapObject(S(o, "Object_Type"), S(o, "Stereotype"), I(o, "NType"), inStateMachine, outgoing.GetValueOrDefault(I(o, "Object_ID")), out var subtype, out var approx);
             if (kind is null) { if (S(o, "Object_Type") is not ("Package" or "Boundary" or "Text" or "NoteLink")) warnings.Add($"Skipped {S(o, "Object_Type")} '{S(o, "Name")}'"); continue; }
+            if (approx != null) warnings.Add($"Approximated: {S(o, "Object_Type")} '{S(o, "Name")}' ({approx})");
             var e = new Element(kind.Value);
             ModelRepository.SetFieldForLoad(e, FieldKeys.Name, S(o, "Name"));
+            if (kind == ElementKind.CombinedFragment) ModelRepository.SetFieldForLoad(e, FieldKeys.Operator, subtype ?? "alt");
+            else ModelRepository.SetFieldForLoad(e, FieldKeys.Subtype, subtype);
             var note = Clean(S(o, "Note"));
             if (kind == ElementKind.Comment) ModelRepository.SetFieldForLoad(e, FieldKeys.Body, note);
             else if (kind == ElementKind.Requirement) ModelRepository.SetFieldForLoad(e, FieldKeys.Text, note);
             else ModelRepository.SetFieldForLoad(e, FieldKeys.Documentation, note);
             if (S(o, "Abstract") == "1") ModelRepository.SetFieldForLoad(e, FieldKeys.IsAbstract, "true");
             var stereo = S(o, "Stereotype");
-            if (stereo.Length > 0 && Metamodel.Keyword(kind.Value) != stereo && !IsSysmlStereo(stereo)) ModelRepository.SetFieldForLoad(e, FieldKeys.Stereotypes, stereo);
+            if (stereo.Length > 0 && Metamodel.Keyword(kind.Value) != stereo && !IsSysmlStereo(stereo) && !IsKindStereo(stereo)) ModelRepository.SetFieldForLoad(e, FieldKeys.Stereotypes, stereo);
             if (kind == ElementKind.Requirement)
                 ModelRepository.SetFieldForLoad(e, FieldKeys.RequirementId, S(o, "Alias") is { Length: > 0 } alias ? alias : null);
             foreach (var tv in props.GetValueOrDefault(I(o, "Object_ID")) ?? [])
@@ -107,6 +121,7 @@ public static class EaImporter
             }
             if (Metamodel.IsTypedFeature(kind.Value) && I(o, "Classifier") > 0) typeRefs.Add((e, I(o, "Classifier")));
             objById[I(o, "Object_ID")] = e;
+            if (S(o, "ea_guid") is { Length: > 0 } guid) objByGuid[guid] = e;
             pendingParents.Add((e, I(o, "ParentID"), pkgById.GetValueOrDefault(I(o, "Package_ID")) ?? model.Root));
         }
         // Attach parents before children (parents may themselves be nested).
@@ -122,12 +137,38 @@ public static class EaImporter
                 if (Metamodel.CanOwn(parent.Kind, item.e.Kind)) owner = parent;
             }
             if (!Metamodel.CanOwn(owner.Kind, item.e.Kind))
-                owner = Metamodel.IsActivityNode(item.e.Kind) || Metamodel.IsVertex(item.e.Kind) || item.e.Kind == ElementKind.Partition ? ContainerFor(item.pkg, item.e.Kind) : model.DefaultOwnerFor(owner, item.e.Kind);
+                owner = Metamodel.IsActivityNode(item.e.Kind) || Metamodel.IsVertex(item.e.Kind) || item.e.Kind is ElementKind.Partition or ElementKind.Lifeline or ElementKind.CombinedFragment
+                    ? ContainerFor(item.pkg, item.e.Kind) : model.DefaultOwnerFor(owner, item.e.Kind);
             if (!Metamodel.CanOwn(owner.Kind, item.e.Kind)) { warnings.Add($"Could not place {item.e.Kind} '{item.e.Name}'"); attached.Add(item.e); return; }
             model.AttachForLoad(owner, item.e);
             attached.Add(item.e);
         }
         foreach (var item in pendingParents) Attach(item);
+
+        // Interaction operands: EA keeps a combined fragment's operands as its "Partitions", one t_xref row per fragment
+        // (Name = 'Partitions', Client = the fragment's ea_guid) whose Description lists @PAR;Name=<guard>;Size=<height>;…;@ENDPAR;
+        // segments, top operand first. Sizes are the operands' heights in pixels (turned into separators on each diagram below).
+        var operandSizes = new Dictionary<Element, List<double>>(ReferenceEqualityComparer.Instance);
+        if (objByGuid.Count > 0 && Columns("t_xref").Count > 0)
+            foreach (var x in Query("select Client, Name, Description from t_xref where Name = 'Partitions'"))
+            {
+                if (!objByGuid.TryGetValue(S(x, "Client"), out var owner)) continue;
+                var parts = ParsePartitions(S(x, "Description"));
+                if (owner.Kind == ElementKind.CombinedFragment)
+                {
+                    var sizes = new List<double>();
+                    foreach (var (guard, size) in parts)
+                    {
+                        var op = new Element(ElementKind.InteractionOperand);
+                        ModelRepository.SetFieldForLoad(op, FieldKeys.Guard, guard);
+                        model.AttachForLoad(owner, op);
+                        sizes.Add(size);
+                    }
+                    operandSizes[owner] = sizes;
+                }
+                else if (owner.Kind == ElementKind.State && parts.Count > 1)
+                    warnings.Add($"State '{owner.Name}' has {parts.Count} regions; they were flattened into one.");
+            }
 
         var columnsById = new Dictionary<int, Element>();
         // Attributes and operations.
@@ -171,14 +212,17 @@ public static class EaImporter
         // Connectors.
         var relById = new Dictionary<int, Relationship>();
         var rels = 0;
-        foreach (var c in Query("select Connector_ID, Connector_Type, SubType, Stereotype, Name, Start_Object_ID, End_Object_ID, DestCard, PDATA2 from t_connector"))
+        var messageOrder = new Dictionary<Relationship, int>(ReferenceEqualityComparer.Instance);
+        foreach (var c in Query("select Connector_ID, Connector_Type, SubType, Stereotype, Name, Start_Object_ID, End_Object_ID, DestCard, PDATA2"
+                                + Opt(connectorCols, "SourceCard") + Opt(connectorCols, "SeqNo") + " from t_connector"))
         {
             if (!objById.TryGetValue(I(c, "Start_Object_ID"), out var s) || !objById.TryGetValue(I(c, "End_Object_ID"), out var t)) continue;
             var kind = MapConnector(S(c, "Connector_Type"), S(c, "SubType"), S(c, "Stereotype"));
             if (kind is null) continue;
             var k = kind.Value;
             // EA draws composition from part to whole; Meridian's composition goes whole → part.
-            if (k is ElementKind.Composition or ElementKind.Aggregation) (s, t) = (t, s);
+            var swapped = k is ElementKind.Composition or ElementKind.Aggregation;
+            if (swapped) (s, t) = (t, s);
             if (Metamodel.CheckEnds(k, s.Kind, t.Kind) != null)
             {
                 if (Metamodel.CheckEnds(k, t.Kind, s.Kind) == null) (s, t) = (t, s);
@@ -195,13 +239,25 @@ public static class EaImporter
                 var pk = t.OwnedElements.Where(x => x.Kind == ElementKind.Column && x.Get(FieldKeys.PrimaryKey) == "true").Select(x => x.Name).ToList();
                 if (pk.Count > 0) ModelRepository.SetFieldForLoad(r, FieldKeys.RefColumns, string.Join(", ", pk));
             }
-            if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation) ModelRepository.SetFieldForLoad(r, FieldKeys.Multiplicity, S(c, "DestCard"));
+            if (k is ElementKind.Association or ElementKind.Composition or ElementKind.Aggregation)
+            {
+                // SourceCard / DestCard are the multiplicities at EA's start / end object. A composition is drawn part → whole in EA and
+                // whole → part in Meridian, so its ends swap. Repositories without SourceCard keep DestCard as the target's.
+                var (atTarget, atSource) = swapped && connectorCols.Contains("SourceCard") ? (S(c, "SourceCard"), S(c, "DestCard")) : (S(c, "DestCard"), S(c, "SourceCard"));
+                ModelRepository.SetFieldForLoad(r, FieldKeys.Multiplicity, atTarget);
+                ModelRepository.SetFieldForLoad(r, FieldKeys.SourceMultiplicity, atSource);
+            }
+            if (k == ElementKind.Message)
+            {
+                ModelRepository.SetFieldForLoad(r, FieldKeys.MessageSort, "synchCall");
+                messageOrder[r] = I(c, "SeqNo");
+            }
             if (k is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow)
             {
                 var guard = S(c, "PDATA2").Split(';').Select(x => x.Trim()).FirstOrDefault(x => x.StartsWith("guard=", StringComparison.OrdinalIgnoreCase));
                 if (guard != null) ModelRepository.SetFieldForLoad(r, FieldKeys.Guard, guard[6..]);
             }
-            var owner = k is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow or ElementKind.Connector ? s.Owner ?? model.Root : model.DefaultOwnerFor(s.Owner ?? model.Root, k);
+            var owner = k is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow or ElementKind.Connector or ElementKind.Message ? s.Owner ?? model.Root : model.DefaultOwnerFor(s.Owner ?? model.Root, k);
             if (!Metamodel.CanOwn(owner.Kind, k)) owner = model.DefaultOwnerFor(owner, k);
             model.AttachForLoad(owner, r);
             relById[I(c, "Connector_ID")] = r;
@@ -233,10 +289,19 @@ public static class EaImporter
                 double l = I(o, "RectLeft"), r = I(o, "RectRight"), top = -I(o, "RectTop"), bottom = -I(o, "RectBottom");
                 model.AddNodeForLoad(diagram, new DiagramNode(el, new Bounds(l, Math.Min(top, bottom), Math.Max(10, r - l), Math.Max(10, Math.Abs(bottom - top)))));
             }
-            foreach (var link in diagramLinks.GetValueOrDefault(I(d, "Diagram_ID")) ?? [])
+            foreach (var n in diagram.Nodes.Where(n => operandSizes.ContainsKey(n.Element)))
+                PlaceSeparators(diagram, n, operandSizes[n.Element], warnings);
+            // Messages: EA stacks them by sequence number; each gets a height below the lifeline heads in that order.
+            var messageRank = 0;
+            var lifelineTop = diagram.Nodes.Where(n => n.Element.Kind == ElementKind.Lifeline).Select(n => n.Bounds.Y).DefaultIfEmpty(0).Min();
+            foreach (var link in (diagramLinks.GetValueOrDefault(I(d, "Diagram_ID")) ?? [])
+                         .OrderBy(l => relById.TryGetValue(I(l, "ConnectorID"), out var r) ? messageOrder.GetValueOrDefault(r) : 0))
             {
                 if (S(link, "Hidden") is "1" or "True" || !relById.TryGetValue(I(link, "ConnectorID"), out var rel)) continue;
-                if (diagram.NodeFor(rel.Source) is { } sn && diagram.NodeFor(rel.Target) is { } tn) model.AddEdgeForLoad(diagram, new DiagramEdge(rel, sn, tn));
+                if (diagram.NodeFor(rel.Source) is not { } sn || diagram.NodeFor(rel.Target) is not { } tn) continue;
+                var edge = new DiagramEdge(rel, sn, tn);
+                if (rel.Kind == ElementKind.Message) edge.Waypoints = [new Pt(sn.Bounds.Center.X, lifelineTop + 80 + 40 * messageRank++)];
+                model.AddEdgeForLoad(diagram, edge);
             }
         }
 
@@ -305,7 +370,110 @@ public static class EaImporter
         return fks;
     }
 
+    /// <summary>
+    /// Separators of a fragment shape from its EA partition heights: operand i starts below the heights of the operands above it.
+    /// When the heights do not fit the shape (EA adds guard rows it does not store), the rest are spread evenly and reported.
+    /// </summary>
+    private static void PlaceSeparators(Diagram d, DiagramNode n, List<double> sizes, List<string> warnings)
+    {
+        var ops = InteractionOperands.Of(n.Element);
+        var top = 0.0;
+        var guessed = 0;
+        for (var i = 1; i < ops.Count; i++)
+        {
+            top += i - 1 < sizes.Count ? sizes[i - 1] : double.NaN;
+            if (double.IsNaN(top) || top <= 0 || top >= n.Bounds.Height) { guessed++; continue; }
+            ModelRepository.SetNodeStyleForLoad(n, InteractionOperands.StyleKey(ops[i]), InteractionOperands.Format(top));
+        }
+        if (guessed > 0)
+            warnings.Add($"Approximated: diagram '{d.Name}', {n.Element.Get(FieldKeys.Operator)} fragment: {guessed} operand separator(s) did not fit the stored heights and were spread evenly");
+    }
+
+    /// <summary>The (guard, height) pairs of an EA "Partitions" description: <c>@PAR;Name=x &gt; 0;Size=80;GUID={…};@ENDPAR;</c>….</summary>
+    internal static List<(string? Guard, double Size)> ParsePartitions(string description)
+    {
+        var list = new List<(string?, double)>();
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(description, "@PAR;(.*?)@ENDPAR;", System.Text.RegularExpressions.RegexOptions.Singleline))
+        {
+            string? name = null; var size = double.NaN;
+            foreach (var part in m.Groups[1].Value.Split(';'))
+            {
+                var eq = part.IndexOf('=');
+                if (eq < 0) continue;
+                var (k, v) = (part[..eq], part[(eq + 1)..]);
+                if (k == "Name") name = v.Trim();
+                else if (k == "Size" && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var sz)) size = sz;
+            }
+            // EA shows guards in brackets and users often type them: "[x > 0]" is the guard "x > 0".
+            if (name is { Length: >= 2 } && name[0] == '[' && name[^1] == ']') name = name[1..^1].Trim();
+            list.Add((string.IsNullOrEmpty(name) ? null : name, size));
+        }
+        return list;
+    }
+
+    // Stereotypes EA uses to mark what Meridian expresses through the element kind or subtype.
+    private static bool IsKindStereo(string s) => s.ToLowerInvariant() is "datastore" or "centralbuffer" or "fork" or "join";
+
     private static bool IsSysmlStereo(string s) => s is "block" or "interfaceBlock" or "valueType" or "constraintBlock" or "requirement" or "testCase" or "table";
+
+    /// <summary>EA combined fragment operators by t_object.NType (EA's InteractionFragment subtype).</summary>
+    internal static readonly string[] FragmentOperators = ["alt", "opt", "break", "par", "loop", "critical", "neg", "assert", "strict", "seq", "ignore", "consider"];
+
+    /// <summary>
+    /// Element kind of an EA object (t_object.Object_Type, Stereotype, NType). <paramref name="subtype"/> is the Meridian subtype
+    /// (pseudostate kind, object node kind) or, for a combined fragment, its operator. <paramref name="approx"/> says what was
+    /// guessed, when anything was. See docs-site/docs/import-export.md for which codes are verified.
+    /// </summary>
+    internal static ElementKind? MapObject(string type, string stereo, int ntype, bool inStateMachine, int outgoing, out string? subtype, out string? approx)
+    {
+        subtype = null; approx = null;
+        var st = stereo.ToLowerInvariant();
+        switch (type)
+        {
+            case "StateNode":
+                // EA "StateNode" NType: 3 initial, 4 final, 5 shallow history, 11 choice, 12 terminate, 13 entry point, 14 exit point,
+                // 15 deep history, 100 activity initial, 101 activity final, 102 flow final.
+                switch (ntype)
+                {
+                    case 3: return ElementKind.InitialState;
+                    case 4: return ElementKind.FinalState;
+                    case 100: return ElementKind.InitialNode;
+                    case 101 or 102: return ElementKind.ActivityFinalNode;
+                }
+                (subtype, approx) = ntype switch
+                {
+                    5 => (Pseudostates.ShallowHistory, null),
+                    15 => (Pseudostates.DeepHistory, null),
+                    11 => (Pseudostates.Choice, null),
+                    12 => (Pseudostates.Terminate, null),
+                    13 => (Pseudostates.EntryPoint, null),
+                    14 => (Pseudostates.ExitPoint, null),
+                    10 => (Pseudostates.Junction, "NType 10 read as a junction; this code is not confirmed by Sparx documentation"),
+                    _ => (Pseudostates.Choice, $"unknown pseudostate NType {ntype} imported as a choice"),
+                };
+                return ElementKind.Pseudostate;
+            case "EntryPoint": subtype = Pseudostates.EntryPoint; return ElementKind.Pseudostate;
+            case "ExitPoint": subtype = Pseudostates.ExitPoint; return ElementKind.Pseudostate;
+            case "Synchronization" when inStateMachine:
+                subtype = st == "join" ? Pseudostates.Join : st == "fork" ? Pseudostates.Fork : outgoing > 1 ? Pseudostates.Fork : Pseudostates.Join;
+                if (st is not ("join" or "fork")) approx = $"fork / join bar read as a {subtype} from its {outgoing} outgoing transition(s)";
+                return ElementKind.Pseudostate;
+            case "CentralBufferNode": subtype = Subtypes.CentralBuffer; return ElementKind.ObjectNode;
+            case "DataStore" or "DataStoreNode": subtype = Subtypes.DataStore; return ElementKind.ObjectNode;
+            case "ObjectNode": return ElementKind.ObjectNode;
+            case "Object" when st == "datastore": subtype = Subtypes.DataStore; return ElementKind.ObjectNode;
+            case "Object" when st == "centralbuffer": subtype = Subtypes.CentralBuffer; return ElementKind.ObjectNode;
+            case "Interaction": return ElementKind.Interaction;
+            case "Sequence": return ElementKind.Lifeline;
+            case "InteractionFragment":
+                // NType 0 alt, 1 opt, 3 par, 4 loop are confirmed; the rest follow EA's toolbox order.
+                if (ntype >= 0 && ntype < FragmentOperators.Length) subtype = FragmentOperators[ntype];
+                else { subtype = "alt"; approx = $"unknown fragment operator NType {ntype} imported as alt"; }
+                if (ntype is 2 or >= 5 and < 12) approx = $"operator NType {ntype} read as '{subtype}' (not confirmed by Sparx documentation)";
+                return ElementKind.CombinedFragment;
+        }
+        return MapObject(type, stereo, ntype);
+    }
 
     private static ElementKind? MapObject(string type, string stereo, int ntype) => type switch
     {
@@ -326,7 +494,6 @@ public static class EaImporter
         "Action" => ElementKind.Action,
         "StateMachine" => ElementKind.StateMachine,
         "State" => ElementKind.State,
-        "StateNode" => ntype switch { 3 or 100 => ntype == 100 ? ElementKind.InitialNode : ElementKind.InitialState, 4 or 101 or 102 => ntype == 4 ? ElementKind.FinalState : ElementKind.ActivityFinalNode, _ => null },
         "Decision" or "MergeNode" => ElementKind.DecisionNode,
         "Synchronization" => ElementKind.ForkNode,
         "ActivityPartition" => ElementKind.Partition,
@@ -362,6 +529,7 @@ public static class EaImporter
             "StateFlow" => ElementKind.Transition,
             "Connector" or "Assembly" => ElementKind.Connector,
             "InformationFlow" => ElementKind.Trace,
+            "Sequence" => ElementKind.Message,
             _ => null,
         },
     };
@@ -377,6 +545,7 @@ public static class EaImporter
             "Use Case" => DiagramType.UseCase,
             "Activity" => DiagramType.Activity,
             "Statechart" => DiagramType.StateMachine,
+            "Sequence" => DiagramType.Sequence,
             "Package" => DiagramType.Package,
             "Requirements" => DiagramType.Requirement,
             _ => DiagramType.Class,
