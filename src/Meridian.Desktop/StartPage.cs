@@ -96,6 +96,8 @@ button.ghost { background:none; border:1px solid var(--border); color:var(--text
 </div>
 <script>
   const send = m => window.external.sendMessage(JSON.stringify(m));
+  // Tell the app the page (and its web view) is ready for messages, as the web app does.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => send({ command: 'hello' })); else send({ command: 'hello' });
   const remember = () => document.getElementById('remember')?.checked ?? false;
   const busy = () => { document.querySelector('.wrap').insertAdjacentHTML('beforeend', '<div class="busy"><div class="spin"></div>Opening…</div>'); };
   document.getElementById('local')?.addEventListener('click', () => { busy(); send({ command: 'local', remember: remember() }); });

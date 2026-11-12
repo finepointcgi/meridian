@@ -166,7 +166,8 @@ internal static class Program
                 _settings.Save();
                 break;
             case "hello":
-                // A page finished loading: tell it about a pending update so the web app can show its notice.
+                // A page finished loading: deliver waiting messages, and tell it about a pending update so the web app can show its notice.
+                PageReady();
                 if ((_update ?? CachedUpdate()) is { } u) Post(new { type = "update", version = u.Version, url = u.PageUrl });
                 break;
             case "update":
@@ -178,11 +179,38 @@ internal static class Program
         }
     }
 
+    // Messages for the page wait here until a page has said "hello": before that the web view may not exist yet, and on
+    // Windows sending to WebView2 too early throws (an update check at start-up crashed the app this way).
+    private static readonly List<string> _pending = new();
+    private static bool _pageReady;
+
     private static void Post(object message)
     {
         var json = JsonSerializer.Serialize(message);
-        try { _window.Invoke(() => _window.SendWebMessage(json)); }
-        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException) { /* window not ready or closing */ }
+        lock (_pending)
+        {
+            if (!_pageReady) { if (_pending.Count < 50) _pending.Add(json); return; }
+        }
+        Send(json);
+    }
+
+    private static void Send(string json)
+    {
+        try { _window.Invoke(() => { try { _window.SendWebMessage(json); } catch (Exception ex) { Log($"Message to the page dropped: {ex.Message}"); } }); }
+        catch (Exception ex) { Log($"Message to the page dropped: {ex.Message}"); }   // window not ready or closing
+    }
+
+    /// <summary>A page finished loading: deliver what was waiting.</summary>
+    private static void PageReady()
+    {
+        List<string> waiting;
+        lock (_pending)
+        {
+            _pageReady = true;
+            waiting = [.. _pending];
+            _pending.Clear();
+        }
+        foreach (var json in waiting) Send(json);
     }
 
     /// <summary>Opens a diagram hyperlink in the system browser. Only http(s) addresses are accepted.</summary>
@@ -434,6 +462,12 @@ internal static class Program
                 Log($"Update available: {found.Tag} ({found.Asset.Name}, {found.Kind}).");
                 Post(new { type = "update", version = found.Version, url = found.PageUrl });
             }
+        }
+        catch (Exception ex)
+        {
+            // An update check must never take the app down (a 404 from a private repository used to on Windows).
+            Log($"Update check failed: {ex}");
+            try { PostStatus("Unreachable", "Couldn't check for updates: " + ex.Message); } catch { /* reporting is best effort */ }
         }
         finally { Interlocked.Exchange(ref _checking, 0); }
     }
