@@ -1,5 +1,5 @@
 ; Meridian for Windows: a per-user installer (no administrator rights) built by build/package.sh with Inno Setup 6.
-;   iscc /DAppVersion=0.9.0 /DSourceDir=<published folder> /DOutputDir=<artifacts> /DOutputName=Meridian-0.9.0-windows-x64-setup meridian.iss
+;   iscc /DAppVersion=0.9.1 /DSourceDir=<published folder> /DOutputDir=<artifacts> /DOutputName=Meridian-0.9.1-windows-x64-setup meridian.iss
 ; Installs to %LOCALAPPDATA%\Programs\Meridian, adds Start menu and desktop shortcuts and an uninstaller, and registers
 ; .meridian (and .sysml) so double-clicking a model opens it in Meridian's local workspace.
 
