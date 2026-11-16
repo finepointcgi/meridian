@@ -25,6 +25,14 @@ public class ReportStreamingTests
     /// <summary>Deterministic (ids included), with packages, requirements, diagrams and two big diagrams: ~1,200 elements.</summary>
     private static ModelRepository Small() => LargeModelGenerator.Generate(new LargeModelOptions { Scale = 0.02, UseCases = 10, BreakdownDepth = 3, LargeDiagrams = 2 });
 
+    /// <summary>The golden hashes were taken when diagrams drew paths below shapes; diagrams now draw them on top by default
+    /// (EdgeRouter.LinesOnTop, covered by LineOrderTests). These tests compare the report pipelines, so they keep the old order.</summary>
+    private static ModelRepository LinesBelow(ModelRepository m)
+    {
+        foreach (var d in m.AllElements.OfType<Diagram>().ToList()) m.Set(d, Meridian.Core.Language.EdgeRouter.LinesBelowKey, "true");
+        return m;
+    }
+
     /// <summary>The built-ins as they were at a847aca, when the golden hashes below were taken: matrices without hidden empty
     /// rows and columns, the VCRM table without the "Criteria" column (added later with several criteria per requirement), and
     /// the SDD without its "Deployment view" section (added with deployment diagrams; DeploymentTests covers it).</summary>
@@ -73,9 +81,9 @@ public class ReportStreamingTests
     [MemberData(nameof(Goldens))]
     public void Streamed_Html_And_Word_Match_The_Pre_Streaming_Output(string template, string htmlHash, string wordHash)
     {
-        var html = Encoding.UTF8.GetString(ReportEngine.Generate(Small(), Builtin(template), ReportFormat.Html, options: Fixed));
+        var html = Encoding.UTF8.GetString(ReportEngine.Generate(LinesBelow(Small()), Builtin(template), ReportFormat.Html, options: Fixed));
         Assert.Equal(htmlHash, Hash(Ids(html)));
-        Assert.Equal(wordHash, Hash(WordXml(ReportEngine.Generate(Small(), Builtin(template), ReportFormat.Docx, options: Fixed))));
+        Assert.Equal(wordHash, Hash(WordXml(ReportEngine.Generate(LinesBelow(Small()), Builtin(template), ReportFormat.Docx, options: Fixed))));
     }
 
     [Fact]
@@ -93,8 +101,8 @@ public class ReportStreamingTests
         ];
         foreach (var (name, html, word) in goldens)
         {
-            if (html != null) Assert.Equal(html, Hash(Ids(Encoding.UTF8.GetString(ReportEngine.Generate(SampleModels.Vehicle(), Builtin(name), ReportFormat.Html, options: Fixed)))));
-            Assert.Equal(word, Hash(WordXml(ReportEngine.Generate(SampleModels.Vehicle(), Builtin(name), ReportFormat.Docx, options: Fixed))));
+            if (html != null) Assert.Equal(html, Hash(Ids(Encoding.UTF8.GetString(ReportEngine.Generate(LinesBelow(SampleModels.Vehicle()), Builtin(name), ReportFormat.Html, options: Fixed)))));
+            Assert.Equal(word, Hash(WordXml(ReportEngine.Generate(LinesBelow(SampleModels.Vehicle()), Builtin(name), ReportFormat.Docx, options: Fixed))));
         }
     }
 

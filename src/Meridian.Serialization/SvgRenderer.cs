@@ -221,12 +221,21 @@ public static partial class SvgRenderer
             return;
         }
         if (d.DiagramType == DiagramType.Database) RenderGroupFrames(sb, model, d, bounds, t);   // subject areas behind everything
-        // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then paths, then contents by depth.
+        // Containers (pools, swimlanes, composite states, parts with nested shapes) first, then contents by depth. Paths go on
+        // top by default (as in Cameo / EA, so a line passing a block is never hidden); the diagram's "linesBelow" option
+        // keeps the old order, with paths between the containers and their contents.
         var containers = d.Nodes.Where(n => IsContainer(d, n)).OrderBy(n => Depth(d, n)).ToList();
         foreach (var n in containers) RenderNode(sb, model, d, n, bounds(n), t);
-        foreach (var e in d.Edges.Where(e => !Core.Deployment.DeploymentModel.ShownByNesting(d, e))) RenderEdge(sb, d, e, routes[e], t, jumps, model);
-        if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
+        var onTop = EdgeRouter.LinesOnTop(d);
+        if (!onTop) RenderPaths();
         foreach (var n in d.Nodes.Except(containers).OrderBy(n => Depth(d, n))) RenderNode(sb, model, d, n, bounds(n), t);
+        if (onTop) RenderPaths();
+
+        void RenderPaths()
+        {
+            foreach (var e in d.Edges.Where(e => !Core.Deployment.DeploymentModel.ShownByNesting(d, e))) RenderEdge(sb, d, e, routes[e], t, jumps, model);
+            if (d.DiagramType == DiagramType.FeatureModel) FeatureDiagramSvg.RenderGroupArcs(sb, d, bounds, waypoints, t);
+        }
         if (d.DiagramType == DiagramType.Timing) RenderTimeAxis(sb, d, bounds, t);
         RenderLegend(sb, model, d, bounds, t);
     }

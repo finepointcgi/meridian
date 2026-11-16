@@ -198,6 +198,9 @@
                 case EdgeRouter.LineJumpsKey:
                     <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Line jumps where connectors cross" />
                     break;
+                case EdgeRouter.LinesBelowKey:
+                    <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) != "true")" ValueChanged="v => SetFlag(e, key, !v)" Color="Color.Primary" Size="Size.Small" Label="Draw lines above shapes" />
+                    break;
                 case FieldKeys.Legend:
                     <MudSwitch @key="@(e.Id + key)" T="bool" Value="@(e.Get(key) == "true")" ValueChanged="v => SetFlag(e, key, v)" Color="Color.Primary" Size="Size.Small" Label="Show legend" />
                     break;
@@ -380,7 +383,7 @@
     }
 
     private static IEnumerable<string> Fields(Element e) =>
-        e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation]
+        e is Diagram dg ? [FieldKeys.Name, EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, EdgeRouter.LinesBelowKey, FieldKeys.Legend, .. dg.DiagramType == DiagramType.Timing ? new[] { InteractionNotation.TimeUnit } : [], FieldKeys.Documentation]
         : Metamodel.EditableFields(e.Kind).Where(k => !k.StartsWith("db.", StringComparison.Ordinal))   // data-model fields: DatabaseInspectorSection
             .Where(k => !Meridian.Core.Safety.SafetyFields.IsSafetyField(k) && !(k == FieldKeys.Subtype && e.Kind is ElementKind.FaultTreeEvent or ElementKind.FaultTreeGate));   // SafetyInspectorSection
 

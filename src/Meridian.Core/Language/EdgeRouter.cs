@@ -39,6 +39,10 @@ public static class EdgeRouter
     /// <summary>Diagram field: "true" draws a small hop where a connector crosses one drawn before it.</summary>
     public const string LineJumpsKey = "lineJumps";
 
+    /// <summary>Diagram field: "true" draws paths underneath shapes (the old look). By default paths are drawn above
+    /// shapes, as in Cameo and EA, so a line passing a block is never hidden by it.</summary>
+    public const string LinesBelowKey = "linesBelow";
+
     /// <summary>Clearance kept between a routed path and the shapes it passes.</summary>
     public const double Margin = 14;
 
@@ -84,6 +88,9 @@ public static class EdgeRouter
         e.Style.TryGetValue(EdgeKey, out var s) && s.Length > 0 ? Parse(s) : Parse(d.Get(DiagramKey));
 
     public static bool LineJumps(Diagram d) => d.Get(LineJumpsKey) == "true";
+
+    /// <summary>True (the default) when paths are drawn above shapes.</summary>
+    public static bool LinesOnTop(Diagram d) => d.Get(LinesBelowKey) != "true";
 
     /// <summary>Messages (sequence time order) and self loops keep their dedicated notation.</summary>
     public static bool Routable(DiagramEdge e) => e.Relationship.Kind != ElementKind.Message && !ReferenceEquals(e.Source, e.Target);
