@@ -3,7 +3,7 @@
    left when it would run off it), closes with Escape, and an entry with Children opens a submenu (hover, click or →). *@
 @if (Entries is { Count: > 0 })
 {
-    <div class="ctx-backdrop" @onclick="Close" @oncontextmenu="Close" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-backdrop" @onclick="Close" @oncontextmenu="CloseOnRightClick" @oncontextmenu:preventDefault="true"></div>
     <div class="ctx-menu" role="menu" tabindex="-1" style="left:@(Px(X))px; top:@(Px(Y))px" @ref="_root" @onkeydown="Key">
         @Items(Entries, true)
     </div>
@@ -79,6 +79,21 @@
     }
 
     private Task Close() => OnClose.InvokeAsync();
+
+    // When this menu (these entries) appeared. Windows sends the browser's "contextmenu" event when the right button is
+    // released, after the canvas already opened the menu on press: that trailing event lands on this backdrop and must not
+    // close the menu it just opened. A later right-click outside the menu still closes it.
+    private IReadOnlyList<MenuEntry>? _openedFor;
+    private DateTime _openedAt;
+    internal static TimeSpan TrailingRightClick { get; set; } = TimeSpan.FromMilliseconds(700);
+
+    protected override void OnParametersSet()
+    {
+        if (Entries is { Count: > 0 } && !ReferenceEquals(Entries, _openedFor)) { _openedFor = Entries; _openedAt = DateTime.UtcNow; }
+        if (Entries is not { Count: > 0 }) _openedFor = null;
+    }
+
+    private Task CloseOnRightClick() => DateTime.UtcNow - _openedAt < TrailingRightClick ? Task.CompletedTask : Close();
 
     private async Task Run(MenuEntry e)
     {

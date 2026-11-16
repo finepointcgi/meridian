@@ -138,6 +138,23 @@ public sealed class UxAuditTests : TestContext
     }
 
     [Fact]
+    public void The_Right_Click_Release_That_Follows_Opening_Does_Not_Close_The_Menu()
+    {
+        // Windows sends "contextmenu" when the right button is released, after the canvas opened the menu on press: that
+        // trailing event lands on the backdrop and must not close the menu. A right-click a moment later still does.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        var closed = false;
+        var cut = RenderComponent<ContextMenu>(p => p
+            .Add(x => x.Entries, new[] { MenuEntry.Do("Rename…", () => { }) })
+            .Add(x => x.OnClose, () => closed = true));
+        cut.Find(".ctx-backdrop").ContextMenu();
+        Assert.False(closed);
+        Thread.Sleep(800);
+        cut.Find(".ctx-backdrop").ContextMenu();
+        Assert.True(closed);
+    }
+
+    [Fact]
     public void Escape_Closes_The_Submenu_Then_The_Menu()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
