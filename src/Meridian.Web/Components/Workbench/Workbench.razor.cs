@@ -94,6 +94,7 @@ public partial class Workbench
         list.AddRange(CodeBehaviourPaletteCommands());   // Workbench.CodeBehaviour.cs
         list.AddRange(ArchitecturePaletteCommands());   // Workbench.Architecture.cs
         list.AddRange(MermaidPaletteCommands());
+        list.AddRange(DiagramFilePaletteCommands());   // Workbench.DiagramFiles.cs
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
         list.AddRange(SpreadsheetPaletteCommands());   // Workbench.Spreadsheet.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
@@ -513,6 +514,7 @@ public partial class Workbench
             m.Add(MenuEntry.Async("Export as SVG", ExportSvg));
             m.Add(MenuEntry.Async("Export as PNG…", ExportImage));
             m.Add(MenuEntry.Async("Copy diagram as image", CopyDiagramImage));
+            m.Add(MenuEntry.Async("Export as draw.io", ExportDrawIo));
         }
         OpenMenu(m, r.X, r.Y);
     }
@@ -801,6 +803,7 @@ public partial class Workbench
                 return;
             }
             if (IsMagicDrawFile(file.Name)) { await OpenMagicDrawProject(file); return; }
+            if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name)) { await OpenDrawIoProject(file); return; }
             if (MermaidImporter.IsMermaidFile(file.Name)) { await OpenMermaidProject(file); return; }
             var text = await ReadText(file);
             if (ext is ".xmi" or ".xml" or ".uml")
@@ -822,7 +825,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip and Mermaid files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid and draw.io files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 
@@ -839,11 +842,17 @@ public partial class Workbench
     {
         var target = _importTarget ?? Ws.Model.Root;
         var csharp = new List<(string, string)>();
+        var diagramFiles = new List<Meridian.Serialization.DiagramFiles.DiagramSourceFile>();
         foreach (var file in e.GetMultipleFiles(500))
         {
             var ext = Path.GetExtension(file.Name).ToLowerInvariant();
             try
             {
+                if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name))
+                {
+                    diagramFiles.Add(await ReadDiagramFile(file));
+                    continue;
+                }
                 switch (ext)
                 {
                     case ".bpmn":
@@ -885,6 +894,17 @@ public partial class Workbench
                         await s.CopyToAsync(ms);
                         ms.Position = 0;
                         using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
+                        // A zipped folder of Mermaid / draw.io files: imported like "Import a folder of diagrams…".
+                        foreach (var entry in zip.Entries.Where(x => Meridian.Serialization.DiagramFiles.DiagramFolderImport.IsDiagramFile(x.FullName) && !x.FullName.StartsWith("__MACOSX/", StringComparison.Ordinal)))
+                        {
+                            if (diagramFiles.Count >= Meridian.Serialization.DiagramFiles.DiagramFolderImport.MaxFiles) break;
+                            using var es = entry.Open();
+                            using var eb = new MemoryStream();
+                            await es.CopyToAsync(eb);
+                            if (eb.Length > Meridian.Serialization.DiagramFiles.DiagramFolderImport.MaxFileBytes) throw new InvalidDataException($"{entry.FullName} is larger than 32 MB.");
+                            diagramFiles.Add(new(entry.FullName, eb.ToArray()));
+                            if (diagramFiles.Sum(x => x.Content.LongLength) > Meridian.Serialization.DiagramFiles.DiagramFolderImport.MaxTotalBytes) throw new InvalidDataException("The archive unpacks to more than 128 MB of diagrams.");
+                        }
                         foreach (var entry in zip.Entries.Where(x => x.FullName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !x.FullName.Contains("/obj/") && !x.FullName.Contains("/bin/")))
                         {
                             csharp.Add((entry.FullName, SafeZip.ReadText(entry, 16 * 1024 * 1024)));
@@ -902,6 +922,8 @@ public partial class Workbench
                 ErrorWithGuide($"Could not import {file.Name}: {FriendlyError.Describe(ex)}. Nothing was changed.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
             }
         }
+        if (diagramFiles.Count > 0)
+            await ImportDiagramFiles(diagramFiles, target, diagramFiles.Count == 1 ? $"Import {Path.GetFileName(diagramFiles[0].Path)}" : $"Import {diagramFiles.Count} diagram files", diagramFiles.Count == 1 ? diagramFiles[0].Path : $"{diagramFiles.Count} files");
         if (csharp.Count > 0)
         {
             try

@@ -464,6 +464,36 @@
         StateHasChanged();
     }
 
+    private readonly List<Meridian.Serialization.DiagramFiles.DiagramSourceFile> _dropped = new();
+
+    /// <summary>A folder of diagrams or draw.io files dropped on the canvas: read in batches, then imported into the diagram's package.</summary>
+    [JSInvokable]
+    public void OnDiagramFilesBatch(BrowserDiagramFile[] batch)
+    {
+        foreach (var f in batch)
+        {
+            if (_dropped.Count >= Meridian.Serialization.DiagramFiles.DiagramFolderImport.MaxFiles) break;
+            try { _dropped.Add(f.ToSource()); } catch (FormatException) { }
+        }
+    }
+
+    [JSInvokable]
+    public void OnDiagramFilesDone(string folder, int skipped)
+    {
+        var files = _dropped.ToList();
+        _dropped.Clear();
+        if (files.Count == 0)
+        {
+            Ws.SetStatus($"No Mermaid or draw.io files in {folder}");
+            StateHasChanged();
+            return;
+        }
+        var target = Meridian.Serialization.DiagramFiles.DiagramFolderImport.PreviousTarget(Ws.Model, files)
+                     ?? C.Diagram.Owner?.AncestorsAndSelf().FirstOrDefault(a => a.Kind is ElementKind.Package or ElementKind.Model) ?? Ws.Model.Root;
+        DiagramFilesImport.Apply(Ws, files, DiagramFilesImport.DefaultOptions(Ws, files, target), folder, target);
+        StateHasChanged();
+    }
+
     [JSInvokable]
     public void OnImageError(string message)
     {

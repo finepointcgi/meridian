@@ -20,7 +20,7 @@ public static class LocalFileImport
     public const long MaxBytes = 64 * 1024 * 1024;
 
     /// <summary>Files the desktop app can open as a project (the same formats as "Open a file as a new project").</summary>
-    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md", ".sql", ".ddl", ".dacpac"];
+    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md", ".sql", ".ddl", ".dacpac", ".drawio", ".dio"];
 
     public static bool IsSupported(string path) =>
         Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
@@ -50,7 +50,7 @@ public static class LocalFileImport
             var path = body?.Path;
             if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || !IsSupported(path))
             {
-                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea, .mdzip/.mdxml or Mermaid (.mmd, .mermaid, .md) files can be opened.");
+                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea, .mdzip/.mdxml, Mermaid (.mmd, .mermaid, .md) or draw.io (.drawio) files can be opened.");
                 return;
             }
             var file = new FileInfo(path);
@@ -108,6 +108,12 @@ public static class LocalFileImport
                     File.ReadAllText(path), Path.GetFileNameWithoutExtension(path), Meridian.Serialization.Mermaid.MermaidImporter.IsMarkdownFile(path));
                 if (!mm.Diagrams.Any()) throw new FormatException("the file contains no Mermaid diagram Meridian can import.");
                 return (mm, report);
+            }
+            case ".drawio" or ".dio":
+            {
+                var (dm, report) = Meridian.Serialization.DrawIo.DrawIoImporter.ImportAsNewProject(Path.GetFileName(path), File.ReadAllBytes(path));
+                if (!dm.Diagrams.Any()) throw new FormatException("the file contains no diagram Meridian can import.");
+                return (dm, report);
             }
             case ".sql" or ".ddl" or ".dacpac":
             {

@@ -77,7 +77,7 @@ internal sealed class MGraph
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
     public bool NodeLimitHit, EdgeLimitHit;
 
-    public void Warn(int line, string message) => Warnings.Add($"{Describe()} line {line}: {message}");
+    public void Warn(int line, string message) => Warnings.Add(line > 0 ? $"{Describe()} line {line}: {message}" : $"{Describe()} {message}");
 
     /// <summary>Warns once per <paramref name="key"/>.</summary>
     public void WarnOnce(string key, int line, string message)

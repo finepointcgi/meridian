@@ -72,13 +72,92 @@
     }
   }
 
-  /** Canvas: drop picture or Mermaid (.mmd) files onto it, or paste a picture while it has focus. */
+  // Diagram files read from a folder or a drop (DiagramFolderImport.Extensions / limits).
+  const DIAGRAM_FILE = /\.(mmd|mermaid|md|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png)$/i;
+  const DRAWIO_FILE = /\.(drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png)$/i;
+  const MAX_DIAGRAM_FILE = 32 * 1024 * 1024, MAX_DIAGRAM_TOTAL = 128 * 1024 * 1024, MAX_DIAGRAM_FILES = 2000, BATCH_BYTES = 8 * 1024 * 1024;
+  const SKIP_DIR = /(^|\/)(node_modules|\.git|bin|obj|dist|build|\.venv|__MACOSX)(\/|$)/;
+
+  function toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
+  /** Reads [path, File] pairs and sends them to .NET in batches (Add), then Done(folder, skipped). */
+  async function sendDiagramFiles(dotnet, pairs, folder, skipped, add = "Add", done = "Done") {
+    let batch = [], size = 0, total = 0, count = 0;
+    for (const [path, f] of pairs) {
+      if (SKIP_DIR.test(path) || !DIAGRAM_FILE.test(path)) { skipped++; continue; }
+      if (f.size > MAX_DIAGRAM_FILE || total + f.size > MAX_DIAGRAM_TOTAL || count >= MAX_DIAGRAM_FILES) { skipped++; continue; }
+      const item = /\.png$/i.test(path) ? { path, base64: toBase64(await f.arrayBuffer()) } : { path, text: await f.text() };
+      batch.push(item); size += f.size; total += f.size; count++;
+      if (size >= BATCH_BYTES) { await dotnet.invokeMethodAsync(add, batch); batch = []; size = 0; }
+    }
+    if (batch.length > 0) await dotnet.invokeMethodAsync(add, batch);
+    await dotnet.invokeMethodAsync(done, folder, skipped);
+  }
+
+  /** "Import a folder of diagrams…": the browser's folder picker; only Mermaid and draw.io files are read. */
+  m.pickDiagramFolder = dotnet => {
+    const input = Object.assign(document.createElement("input"), { type: "file", multiple: true });
+    input.setAttribute("webkitdirectory", "");
+    input.setAttribute("directory", "");
+    input.style.display = "none";
+    let settled = false;
+    input.addEventListener("change", async () => {
+      settled = true;
+      const files = [...input.files];
+      input.remove();
+      const pairs = files.map(f => [f.webkitRelativePath || f.name, f]);
+      const folder = (pairs[0]?.[0] || "").split("/")[0] || "folder";
+      try { await sendDiagramFiles(dotnet, pairs, folder, 0); }
+      catch (e) { dotnet.invokeMethodAsync("Cancel"); console.error(e); }
+    });
+    input.addEventListener("cancel", () => { if (!settled) { settled = true; input.remove(); dotnet.invokeMethodAsync("Cancel"); } });
+    document.body.appendChild(input);
+    input.click();
+  };
+
+  /** Walks dropped folders (and takes dropped draw.io files) as [path, File] pairs. Entries must be taken during the drop event. */
+  async function collectEntries(entries) {
+    const out = [];
+    const fileOf = entry => new Promise((resolve, reject) => entry.file(resolve, reject));
+    async function walk(entry, prefix) {
+      if (out.length >= MAX_DIAGRAM_FILES * 4) return;
+      if (entry.isFile) { out.push([prefix + entry.name, await fileOf(entry)]); return; }
+      if (!entry.isDirectory || SKIP_DIR.test(prefix + entry.name + "/")) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+        if (batch.length === 0) break;
+        for (const child of batch) await walk(child, prefix + entry.name + "/");
+      }
+    }
+    for (const entry of entries) await walk(entry, "");
+    return out;
+  }
+
+  /** Canvas: drop picture, Mermaid (.mmd) or draw.io files or a folder of diagrams onto it, or paste a picture while it has focus. */
   m.installCanvasExtras = (el, dotnet) => {
     const onDrop = e => {
       const all = [...(e.dataTransfer?.files || [])];
-      const mermaid = all.filter(f => MERMAID_FILE.test(f.name || ""));
+      const entries = [...(e.dataTransfer?.items || [])].map(it => it.kind === "file" && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null).filter(Boolean);
+      const folders = entries.filter(x => x.isDirectory);
+      const drawio = entries.filter(x => x.isFile && DRAWIO_FILE.test(x.name));
+      // Without entries (some browsers, synthetic drops) draw.io files still come through as plain files.
+      const drawioFiles = entries.length > 0 ? [] : all.filter(f => DRAWIO_FILE.test(f.name || ""));
+      if (folders.length > 0 || drawio.length > 0 || drawioFiles.length > 0) {
+        e.preventDefault();
+        const collected = drawioFiles.length > 0 ? Promise.resolve(drawioFiles.map(f => [f.name, f])) : collectEntries([...folders, ...drawio]);
+        collected
+          .then(pairs => sendDiagramFiles(dotnet, pairs, folders[0]?.name || (drawio[0] || drawioFiles[0]).name, 0, "OnDiagramFilesBatch", "OnDiagramFilesDone"))
+          .catch(err => dotnet.invokeMethodAsync("OnImageError", err?.message || String(err)));
+      }
+      const mermaid = folders.length > 0 ? [] : all.filter(f => MERMAID_FILE.test(f.name || ""));
       if (mermaid.length > 0) { e.preventDefault(); importMermaid(dotnet, mermaid); }
-      const files = all.filter(f => f.type?.startsWith("image/"));
+      const files = all.filter(f => f.type?.startsWith("image/") && !DRAWIO_FILE.test(f.name || ""));
       if (files.length === 0) return;
       e.preventDefault();
       const r = el.getBoundingClientRect();

@@ -12,6 +12,7 @@ runtime, no extra packages) and never calls the network.
 | Project menu → **Import into this project…** with a `.mmd`, `.mermaid` or `.md` file | Opens the same dialog pre-filled with the file. |
 | Project menu → **Open a file as a new project…** with a `.mmd`, `.mermaid` or `.md` file | Creates a new project holding the imported diagrams. The desktop app opens these files from its file dialog, the start screen and the command line too. |
 | Drop a `.mmd` / `.mermaid` / `.md` file on the canvas | Imports it straight into the active diagram's package. |
+| Project menu → Import → **Folder of diagrams (Mermaid, draw.io)…** (also ⌘K), or drop a folder on the canvas | Reads every `.mmd`, `.mermaid` and Markdown file (and draw.io file) in a folder and its subfolders. Each folder becomes a package, an untitled diagram is named after its file, and importing the same folder again replaces the diagrams it made last time. See [DRAWIO.md](DRAWIO.md#folders-of-diagrams). |
 | Project menu → Export → **Export diagram as Mermaid (.mmd)**, **Copy diagram as Mermaid** (also ⌘K, and Generate → Formats → **Mermaid .mmd**) | Writes the active activity, state machine, sequence, block definition / class or requirement diagram. |
 
 ### Mermaid from an AI assistant

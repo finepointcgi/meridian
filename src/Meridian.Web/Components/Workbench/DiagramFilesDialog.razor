@@ -1,0 +1,143 @@
+@* "Import a folder of diagrams…" (Project menu ▸ Import, ⌘K) and draw.io files from "Import into this project…": what each
+   Mermaid / draw.io file will become, a few options, then one undo step (Services/DiagramFilesImport). *@
+@using Meridian.Serialization.DiagramFiles
+@using Meridian.Serialization.Mermaid
+@using Meridian.Core.Model
+@inject Workspace Ws
+
+<MudDialog Class="diagram-files-dialog">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.DriveFolderUpload" />
+            <MudText Typo="Typo.h6">@Title</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:10px">
+            <MudText Typo="Typo.body2" Style="color:var(--text-2)">
+                Mermaid files (<code>.mmd</code>, Markdown with <code>```mermaid</code> blocks) and draw.io files (<code>.drawio</code>,
+                <code>.drawio.svg</code>, <code>.drawio.png</code>) go into <b>@Target.DisplayName</b>.
+                draw.io pages drawn with UML shapes become model elements; other pages become whiteboard drawings with their layout.
+            </MudText>
+
+            @if (_preview.Count == 0)
+            {
+                <div class="df-empty" style="padding:10px; color:var(--text-3); font-size:13px">No Mermaid or draw.io diagrams found@(Skipped > 0 ? $" ({Skipped} other files ignored)" : "").</div>
+            }
+            else
+            {
+                <div class="df-preview" style="border:1px solid var(--border); border-radius:8px; max-height:42vh; overflow:auto">
+                    @foreach (var f in _preview)
+                    {
+                        <div class="df-file" style="padding:6px 10px; border-bottom:1px solid var(--border); font-size:13px">
+                            <div style="display:flex; gap:8px; align-items:center">
+                                <MudIcon Icon="@(f.Format == DiagramFileFormat.DrawIo ? Icons.Material.Outlined.Draw : Icons.Material.Outlined.Schema)" Size="Size.Small" Style="color:var(--text-3)" />
+                                <span class="df-path" style="font-family:var(--mono, ui-monospace, monospace); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">@f.Path</span>
+                                @if (f.ImportedBefore)
+                                {
+                                    <span class="df-again" style="font-size:11px; padding:1px 6px; border-radius:8px; background:var(--accent-soft, rgba(80,120,255,.12)); color:var(--text-2)" title="Imported here before">@(_replace ? "replaces earlier import" : "imported before")</span>
+                                }
+                            </div>
+                            @if (f.Error != null)
+                            {
+                                <div class="df-error" style="margin:2px 0 0 26px; color:var(--error, #c62828); font-size:12px">Can't read it: @f.Error</div>
+                            }
+                            @foreach (var d in f.Diagrams)
+                            {
+                                <div class="df-diagram @(d.Supported ? "" : "skipped")" style="display:grid; grid-template-columns:1fr auto; gap:8px; margin:2px 0 0 26px; @(d.Supported ? "" : "opacity:.6")">
+                                    <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap"><b class="df-becomes">@d.Becomes</b> <span style="color:var(--text-3)">· @d.Name</span></span>
+                                    <span style="color:var(--text-2); font-size:12px">@d.Counts</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (Skipped > 0)
+                {
+                    <div style="font-size:12px; color:var(--text-3)">@Skipped other file@(Skipped == 1 ? "" : "s") in the folder @(Skipped == 1 ? "was" : "were") ignored.</div>
+                }
+            }
+
+            <div style="display:flex; flex-direction:column; gap:6px; font-size:13px">
+                @if (HasFolders)
+                {
+                    <label><input type="checkbox" class="df-packages" checked="@_packages" @onchange="e => _packages = e.Value is true" /> Create a package for each folder</label>
+                }
+                @if (HasDrawIo)
+                {
+                    <label><input type="checkbox" class="df-uml" checked="@_uml" @onchange="ToggleUml" /> Recognise UML in draw.io pages (use case, class, activity, state, sequence, requirement)</label>
+                }
+                @if (_preview.Any(p => p.ImportedBefore))
+                {
+                    <label><input type="checkbox" class="df-replace" checked="@_replace" @onchange="e => _replace = e.Value is true" /> Replace the diagrams imported from these files before</label>
+                }
+                <div class="d-flex align-center gap-4" style="flex-wrap:wrap">
+                    <span style="color:var(--text-3)">Existing blocks, actors and requirements:</span>
+                    <label><input type="radio" name="df-match" class="df-new" checked="@(_match == MermaidMatchMode.CreateNew)" @onchange="() => _match = MermaidMatchMode.CreateNew" /> create new</label>
+                    <label><input type="radio" name="df-match" class="df-match" checked="@(_match == MermaidMatchMode.MatchByName)" @onchange="() => _match = MermaidMatchMode.MatchByName" /> match by name (reuse)</label>
+                </div>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="df-import" Disabled="@(Ws.ReadOnly || Count == 0)" OnClick="Import">
+            @(Count == 1 ? "Import 1 diagram" : $"Import {Count} diagrams")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public IReadOnlyList<DiagramSourceFile> Files { get; set; } = [];
+    [Parameter] public string Title { get; set; } = "Import diagrams";
+    [Parameter] public Element Target { get; set; } = default!;
+    [Parameter] public DiagramFolderOptions Options { get; set; } = new();
+    /// <summary>Files in the folder that are not diagrams.</summary>
+    [Parameter] public int Skipped { get; set; }
+
+    private IReadOnlyList<DiagramFilePreview> _preview = [];
+    private bool _packages, _uml, _replace;
+    private MermaidMatchMode _match;
+
+    private int Count => _preview.Sum(p => p.Supported);
+    private bool HasFolders => Files.Any(f => f.Path.Replace('\\', '/').Trim('/').Contains('/'));
+    private bool HasDrawIo => _preview.Any(p => p.Format == DiagramFileFormat.DrawIo);
+
+    protected override void OnInitialized()
+    {
+        _packages = Options.PackagePerFolder;
+        _uml = Options.DrawIoModelElements;
+        _replace = Options.ReplacePrevious;
+        _match = Options.Match;
+        Refresh();
+    }
+
+    private void ToggleUml(ChangeEventArgs e)
+    {
+        _uml = e.Value is true;
+        Refresh();
+    }
+
+    private void Refresh() => _preview = DiagramFolderImport.Preview(Files, new DiagramFolderOptions { DrawIoModelElements = _uml }, Ws.Model, Target);
+
+    private void Import()
+    {
+        if (Count == 0) return;
+        MudDialog.Close(DialogResult.Ok(new DiagramFolderOptions { PackagePerFolder = _packages, DrawIoModelElements = _uml, ReplacePrevious = _replace, Match = _match }));
+    }
+
+    /// <summary>Shows the dialog; returns the chosen options, or null when cancelled.</summary>
+    public static async Task<DiagramFolderOptions?> ShowAsync(IDialogService dialogs, IReadOnlyList<DiagramSourceFile> files, Element target, DiagramFolderOptions options, string title, int skipped = 0)
+    {
+        var parameters = new DialogParameters<DiagramFilesDialog>
+        {
+            { x => x.Files, files }, { x => x.Target, target }, { x => x.Options, options }, { x => x.Title, title }, { x => x.Skipped, skipped },
+        };
+        var dialog = await dialogs.ShowAsync<DiagramFilesDialog>(title, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true, BackdropClick = false });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: DiagramFolderOptions o } ? o : null;
+    }
+}

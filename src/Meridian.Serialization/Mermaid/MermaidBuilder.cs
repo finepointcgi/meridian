@@ -24,9 +24,17 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
     /// <summary>Relationships made by this import (kind, source, target), so a link stated twice is made once.</summary>
     private readonly HashSet<(ElementKind, Element, Element)> _links = new();
 
-    public Diagram? Build(MGraph g)
+    /// <summary>Where the diagrams come from, for the diagram's purpose text ("Mermaid", "draw.io").</summary>
+    public string Source { get; init; } = "Mermaid";
+
+    /// <summary>The elements the last <see cref="Build"/> made for each node id (flowcharts, state and class diagrams).</summary>
+    public Dictionary<string, Element>? LastMade { get; private set; }
+
+    /// <summary>Builds one diagram. <paramref name="fallbackName"/> names a diagram without a title (else "Flowchart 1"…).</summary>
+    public Diagram? Build(MGraph g, string? fallbackName = null)
     {
-        var name = DiagramName(g);
+        LastMade = null;
+        var name = DiagramName(g, fallbackName);
         try
         {
             return g.Kind switch
@@ -49,11 +57,18 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
     }
 
     /// <summary>The front matter / accTitle title, else "Flowchart 1", "Flowchart 2"… unique among the model's diagrams.</summary>
-    private string DiagramName(MGraph g)
+    private string DiagramName(MGraph g, string? fallback = null)
     {
         if (g.Title is { Length: > 0 } t) return MermaidSource.Name(t);
-        var type = MermaidImporter.TypeName(g.Kind);
         var used = m.Diagrams.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
+        if (fallback is { Length: > 0 })
+        {
+            var baseName = MermaidSource.Name(fallback);
+            var candidateName = baseName;
+            for (var i = 2; used.Contains(candidateName); i++) candidateName = $"{baseName} {i}";
+            return candidateName;
+        }
+        var type = MermaidImporter.TypeName(g.Kind);
         var n = _numbers.GetValueOrDefault(g.Kind);
         string candidate;
         do candidate = $"{type} {++n}"; while (used.Contains(candidate));
@@ -62,6 +77,14 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
     }
 
     // ================================================================== shared helpers
+
+    /// <summary>The package new elements go to; a folder import moves it from folder to folder.</summary>
+    public Element Target { get => target; set => target = value; }
+
+    /// <summary>For other importers sharing this one's elements by name (draw.io).</summary>
+    internal Element? FindShared(string name, params ElementKind[] kinds) => Find(name, kinds);
+    internal Element MakeShared(Element owner, ElementKind kind, string? name) => Make(owner, kind, name);
+    internal Relationship? ConnectShared(MGraph g, ElementKind kind, Element a, Element b, Element? owner = null) => Connect(g, 0, kind, a, b, owner);
 
     private Element? Find(string name, params ElementKind[] kinds)
     {
@@ -117,7 +140,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
         var plan = new PlannedDiagram
         {
             Type = type, Name = name, Owner = owner, Elements = elements.Values.Distinct().ToList(), LeftToRight = g.LeftToRight,
-            Purpose = $"Imported from Mermaid ({g.Keyword}).",
+            Purpose = $"Imported from {Source} ({g.Keyword}).",
         };
         var d = AutoDiagrammer.Build(m, plan);
         if (g.Reversed) Mirror(d, g.LeftToRight);
@@ -258,6 +281,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             }
         }
 
+        LastMade = made;
         Diagram d;
         if (g.Groups.Count == 0) d = Layout(g, DiagramType.Activity, act, name, made);
         else d = Swimlanes(g, act, name, made, resolved.Select(x => (x.From, x.To)).ToList());
@@ -273,7 +297,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
         if (g.LeftToRight || g.Reversed) g.WarnOnce("lanesdir", g.Line, "flowcharts with subgraphs are laid out top to bottom, one swimlane per subgraph.");
         if (g.Groups.Any(x => x.Parent != null)) g.WarnOnce("nested", g.Line, "nested subgraphs became separate swimlanes.");
         var d = m.CreateDiagram(act, DiagramType.Activity, name);
-        m.Set(d, FieldKeys.Documentation, $"Imported from Mermaid ({g.Keyword}).");
+        m.Set(d, FieldKeys.Documentation, $"Imported from {Source} ({g.Keyword}).");
 
         // Ranks: longest path over the flow graph with back edges (cycles) ignored.
         var ids = made.Keys.ToList();
@@ -413,6 +437,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             if (effect.Length > 0) m.Set(r, FieldKeys.Effect, effect);
         }
         var notes = Notes(g, sm);
+        LastMade = made;
         return Layout(g, DiagramType.StateMachine, sm, name, made, notes);
     }
 
@@ -496,6 +521,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             m.Set(c, FieldKeys.Body, note.Text);
             notes.Add((note, c));
         }
+        LastMade = made;
         return Layout(g, DiagramType.BlockDefinition, target, name, made, notes);
     }
 
@@ -738,6 +764,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
             }
             Connect(g, x.Line, kind, a, b);
         }
+        LastMade = made;
         return Layout(g, DiagramType.Requirement, target, name, made);
     }
 
@@ -778,7 +805,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
     {
         var inter = Make(target, ElementKind.Interaction, name);
         var d = m.CreateDiagram(inter, DiagramType.Sequence, name);
-        m.Set(d, FieldKeys.Documentation, $"Imported from Mermaid ({g.Keyword}).");
+        m.Set(d, FieldKeys.Documentation, $"Imported from {Source} ({g.Keyword}).");
         var lifelines = new Dictionary<string, Element>(StringComparer.Ordinal);
         var x = 40.0;
         var lx = new Dictionary<string, (double X, double W)>(StringComparer.Ordinal);

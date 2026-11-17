@@ -104,6 +104,9 @@ themes, Auto-diagram and one-click SDD (0.4).
   - Cameo / MagicDraw `.mdzip` and Enterprise Architect `.qea` import.
   - ★ **Mermaid** import (flowchart, class, state, sequence, requirement, ER and C4) and export.
     ([guide](docs-site/docs/mermaid.md), [reference](docs/MERMAID.md))
+  - ★ **draw.io** import and export (`.drawio`, `.drawio.svg`, `.drawio.png`): UML pages become model elements at their drawn
+    positions, other pages whiteboard drawings; and **folders of diagrams** (Mermaid and draw.io, one package per folder,
+    re-import updates in place). ([reference](docs/DRAWIO.md))
   - A read-only SysML v2 REST API.
 - **Reports**: program deliverables (SRS, ICD, SDD, VCRM / test report, model overview) as PDF, Word and HTML from
   editable templates: numbered sections, TOC, lists of figures / tables, captions and cross-references, query-driven
