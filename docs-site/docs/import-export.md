@@ -152,8 +152,10 @@ your sheet has other columns). Meridian matches rows to requirements by id and s
 The accepted changes are applied as one undo step. Common alternative headers are recognised (`Req Id`,
 `Requirement Id`, `Title`, `Description`, `Requirement Text`, `Parent`).
 
-> [!NOTE]
-> **TODO (screenshot):** the re-import preview with one added, one changed and one removed requirement.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/requirements-reimport-dark.png">
+  <img src="../images/requirements-reimport-light.png" alt="The re-import review of a requirements CSV: one changed, one new and one requirement no longer in the sheet">
+</picture>
 
 ### ReqIF 1.2
 

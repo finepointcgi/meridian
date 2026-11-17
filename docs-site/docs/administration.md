@@ -15,8 +15,10 @@ administrator**. Administrators get **Administration** in the avatar menu (`/adm
 | **Audit log** | a filterable, append-only log with CSV export |
 | **Backups** | download and restore backups |
 
-> [!NOTE]
-> **TODO (screenshot):** the Administration page, Users tab.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/admin-users-dark.png">
+  <img src="../images/admin-users-light.png" alt="The Administration page, Users tab, listing the accounts with their roles and status">
+</picture>
 
 ## Configuration
 

@@ -56,8 +56,10 @@ A test case can own an activity that describes its procedure.
 status, verification method and its *Satisfied by* / *Verified by* links. Edit cells in place, add requirements,
 **Re-import** a spreadsheet and **Renumber**.
 
-> [!NOTE]
-> **TODO (screenshot):** the requirements table with the inspector's requirement attributes alongside.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/requirements-table-dark.png">
+  <img src="../images/requirements-table-light.png" alt="The requirements table of the Vehicle sample with REQ-002 Acceleration selected and its attributes in the inspector">
+</picture>
 
 ## Traceability matrix
 

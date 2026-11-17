@@ -11,8 +11,10 @@ diagrams of the same elements.
 - The scope picker switches between packages and the **Whole model**.
 - **Generate → SysML v2** exports the whole model as a `.sysml` file.
 
-> [!NOTE]
-> **TODO (screenshot):** the SysML v2 text panel next to a block definition diagram of the same package.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/sysml-text-dark.png">
+  <img src="../images/sysml-text-light.png" alt="The SysML v2 text panel for the Structure package below the Vehicle Structure block definition diagram">
+</picture>
 
 ## Editing
 

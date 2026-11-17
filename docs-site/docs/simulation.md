@@ -87,9 +87,10 @@ State machines follow the same rules as in the Step tab (regions, pseudostates, 
 its own timeline row, so a fork shows parallel bars. A join waits until its slowest incoming region arrives: with
 `after(2s)` in one region and `after(5s)` in the other, the join fires at 5 s.
 
-> [!NOTE]
-> **TODO (screenshot):** the timeline of the CubeSat *Acquire Image* activity running with the *Operating Modes*
-> state machine.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/simulation-timeline-dark.png">
+  <img src="../images/simulation-timeline-light.png" alt="The timed simulation timeline of the CubeSat Acquire Image activity running beside the Operating Modes state machine">
+</picture>
 
 ## Parametrics
 

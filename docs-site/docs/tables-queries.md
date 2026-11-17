@@ -8,8 +8,10 @@ collaborators and exported in `.meridian` files.
 Open them from the ribbon's **Model views** group (**Table** and **Query**) or the *Tables* dock tab. The panel lists
 the saved views of the model on the left.
 
-> [!NOTE]
-> **TODO (screenshot):** the Tables panel showing the *Hazard analysis* table of the Infusion pump sample.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/tables-hazard-dark.png">
+  <img src="../images/tables-hazard-light.png" alt="The Hazard analysis table of the Infusion pump sample">
+</picture>
 
 ## Generic tables
 

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Meridian.Desktop.Tests" />
+    <InternalsVisibleTo Include="Meridian.E2E" />
   </ItemGroup>
 
   <ItemGroup>

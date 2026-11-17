@@ -31,8 +31,10 @@ button creates a review checklist for yourself.
 | **Reviewers** | project members (share the project first) |
 | **When approved, set the in-scope requirements' status to "approved"** | optional |
 
-> [!NOTE]
-> **TODO (screenshot):** the Request review dialog with a package scope and two reviewers.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/request-review-dark.png">
+  <img src="../images/request-review-light.png" alt="The Request review dialog with the Structure package as scope and two reviewers ticked">
+</picture>
 
 ### Working through a review
 

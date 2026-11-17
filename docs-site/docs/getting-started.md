@@ -37,8 +37,10 @@ it created instead of importing it twice.
 
 You can change your choice later from the avatar menu: **Switch workspace or server…**.
 
-> [!NOTE]
-> **TODO (screenshot):** the desktop start screen with *Open local workspace*, *Connect* and *Recent files*.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/desktop-start-dark.png">
+  <img src="../images/desktop-start-light.png" alt="The desktop start screen with This computer (Open local workspace), Team server (Connect, recent servers) and Recent files">
+</picture>
 
 ### Updates
 

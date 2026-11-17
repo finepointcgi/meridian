@@ -16,8 +16,10 @@ history:
   version for everyone in the project (the current state is committed as a version first, so you can restore it again), **Download** saves it as a `.meridian` file, **Branch** starts a branch from
   it and **Baseline…** tags it.
 
-> [!NOTE]
-> **TODO (screenshot):** the version history dialog comparing a version with the current model.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/version-history-dark.png">
+  <img src="../images/version-history-light.png" alt="The Version history dialog comparing v1 Initial architecture with the current model: two renamed elements">
+</picture>
 
 ## Element history
 
@@ -91,8 +93,10 @@ For each conflict choose **ours** (the target), **theirs** (the source) or, for 
 message and confirm: the result is committed as a new version on the target, becomes its head for everyone editing it,
 and the merge base moves forward so the next merge only sees newer changes.
 
-> [!NOTE]
-> **TODO (screenshot):** the merge dialog with one field conflict and the incoming changes preview.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/merge-conflict-dark.png">
+  <img src="../images/merge-conflict-light.png" alt="The merge dialog for lighter-engine into main with one name conflict and the result preview">
+</picture>
 
 ## Baselines
 
