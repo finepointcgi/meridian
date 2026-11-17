@@ -1,0 +1,96 @@
+@using Meridian.Serialization
+
+@* After a Cameo / MagicDraw import that lost something: what came across, what did not, and why. "Download report" closes
+   with the result "download" so the workbench saves the Markdown fidelity report. *@
+<MudDialog ContentStyle="padding-top:0">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Outlined.FactCheck" />
+            <MudText Typo="Typo.h6">Import check: @FileName</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div data-testid="fidelity-summary" class="mb-2">@Report.FidelitySummary</div>
+        <MudSimpleTable Dense="true" Elevation="0" Class="mb-3" data-testid="fidelity-table">
+            <thead><tr><th>What</th><th style="text-align:right">Kept</th><th style="text-align:right">In file</th><th style="text-align:right">Coverage</th></tr></thead>
+            <tbody>
+                @Row("Model elements", Report.ElementsKept, Report.ElementsInFile, Report.ElementCoverage)
+                @Row("Diagrams", Report.Diagrams, Report.DiagramsInFile, Report.DiagramCoverage)
+                @Row("Stereotype applications", Report.StereotypeApplicationsKept, Report.StereotypeApplications, Report.StereotypeCoverage)
+            </tbody>
+        </MudSimpleTable>
+
+        @if (Report.Losses.Any())
+        {
+            <MudText Typo="Typo.subtitle2">Not imported</MudText>
+            <MudSimpleTable Dense="true" Elevation="0" Class="mb-3" data-testid="fidelity-losses">
+                <thead><tr><th>UML type</th><th style="text-align:right">In file</th><th style="text-align:right">Not imported</th></tr></thead>
+                <tbody>
+                    @foreach (var (type, t) in Report.Losses.Take(MaxRows))
+                    {
+                        <tr><td>@type</td><td style="text-align:right">@t.InFile</td><td style="text-align:right">@t.NotImported</td></tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+            @if (Report.Losses.Count() > MaxRows)
+            {
+                <div class="dim mb-2">… and @(Report.Losses.Count() - MaxRows) more types (see the report).</div>
+            }
+        }
+        @if (Report.Skipped.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2">Reasons</MudText>
+            <ul class="mb-3" data-testid="fidelity-reasons">
+                @foreach (var (k, v) in Report.Skipped.OrderByDescending(kv => kv.Value).Take(MaxRows))
+                {
+                    <li>@k: @v</li>
+                }
+            </ul>
+        }
+        @if (Report.StereotypesLost.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2">Stereotypes lost with their element</MudText>
+            <div class="mb-3">@string.Join(", ", Report.StereotypesLost.OrderByDescending(kv => kv.Value).Take(MaxRows).Select(kv => $"«{kv.Key}» ×{kv.Value}"))</div>
+        }
+        @if (Report.TagValuesLost.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2">Tag values not copied (structured values)</MudText>
+            <div class="mb-3">@string.Join(", ", Report.TagValuesLost.OrderByDescending(kv => kv.Value).Take(MaxRows).Select(kv => $"{kv.Key} ×{kv.Value}"))</div>
+        }
+        <div class="dim">The full list, with @Report.Warnings.Count warnings, is in the Output panel.</div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Close(DialogResult.Ok(DownloadResult))" data-testid="fidelity-download"
+                   StartIcon="@Icons.Material.Outlined.Download">Download report</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => MudDialog.Close()" data-testid="fidelity-ok">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public const string DownloadResult = "download";
+    private const int MaxRows = 12;
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public MagicDrawImportReport Report { get; set; } = default!;
+    [Parameter, EditorRequired] public string FileName { get; set; } = "";
+
+    private static RenderFragment Row(string what, int kept, int inFile, double coverage) => __builder =>
+    {
+        <tr>
+            <td>@what</td>
+            <td style="text-align:right">@kept</td>
+            <td style="text-align:right">@inFile</td>
+            <td style="text-align:right"><span class="vc-stat @(coverage >= 1 ? "ok" : coverage >= 0.9 ? "warn" : "bad")">@coverage.ToString("P0")</span></td>
+        </tr>
+    };
+
+    /// <summary>Shows the dialog; true when the user asked to download the Markdown report.</summary>
+    public static async Task<bool> ShowAsync(IDialogService dialogs, MagicDrawImportReport report, string fileName)
+    {
+        var d = await dialogs.ShowAsync<ImportFidelityDialog>("Import check", new DialogParameters<ImportFidelityDialog>
+            { { x => x.Report, report }, { x => x.FileName, fileName } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+        var r = await d.Result;
+        return r is { Canceled: false, Data: DownloadResult };
+    }
+}

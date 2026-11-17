@@ -35,6 +35,14 @@ public partial class Workbench
         OpenDock(3);
     }
 
+    /// <summary>When the import lost anything, says what and why, and offers the Markdown fidelity report.</summary>
+    private async Task ShowFidelityAsync(MagicDrawImportReport report, string fileName)
+    {
+        if (report.IsLossless) return;
+        if (await ImportFidelityDialog.ShowAsync(Dialogs, report, fileName))
+            await DownloadText(Path.GetFileNameWithoutExtension(fileName) + " import report.md", "text/markdown", report.ToMarkdown(fileName));
+    }
+
     private async Task OpenMagicDrawProject(IBrowserFile file)
     {
         var (report, model) = await ReadMagicDraw(file, null);
@@ -43,6 +51,7 @@ public partial class Workbench
         if (created is { } projectId && usages.Count > 0) await CreateCameoUsagesAsync(projectId, usages);
         LogMagicDrawReport(report, file.Name);
         Snackbar.Add($"Imported {file.Name}: {report.Elements} elements, {report.Diagrams} diagrams ({report.Warnings.Count} warnings, see Output)", Severity.Success);
+        await ShowFidelityAsync(report, file.Name);
     }
 
     private async Task ReimportMagicDraw(IBrowserFile file)
@@ -50,5 +59,6 @@ public partial class Workbench
         var (report, _) = await ReadMagicDraw(file, Ws.Model);
         LogMagicDrawReport(report, file.Name);
         Snackbar.Add($"Re-imported {file.Name}: {report.Added} added, {report.Updated} updated", Severity.Success);
+        await ShowFidelityAsync(report, file.Name);
     }
 }

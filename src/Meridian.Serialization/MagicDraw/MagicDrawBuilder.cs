@@ -63,6 +63,7 @@ public static partial class MagicDrawImporter
             if (ignored > 0) _report.Skip("Project resources (options, proxies, used-project backups)", ignored);
             _report.Elements = _model.AllElements.Count(e => e is not Relationship && e is not Diagram) - 1;
             _report.Relationships = _model.Relationships.Count();
+            ComputeFidelity();   // MagicDrawFidelity.cs
             _report.Finish();
             if (_report.ProjectId is { } pid) ModelRepository.SetFieldForLoad(_model.Root, ProjectIdField, pid);
             _model.History.Clear();
@@ -239,6 +240,7 @@ public static partial class MagicDrawImporter
         private Element? CreatePackage(XElement head, Element owner)
         {
             var id = XmiId(head);
+            Inventory("packagedElement", XmiType(head), id);
             if (id != null && _map.TryGetValue(id, out var existing)) return existing;   // same package in model + shared_model parts
             var kind = XmiType(head) == "Profile" ? ElementKind.Profile : ElementKind.Package;
             return Create(kind, head, owner, id);
@@ -281,6 +283,7 @@ public static partial class MagicDrawImporter
             var type = XmiType(c);
             var id = XmiId(c);
             if (id != null && Attr(c, "name") is { } nm) _names.TryAdd(id, nm);
+            Inventory(tag, type, id);
 
             switch (tag)
             {
@@ -298,6 +301,7 @@ public static partial class MagicDrawImporter
                     HandleChildren(c, owner, ownerXmiId);
                     return;
                 case "operand":
+                    Fold(id);   // its guard goes on the combined fragment
                     HandleChildren(c, owner, ownerXmiId);   // fragments of an operand belong to the interaction
                     return;
                 case "subpartition":
@@ -319,6 +323,7 @@ public static partial class MagicDrawImporter
                 }
                 case "Collaboration":
                     // MagicDraw wraps interactions in a collaboration; its attributes are the lifelines' parts.
+                    Fold(id);
                     HandleChildren(c, owner, ownerXmiId);
                     return;
                 case "Property": HandleProperty(c, owner, ownerXmiId); return;
@@ -401,6 +406,7 @@ public static partial class MagicDrawImporter
                     return;
                 }
                 case "InteractionOperand":
+                    Fold(id);
                     HandleChildren(c, owner, ownerXmiId);   // an operand outside a fragment: only its contents
                     return;
             }
@@ -651,7 +657,7 @@ public static partial class MagicDrawImporter
             return children.Count > 0 ? string.Join(", ", children) : null;
         }
 
-        private static void CopyTags(Element el, XElement app, params string[] except)
+        private void CopyTags(Element el, XElement app, params string[] except)
         {
             foreach (var a in app.Attributes())
             {
@@ -659,12 +665,14 @@ public static partial class MagicDrawImporter
                 var n = a.Name.LocalName;
                 if (n.StartsWith("base_", StringComparison.Ordinal) || except.Contains(n)) continue;
                 ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + n, PlainText(a.Value));
+                _report.TagValuesKept++;
             }
             foreach (var g in app.Elements().GroupBy(e => e.Name.LocalName))
             {
                 if (g.Key.StartsWith("base_", StringComparison.Ordinal) || g.Key == "Extension" || except.Contains(g.Key)) continue;
                 var values = g.Select(e => e.HasElements ? null : e.Value.Length > 0 ? e.Value : IdRef(e)).OfType<string>().ToList();
-                if (values.Count > 0) ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + g.Key, PlainText(string.Join(", ", values)));
+                if (values.Count > 0) { ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + g.Key, PlainText(string.Join(", ", values))); _report.TagValuesKept++; }
+                if (values.Count < g.Count()) LoseTagValue(g.Key);
             }
         }
 
@@ -697,7 +705,7 @@ public static partial class MagicDrawImporter
             RecordProperty(c, ownerXmiId);
             if (owner.Kind == ElementKind.Stereotype)
             {
-                if ((Attr(c, "name") ?? "").StartsWith("base_", StringComparison.Ordinal)) return;
+                if ((Attr(c, "name") ?? "").StartsWith("base_", StringComparison.Ordinal)) { Fold(id); return; }
                 var td = Create(ElementKind.TagDefinition, c, owner, id);
                 if (td != null) _typeRefs.Add((td, TypeHolder(c)));
                 return;
@@ -707,6 +715,7 @@ public static partial class MagicDrawImporter
                 // Interaction / collaboration attributes are the parts lifelines represent; others have no home.
                 if (owner.Kind is not (ElementKind.Interaction or ElementKind.Package or ElementKind.Model or ElementKind.TestCase))
                     _report.Skip($"Properties owned by {Metamodel.DisplayName(owner.Kind)}");
+                else Fold(id);   // shown through the lifelines that represent it
                 return;
             }
             var el = Create(ElementKind.Property, c, owner, id);
@@ -757,6 +766,7 @@ public static partial class MagicDrawImporter
                 var old = owner.Get(FieldKeys.Body);
                 ModelRepository.SetFieldForLoad(owner, FieldKeys.Body, string.IsNullOrEmpty(old) ? spec : old + "\n" + spec);
                 _report.Count("Constraint (on constraint block)");
+                Fold(XmiId(c));
                 return;
             }
             if (string.IsNullOrEmpty(spec)) { _report.Skip("Constraints"); return; }
@@ -779,6 +789,7 @@ public static partial class MagicDrawImporter
                 var old = owner.Documentation;
                 ModelRepository.SetFieldForLoad(owner, FieldKeys.Documentation, string.IsNullOrEmpty(old) ? body : old + "\n\n" + body);
                 _report.Count("Documentation");
+                Fold(id);
                 return;
             }
             var cm = new Element(ElementKind.Comment, id != null && !_map.ContainsKey(id) && _model.Find(id) == null ? id : null);

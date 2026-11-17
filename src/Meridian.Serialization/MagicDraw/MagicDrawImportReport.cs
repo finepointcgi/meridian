@@ -71,6 +71,7 @@ public sealed partial class MagicDrawImportReport
                      $"({DiagramsWithLayout} with original layout, {DiagramsAutoLaidOut} auto-laid out), {Warnings.Count} warnings.";
         if (Added + Updated + Unchanged > 0)
             yield return $"  Re-import: {Added} added, {Updated} updated, {Unchanged} unchanged, {NotInFile} kept that are no longer in the file.";
+        foreach (var line in FidelityLines()) yield return line;
         if (Imported.Count > 0)
         {
             yield return "  Imported:";

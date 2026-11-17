@@ -21,6 +21,22 @@ A new, empty project offers **Open a Cameo file** in the middle of the screen as
 were not in the file (spread evenly), and for Cameo the **used projects** — each one found (referenced only), copied (its
 shared packages were in the file) or linked to a Meridian project — plus the standard profiles the project used.
 
+### Checking what came across
+
+Every Cameo import counts what the file holds and compares it with what Meridian kept. If anything was left out, an
+**Import check** dialog opens with:
+
+- the share of **model elements**, **diagrams** and **stereotype applications** that came across. An element *folded into
+  another* still counts as kept: a documentation comment becomes the element's documentation, and a constraint on a
+  constraint block becomes its equation;
+- the elements **not imported**, by UML type (for example `InstanceSpecification` or `StructuredActivityNode`), and the
+  reasons the importer recorded;
+- stereotypes lost because the element they were applied to was not imported, and tagged values with structured values
+  that could not be copied.
+
+**Download report** saves the same information as a Markdown file, which is useful to attach to a migration ticket.
+The full list, with every warning, is also in the **Output** panel. When nothing was lost, the dialog does not open.
+
 After importing, run **Validate** (**F7**) and look at the *Traceability table* to see what arrived. A good habit is
 to **Commit** the imported state immediately and tag it as a **baseline** (for example `Imported from Cameo`), so you
 can always compare against it.

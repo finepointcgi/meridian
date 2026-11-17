@@ -100,7 +100,9 @@ public static class LocalFileImport
             case ".mdzip" or ".mdxml":
             {
                 var (md, report) = MagicDrawImporter.Import(path);
-                return (md, report.ToImportReport());
+                // The generic report only carries warnings: lead with the fidelity summary so losses are not buried.
+                return (md, report.IsLossless ? report.ToImportReport()
+                    : new ImportReport(report.Elements, report.Relationships, [report.FidelitySummary, .. report.Warnings]));
             }
             case ".mmd" or ".mermaid" or ".md":
             {

@@ -260,7 +260,7 @@ public static partial class MagicDrawImporter
                         ModelRepository.SetFieldForLoad(conn, FieldKeys.ItemFlow, item);
                         hit = true;
                     }
-                if (hit) _report.Count("Item flow (on connector)");
+                if (hit) { _report.Count("Item flow (on connector)"); Fold(id); }
                 else _report.Skip("Information / item flows not realized by a connector");
             }
         }
