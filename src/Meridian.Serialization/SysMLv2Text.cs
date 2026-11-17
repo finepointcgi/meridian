@@ -55,6 +55,19 @@ public static class SysMLv2Text
     internal const string UsageField = "sysml:usage";                // the usage name of "perform action x : X"
     internal const string NoKeyword = "(none)";
 
+    /// <summary>On a pin created to carry a <c>flow a.p to b.q</c> end (from the called activity's parameter): not written as a declaration.</summary>
+    internal const string ImplicitField = "sysml:implicit";
+
+    /// <summary>A directed parameter the text declares: an activity parameter node (<c>in x : T;</c> in an action def) or a named,
+    /// explicit pin of an action usage.</summary>
+    internal static bool IsParameter(Element e) =>
+        e.Name.Length > 0 && e.Get(ImplicitField) != "true"
+        && (e.Kind == ElementKind.ObjectNode && e.Get(FieldKeys.Direction).Length > 0 || Metamodel.IsPin(e.Kind));
+
+    /// <summary>A parameter's direction: the recorded one, else the pin kind's.</summary>
+    internal static string ParameterDirection(Element e) =>
+        e.Get(FieldKeys.Direction) is { Length: > 0 } d ? d : e.Kind == ElementKind.OutputPin ? "out" : "in";
+
     // ======================================================================= export
 
     public static string Export(ModelRepository model) => Export(model, new SysMLv2ExportOptions());
@@ -131,7 +144,10 @@ public static class SysMLv2Text
             var parts = new List<string>();
             var vis = e.Get(FieldKeys.Visibility);
             if (vis is "private" or "protected") parts.Add(vis);
-            if (e.Kind is ElementKind.Port or ElementKind.Property && e.Get(FieldKeys.Direction) is { Length: > 0 } dir) parts.Add(dir);
+            var kwText = keyword ?? KeywordOf(e);
+            if (kwText.StartsWith("return", StringComparison.Ordinal)) { }   // a calc result: "return" already says out
+            else if (e.Kind is ElementKind.Port or ElementKind.Property && e.Get(FieldKeys.Direction) is { Length: > 0 } dir) parts.Add(dir);
+            else if (IsParameter(e)) parts.Add(ParameterDirection(e));
             if (Metamodel.IsClassifier(e.Kind) && e.Kind is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype) && e.IsAbstract) parts.Add("abstract");
             if (e.Get(PrefixField) is { Length: > 0 } prefix) parts.Add(prefix);
             if (e.Kind == ElementKind.Actor) parts.Add("#actor");
@@ -151,7 +167,7 @@ public static class SysMLv2Text
         private string Clauses(Element e, bool isDef = false)
         {
             var sb = new StringBuilder();
-            if (e.Kind is ElementKind.Property or ElementKind.Port) sb.Append(Mult(e));
+            if (e.Kind is ElementKind.Property or ElementKind.Port || IsParameter(e)) sb.Append(Mult(e));
             else if (e.Get(MultiplicityField) is { Length: > 0 } mu) sb.Append($"[{mu}]");
             if (e.Get(FlagsField) is { Length: > 0 } flags) sb.Append(' ').Append(flags);
             if (e.Get(SubsetsField) is { Length: > 0 } sub) sb.Append(" :> ").Append(sub);
@@ -208,6 +224,9 @@ public static class SysMLv2Text
                 case ElementKind.Property or ElementKind.Port or ElementKind.Lifeline or ElementKind.EnumerationLiteral:
                     Leaf(d, Header(e, e.Name) + (e.Kind == ElementKind.EnumerationLiteral ? "" : TypeSuffix(e)) + Clauses(e), e);
                     return;
+                case ElementKind.ObjectNode or ElementKind.InputPin or ElementKind.OutputPin:
+                    if (IsParameter(e)) Leaf(d, Header(e, e.Name) + TypeSuffix(e) + Clauses(e), e);
+                    return;
                 case ElementKind.Operation:
                     Line(d, $"// operation {e.Name}{e.Get(FieldKeys.Signature)}");
                     return;
@@ -229,7 +248,13 @@ public static class SysMLv2Text
                     }
                     var behavior = m.Find(e.Get(FieldKeys.Behavior)) is { Kind: ElementKind.Activity } b ? " : " + Ref(b, e.Owner!, x => x.Kind == ElementKind.Activity)
                                  : e.Get(TypeField) is { Length: > 0 } tt ? " : " + tt : "";
-                    Leaf(d, Header(e, e.Name) + behavior + Clauses(e), e);
+                    var pins = e.OwnedElements.Where(IsParameter).ToList();
+                    if (pins.Count == 0) { Leaf(d, Header(e, e.Name) + behavior + Clauses(e), e); return; }
+                    Line(d, Header(e, e.Name) + behavior + Clauses(e) + Id(e) + " {");
+                    Head(e, d + 1, e.Documentation);
+                    foreach (var p in pins) WriteMember(p, d + 1);
+                    Tail(e, d + 1);
+                    Line(d, "}");
                     return;
                 }
                 case ElementKind.State:
@@ -371,12 +396,27 @@ public static class SysMLv2Text
                     var name = string.IsNullOrEmpty(r.Name) ? "" : N(r.Name) + " ";
                     Line(d, $"transition {name}first {from}{trigger}{guard}{effect} then {to};");
                 }
+                else if (r.Kind == ElementKind.ObjectFlow && FlowEnd(r.Source, owner) is { } fs && FlowEnd(r.Target, owner) is { } ft)
+                {
+                    var name = string.IsNullOrEmpty(r.Name) ? "" : N(r.Name) + " from ";
+                    Line(d, $"flow {name}{fs} to {ft};");
+                }
                 else if (r.Kind is ElementKind.ControlFlow or ElementKind.ObjectFlow)
                 {
                     var guard = r.Get(FieldKeys.Guard) is { Length: > 0 } g ? $" if {g}" : "";
                     Line(d, $"first {NodeRef(r.Source, owner)}{guard} then {NodeRef(r.Target, owner)};");
                 }
             }
+        }
+
+        /// <summary>An object flow end as a feature chain: <c>action.pin</c>, or a parameter node by name; null when it has no text form.</summary>
+        private string? FlowEnd(Element e, Element owner)
+        {
+            if (e.Name.Length == 0) return null;
+            if (Metamodel.IsPin(e.Kind) && e.Owner is { Kind: ElementKind.Action } a && SysmlNameIndex.ExportName(a).Length > 0)
+                return NodeRef(a, owner) + "." + N(e.Name);
+            if (e.Kind == ElementKind.ObjectNode && ReferenceEquals(e.Owner, owner)) return N(e.Name);
+            return null;
         }
 
         private string NodeRef(Element e, Element owner)

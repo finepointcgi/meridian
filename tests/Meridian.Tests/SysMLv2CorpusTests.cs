@@ -78,7 +78,14 @@ public partial class SysMLv2CorpusTests
         var power = m.OfKind(ElementKind.ConstraintBlock).Single(c => c.Name == "Power");
         Assert.Equal("in", power.OwnedElements.Single(p => p.Name == "whlpwr").Get(FieldKeys.Direction));
         Assert.Equal("whlpwr - drag - friction", power.Get(FieldKeys.Body));
-        Assert.Contains("return : PowerValue;", power.Get(SysMLv2Text.UnmappedField));
+        // the calc's result is the constraint block's output parameter
+        var result = power.OwnedElements.Single(p => p.Name == "result");
+        Assert.Equal(ElementKind.Property, result.Kind);
+        Assert.Equal("out", result.Get(FieldKeys.Direction));
+        Assert.Equal("PowerValue", m.ResolveType(result)?.Name ?? result.TypeRef.Split("::")[^1]);
+        Assert.DoesNotContain("return", power.Get(SysMLv2Text.UnmappedField));
+        var accel = m.OfKind(ElementKind.ConstraintBlock).Single(c => c.Name == "Acceleration").OwnedElements.Single(p => p.Name == "result");
+        Assert.Equal("tp / (tm * v)", accel.Get(FieldKeys.DefaultValue));
         Assert.Contains(m.OfKind(ElementKind.ConstraintBlock), c => c.Name == "MassLimit" && c.Get(FieldKeys.Body) == "total <= limit");
 
         // cases → test cases / use cases; verify relationships

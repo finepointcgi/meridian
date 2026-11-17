@@ -62,11 +62,15 @@ Viewers can read the text but not apply edits.
 | `attribute def` / `attribute` | value type / value property (primitive types as `ScalarValues::Real`, `Integer`, `Boolean`, `String`) |
 | `port def` / `port` (`in`, `out`, `inout`) | interface block / port with direction |
 | `constraint def` with an equation, `bind a = usage.param` | constraint block, binding connector |
+| `calc def` with `return [name] : T [= expression];` | constraint block whose result is an `out` parameter (named `result` when the text leaves it unnamed) |
 | `requirement def <'REQ-001'> Name { doc /* text */ }` | requirement with id and text (nested requirements stay nested) |
 | `satisfy R by X`, `#derivation dependency from A to B` | satisfy, deriveReqt |
 | `verification def` with `objective { verify R; }` | test case verifying a requirement |
 | `use case def` with `include use case` | use case and include |
 | `action def` with `action`, `decide`, `first … then …` | activity, actions, decisions and control flows (guards as `if`) |
+| `in` / `out` / `inout` parameters of an `action def` | activity parameter nodes with that direction |
+| `in` / `out` parameters declared on an `action` usage | input / output pins of the action |
+| `flow focus.image to shoot.image` inside an `action def` | an object flow between pins. A pin the usage does not declare is taken from the parameter of the activity the action calls, and is removed again when no flow uses it |
 | `state def` with `state` and `transition` | state machine, states and transitions |
 | `occurrence def` with `message … from … to …` | interaction with lifelines and messages |
 | `connect a to b` | connector |

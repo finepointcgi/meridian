@@ -703,7 +703,8 @@ public sealed partial class ModelRepository
         if (kind == ElementKind.Message) r.SetRaw(FieldKeys.MessageSort, "synchCall");
         owner ??= DefaultOwnerFor(source.Owner ?? Root, kind);
         if (kind is ElementKind.Transition or ElementKind.ControlFlow or ElementKind.ObjectFlow or ElementKind.Connector or ElementKind.Message)
-            owner = source.Owner ?? Root;   // flows live with their nodes
+            // flows live with their nodes; a pin's flows live with the activity that owns its action
+            owner = (Metamodel.IsPin(source.Kind) && source.Owner?.Kind == ElementKind.Action ? source.Owner.Owner : source.Owner) ?? Root;
         if (_libraries.Count > 0) owner = EditableOwnerFor(owner, target, kind);   // links to library elements belong to the project
         return Add(owner, r);
     }

@@ -73,7 +73,7 @@ public static class SysMLv2Sync
 
     /// <summary>A behavior node (action, state, decision …) addressed by its exported name within a behavior.</summary>
     internal static Element? FindNode(Element owner, string name) =>
-        owner.Descendants().FirstOrDefault(c => c is not Relationship and not Diagram && SysmlNameIndex.ExportName(c) == name
+        owner.Descendants().FirstOrDefault(c => c is not Relationship and not Diagram && SysmlNameIndex.ExportName(c) == name && !Metamodel.IsPin(c.Kind)
                                                && c.Kind is not (ElementKind.InitialNode or ElementKind.InitialState or ElementKind.ActivityFinalNode or ElementKind.FinalState));
 
     /// <summary><c>#tag</c> words with a meaning of their own (not stereotype applications).</summary>
@@ -132,6 +132,7 @@ public static class SysMLv2Sync
             ElementKind.InstanceSpecification => "instance",
             ElementKind.Slot => "slot",
             _ when SysMLv2Text.DeploymentTag(e.Kind) is { } tag => tag,   // node, device, executionEnvironment, artifact, deploymentSpec
+            ElementKind.ObjectNode or ElementKind.InputPin or ElementKind.OutputPin when SysMLv2Text.IsParameter(e) => "param",
             _ => null,
         };
 
@@ -143,7 +144,7 @@ public static class SysMLv2Sync
                 && owner is ElementKind.Package or ElementKind.Model or ElementKind.InstanceSpecification) return "instance";
             if (owner == ElementKind.InstanceSpecification)
                 return !d.IsDef && d.Name == null && d.Redefines.Count == 1 && !d.HasBody && d.Types.Count == 0 ? "slot" : null;
-            if (d.OpaqueHeader || d.Types.Count > 1 || d.EffectiveName == null) return null;
+            if (d.OpaqueHeader || d.Types.Count > 1 || d.EffectiveName == null && !IsCalcResult(d, owner)) return null;
             var kw = d.Keyword;
             if (d.IsDef)
                 return kw switch
@@ -165,6 +166,9 @@ public static class SysMLv2Sync
             return kw switch
             {
                 "package" => "package",
+                "return" when IsCalcResult(d, owner) => "feature",
+                _ when d.Direction != null && owner is ElementKind.Activity or ElementKind.Action
+                       && (d.ImplicitKeyword || kw is "ref" or "item" or "attribute" or "part" or "occurrence") => "param",
                 "decide" or "merge" => owner == ElementKind.Activity ? "decision" : null,
                 "fork" or "join" => owner == ElementKind.Activity ? "fork" : null,
                 "action" or "perform action" when owner == ElementKind.Activity => "action",
@@ -210,6 +214,7 @@ public static class SysMLv2Sync
             "executionEnvironment" => ElementKind.ExecutionEnvironment,
             "artifact" => ElementKind.Artifact,
             "deploymentSpec" => ElementKind.DeploymentSpecification,
+            "param" => owner == ElementKind.Activity ? ElementKind.ObjectNode : d.Direction == "out" ? ElementKind.OutputPin : ElementKind.InputPin,
             _ => throw new InvalidOperationException(family),
         };
 
@@ -220,7 +225,13 @@ public static class SysMLv2Sync
         private static IEnumerable<Element> ManagedComments(Element owner) =>
             owner.Kind == ElementKind.Requirement ? [] : owner.OwnedElements.Where(c => c.Kind == ElementKind.Comment);
 
-        private static string Name(SysmlDecl d) => d.EffectiveName ?? "";
+        private static string Name(SysmlDecl d) => d.EffectiveName ?? (d.Keyword == "return" ? ResultName : "");
+
+        /// <summary>The model name of an unnamed <c>return</c> result (written back without a name).</summary>
+        private const string ResultName = "result";
+
+        /// <summary><c>return [name] : T [= expr];</c> in a calc / constraint def: the constraint block's output parameter.</summary>
+        private static bool IsCalcResult(SysmlDecl d, ElementKind owner) => d.Keyword == "return" && owner == ElementKind.ConstraintBlock;
 
         private static bool IsPlain(SysmlComment c) => c.Name == null && c.About.Count == 0;
 
@@ -326,6 +337,7 @@ public static class SysMLv2Sync
             _names = new SysmlNameIndex(m);
             Typing();
             Relationships();
+            DeleteUnusedImplicitPins();
             CheckImports(doc.Members);
             StoreUnmapped();
         }
@@ -424,13 +436,20 @@ public static class SysMLv2Sync
 
             if (Metamodel.IsClassifier(e.Kind) && e.Kind is not (ElementKind.Requirement or ElementKind.Table or ElementKind.Stereotype))
                 Set(e, FieldKeys.IsAbstract, d.IsAbstract ? "true" : null);
-            if (e.Kind is ElementKind.Property or ElementKind.Port)
+            var isParam = e.Kind is ElementKind.ObjectNode || Metamodel.IsPin(e.Kind);
+            if (e.Kind is ElementKind.Property or ElementKind.Port || isParam)
                 Set(e, FieldKeys.Multiplicity, string.IsNullOrEmpty(d.Multiplicity) ? "1" : d.Multiplicity);
             else Set(e, SysMLv2Text.MultiplicityField, d.Multiplicity);
             if (e.Kind == ElementKind.Property) Set(e, FieldKeys.DefaultValue, d.Value);
             else if (e.Kind != ElementKind.Slot) Set(e, SysMLv2Text.ValueField, d.Value);   // a slot's value is read with its feature (Typing)
             Set(e, SysMLv2Text.ValueOpField, d.Value != null && d.ValueOp != "=" ? d.ValueOp : null);
-            if (e.Kind is ElementKind.Port or ElementKind.Property) Set(e, FieldKeys.Direction, d.Direction);
+            if (e.Kind is ElementKind.Port or ElementKind.Property) Set(e, FieldKeys.Direction, d.Keyword == "return" ? "out" : d.Direction);
+            if (isParam)
+            {
+                // The direction as written; a pin's kind (input/output) is chosen when it is created.
+                Set(e, FieldKeys.Direction, d.Direction);
+                Set(e, SysMLv2Text.ImplicitField, null);
+            }
             if (e.Kind == ElementKind.ConstraintBlock)
             {
                 var exprs = d.Body.OfType<SysmlExpression>().ToList();
@@ -458,7 +477,7 @@ public static class SysMLv2Sync
             if (e.Kind != ElementKind.Requirement) Set(e, SysMLv2Text.ShortNameField, d.ShortName);
             Set(e, SysMLv2Text.FlagsField, d.Flags.Count == 0 ? null : string.Join(" ", d.Flags));
             Set(e, SysMLv2Text.RedefinesField, d.Redefines.Count == 0 || e.Kind == ElementKind.Slot ? null : string.Join(", ", d.Redefines.Select(RefText)));   // a slot's is its feature (Typing)
-            Set(e, SysMLv2Text.UnnamedField, d.Name == null && d.Redefines.Count > 0 && e.Kind != ElementKind.Slot ? "true" : null);
+            Set(e, SysMLv2Text.UnnamedField, d.Name == null && (d.Redefines.Count > 0 && e.Kind != ElementKind.Slot || d.Keyword == "return") ? "true" : null);
             Set(e, SysMLv2Text.ReferencesField, d.References.Count == 0 ? null : string.Join(", ", d.References.Select(RefText)));
             Set(e, SysMLv2Text.ConjugatedField, d.Types.Count > 0 && d.Types[0].Conjugated ? "true" : null);
 
@@ -937,11 +956,65 @@ public static class SysMLv2Sync
             into.Add(new Fact(kind, a, b, ctx, span) { Name = name, SourcePart = ap, TargetPart = bp, Item = item, Member = member });
         }
 
+        /// <summary><c>flow focus.image to shoot.image</c> in an action def: an object flow between pins (or parameter nodes).
+        /// A pin the text does not declare is created from the parameter of the activity the action calls, marked implicit.</summary>
+        private void AddObjectFlow(List<Fact> into, Element activity, SysmlRelation r)
+        {
+            if (r.Detail != null || r.Source == null || r.Target == null) return;   // "flow of Item …": kept as text
+            var a = FlowEnd(r.Source, activity, outgoing: true);
+            var b = FlowEnd(r.Target, activity, outgoing: false);
+            if (a == null || b == null) return;
+            into.Add(new Fact(ElementKind.ObjectFlow, a, b, activity, r.Span) { Name = r.Name, Member = r });
+        }
+
+        private Element? FlowEnd(SysmlRef end, Element activity, bool outgoing)
+        {
+            if (!end.IsChain)
+            {
+                if (end.Segments.Count == 1 && activity.OwnedElements.FirstOrDefault(c => c.Kind == ElementKind.ObjectNode && c.Name == end.Simple) is { } node)
+                    return node;
+                Unresolved(end, activity, "flow end");
+                return null;
+            }
+            if (end.Segments.Count != 2 || FindNode(activity, end.Segments[0]) is not { Kind: ElementKind.Action } action)
+            {
+                Unresolved(end, activity, "flow end");
+                return null;
+            }
+            var pinName = end.Segments[1];
+            if (action.OwnedElements.FirstOrDefault(c => Metamodel.IsPin(c.Kind) && c.Name == pinName) is { } pin) return pin;
+            // Not declared on the usage: take the parameter of the called activity.
+            var param = m.Find(action.Get(FieldKeys.Behavior)) is { Kind: ElementKind.Activity } called
+                ? called.OwnedElements.FirstOrDefault(c => c.Kind == ElementKind.ObjectNode && c.Name == pinName) : null;
+            if (param == null) { Unresolved(end, activity, "parameter"); return null; }
+            var dir = SysMLv2Text.ParameterDirection(param);
+            var kind = dir == "out" || dir == "inout" && outgoing ? ElementKind.OutputPin : ElementKind.InputPin;
+            var created = m.Create(action, kind, pinName);
+            m.Set(created, SysMLv2Text.ImplicitField, "true");
+            if (param.TypeRef.Length > 0) m.Set(created, FieldKeys.Type, param.TypeRef);
+            if (param.Get(FieldKeys.Multiplicity) is { Length: > 0 } mu && mu != "1") m.Set(created, FieldKeys.Multiplicity, mu);
+            Change(SysmlChangeKind.Create, $"Create {Metamodel.DisplayName(kind)} {pinName} on {action.DisplayName}");
+            return created;
+        }
+
+        /// <summary>Implicit pins no object flow uses any more.</summary>
+        private void DeleteUnusedImplicitPins()
+        {
+            foreach (var e in Map.Values.Where(e => e.Kind == ElementKind.Activity && m.Contains(e)).ToList())
+                foreach (var pin in e.Descendants().Where(p => Metamodel.IsPin(p.Kind) && p.Get(SysMLv2Text.ImplicitField) == "true").ToList())
+                    if (!m.Incoming(pin).Any() && !m.Outgoing(pin).Any())
+                    {
+                        m.Delete(pin);
+                        Change(SysmlChangeKind.Delete, $"Delete unused pin {pin.Name}");
+                    }
+        }
+
         private void AddRelation(List<Fact> into, Element ctx, SysmlRelation r)
         {
             switch (r.Keyword)
             {
                 case "connect": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span, member: r); return;
+                case "flow" when ctx.Kind == ElementKind.Activity: AddObjectFlow(into, ctx, r); return;
                 case "flow": AddConnector(into, ctx, r.Source!, r.Target!, r.Name, r.Detail, r.Span, member: r); return;
                 case "bind": AddConnector(into, ctx, r.Source!, r.Target!, null, null, r.Span, ElementKind.Binding, member: r); return;
                 case "perform" or "exhibit":
