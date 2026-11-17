@@ -29,7 +29,7 @@ Every Cameo import counts what the file holds and compares it with what Meridian
 - the share of **model elements**, **diagrams** and **stereotype applications** that came across. An element *folded into
   another* still counts as kept: a documentation comment becomes the element's documentation, and a constraint on a
   constraint block becomes its equation;
-- the elements **not imported**, by UML type (for example `InstanceSpecification` or `StructuredActivityNode`), and the
+- the elements **not imported**, by UML type (for example `StructuredActivityNode`), and the
   reasons the importer recorded;
 - stereotypes lost because the element they were applied to was not imported, and tagged values with structured values
   that could not be copied.

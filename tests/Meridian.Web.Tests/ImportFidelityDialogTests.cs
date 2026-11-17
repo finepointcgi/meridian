@@ -29,9 +29,9 @@ public class ImportFidelityDialogTests : TestContext
                          xmlns:MyProfile='http://www.magicdraw.com/schemas/MyProfile.xmi'>
                   <uml:Model xmi:type='uml:Model' xmi:id='_root' name='Small'>
                     <packagedElement xmi:type='uml:Class' xmi:id='_a' name='A'/>
-                    <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_i' name='a1'/>
+                    <packagedElement xmi:type='uml:Frobnicator' xmi:id='_i' name='a1'/>
                   </uml:Model>
-                  <MyProfile:Config xmi:id='_cfg' base_InstanceSpecification='_i'/>
+                  <MyProfile:Config xmi:id='_cfg' base_Element='_i'/>
                 </xmi:XMI>
                 """);
             return MagicDrawImporter.Import(path).Report;
@@ -49,7 +49,7 @@ public class ImportFidelityDialogTests : TestContext
         await provider.InvokeAsync(() => { shown = ImportFidelityDialog.ShowAsync(dialogs, report, "small.mdxml"); });   // Action: do not await the dialog here
 
         provider.WaitForAssertion(() => Assert.Contains("Kept 50% of model elements (1 of 2)", provider.Find("[data-testid=fidelity-summary]").TextContent));
-        Assert.Contains("InstanceSpecification", provider.Find("[data-testid=fidelity-losses]").TextContent);
+        Assert.Contains("Frobnicator", provider.Find("[data-testid=fidelity-losses]").TextContent);
         Assert.Contains("«Config» ×1", provider.Markup);
 
         provider.Find("[data-testid=fidelity-download]").Click();

@@ -36,7 +36,7 @@ public sealed class MagicDrawFidelityTests : IDisposable
 
         Assert.False(r.IsLossless);
         var lost = r.Losses.ToDictionary(l => l.Type, l => l.Tally.NotImported);
-        Assert.Equal(1, lost["InstanceSpecification"]);
+        Assert.DoesNotContain("InstanceSpecification", lost.Keys);   // imported as instances since 0.10
         Assert.Equal(1, lost["Frobnicator"]);
         Assert.Equal(1, lost["StructuredActivityNode"]);   // nested under an activity: found by the inventory, not only the skip list
         Assert.Equal(1, lost["Message"]);                  // the lost message
@@ -86,10 +86,10 @@ public sealed class MagicDrawFidelityTests : IDisposable
     {
         var r = ImportXmi("""
             <packagedElement xmi:type='uml:Class' xmi:id='_a' name='A'/>
-            <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_i' name='a1'/>
+            <packagedElement xmi:type='uml:Frobnicator' xmi:id='_i' name='a1'/>
             """,
             "<sysml:Block xmi:id='_a_st' base_Class='_a'/>" +
-            "<MyProfile:Config xmi:id='_cfg' base_InstanceSpecification='_i' variant='X'/>" +
+            "<MyProfile:Config xmi:id='_cfg' base_Element='_i' variant='X'/>" +
             "<MyProfile:Rated xmi:id='_rt' base_Class='_a' owner='Ana'><limit><value xmi:type='uml:LiteralReal' value='4.5'/></limit></MyProfile:Rated>");
 
         Assert.False(r.IsLossless);
