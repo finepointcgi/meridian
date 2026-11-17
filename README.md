@@ -269,9 +269,11 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
   and failures, SSO provisioning, user, role, team and member changes, project create/rename/delete/transfer,
   version commits and restores, exports, backups and restores.
 - **Backups**: *Administration → Backups* downloads a zip with every project's latest model, its full version
-  history and members, plus (optionally) the user directory without password hashes. Uploading a backup there
+  history, comments, reviews, baselines and members, plus (optionally) the user directory without password hashes. Uploading a backup there
   restores selected projects with their history; a project whose id still exists comes back as a copy. With
   `Backup:Folder` set, the server also writes a backup every `IntervalHours` and keeps the newest `Retain` files.
+  Project owners can take one project in the same format (**Export ▸ Download project with history**), which is how
+  a project moves from the desktop's local workspace to a team server with its history.
 
 ## Build the desktop apps
 

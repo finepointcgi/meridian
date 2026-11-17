@@ -105,6 +105,35 @@ A **baseline** is an immutable, named tag on a committed version, for example `P
 - A review can compare against a baseline, and **Request review** can commit a new baseline for that purpose (see
   [Reviews](reviews.md)).
 
+## Moving a project with its history
+
+A project can move from the desktop app's local workspace to a team server, or from one server to another, without
+leaving its history behind.
+
+1. Open the project and choose **Export ▸ Download project with history (.zip)** in the project menu. Only the
+   project's **owners** see this item: the file holds the whole project, and package permissions never hide anything
+   from an owner. In the local workspace you own every project.
+2. On the other server, choose **Open a file as a new project…** (project menu or **Projects… ▸ Open a file**) and
+   pick the `.zip`.
+
+The new project has:
+
+| Kept | Notes |
+| --- | --- |
+| the model, including edits not yet committed | |
+| every committed version, with its message and date | branch commits are kept as versions; branches themselves are not |
+| element comments, replies and their resolved state | |
+| reviews with their scope, state, votes, discussion and checklist | the versions a review compares are matched by number |
+| baselines | |
+
+You become the project's only member and its owner, and what was written in the archive is attributed to you: a
+local workspace has a single author, and nothing in the file is matched to other people's accounts on the server.
+Add people with **Share & members…**. Opening the same file twice gives two separate projects.
+
+The `.zip` uses the [backup format](administration.md#backups) and holds one project. An administrator who restores it
+through **Administration ▸ Backups** instead keeps the original authors and members wherever their accounts exist
+on the server. **Download .meridian file** still exports only the current model, without history.
+
 ## Element locks (server)
 
 On a team server you can take a pessimistic lock in the model explorer's context menu: **Lock for editing** locks one

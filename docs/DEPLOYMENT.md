@@ -376,7 +376,7 @@ Use both kinds of backup. They protect against different failures.
 
 | | `pg_dump` (database) | In-app backup (Admin → Backups) |
 | --- | --- | --- |
-| Contains | Everything: users and password hashes, projects, history, comments, reviews, audit log, tokens, integrations | Projects with full version history, members, and users (without password hashes) |
+| Contains | Everything: users and password hashes, projects, history, comments, reviews, audit log, tokens, integrations | Projects with full version history, comments, reviews, baselines, members, and users (without password hashes) |
 | Restores to | The same or newer Meridian version, as a whole server | Any Meridian server, selected projects, restored side by side (an id still in use comes back as a copy) |
 | Use for | Disaster recovery | Moving projects between servers, undoing a deleted project |
 

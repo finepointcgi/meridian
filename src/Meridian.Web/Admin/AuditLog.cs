@@ -24,7 +24,7 @@ public static class AuditActions
         TeamCreate = "team.create", TeamDelete = "team.delete", TeamMemberAdd = "team.member-add", TeamMemberRemove = "team.member-remove",
         TeamGrantSet = "team.grant-set", TeamGrantRemove = "team.grant-remove";
     public const string ProjectCreate = "project.create", ProjectDelete = "project.delete", ProjectRename = "project.rename", ProjectTransfer = "project.transfer",
-        ProjectExport = "project.export", MemberSet = "project.member-set", MemberRemove = "project.member-remove",
+        ProjectExport = "project.export", ProjectImportHistory = "project.import-history", MemberSet = "project.member-set", MemberRemove = "project.member-remove",
         PermissionSet = "project.permission-set", PermissionRemove = "project.permission-remove";
     public const string VersionCommit = "version.commit", VersionRestore = "version.restore";
     public const string McpTool = "mcp.tool";   // an AI client read the model over MCP (docs-site/docs/mcp.md)

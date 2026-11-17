@@ -903,6 +903,59 @@ public abstract partial class StoreContract
     }
 
     [SkippableFact]
+    public async Task Restore_Brings_Back_Comments_Reviews_And_Baselines()
+    {
+        await using var h = await OpenAsync();
+        var s = h.Store;
+        var ann = await s.CreateUserAsync("ann", "Ann", "password-1");
+        var ben = await s.CreateUserAsync("ben", "Ben", "password-2");
+        var t0 = new DateTime(2024, 3, 1, 9, 0, 0, DateTimeKind.Utc);
+        var ghost = Guid.NewGuid();   // an author with no account here
+        var pid = Guid.NewGuid();
+        var restored = await s.RestoreProjectAsync(new RestoredProject(pid, "Rover", Json,
+            [new VersionSnapshot(1, "first", Json, ann.Id, t0), new VersionSnapshot(2, "second", Json, ben.Id, t0.AddDays(1))],
+            [new RestoredMember(ann.Id, ProjectRole.Owner), new RestoredMember(ben.Id, ProjectRole.Editor)],
+            Comments:
+            [
+                new RestoredComment(10, "el-1", ann.Id, "Is this right?", true, t0.AddHours(1)),
+                new RestoredComment(11, "el-1", ghost, "Yes.", false, t0.AddHours(2), ParentKey: 10),
+            ],
+            Reviews:
+            [
+                new RestoredReview("Mass budget", "Check it", ann.Id, ReviewState.Approved, ReviewScopeKind.Versions, [], 1, 2, true,
+                    t0.AddDays(2), t0.AddDays(3), [new RestoredReviewer(ben.Id, ReviewVote.Approve, t0.AddDays(3)), new RestoredReviewer(ghost, ReviewVote.Pending, null)],
+                    [new RestoredReviewComment(5, "el-1", null, ben.Id, "Looks good", t0.AddDays(2)), new RestoredReviewComment(6, null, 5, ann.Id, "Thanks", t0.AddDays(2).AddHours(1))],
+                    [new RestoredReviewCheck("el-1", ben.Id), new RestoredReviewCheck("el-2", ghost)]),
+            ],
+            Baselines: [new RestoredBaseline(1, "PDR", "Preliminary design", t0.AddDays(4)), new RestoredBaseline(9, "Lost", "", t0)]));
+        Assert.Equal(pid, restored);
+
+        var comments = (await s.ListCommentsAsync(pid)).OrderBy(c => c.Id).ToList();
+        Assert.Equal(["Is this right?", "Yes."], comments.Select(c => c.Body));
+        Assert.Equal((true, false), (comments[0].Resolved, comments[1].Resolved));
+        Assert.Equal(ann.Id, comments[0].Author.Id);
+        Assert.Equal(t0.AddHours(1), comments[0].CreatedAt, TimeSpan.FromMilliseconds(1));
+        Assert.Equal(comments[0].Id, (await s.ListCommentParentsAsync(pid))[comments[1].Id]);
+
+        var versions = await s.ListVersionsAsync(pid);
+        var review = Assert.Single(await s.ListReviewsAsync(pid));
+        Assert.Equal(("Mass budget", ReviewState.Approved, ReviewScopeKind.Versions, true), (review.Title, review.State, review.ScopeKind, review.ApplyStatus));
+        Assert.Equal((versions.Single(v => v.Number == 1).Id, versions.Single(v => v.Number == 2).Id), (review.BaseVersionId!.Value, review.HeadVersionId!.Value));
+        Assert.Equal(ann.Id, review.Author.Id);
+        Assert.Equal(t0.AddDays(2), review.CreatedAt, TimeSpan.FromMilliseconds(1));
+        var reviewer = Assert.Single(review.Reviewers);   // the unknown reviewer is dropped
+        Assert.Equal((ben.Id, ReviewVote.Approve), (reviewer.User.Id, reviewer.Vote));
+        var rc = (await s.ListReviewCommentsAsync(review.Id)).OrderBy(c => c.Id).ToList();
+        Assert.Equal(["Looks good", "Thanks"], rc.Select(c => c.Body));
+        Assert.Equal(rc[0].Id, rc[1].ParentId);
+        Assert.Equal("el-1", rc[0].ElementId);
+        Assert.Equal([("el-1", ben.Id)], (await s.ListReviewChecksAsync(review.Id)).Select(c => (c.ElementId, c.UserId)));
+
+        var baseline = Assert.Single(await s.ListBaselinesAsync(pid));   // the one on a missing version is skipped
+        Assert.Equal(("PDR", "Preliminary design", 1), (baseline.Name, baseline.Description, baseline.VersionNumber));
+    }
+
+    [SkippableFact]
     public async Task Audit_Log_Is_Filterable_Paged_And_Append_Only()
     {
         await using var h = await OpenAsync();

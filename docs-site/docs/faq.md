@@ -12,8 +12,11 @@ Not for the desktop app's local workspace. A team server needs an account, creat
 administrator or through single sign-on.
 
 **Can I move a project from my computer to a team server?**
-Yes. **Download .meridian file** from the project menu in the local workspace, then **Open a file as a new project** on the
-server. The file holds the whole model; version history, comments and reviews stay in the original workspace.
+Yes, with its history. In the local workspace choose **Export ▸ Download project with history (.zip)** in the project
+menu, then sign in to the server and choose **Open a file as a new project…** with that `.zip`. The new project on the
+server has every version, comment, review and baseline, and you are its owner; share it from there. (**Download
+.meridian file** takes only the current model.) See
+[Moving a project with its history](version-control.md#moving-a-project-with-its-history).
 
 **Which browsers work?**
 The web app is a Blazor Server application and works in current versions of Chrome, Edge, Firefox and Safari. The
