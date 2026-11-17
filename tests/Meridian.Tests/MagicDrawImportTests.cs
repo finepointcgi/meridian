@@ -35,6 +35,10 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Contains("Critical", drone.Stereotypes);                          // user stereotype + tagged values
         Assert.Equal("high", drone.Get(FieldKeys.TagPrefix + "level"));
         Assert.Equal("Ana, Bo", drone.Get(FieldKeys.TagPrefix + "reviewers"));
+        // Tag values that reference elements show the elements' names; ids nothing resolves stay as they were.
+        Assert.Equal("Controller", drone.Get(FieldKeys.TagPrefix + "owner"));
+        Assert.Equal("Endurance, Wind resistance", drone.Get(FieldKeys.TagPrefix + "relatedTo"));
+        Assert.Equal("_ext_99", drone.Get(FieldKeys.TagPrefix + "backup"));
         Assert.DoesNotContain(drone.Stereotypes, s => s is "Block" or "PartProperty");
         Assert.Contains(drone.OwnedElements, e => e.Kind == ElementKind.Comment && e.Get(FieldKeys.Body) == "Reviewed by systems team");
 
@@ -145,7 +149,29 @@ public sealed class MagicDrawImportTests : IDisposable
         Assert.Equal("", ById(m, "_cf1").Get(FieldKeys.Guard));                  // default "true" guard dropped
         Assert.Equal(ElementKind.ObjectFlow, ById(m, "_of1").Kind);
         Assert.Equal("_drone", ById(m, "_part1").Get(FieldKeys.Represents));
-        Assert.Equal(1, report.Skipped["Structured activity nodes (and their contents)"]);
+        // The structured node is an action (keeping its incoming flow); its contents are flattened into the activity.
+        var act1 = ById(m, "_act1");
+        var san = ById(m, "_san");
+        Assert.Equal(ElementKind.Action, san.Kind);
+        Assert.Contains("structured", san.Stereotypes);
+        Assert.Equal("StructuredActivityNode", san.Get(FieldKeys.TagPrefix + "actionKind"));
+        Assert.Same(act1, ById(m, "_san_a").Owner);
+        Assert.Same(act1, ById(m, "_san_in").Owner);
+        Assert.Same(san, ((Relationship)ById(m, "_cf5")).Target);
+        Assert.Equal(ElementKind.ControlFlow, ById(m, "_san_cf").Kind);
+        Assert.Contains(report.Warnings, w => w.Contains("Block of work") && w.Contains("flattened"));
+        Assert.DoesNotContain("Structured activity nodes (and their contents)", report.Skipped.Keys);
+
+        // An opaque behavior is an activity that keeps its body; the action calling it resolves to it.
+        var ob = ById(m, "_ob");
+        Assert.Equal(ElementKind.Activity, ob.Kind);
+        Assert.Contains("opaqueBehavior", ob.Stereotypes);
+        Assert.Equal("route = plan(waypoints)", ob.Get(FieldKeys.Body));
+        Assert.Equal("Python", ob.Get(FieldKeys.TagPrefix + "language"));
+        Assert.Equal("_ob", ById(m, "_san_a").Get(FieldKeys.Behavior));
+        // Opaque entry / do / effect behaviors are read by their state or transition and not reported as skipped.
+        Assert.DoesNotContain("Opaque / function behaviors", report.Skipped.Keys);
+        Assert.DoesNotContain("uml:OpaqueBehavior", report.Skipped.Keys);
 
         Assert.Equal(ElementKind.InitialState, ById(m, "_ps").Kind);
         Assert.Equal("self check", ById(m, "_idle").Get(FieldKeys.Entry));

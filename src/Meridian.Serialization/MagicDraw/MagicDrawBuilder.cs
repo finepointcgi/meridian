@@ -33,6 +33,7 @@ public static partial class MagicDrawImporter
         private readonly List<(Element El, string Field, string RefId, bool AsName)> _fieldRefs = new();
         private readonly List<(string Id, List<string> Conveyed, List<string> Connectors)> _infoFlows = new();
         private readonly List<Element> _properties = new();
+        private readonly List<(Element El, string Key, List<(string Value, bool IsRef)> Values)> _tagRefs = new();
         private readonly List<DiagramSpec> _diagrams = new();
         private readonly HashSet<string> _warnedOnce = new(StringComparer.Ordinal);
         private ModelRepository _model = null!;
@@ -56,6 +57,7 @@ public static partial class MagicDrawImporter
             ResolveRelationships();
             BuildInstances();   // instance specifications, slots and links (MagicDrawInstances.cs)
             ResolveFieldRefs();
+            ResolveTagRefs();
             ClassifyProperties();
             BuildDiagrams();
 
@@ -275,6 +277,8 @@ public static partial class MagicDrawImporter
             "joinSpec", "weight", "decisionInput", "precondition", "postcondition", "ownedEnd", "extensionPoint", "condition",
             "contract", "addition", "extendedCase", "extension", "base_Class", "instance", "classifier", "slot", "submachine",
             "isConjugated", "interactionOperator", "operand_ref", "ownedAttribute_ref",
+            // structured activity nodes: references to their contained nodes
+            "setupPart", "test", "bodyPart", "bodyOutput", "decider", "inputElement", "outputElement", "predecessorClause", "successorClause",
         };
 
         private void Handle(XElement c, Element owner, string? ownerXmiId)
@@ -312,6 +316,9 @@ public static partial class MagicDrawImporter
                 if (!IgnoredTags.Contains(tag) && !tag.StartsWith("_", StringComparison.Ordinal)) _report.Skip($"Unknown XML <{tag}>");
                 return;
             }
+            // Features the parent element reads into its own fields (guards, opaque entry/do/effect behaviors, parameters…):
+            // not counted by the inventory, so not reported as skipped either. A full activity as entry behavior still imports.
+            if (ParentReadTags.Contains(tag) && (MapKind(type, id) == null || type is "OpaqueBehavior" or "FunctionBehavior")) return;
 
             switch (type)
             {
@@ -409,6 +416,12 @@ public static partial class MagicDrawImporter
                     Fold(id);
                     HandleChildren(c, owner, ownerXmiId);   // an operand outside a fragment: only its contents
                     return;
+                case "StructuredActivityNode" or "LoopNode" or "ConditionalNode" or "SequenceNode" or "ExpansionRegion":
+                    HandleStructuredNode(c, owner, id, type);
+                    return;
+                case "Clause":
+                    Fold(id);   // its test / body nodes are imported (flattened); the clause is kept as a tag on the conditional node
+                    return;
             }
 
             var ek = MapKind(type, id);
@@ -426,8 +439,6 @@ public static partial class MagicDrawImporter
         private static string SkipLabel(string type) => type switch
         {
             "InstanceSpecification" => "Instance specifications",
-            "OpaqueBehavior" or "FunctionBehavior" => "Opaque / function behaviors",
-            "StructuredActivityNode" or "ConditionalNode" or "LoopNode" or "SequenceNode" or "ExpansionRegion" => "Structured activity nodes (and their contents)",
             "InterruptibleActivityRegion" => "Interruptible regions",
             "InteractionUse" or "Gate" or "StateInvariant" or "Continuation" or "GeneralOrdering" => "Interaction uses, gates, invariants",
             "ConnectionPointReference" => "Connection point references",
@@ -457,13 +468,14 @@ public static partial class MagicDrawImporter
                 "Actor" => ElementKind.Actor,
                 "UseCase" => ElementKind.UseCase,
                 "Activity" => Has("TestCase") ? ElementKind.TestCase : ElementKind.Activity,
+                "OpaqueBehavior" or "FunctionBehavior" => ElementKind.Activity,   // body kept as text (FillSpecific)
                 "StateMachine" or "ProtocolStateMachine" => ElementKind.StateMachine,
                 "Interaction" => Has("TestCase") ? ElementKind.TestCase : ElementKind.Interaction,
                 "Stereotype" => ElementKind.Stereotype,
                 "ActivityPartition" => ElementKind.Partition,
                 "InputPin" or "ValuePin" or "ActionInputPin" => ElementKind.InputPin,
                 "OutputPin" => ElementKind.OutputPin,
-                "CentralBufferNode" or "DataStoreNode" or "ActivityParameterNode" => ElementKind.ObjectNode,
+                "CentralBufferNode" or "DataStoreNode" or "ActivityParameterNode" or "ExpansionNode" => ElementKind.ObjectNode,
                 "InitialNode" => ElementKind.InitialNode,
                 "ActivityFinalNode" or "FlowFinalNode" => ElementKind.ActivityFinalNode,
                 "DecisionNode" or "MergeNode" => ElementKind.DecisionNode,
@@ -523,6 +535,17 @@ public static partial class MagicDrawImporter
                 case ElementKind.Class when type == "Signal":
                     AppendStereotype(el, "signal");
                     break;
+                case ElementKind.Activity when type is "OpaqueBehavior" or "FunctionBehavior":
+                {
+                    AppendStereotype(el, type == "OpaqueBehavior" ? "opaqueBehavior" : "functionBehavior");
+                    var bodies = c.Elements().Where(e => e.Name.LocalName == "body").Select(e => e.Value).Where(v => v.Length > 0).ToList();
+                    if (bodies.Count == 0 && Attr(c, "body") is { } b1) bodies.Add(b1);
+                    if (bodies.Count > 0) ModelRepository.SetFieldForLoad(el, FieldKeys.Body, string.Join("\n", bodies));
+                    var langs = c.Elements().Where(e => e.Name.LocalName == "language").Select(e => e.Value).Where(v => v.Length > 0).ToList();
+                    if (langs.Count == 0 && Attr(c, "language") is { } l1) langs.Add(l1);
+                    if (langs.Count > 0) ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + "language", string.Join(", ", langs));
+                    break;
+                }
                 case ElementKind.ConstraintBlock:
                     break;
             }
@@ -659,19 +682,27 @@ public static partial class MagicDrawImporter
 
         private void CopyTags(Element el, XElement app, params string[] except)
         {
+            // Values are stored as written; references to elements (ids) become names in ResolveTagRefs once the model is built.
             foreach (var a in app.Attributes())
             {
                 if (a.IsNamespaceDeclaration || a.Name.Namespace != XNamespace.None) continue;
                 var n = a.Name.LocalName;
                 if (n.StartsWith("base_", StringComparison.Ordinal) || except.Contains(n)) continue;
                 ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + n, PlainText(a.Value));
+                _tagRefs.Add((el, FieldKeys.TagPrefix + n, [(a.Value, false)]));
                 _report.TagValuesKept++;
             }
             foreach (var g in app.Elements().GroupBy(e => e.Name.LocalName))
             {
                 if (g.Key.StartsWith("base_", StringComparison.Ordinal) || g.Key == "Extension" || except.Contains(g.Key)) continue;
-                var values = g.Select(e => e.HasElements ? null : e.Value.Length > 0 ? e.Value : IdRef(e)).OfType<string>().ToList();
-                if (values.Count > 0) { ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + g.Key, PlainText(string.Join(", ", values))); _report.TagValuesKept++; }
+                var values = g.Select(e => e.HasElements ? ((string, bool)?)null : e.Value.Length > 0 ? (e.Value, false) : IdRef(e) is { } r ? (r, true) : null)
+                              .OfType<(string Value, bool IsRef)>().ToList();
+                if (values.Count > 0)
+                {
+                    ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + g.Key, PlainText(string.Join(", ", values.Select(v => v.Value))));
+                    _tagRefs.Add((el, FieldKeys.TagPrefix + g.Key, values));
+                    _report.TagValuesKept++;
+                }
                 if (values.Count < g.Count()) LoseTagValue(g.Key);
             }
         }
@@ -776,6 +807,56 @@ public static partial class MagicDrawImporter
             _model.AttachForLoad(owner, cm);
             if (XmiId(c) is { } cid) _map.TryAdd(cid, cm);
             _report.Count("Constraint (as comment)");
+        }
+
+        /// <summary>
+        /// Structured activity nodes (structured / loop / conditional / sequence nodes, expansion regions) become an action that keeps
+        /// their pins and incoming / outgoing flows; the nodes and flows inside are flattened into the owning activity.
+        /// </summary>
+        private void HandleStructuredNode(XElement c, Element owner, string? id, string type)
+        {
+            var el = Create(ElementKind.Action, c, owner, id);
+            if (el == null) return;
+            ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + "actionKind", type);
+            AppendStereotype(el, type switch
+            {
+                "LoopNode" => "loopNode",
+                "ConditionalNode" => "conditionalNode",
+                "SequenceNode" => "sequenceNode",
+                "ExpansionRegion" => "expansionRegion",
+                _ => "structured",
+            });
+            if (type == "ExpansionRegion" && Attr(c, "mode") is { } mode) ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + "mode", mode);
+            if (type == "LoopNode")
+            {
+                if (Attr(c, "isTestedFirst") is { } tf) ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + "isTestedFirst", tf);
+                AddRefTag(el, "setupPart", Refs(c, "setupPart"));
+                AddRefTag(el, "test", Refs(c, "test"));
+                AddRefTag(el, "bodyPart", Refs(c, "bodyPart"));
+            }
+            var clauses = c.Elements().Where(e => e.Name.LocalName == "clause").ToList();
+            for (var i = 0; i < clauses.Count; i++)
+            {
+                AddRefTag(el, $"clause{i + 1}.test", Refs(clauses[i], "test"));
+                AddRefTag(el, $"clause{i + 1}.body", Refs(clauses[i], "body"));
+            }
+
+            var inner = c.Elements().Count(e => e.Name.LocalName is "node" or "edge" && XmiType(e) != null);
+            if (inner > 0)
+            {
+                var activity = _model.DefaultOwnerFor(el, ElementKind.Action);
+                _report.Warn($"{type} '{Attr(c, "name")}': its {inner} contained nodes and flows were flattened into {Metamodel.DisplayName(activity.Kind)} '{activity.Name}'.");
+            }
+            // Pins stay on the action; contained nodes and flows climb to the owning activity (OwnerFor / DefaultOwnerFor).
+            HandleChildren(c, el, id);
+        }
+
+        /// <summary>A tag whose value is a list of element references, shown as names once the model is built.</summary>
+        private void AddRefTag(Element el, string tag, List<string> ids)
+        {
+            if (ids.Count == 0) return;
+            ModelRepository.SetFieldForLoad(el, FieldKeys.TagPrefix + tag, string.Join(", ", ids));
+            _tagRefs.Add((el, FieldKeys.TagPrefix + tag, ids.Select(i => (i, true)).ToList()));
         }
 
         private void HandleComment(XElement c, Element owner, string? ownerXmiId)

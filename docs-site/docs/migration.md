@@ -29,10 +29,21 @@ Every Cameo import counts what the file holds and compares it with what Meridian
 - the share of **model elements**, **diagrams** and **stereotype applications** that came across. An element *folded into
   another* still counts as kept: a documentation comment becomes the element's documentation, and a constraint on a
   constraint block becomes its equation;
-- the elements **not imported**, by UML type (for example `StructuredActivityNode`), and the
+- the elements **not imported**, by UML type (for example `InteractionUse` or `Reception`), and the
   reasons the importer recorded;
 - stereotypes lost because the element they were applied to was not imported, and tagged values with structured values
   that could not be copied.
+
+Some Cameo constructs have no exact Meridian counterpart and arrive approximated (the report warns about each):
+
+- **Structured activity nodes** (structured, loop, conditional and sequence nodes, expansion regions) become an action
+  with a stereotype such as «loopNode», which keeps its pins and flows. The actions and flows inside are moved up into the
+  owning activity. Loop parts and conditional clauses are kept as tagged values that name those actions.
+- **Opaque and function behaviors** become activities stereotyped «opaqueBehavior» / «functionBehavior» that keep their
+  body text and language, so call behavior actions still point at them.
+- **Tagged values that reference elements** show the referenced element's name. A reference to an element in a used
+  project that was not loaded keeps the Cameo id.
+- **Orthogonal regions** of a state are merged into one region.
 
 **Download report** saves the same information as a Markdown file, which is useful to attach to a migration ticket.
 The full list, with every warning, is also in the **Output** panel. When nothing was lost, the dialog does not open.

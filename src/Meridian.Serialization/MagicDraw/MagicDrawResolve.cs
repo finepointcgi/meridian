@@ -265,6 +265,51 @@ public static partial class MagicDrawImporter
             }
         }
 
+        // ------------------------------------------------------------------ element references kept as text
+
+        /// <summary>Name of a referenced element: the imported element's name, else any name seen in the file, else the id.</summary>
+        private string RefName(string id) =>
+            _map.TryGetValue(id, out var e) && !string.IsNullOrEmpty(e.Name) ? e.Name
+            : _names.TryGetValue(id, out var n) ? n
+            : PrimitiveName(id) ?? id;
+
+        private bool IsSourceId(string token) => _map.ContainsKey(token) || _names.ContainsKey(token) || _source.ContainsKey(token);
+
+        /// <summary>
+        /// Tag values that reference elements (xmi:idref / href children, or attributes made only of ids from this file) are stored
+        /// as written while the model is read; here they become the referenced elements' names. Ids nothing resolves are kept.
+        /// </summary>
+        private void ResolveTagRefs()
+        {
+            var unresolved = 0;
+            foreach (var (el, key, values) in _tagRefs)
+            {
+                var changed = false;
+                var text = new List<string>();
+                foreach (var (value, isRef) in values)
+                {
+                    if (isRef)
+                    {
+                        var name = RefName(value);
+                        if (name != value) changed = true;
+                        else if (!IsSourceId(value)) unresolved++;
+                        text.Add(name);
+                        continue;
+                    }
+                    var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (tokens.Length > 0 && tokens.All(IsSourceId))
+                    {
+                        changed = true;
+                        text.Add(string.Join(", ", tokens.Select(RefName)));
+                    }
+                    else text.Add(value);
+                }
+                if (changed) ModelRepository.SetFieldForLoad(el, key, PlainText(string.Join(", ", text)));
+            }
+            if (unresolved > 0)
+                _report.Warn($"{unresolved} tag values reference elements outside the project (e.g. in a used project); they were kept as ids.");
+        }
+
         private void ClassifyProperties()
         {
             foreach (var p in _properties)
