@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Meridian is broken, wrong or crashed.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Meridian never sends anything by itself: if this form was opened from **Help ▸ Report a problem**
+        or the crash notice, the fields below were filled in from a crash file on your computer. Read them before you submit and remove
+        anything you don't want to share. Please don't attach models you're not allowed to share.
+  - type: input
+    id: version
+    attributes:
+      label: Meridian version
+      description: Help ▸ About, or Settings ▸ Desktop in the desktop app.
+      placeholder: "0.7.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and how you run Meridian
+      description: For example "macOS 15.2 (Arm64), desktop app" or "Windows 11, Chrome, team server".
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Crash details or log
+      description: Filled in automatically for a crash (redacted). You can also paste lines from the Output panel or a crash file.
+      render: text

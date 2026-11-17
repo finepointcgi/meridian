@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Meridian.Web;
+using Meridian.Web.Hosting;
 using Meridian.Web.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -30,10 +31,14 @@ internal static class Program
     private static int _updating;
     /// <summary>A server opened with --server (not necessarily in the settings).</summary>
     private static string? _serverArg;
+    private static int _crashOffered;
 
     [STAThread]
     private static void Main(string[] args)
     {
+        // Crash files go to the data folder; nothing is sent anywhere (the next start offers a prefilled GitHub issue).
+        CrashReports.Configure(CrashFolder, "desktop");
+        CrashReports.InstallProcessHandlers();
         _settings = DesktopSettings.Load();
         // A portable update leaves the staging folder and the previous version next to the install: remove them now.
         _ = Task.Run(() =>
@@ -72,7 +77,7 @@ internal static class Program
         else if (serverArg != null) _window.Load(_serverArg = serverArg);
         else if (_settings.AutoOpen && _settings.LastMode == "local") _window.LoadRawString(StartPage.Html(_settings, busy: true)).RegisterWindowCreatedHandler((_, _) => OpenLocal());
         else if (_settings.AutoOpen && _settings.LastMode == "server" && _settings.Servers.FirstOrDefault() is { } last) _window.Load(last);
-        else _window.LoadRawString(StartPage.Html(_settings, update: CachedUpdate()));
+        else _window.LoadRawString(StartPage.Html(_settings, update: CachedUpdate(), crash: OfferCrash()));
 
         _window.WaitForClose();
         StopLocal();
@@ -94,7 +99,7 @@ internal static class Program
     }
 
     private static void ShowStart(string? error = null) =>
-        _window.Invoke(() => _window.LoadRawString(StartPage.Html(_settings, error: error, update: _update ?? CachedUpdate())));
+        _window.Invoke(() => _window.LoadRawString(StartPage.Html(_settings, error: error, update: _update ?? CachedUpdate(), crash: OfferCrash())));
 
     private static void OnMessage(string raw)
     {
@@ -169,6 +174,24 @@ internal static class Program
                 // A page finished loading: deliver waiting messages, and tell it about a pending update so the web app can show its notice.
                 PageReady();
                 if ((_update ?? CachedUpdate()) is { } u) Post(new { type = "update", version = u.Version, url = u.PageUrl });
+                if (OfferCrash() is { } crash) Post(new { type = "crash", summary = crash.Summary, time = crash.Time.ToString("O") });
+                break;
+            // Problem reports (Help ▸ Report a problem, the crash notice): open a prefilled GitHub issue in the browser.
+            case "reportCrash":
+            case "reportProblem":
+                ReportProblem();
+                break;
+            case "dismissCrash":
+                CrashReports.MarkHandled(CrashReports.Pending(CrashFolder).Select(p => p.Path));
+                Post(DesktopState());
+                break;
+            case "openCrashFolder":
+                OpenCrashFolder();
+                break;
+            case "crashPrompt":
+                _settings.OfferCrashReports = (bool?)msg!["enabled"] ?? true;
+                _settings.Save();
+                Post(DesktopState());
                 break;
             case "update":
                 _ = InstallUpdateAsync();
@@ -183,6 +206,45 @@ internal static class Program
     // Windows sending to WebView2 too early throws (an update check at start-up crashed the app this way).
     private static readonly List<string> _pending = new();
     private static bool _pageReady;
+
+    // ------------------------------------------------------------------ problem reports
+
+    internal static string CrashFolder => Path.Combine(DesktopSettings.Folder, "crashes");
+
+    /// <summary>The newest unreported crash, once per run, unless the prompt is turned off in Settings ▸ Desktop.</summary>
+    private static CrashReport? OfferCrash()
+    {
+        if (!_settings.OfferCrashReports || Volatile.Read(ref _crashOffered) == 1) return null;
+        if (CrashReports.Pending(CrashFolder) is not [var (_, latest), ..]) return null;
+        return Interlocked.Exchange(ref _crashOffered, 1) == 0 ? latest : null;
+    }
+
+    /// <summary>
+    /// Opens a new GitHub issue in the browser, prefilled with the newest unreported crash (or just the version and OS).
+    /// The user reviews and submits it there; the crash is marked handled so it is not offered again.
+    /// </summary>
+    private static void ReportProblem()
+    {
+        var pending = CrashReports.Pending(CrashFolder);
+        var url = pending is [var (_, latest), ..]
+            ? IssueLinks.ForCrash(latest)
+            : IssueLinks.ForProblem(Updater.CurrentVersion(), $"{CrashReports.ThisOs()}, desktop app");
+        OpenUrl(url);
+        CrashReports.MarkHandled(pending.Select(p => p.Path));
+        Post(DesktopState());
+        Log(pending.Count > 0 ? $"Opened a problem report for crash {pending[0].Report.Id} in the browser." : "Opened a problem report in the browser.");
+    }
+
+    /// <summary>Shows the crash files in Finder / Explorer / the file manager (the path never goes to the page).</summary>
+    private static void OpenCrashFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(CrashFolder);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(CrashFolder) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Log($"Could not open the crash folder: {ex.Message}"); }
+    }
 
     private static void Post(object message)
     {
@@ -423,6 +485,8 @@ internal static class Program
         gitLabProject = _settings.UpdateGitLabProject,
         hasGitLabToken = !string.IsNullOrEmpty(_settings.ProtectedGitLabToken),
         checksDisabled = ChecksDisabled,
+        crashPrompt = _settings.OfferCrashReports,
+        pendingCrashes = CrashReports.Pending(CrashFolder).Count,
     };
 
     private static void PostStatus(string status, string message) =>
@@ -683,6 +747,7 @@ internal static class Program
             File.AppendAllText(Path.Combine(DesktopSettings.Folder, "desktop.log"), $"[{DateTime.Now:O}] {text}{Environment.NewLine}");
         }
         catch (IOException) { }
+        CrashReports.Record(text);
         Console.Error.WriteLine(text);
     }
 

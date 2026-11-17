@@ -224,6 +224,24 @@ public class SettingsDialogTests : TestContext
     }
 
     [Fact]
+    public void Desktop_Crash_Reports_Can_Be_Reported_Shown_And_Turned_Off()
+    {
+        var d = OpenDesktop(new(false, true, 0, Version: "0.7.0", CrashPrompt: true, PendingCrashes: 2));
+        Assert.Contains("2 crash files not yet reported", d.Find(".settings-row[data-setting='desktop-crashes']").TextContent);
+        Assert.True(d.Find(".switch input[data-name='crash-prompt']").HasAttribute("checked"));
+
+        d.Find("button.desktop-crash-report").Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "reportProblem");
+        Assert.Empty(d.FindAll("button.desktop-crash-report"));
+
+        d.Find("button.desktop-crash-folder").Click();
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "openCrashFolder");
+
+        d.Find(".switch input[data-name='crash-prompt']").Change(false);
+        Assert.Contains(DesktopCommands(), a => (string?)a[0] == "crashPrompt");
+    }
+
+    [Fact]
     public void Desktop_Check_For_Updates_Asks_The_Host_And_Shows_Its_Answer()
     {
         var d = OpenDesktop(new(false, true, 0, Version: "0.5.0"));

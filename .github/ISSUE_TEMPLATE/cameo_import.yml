@@ -1,0 +1,53 @@
+name: Cameo import problem
+description: A Cameo / MagicDraw model (.mdzip, .mdxml) did not come across into Meridian as expected.
+labels: ["import", "cameo"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        After a Cameo import, the **Import check** dialog lists what came across and what did not. Its **Download report**
+        button saves a Markdown fidelity report: it counts elements, diagrams and stereotypes by kind and does not contain your model.
+        Pasting it here is the most useful thing you can do. Please only attach a model if you're allowed to share it.
+  - type: input
+    id: version
+    attributes:
+      label: Meridian version
+      placeholder: "0.7.0"
+    validations:
+      required: true
+  - type: input
+    id: cameo-version
+    attributes:
+      label: Cameo / MagicDraw version
+      description: The tool and version that saved the file, for example "Cameo Systems Modeler 2024x Refresh2".
+    validations:
+      required: true
+  - type: dropdown
+    id: file-type
+    attributes:
+      label: File type
+      options:
+        - .mdzip
+        - .mdxml
+        - XMI exported from Cameo
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: missing
+    attributes:
+      label: What was missing or wrong?
+      description: Which elements, diagrams, relationships, stereotypes or properties did not come across, or came across wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: fidelity-report
+    attributes:
+      label: Fidelity report
+      description: Paste the Markdown from Import check ▸ Download report.
+      render: markdown
+  - type: textarea
+    id: profiles
+    attributes:
+      label: Profiles and plugins used
+      description: Custom profiles, UAF, MARTE, project-specific stereotypes or Cameo plugins the model depends on (optional).

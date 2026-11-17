@@ -1,4 +1,5 @@
 using System.Net;
+using Meridian.Web.Hosting;
 
 namespace Meridian.Desktop;
 
@@ -7,7 +8,7 @@ internal static class StartPage
 {
     private static string E(string s) => WebUtility.HtmlEncode(s);
 
-    public static string Html(DesktopSettings settings, string? error = null, bool busy = false, UpdateInfo? update = null)
+    public static string Html(DesktopSettings settings, string? error = null, bool busy = false, UpdateInfo? update = null, CrashReport? crash = null)
     {
         var files = string.Join("", settings.RecentFiles.Select(f =>
         {
@@ -60,12 +61,16 @@ button.ghost { background:none; border:1px solid var(--border); color:var(--text
 .update.show { display:flex; }
 .update .msg { flex:1; }
 .update progress { width:140px; display:none; }
+.crash { display:flex; margin-bottom:16px; padding:10px 14px; border-radius:10px; background:rgba(255,170,60,.12); border:1px solid rgba(255,170,60,.45); align-items:center; gap:10px; flex-wrap:wrap; }
+.crash .msg { flex:1; min-width:240px; }
+.crash .detail { display:block; color:var(--text3); font-size:12px; margin-top:2px; overflow-wrap:anywhere; }
 .options { display:flex; gap:22px; flex-wrap:wrap; }
 </style></head>
 <body><div class="wrap">
   <div class="brand"><div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3 6.7 3.7L12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.3v6.7l-6-3.3V9.7Zm8 10v-6.7l6-3.3v6.7l-6 3.3Z"/></svg></div><h1>Meridian</h1></div>
   <p class="sub">Model-based systems engineering — SysML, requirements, BPMN, ArchiMate and free drawing.</p>
   <div class="update{{(update != null ? " show" : "")}}" id="update" role="status"><span class="msg">{{(update != null ? $"Meridian {E(update.Version)} is available." : "")}}</span><progress max="100" value="0"></progress><button class="primary" id="update-go" style="height:30px;padding:0 12px">Download and install</button><button class="x" id="update-x" title="Dismiss">×</button></div>
+  {{(crash != null ? $"<div class=\"crash\" id=\"crash\" role=\"status\"><span class=\"msg\">Meridian ran into an unexpected error last time.<span class=\"detail\">{E(crash.Summary.Length > 200 ? crash.Summary[..200] + "…" : crash.Summary)}</span></span><button class=\"primary\" id=\"crash-report\" style=\"height:30px;padding:0 12px\" title=\"Opens a prefilled GitHub issue in your browser. Review it there before submitting: nothing is sent automatically.\">Report this problem</button><button class=\"ghost\" id=\"crash-never\">Don't ask again</button><button class=\"x\" id=\"crash-x\" title=\"Dismiss\">×</button></div>" : "")}}
   {{(error != null ? $"<div class=\"error\">{E(error)}</div>" : "")}}
   {{(busy ? "<div class=\"busy\"><div class=\"spin\"></div>Starting your local workspace…</div>" : $$"""
   <div class="cards">
@@ -113,6 +118,11 @@ button.ghost { background:none; border:1px solid var(--border); color:var(--text
   // Update banner: filled by the host (bridge messages), never blocks the rest of the page.
   const upd = document.getElementById('update');
   document.getElementById('update-go')?.addEventListener('click', e => { e.target.disabled = true; upd.querySelector('progress').style.display = 'block'; upd.querySelector('.msg').textContent = 'Downloading…'; send({ command: 'update' }); });
+  // Crash notice: opens a prefilled GitHub issue for the user to review; nothing is sent from here.
+  const crash = document.getElementById('crash');
+  document.getElementById('crash-report')?.addEventListener('click', () => { send({ command: 'reportCrash' }); crash.querySelector('.msg').textContent = 'Opened a prefilled issue in your browser. Review it there before submitting.'; crash.querySelectorAll('button:not(.x)').forEach(b => b.remove()); });
+  document.getElementById('crash-never')?.addEventListener('click', () => { send({ command: 'crashPrompt', enabled: false }); send({ command: 'dismissCrash' }); crash.remove(); });
+  document.getElementById('crash-x')?.addEventListener('click', () => { send({ command: 'dismissCrash' }); crash.remove(); });
   document.getElementById('update-x')?.addEventListener('click', () => upd.classList.remove('show'));
   if (typeof window.external?.receiveMessage === 'function') window.external.receiveMessage(raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
