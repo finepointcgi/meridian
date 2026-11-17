@@ -255,11 +255,11 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
 ## Build the desktop apps
 
 ```bash
-build/package.sh 0.9.1                 # all platforms → artifacts/
-build/package.sh 0.9.1 osx-arm64       # just one
+build/package.sh 0.10.0                 # all platforms → artifacts/
+build/package.sh 0.10.0 osx-arm64       # just one
 ```
 
-Pushing a tag such as `v0.9.1` runs the release workflow, which builds every platform and publishes a
+Pushing a tag such as `v0.10.0` runs the release workflow, which builds every platform and publishes a
 GitHub release. The repository also builds on GitLab: `.gitlab-ci.yml` runs the same tests on merge requests and,
 for a `v*` tag, publishes a GitLab release, the container image in the GitLab Container Registry and the docs on
 GitLab Pages (see [docs/RELEASING.md](docs/RELEASING.md#releasing-with-gitlab)).

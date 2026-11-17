@@ -60,7 +60,7 @@ public sealed class OnboardingTests : TestContext
         Assert.Equal(TourChapters.Basics, TourChapters.All[0].Id);
         Assert.Equal(TourChapters.All.Length, TourChapters.All.Select(c => c.Id).Distinct().Count());
         Assert.Equal(
-            ["The basics", "Coming from Cameo or EA", "Generate diagrams", "Create diagrams from diagrams", "Connect your code", "Import Mermaid", "AI assistant providers", "Select many & link", "Database modelling", "Used projects (shared libraries)", "Verify requirements", "Permissions & requirements tools", "Instances, deployment & more", "Settings & themes"],
+            ["The basics", "Coming from Cameo or EA", "Generate diagrams", "Create diagrams from diagrams", "Connect your code", "Import Mermaid & draw.io", "AI assistant providers", "Select many & link", "Database modelling", "Used projects (shared libraries)", "Verify requirements", "Permissions & requirements tools", "Instances, deployment & more", "Settings & themes"],
             TourChapters.All.Select(c => c.Title));
         Assert.All(TourChapters.All, c => Assert.True(c.Steps.Length >= 2, c.Id));
         Assert.All(TourChapters.All.SelectMany(c => c.Steps), s => Assert.False(string.IsNullOrWhiteSpace(s.Html)));
@@ -77,10 +77,11 @@ public sealed class OnboardingTests : TestContext
         Assert.Equal(TourChapters.All.Select(c => c.Id), items.Select(i => i.GetAttribute("data-chapter")));
 
         cut.Find(".tour-chapter[data-chapter='mermaid']").Click();
-        cut.WaitForAssertion(() => Assert.Equal("Import Mermaid", cut.Find(".tour-kicker").TextContent));
-        Assert.Equal("Step 1 of 3", cut.Find(".tour-count").TextContent);
+        cut.WaitForAssertion(() => Assert.Equal("Import Mermaid & draw.io", cut.Find(".tour-kicker").TextContent));
+        Assert.Equal("Step 1 of 4", cut.Find(".tour-count").TextContent);
         Assert.Equal("mermaid", cut.Instance.CurrentChapter);
         Assert.Contains("Paste Mermaid", cut.Find(".tour-card h3").TextContent);
+        cut.Find(".tour-btn.primary").Click();
         cut.Find(".tour-btn.primary").Click();
         cut.Find(".tour-btn.primary").Click();
         cut.WaitForAssertion(() => Assert.Equal("Done", cut.Find(".tour-btn.primary").TextContent.Trim()));

@@ -21,7 +21,7 @@ public static class TourChapters
     public const string ComingFrom = "coming-from";
 
     /// <summary>The release the "What's new" card describes; <c>UserPreferences.WhatsNewSeen</c> stores the last one shown.</summary>
-    public const string WhatsNewVersion = "0.9";
+    public const string WhatsNewVersion = "0.10";
 
     public static readonly Chapter[] All =
     [
@@ -93,14 +93,16 @@ public static class TourChapters
             new("[data-tour=code-group]", Icons.Material.Outlined.Rule, "Architecture checks",
                 "<b>Code ▸ Architecture</b> compares the synced code with the model: a dependency the model does not allow is listed with a link to the line, and drawn in red on the diagram."),
         ]),
-        new("mermaid", "Import Mermaid", Icons.Material.Outlined.Schema, "Paste or drop Mermaid and get real model elements.",
+        new("mermaid", "Import Mermaid & draw.io", Icons.Material.Outlined.Schema, "Paste or drop Mermaid, import draw.io files or a whole folder, and get real model elements.",
         [
             new(".titlebar .project", Icons.Material.Outlined.Schema, "Paste Mermaid",
                 "Project menu ▸ <b>Paste Mermaid…</b> turns flowcharts, class, state, sequence, requirement, ER and C4 diagrams into model elements with laid-out diagrams. You see a preview first."),
             new(".diagram-host", Icons.Material.Outlined.UploadFile, "Drop a file",
                 "Drop a <b>.mmd</b> or Markdown file on the canvas, or open one as a new project. Ask any AI chat for “a Mermaid flowchart” and paste the answer."),
+            new(".titlebar .project", Icons.Material.Outlined.DriveFolderUpload, "A folder of diagrams",
+                "Project menu ▸ Import ▸ <b>Folder of diagrams…</b> reads every Mermaid and draw.io file in a folder: one package per folder, and importing it again updates those diagrams. draw.io pages drawn with UML shapes become model elements where they were drawn; other pages become whiteboard drawings."),
             new("", Icons.Material.Outlined.Download, "And back out",
-                "Export ▸ <b>Export diagram as Mermaid</b> writes activity, state machine, sequence, block definition and requirement diagrams as Mermaid."),
+                "Export ▸ <b>Export diagram as Mermaid</b> or <b>as draw.io</b> (or all diagrams as one draw.io file) to keep working in other tools."),
         ]),
         new("ai", "AI assistant providers", Icons.Material.Outlined.AutoAwesome, "Claude, a local model or Claude Code.",
         [
@@ -189,8 +191,9 @@ public static class TourChapters
 
     public static readonly WhatsNewItem[] WhatsNew =
     [
-        new("Your code as diagrams", "Connect a repository and its first sync lands straight in main: a package overview, structure diagrams, and activity and sequence diagrams drawn from the code.", "code"),
-        new("Code waiting for review", "Later pushes wait on a review branch; a banner on main shows them with Open and Accept all.", "code"),
+        new("Folders of diagrams", "Project menu ▸ Import ▸ Folder of diagrams… brings in every Mermaid and draw.io file in a folder, one package per folder; importing it again updates them.", "mermaid"),
+        new("draw.io in and out", "Open .drawio, .drawio.svg and .drawio.png files: UML pages become model elements at their drawn positions, other pages whiteboard drawings. Export any diagram, or all of them, as draw.io.", "mermaid"),
+        new("Your code as diagrams", "Connect a repository and its first sync lands straight in main, with activity and sequence diagrams drawn from the code (new in 0.9).", "code"),
         new("Tokens survive upgrades", "Encryption keys now live in the Meridian database, so saved tokens and passwords keep working after an upgrade or a move.", "team"),
         new("Instances, deployment & more", "Object and deployment diagrams, the relation map, find and replace, element history, spreadsheets and printing (new in 0.8).", "analysis"),
         new("Coming from Cameo or EA?", "A short chapter on where the containment tree, specification window and menus went.", ComingFrom),
