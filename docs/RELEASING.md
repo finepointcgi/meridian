@@ -12,15 +12,15 @@ A release is a git tag. Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, w
    | `ubuntu-latest` | `Meridian-X.Y.Z-linux-x64.AppImage`, `.deb`, `.tar.gz`, and `Meridian-Server-X.Y.Z.zip` |
 
 3. **release** (ubuntu): collects every file, writes `SHA256SUMS.txt` (`sha256sum` format), and publishes the GitHub
-   release with notes generated from the merged PRs. If the tag contains a `-` (for example `v0.10.0-rc.1`), it is marked as a pre-release.
+   release with notes generated from the merged PRs. If the tag contains a `-` (for example `v0.10.1-rc.1`), it is marked as a pre-release.
 
 ```sh
 # bump <Version> in src/Meridian.Desktop/Meridian.Desktop.csproj, commit, then:
-git tag v0.10.0
-git push origin v0.10.0
+git tag v0.10.1
+git push origin v0.10.1
 ```
 
-Release notes for a version that changes how keys or secrets are stored must say so. Release 0.10.0 (stable key name, key ring in
+Release notes for a version that changes how keys or secrets are stored must say so. Release 0.10.1 (stable key name, key ring in
 the database) signs everyone out once after the upgrade and re-encrypts stored secrets on first start; see
 [DEPLOYMENT.md, Keys and secrets](DEPLOYMENT.md#keys-and-secrets).
 
@@ -67,11 +67,11 @@ A tag release:
    `SIGSTORE_ID_TOKEN`.
 
 ```sh
-git tag v0.10.0
-git push gitlab v0.10.0
+git tag v0.10.1
+git push gitlab v0.10.1
 ```
 
-To build without releasing, use **Build ▸ Pipelines ▸ Run pipeline** with `VERSION=0.10.0-test`. The packages are
+To build without releasing, use **Build ▸ Pipelines ▸ Run pipeline** with `VERSION=0.10.1-test`. The packages are
 then job artifacts for 7 days.
 
 ### Runners
@@ -125,8 +125,8 @@ publishing.
 ## Building locally
 
 ```sh
-build/package.sh 0.10.0 osx-arm64              # one platform
-build/package.sh 0.10.0                        # osx-arm64 osx-x64 win-x64 linux-x64 + server
+build/package.sh 0.10.1 osx-arm64              # one platform
+build/package.sh 0.10.1                        # osx-arm64 osx-x64 win-x64 linux-x64 + server
 ```
 
 Files go to `artifacts/` together with a `SHA256SUMS.txt`. Each format is built when its tool is available and skipped
@@ -179,7 +179,7 @@ What happens on the macOS runner:
 If you have only the certificate secrets, the build is Developer ID signed but not notarized. If you have none, it is ad-hoc signed.
 
 To sign locally, import the certificate into your login keychain and run:
-`MACOS_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" APPLE_ID=… APPLE_APP_PASSWORD=… APPLE_TEAM_ID=… build/package.sh 0.10.0 osx-arm64`
+`MACOS_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" APPLE_ID=… APPLE_APP_PASSWORD=… APPLE_TEAM_ID=… build/package.sh 0.10.1 osx-arm64`
 
 ### Windows: Authenticode
 
@@ -224,10 +224,10 @@ The desktop app checks for a newer version when it starts, at most once a day, i
 Settings ▸ Desktop checks right away. That section shows the running version, when the last check ran, and its result
 in a sentence, for example:
 
-- "You're up to date (0.10.0)."
-- "0.10.0 is available — Install and restart." (with an **Install 0.10.0 and restart** button and a progress bar)
+- "You're up to date (0.10.1)."
+- "0.10.1 is available — Install and restart." (with an **Install 0.10.1 and restart** button and a progress bar)
 - "Couldn't reach GitHub: the repository is private (or has no releases yet) — set a token or another update source in Settings."
-- "No package for this computer in release 0.10.0."
+- "No package for this computer in release 0.10.1."
 
 Drafts and pre-releases are ignored. A release counts as newer when its tag is a higher semantic version than the
 app's own (`<Version>` in the csproj, passed by `package.sh -p:Version=`). Pages from the web app also get a notice
@@ -254,7 +254,7 @@ the update stops.
   Windows setup runs and replaces the per-user install, because `CloseApplications=force` closes the running copy. A new
   AppImage is started.
 - **Portable archives (in-place swap).** The archive is unpacked into a hidden staging folder next to the install
-  (`.Meridian.meridian-update/new`, beside `Meridian/`, `meridian-0.10.0/` or `Meridian.app`), so the swap is a rename on
+  (`.Meridian.meridian-update/new`, beside `Meridian/`, `meridian-0.10.1/` or `Meridian.app`), so the swap is a rename on
   the same disk. Unpacking uses the same rules as the repository's other archive readers (`SafeZip` and
   `SnapshotArchive`): sizes are counted on the bytes actually read, and there are caps on entries, file size and total
   size. Absolute paths, `..`, drive letters, links and more than one top-level folder are rejected. macOS `__MACOSX/`
@@ -268,7 +268,7 @@ the update stops.
   5. logs each step to `desktop.log` in the data folder.
 
   The install keeps its path, so shortcuts, file associations and the `install.sh` menu entry keep working. A Linux
-  folder keeps its name, such as `meridian-0.10.0`. On Windows, a setup-made install keeps its uninstaller.
+  folder keeps its name, such as `meridian-0.10.1`. On Windows, a setup-made install keeps its uninstaller.
   On the next start the app deletes the staging and `-old` folders. The data folder (`MERIDIAN_DATA`, or the
   application-data `Meridian` folder: the database, `desktop.json` and keys) is outside the install and is never moved.
   If it is inside the install folder, the app does not swap the folder. Stored secrets survive the swap: the Data
@@ -315,11 +315,11 @@ over http.
 
 ```json
 {
-  "version": "0.10.0",
-  "notes": "https://meridian.example.com/release-notes/0.10.0",
+  "version": "0.10.1",
+  "notes": "https://meridian.example.com/release-notes/0.10.1",
   "assets": [
-    { "name": "Meridian-0.10.0-windows-x64.zip", "url": "files/Meridian-0.10.0-windows-x64.zip", "sha256": "<64 hex digits>", "size": 187654321 },
-    { "name": "Meridian-0.10.0-macos-arm64.zip", "url": "https://cdn.example.com/Meridian-0.10.0-macos-arm64.zip", "sha256": "<64 hex digits>" }
+    { "name": "Meridian-0.10.1-windows-x64.zip", "url": "files/Meridian-0.10.1-windows-x64.zip", "sha256": "<64 hex digits>", "size": 187654321 },
+    { "name": "Meridian-0.10.1-macos-arm64.zip", "url": "https://cdn.example.com/Meridian-0.10.1-macos-arm64.zip", "sha256": "<64 hex digits>" }
   ]
 }
 ```
