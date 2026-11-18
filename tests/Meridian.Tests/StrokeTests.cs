@@ -91,6 +91,11 @@ public class StrokeTests
         Assert.Contains($"stroke=\"{Strokes.HighlighterColor}\" stroke-width=\"14\"", svg);
         Assert.Contains("stroke-opacity=\"0.4\"", svg);
         Assert.Contains(" C", svg);
+        // Named for the model explorer, but the name is never drawn on the ink.
+        Assert.Equal("Pen stroke", pen.Element.Name);
+        Assert.Equal("Highlight", hl.Element.Name);
+        Assert.DoesNotContain(">Pen stroke<", svg);
+        Assert.DoesNotContain(">Highlight<", svg);
 
         var rd = replica.Diagrams.Single();
         Assert.Equal(2, rd.Nodes.Count(Strokes.IsStroke));
@@ -113,5 +118,23 @@ public class StrokeTests
         var n = m.AddStroke(d, m.Root, [new Pt(0, 0), new Pt(100, 100)]);
         Assert.True(Strokes.Distance(n, n.Bounds, new Pt(50, 50)) < 1);
         Assert.True(Strokes.Distance(n, n.Bounds, new Pt(90, 5)) > 50);
+    }
+
+    [Fact]
+    public void Same_Named_Drawing_Shapes_Are_Not_Duplicate_Name_Errors()
+    {
+        // Strokes, icons and chart decorations are labels on a drawing: two "Pen stroke"s or two "Database" icons are fine.
+        var m = new ModelRepository("Board");
+        var d = m.CreateDiagram(m.Root, DiagramType.Whiteboard, "Board");
+        m.AddStroke(d, m.Root, [new Pt(0, 0), new Pt(50, 50)]);
+        m.AddStroke(d, m.Root, [new Pt(100, 0), new Pt(150, 50)]);
+        m.Create(m.Root, ElementKind.Shape, "Database");
+        m.Create(m.Root, ElementKind.Shape, "Database");
+        m.Create(m.Root, ElementKind.Shape, " ");
+        m.Create(m.Root, ElementKind.Shape, " ");
+        Assert.DoesNotContain(new Meridian.Core.Validation.ModelValidator().Validate(m), i => i.RuleId == "MER-002");
+        m.Create(m.Root, ElementKind.Block, "Engine");
+        m.Create(m.Root, ElementKind.Block, "Engine");
+        Assert.Contains(new Meridian.Core.Validation.ModelValidator().Validate(m), i => i.RuleId == "MER-002");
     }
 }

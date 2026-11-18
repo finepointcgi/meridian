@@ -29,9 +29,10 @@ public sealed partial class ModelValidator
         // parameter lists are fine; only an identical parameter list is a duplicate.
         new Rule("MER-002", "Sibling names must be unique per kind (operations: per parameter list)", m =>
             // Inside activities and interactions (and their partitions and fragments) names are labels, not identities:
-            // two "return Fail()" final nodes or two "Charge()" actions are normal, so they are not checked.
+            // two "return Fail()" final nodes or two "Charge()" actions are normal, so they are not checked. Free drawing
+            // shapes (whiteboard boxes, icons, pen strokes, imported charts) are labels too: two "Database" icons are fine.
             m.AllElements.Where(e => e.OwnedElements.Count > 1 && !NamesAreLabels(e.Kind)).SelectMany(owner =>
-                owner.OwnedElements.Where(c => !string.IsNullOrEmpty(c.Name) && !c.IsRelationship)
+                owner.OwnedElements.Where(c => !string.IsNullOrEmpty(c.Name) && !c.IsRelationship && c.Kind != ElementKind.Shape)
                     .GroupBy(c => (c.Kind, c.Name, Overload: c.Kind == ElementKind.Operation ? OverloadKey(c) : ""))
                     .Where(g => g.Count() > 1)
                     .SelectMany(g => g.Skip(1).Select(c => Issue(Severity.Error, "MER-002",

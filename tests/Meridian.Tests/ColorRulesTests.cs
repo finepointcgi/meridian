@@ -164,4 +164,18 @@ public class ColorRulesTests
         Assert.Single(ColorRules.Of(d));
         Assert.DoesNotContain("#ff0000", SvgRenderer.Render(m, d));   // an invalid condition matches nothing
     }
+
+    [Fact]
+    public void Names_Stay_Readable_On_A_Light_Rule_Fill_In_The_Dark_Theme()
+    {
+        // A pale fill in the dark theme would leave white names on a pale header: they switch to dark text, unless the
+        // shape sets its own text colour.
+        var (m, d, _, _, _) = Model();
+        Assert.DoesNotMatch("fill=\"#1a2233\"[^>]*>Engine<", SvgRenderer.Render(m, d, theme: SvgTheme.Dark));
+        m.SetColorRules(d, [new ColorRule("Pale", "kind:Block", Fill: "#fde2e4")]);
+        var dark = SvgRenderer.Render(m, d, theme: SvgTheme.Dark);
+        Assert.Matches("fill=\"#1a2233\"[^>]*>Engine<", dark);
+        m.SetColorRules(d, [new ColorRule("Pale", "kind:Block", Fill: "#fde2e4", Text: "#00aa00")]);
+        Assert.Matches("fill=\"#00aa00\"[^>]*>Engine<", SvgRenderer.Render(m, d, theme: SvgTheme.Dark));
+    }
 }

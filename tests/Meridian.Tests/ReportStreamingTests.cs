@@ -69,11 +69,11 @@ public class ReportStreamingTests
     /// </summary>
     public static TheoryData<string, string, string> Goldens => new()
     {
-        { "System Requirements Specification", "84f336e79a3c7a62", "9c05c2ad4aebf7af" },
+        { "System Requirements Specification", "5b5eb26708502f6c", "9c05c2ad4aebf7af" },
         { "Interface Control Document", "28cce40ecda30853", "f968cb14431db556" },
-        { "System Design Description", "7f3253c97483db71", "7de661aa162454b3" },
+        { "System Design Description", "06e62c0ed25c1a18", "7de661aa162454b3" },
         { "Verification Cross-Reference Matrix / Test Report", "721a989a55bddc54", "8dd799f599d1948f" },
-        { "Model Overview", "d7eeb056ada9e162", "fa4d480d4fcdcd39" },
+        { "Model Overview", "fcca4d17f97edc41", "fa4d480d4fcdcd39" },
         { "Data Dictionary", "5b3c13ce7faa9dd4", "fec5d57c7c5b168f" },
     };
 

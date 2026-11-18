@@ -642,6 +642,7 @@ public static partial class SvgRenderer
         var c = Notation.Content(m, n, d.DiagramType);
         var shape = Notation.ShapeOf(n.Element);
         // Per-shape overrides from the format bar: line and text colour apply to every notation.
+        var ownText = n.Element.Kind != ElementKind.Shape && StyleColor(n, "text") != null;
         if (n.Element.Kind != ElementKind.Shape)
         {
             if (StyleColor(n, "stroke") is { } sc) t = t with { Stroke = sc, Ink = sc };
@@ -650,6 +651,11 @@ public static partial class SvgRenderer
         // Compartment boxes take a custom fill on their header band; simple outlines (states, actions, use cases…) on the body.
         var fill = shape != NodeShape.Rectangle && StyleColor(n, "fill") is { } bf ? bf : t.Fill(n.Element.Kind);
         var header = HeaderColor(m, n, t);
+        // A custom fill (format bar, colour rule, stereotype colour) can be light in the dark theme or dark in the light one:
+        // text drawn on it switches to black or white unless the shape sets its own text colour.
+        if (!ownText && n.Element.Kind != ElementKind.Shape && shape != NodeShape.Rectangle && StyleColor(n, "fill") is { } body && Contrast(body) is { } bodyInk)
+            t = t with { Text = bodyInk, Muted = bodyInk };
+        var headerInk = !ownText && header != t.Header(n.Element.Kind) ? Contrast(header) : null;
         var stroke = t.Stroke;
         var ink = t.Ink;
         sb.Append($"<g data-node=\"{E(n.Id)}\"{LineStyleAttrs(n.Style)}>");
@@ -885,7 +891,7 @@ public static partial class SvgRenderer
                 }
                 if (n.Element.Kind == ElementKind.Table) { RenderTable(sb, m, d, n, b, c, fill, header, t); break; }
                 if (RenderDeployment(sb, m, d, n, b, c, fill, header, t)) break;   // SvgRenderer.Deployment.cs
-                RenderCompartments(sb, b, c, fill, n.Element.Kind, t, header);
+                RenderCompartments(sb, b, c, fill, n.Element.Kind, t, header, headerInk);
                 break;
         }
         sb.Append("</g>");
@@ -1138,7 +1144,7 @@ public static partial class SvgRenderer
         if (dept.Length > 0) { y += 15; Text(sb, cx, y, Trunc(dept, textW, 5.8), false, "middle", size: 10, color: muted); }
     }
 
-    private static void RenderCompartments(StringBuilder sb, Bounds b, NodeContent c, string fill, ElementKind kind, SvgTheme t, string headerColor)
+    private static void RenderCompartments(StringBuilder sb, Bounds b, NodeContent c, string fill, ElementKind kind, SvgTheme t, string headerColor, string? headerInk = null)
     {
         var stroke = t.Stroke;
         var headerH = (c.Keyword != null ? Line : 0) + Line + 12;
@@ -1147,8 +1153,8 @@ public static partial class SvgRenderer
         sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"4\" fill=\"none\" stroke=\"{stroke}\"/>");
         sb.Append($"<rect x=\"{F(b.X + 1)}\" y=\"{F(b.Y + 1)}\" width=\"{F(Math.Max(0, b.Width - 2))}\" height=\"3\" rx=\"1.5\" fill=\"{t.Accent(kind)}\"/>");
         var y = b.Y + Line + 2;
-        if (c.Keyword != null) { Text(sb, b.Center.X, y, Trunc(c.Keyword, b.Width - 8), false, "middle", size: 11, color: t.Muted); y += Line; }
-        Text(sb, b.Center.X, y, Trunc(c.Name, b.Width - 8, 7.4), true, "middle", c.Italic, size: 13.5, color: t.Text, underline: kind == ElementKind.InstanceSpecification);   // UML instances: underlined
+        if (c.Keyword != null) { Text(sb, b.Center.X, y, Trunc(c.Keyword, b.Width - 8), false, "middle", size: 11, color: headerInk ?? t.Muted); y += Line; }
+        Text(sb, b.Center.X, y, Trunc(c.Name, b.Width - 8, 7.4), true, "middle", c.Italic, size: 13.5, color: headerInk ?? t.Text, underline: kind == ElementKind.InstanceSpecification);   // UML instances: underlined
         y = b.Y + headerH;
         foreach (var comp in c.Compartments)
         {

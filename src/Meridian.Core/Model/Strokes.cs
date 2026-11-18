@@ -211,7 +211,7 @@ public static class Strokes
         var (bounds, encoded) = Encode(pts, width / 2 + 2);
         using (m.History.Transaction(highlighter ? "Highlight" : "Draw"))
         {
-            var e = m.Create(owner, ElementKind.Shape, "");
+            var e = m.Create(owner, ElementKind.Shape, highlighter ? "Highlight" : "Pen stroke");
             m.Set(e, FieldKeys.Subtype, highlighter ? HighlighterSubtype : PenSubtype);
             m.Set(e, PointsField, encoded);
             var node = m.AddNode(d, e, bounds, showRelationships: false);
