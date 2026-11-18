@@ -38,6 +38,7 @@ public static class Templates
     [
         new("flowchart", "Flowchart", "Start, steps, a decision and an end, connected with arrows.", DiagramType.Whiteboard, Flowchart),
         new("mindmap", "Mind map", "A central idea with four branches and sticky notes.", DiagramType.Whiteboard, MindMap),
+        new("orgchart", "Org chart", "People as cards in a reporting tree. Import your own from a spreadsheet with Import ▸ Org chart from spreadsheet.", DiagramType.Whiteboard, OrgChartSample),
         new("process", "BPMN process", "Start event, tasks, an exclusive gateway and end events.", DiagramType.Bpmn, Process),
         new("er", "ER diagram", "Customer / order / product tables with foreign keys.", DiagramType.Database, ErDiagram),
         new("req-tree", "Requirement tree", "A parent requirement refined into three children.", DiagramType.Requirement, RequirementTree),
@@ -215,6 +216,23 @@ public static class Templates
             m.AddNode(d, note, new Bounds(x, y, 190, 70));
         }
         return d;
+    }
+
+    private static Diagram OrgChartSample(ModelRepository m, Element pkg)
+    {
+        OrgPerson P(string name, string title, string dept, string? manager = null) => new(name, title, dept, manager);
+        var tree = OrgChart.Resolve(
+        [
+            P("Alex Morgan", "Chief Executive", "Leadership"),
+            P("Sam Lee", "Head of Engineering", "Engineering", "Alex Morgan"),
+            P("Priya Shah", "Head of Product", "Product", "Alex Morgan"),
+            P("Jordan Diaz", "Head of Operations", "Operations", "Alex Morgan"),
+            P("Chris Wu", "Systems Engineer", "Engineering", "Sam Lee"),
+            P("Taylor Kim", "Software Engineer", "Engineering", "Sam Lee"),
+            P("Robin Park", "Product Manager", "Product", "Priya Shah"),
+            P("Casey Nolan", "Operations Lead", "Operations", "Jordan Diaz"),
+        ]);
+        return OrgChart.Build(m, pkg, tree, "Org chart").Diagram;
     }
 
     private static Diagram Process(ModelRepository m, Element pkg)

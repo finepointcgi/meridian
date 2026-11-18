@@ -97,6 +97,7 @@ public partial class Workbench
         list.AddRange(DiagramFilePaletteCommands());   // Workbench.DiagramFiles.cs
         list.AddRange(DatabasePaletteCommands());   // Workbench.Database.cs
         list.AddRange(SpreadsheetPaletteCommands());   // Workbench.Spreadsheet.cs
+        list.AddRange(OrgChartPaletteCommands());   // Workbench.OrgChart.cs
         list.AddRange(OnboardingPaletteCommands());   // Workbench.Onboarding.cs
         list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
         list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs

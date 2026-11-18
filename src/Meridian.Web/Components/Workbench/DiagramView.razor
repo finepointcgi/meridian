@@ -7,7 +7,7 @@
 @inject ImageCache Images
 @inject IDialogService Dialogs
 
-<div class="canvas @(C.ProtectedByPermissions ? "perm-locked" : "") @(C.Tool != null ? "tool-active" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !C.ReadOnly ? "shapes-open" : "")"
+<div class="canvas @(C.ProtectedByPermissions ? "perm-locked" : "") @(C.Tool != null ? "tool-active" : "") @(C.InkTool ? "drawing" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !C.ReadOnly ? "shapes-open" : "")"
      tabindex="0" @ref="_canvas"
      @onpointerdown="Down" @onpointermove="Move" @onpointerup="Up" @onpointerleave="Leave"
      @onwheel="Wheel" @onkeydown="Key" @onkeyup="KeyUp"
@@ -78,8 +78,9 @@
                             var item = it;
                             var on = C.IsTool(item);
                             var link = Metamodel.IsRelationship(item.Kind);
-                            <div class="tile @(on ? "on" : "")" draggable="@(link ? "false" : "true")" data-drag="palette"
-                                 title="@(link ? $"{item.Title}: click, then drag from one shape to another" : $"{item.Title}: click to add, or drag onto the canvas (Shift+click keeps the tool)")"
+                            var ink = IsInkItem(item);
+                            <div class="tile @(on ? "on" : "")" draggable="@(link || ink ? "false" : "true")" data-drag="palette"
+                                 title="@(ink ? InkTip(item) : link ? $"{item.Title}: click, then drag from one shape to another" : $"{item.Title}: click to add, or drag onto the canvas (Shift+click keeps the tool)")"
                                  @ondragstart="() => _paletteDrag = item" @ondragend="() => _paletteDrag = null"
                                  @onclick="e => TileClick(item, e)">
                                 @Thumb(item, on)
@@ -99,7 +100,7 @@
                 <button class="tool @(C.Tool == null ? "on" : "")" @onclick="() => SetTool(null)"><MudIcon Icon="@Icons.Material.Outlined.NearMe" /></button>
             </MudTooltip>
             <div class="tsep"></div>
-            @foreach (var it in Metamodel.PaletteItems(C.Diagram.DiagramType).Concat(Metamodel.PaletteLinks(C.Diagram.DiagramType)))
+            @foreach (var it in Metamodel.PaletteItems(C.Diagram.DiagramType).Concat(Metamodel.PaletteLinks(C.Diagram.DiagramType)).Concat(DrawItems()))
             {
                 var item = it;
                 var on = C.IsTool(item);
@@ -118,7 +119,7 @@
     {
         var nodes = C.SelectedNodes.Count > 0;
         var edges = C.SelectedEdges.Count > 0;
-        var shapes = C.SelectedNodes.Where(n => n.Element.Kind == ElementKind.Shape).ToList();
+        var shapes = C.SelectedNodes.Where(n => n.Element.Kind == ElementKind.Shape && !Strokes.IsStroke(n)).ToList();
         var line = C.SelectedEdges.Any(x => x.Relationship.Kind == ElementKind.Line);
         // Near the top of the view the bar would cover what is selected: show it at the bottom instead.
         var barBelow = C.SelectedNodes.Count > 0 && C.SelectedNodes.Min(n => C.ToScreen(new(C.BoundsOf(n).X, C.BoundsOf(n).Y)).Y) < 64;
@@ -280,7 +281,7 @@
     {
         <div class="hint">
             @{ var title = C.ToolSubtype != null ? Subtypes.Display(C.ToolSubtype) : Metamodel.DisplayName(activeTool); }
-            @(Metamodel.IsRelationship(activeTool) ? $"Drag from a source shape to a target to create {title}" : $"Click to place a {title}")
+            @(C.InkTool ? InkTip(new PaletteItem(activeTool, C.ToolSubtype)) : Metamodel.IsRelationship(activeTool) ? $"Drag from a source shape to a target to create {title}" : $"Click to place a {title}")
             · <b>Esc</b> to cancel
         </div>
     }
@@ -434,6 +435,22 @@
     private static readonly PaletteItem ImageItem = new(ElementKind.Shape, DiagramExtras.ImageSubtype, "Image");
 
     private static bool IsImageItem(PaletteItem item) => item.Kind == ElementKind.Shape && item.Subtype == DiagramExtras.ImageSubtype;
+
+    /// <summary>The shapes panel's freehand tools (whiteboards): they stay on until Esc or a second click.</summary>
+    private static readonly PaletteItem[] InkItems =
+    [
+        new(ElementKind.Shape, Strokes.PenSubtype, "Pen"),
+        new(ElementKind.Shape, Strokes.HighlighterSubtype, "Highlighter"),
+        new(ElementKind.Shape, Strokes.EraserTool, "Eraser"),
+    ];
+
+    private IReadOnlyList<PaletteItem> DrawItems() => C.Diagram.DiagramType == DiagramType.Whiteboard ? InkItems : [];
+
+    private static bool IsInkItem(PaletteItem item) => item.Kind == ElementKind.Shape && (Strokes.IsStrokeSubtype(item.Subtype) || item.Subtype == Strokes.EraserTool);
+
+    private static string InkTip(PaletteItem item) => item.Subtype == Strokes.EraserTool
+        ? "Eraser: click or drag over pen and highlighter strokes to delete them · Esc to stop"
+        : $"{(item.Subtype == Strokes.HighlighterSubtype ? "Highlighter" : "Pen")}: drag to draw (Shift for a straight line) · Esc to stop";
 
     private Task EditLink() => LinkDialog.EditAsync(Dialogs, Ws, C);
 
@@ -697,7 +714,7 @@
         IReadOnlyList<PaletteItem> F(IEnumerable<PaletteItem> items) =>
             string.IsNullOrEmpty(q) ? items.ToList() : items.Where(i => IconLibrary.Matches(i, q)).ToList();
         var sections = t == DiagramType.Whiteboard
-            ? new List<(string, IReadOnlyList<PaletteItem>)> { ("Shapes", F(Metamodel.PaletteItems(t).Append(ImageItem))), ("Connectors", F(Metamodel.PaletteLinks(t))) }
+            ? new List<(string, IReadOnlyList<PaletteItem>)> { ("Shapes", F(Metamodel.PaletteItems(t).Append(ImageItem))), ("Connectors", F(Metamodel.PaletteLinks(t))), ("Draw", F(DrawItems())) }
             : [
                 (Metamodel.DisplayName(t).Replace(" Diagram", ""), F(Metamodel.PaletteItems(t))),
                 ("Relationships", F(Metamodel.PaletteLinks(t))),
@@ -717,6 +734,7 @@
     private void TileClick(PaletteItem item, MouseEventArgs e)
     {
         if (IsImageItem(item)) { C.SetTool(null); _ = PickImage(); return; }
+        if (IsInkItem(item)) { SetTool(C.IsTool(item) ? null : item); return; }
         if (Metamodel.IsRelationship(item.Kind) || e.ShiftKey) SetTool(item);
         else
         {
@@ -805,6 +823,9 @@
             (ElementKind.Shape, "document") => $"<path d=\"M4,4 H30 V19 Q24,15 17,19 T4,19 Z\" {a}/>",
             (ElementKind.Shape, "cloud") => $"<path d=\"M10,20 C3,20 3,12 9,12 C9,5 19,4 20,9 C25,5 31,10 28,14 C32,16 30,21 25,20 Z\" {a}/>",
             (ElementKind.Shape, "callout") => $"<path d=\"M3,4 H31 V17 H15 L10,22 L11,17 H3 Z\" {a}/>",
+            (ElementKind.Shape, Strokes.PenSubtype) => "<path d=\"M4,19 C9,8 13,22 18,12 S26,6 30,9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>",
+            (ElementKind.Shape, Strokes.HighlighterSubtype) => "<path d=\"M5,15 C11,11 20,17 29,12\" fill=\"none\" stroke=\"#ffd400\" stroke-opacity=\".7\" stroke-width=\"7\" stroke-linecap=\"round\"/>",
+            (ElementKind.Shape, Strokes.EraserTool) => "<path d=\"M8,19 L18,6 L28,13 L20,23 H11 Z M13,13 L23,20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/><line x1=\"11\" y1=\"23\" x2=\"31\" y2=\"23\" stroke=\"currentColor\" stroke-width=\"1.2\" opacity=\".5\"/>",
             (ElementKind.Shape, DiagramExtras.ImageSubtype) => $"<rect x=\"3\" y=\"3\" width=\"28\" height=\"20\" rx=\"2\" {a}/><circle cx=\"11\" cy=\"9.5\" r=\"2.4\" fill=\"currentColor\"/><path d=\"M5,21 L13,13 L18,18 L22,14 L29,21 Z\" fill=\"currentColor\" opacity=\".75\"/>",
             (ElementKind.Pseudostate, "choice") => $"<polygon points=\"17,4 27,13 17,22 7,13\" {a}/>",
             (ElementKind.Pseudostate, "junction") => "<circle cx=\"17\" cy=\"13\" r=\"5\" fill=\"currentColor\"/>",
@@ -869,6 +890,7 @@
             _paletteDrag = null;
             C.SetTool(null);
             if (IsImageItem(palette)) { _ = PickImage(e.ClientX - _origin.Left, e.ClientY - _origin.Top); return; }
+            if (IsInkItem(palette)) return;
             C.CreateAtScreen(palette, e.ClientX - _origin.Left, e.ClientY - _origin.Top);
             _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
             return;
@@ -1080,6 +1102,12 @@
                 var tb = C.BoundsOf(target);
                 builder.AddMarkupContent(seq++, $"<rect x=\"{F(tb.X - 4 * zi)}\" y=\"{F(tb.Y - 4 * zi)}\" width=\"{F(tb.Width + 8 * zi)}\" height=\"{F(tb.Height + 8 * zi)}\" rx=\"{F(7 * zi)}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{sw}\"/>");
             }
+        }
+        if (C.InkPreview is { } ink)
+        {
+            var hl = C.ToolSubtype == Strokes.HighlighterSubtype;
+            var color = C.InkColor is { } ic ? System.Net.WebUtility.HtmlEncode(ic) : hl ? Strokes.HighlighterColor : Theme.Stroke;
+            builder.AddMarkupContent(seq++, $"<path class=\"ink-preview\" d=\"{Strokes.SmoothPath(ink)}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{F(C.InkWidth)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"{(hl ? $" stroke-opacity=\"{F(Strokes.HighlighterOpacity)}\"" : "")}/>");
         }
         if (C.Current == DiagramController.Gesture.Marquee)
         {

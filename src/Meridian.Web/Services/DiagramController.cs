@@ -16,7 +16,7 @@ public sealed partial class DiagramController
     public const double Grid = 10;
     public const double HandleSize = 8;
 
-    public enum Gesture { None, Move, Resize, Connect, Marquee, Pan, Waypoint, QuickConnect, EdgeDrag, Separator }
+    public enum Gesture { None, Move, Resize, Connect, Marquee, Pan, Waypoint, QuickConnect, EdgeDrag, Separator, Draw, Erase }
 
     /// <summary>An alignment guide shown while dragging (a line where edges or centres line up).</summary>
     public readonly record struct Guide(bool Vertical, double Pos, double From, double To);
@@ -418,6 +418,8 @@ public sealed partial class DiagramController
                 case NodeShape.Fragment when p.X > b.X + tol && p.X < b.Right - tol && p.Y > b.Y + 22 && p.Y < b.Bottom - tol:
                     continue;
             }
+            // Freehand strokes: only near the ink, not the empty corners of their box.
+            if (Strokes.IsStroke(n) && !HitsStroke(n, b, p)) continue;
             return n;
         }
         return null;
@@ -490,7 +492,7 @@ public sealed partial class DiagramController
 
     public bool ShowsQuickArrows(DiagramNode n) =>
         !ReadOnly && Tool == null && Current is Gesture.None
-        && !Notation.IsBorderShape(n.Element) && n.Element.Kind != ElementKind.Comment
+        && !Notation.IsBorderShape(n.Element) && n.Element.Kind != ElementKind.Comment && !Strokes.IsStroke(n)
         && Notation.ShapeOf(n.Element) is not (NodeShape.Swimlane or NodeShape.Pool or NodeShape.Fragment)
         && Successor(n.Element) is { } s && DefaultLink(n.Element.Kind, s.Kind) != null;
 
@@ -722,6 +724,7 @@ public sealed partial class DiagramController
         if (button != 0) return false;
 
         if (ReadOnly) { Tool = null; }
+        if (BeginInk()) return false;   // pen, highlighter, eraser (DiagramController.Ink.cs)
         if (Tool is { } tool)
         {
             if (Metamodel.IsRelationship(tool))
@@ -916,6 +919,8 @@ public sealed partial class DiagramController
                 return true;
             case Gesture.Separator:
                 return DragSeparator();
+            case Gesture.Draw or Gesture.Erase:
+                return MoveInk(mods);
             case Gesture.Connect:
             case Gesture.Marquee:
                 return true;
@@ -961,6 +966,9 @@ public sealed partial class DiagramController
                 case Gesture.Separator:
                     EndSeparatorDrag();
                     break;
+                case Gesture.Draw:
+                    EndInk();
+                    break;
                 case Gesture.Connect when ConnectFrom != null && Tool is { } kind:
                 {
                     var to = HitNode(CurrentModel);
@@ -1001,6 +1009,7 @@ public sealed partial class DiagramController
             _dragEdge = null;
             _quickDir = -1;
             _handle = -1;
+            _ink.Clear();
         }
     }
 

@@ -74,6 +74,8 @@ opens it again.
   - A format bar for fill, line and text colors and line width, with a format painter.
   - **Colour rules** color shapes by their data (kind, stereotype, tagged values, pass / fail), listed in the
     legend and kept in exports, print and reports. ([guide](docs-site/docs/diagrams.md#colour-rules))
+  - **Pen, highlighter and eraser** on whiteboards, with a mouse, pen or finger. ([guide](docs-site/docs/drawing.md#pen-and-highlighter))
+  - **Org charts from Excel / CSV**: one row per person, drawn as a tree; importing again updates it. ([guide](docs-site/docs/org-chart.md))
   - **Multi-select** shapes and connectors, edit them together in the Inspector, and **Link to…** one element in a
     single undo step. ([guide](docs-site/docs/multi-select.md))
 - **Generate diagrams**
