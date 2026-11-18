@@ -122,8 +122,21 @@ public static partial class SvgRenderer
         return a;
     }
 
-    /// <summary>A colour style of a shape (fill, stroke, text), sanitised by <see cref="SafeColor"/>.</summary>
-    private static string? StyleColor(DiagramNode n, string key) => n.Style.TryGetValue(key, out var v) ? SafeColor(v) : null;
+    /// <summary>
+    /// A colour style of a shape (fill, stroke, text), sanitised by <see cref="SafeColor"/>. A colour rule of the diagram
+    /// that matches the shape overrides the shape's own colour for the parts the rule sets.
+    /// </summary>
+    private static string? StyleColor(DiagramNode n, string key)
+    {
+        if (RuleColor(_rules?.ForNode(n.Id), key) is { } rc) return rc;
+        return n.Style.TryGetValue(key, out var v) ? SafeColor(v) : null;
+    }
+
+    private static string? RuleColor(ColorRule? rule, string key) =>
+        rule == null ? null : SafeColor(key switch { "fill" => rule.Fill, "stroke" => rule.Line, "text" => rule.Text, _ => null });
+
+    /// <summary>Colour rules of the diagram being drawn (see <see cref="ColorRules"/>), evaluated once per render.</summary>
+    [ThreadStatic] private static ColorRules.Matches? _rules;
 
     /// <param name="theme">Colours (light by default).</param>
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
@@ -186,6 +199,16 @@ public static partial class SvgRenderer
     {
         var t = theme ?? SvgTheme.Light;
         d = DiagramExtras.VisibleView(d);   // layers: hidden ones are skipped, the rest drawn bottom layer first
+        var outerRules = _rules;
+        _rules = ColorRules.Evaluate(model, d);
+        try { RenderBodyCore(sb, model, d, bounds, waypoints, t, viewport, precomputedRoutes); }
+        finally { _rules = outerRules; }
+    }
+
+    private static void RenderBodyCore(StringBuilder sb, ModelRepository model, Diagram d, Func<DiagramNode, Bounds> bounds,
+                                       Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints, SvgTheme t, Bounds? viewport,
+                                       Dictionary<DiagramEdge, IReadOnlyList<Pt>>? precomputedRoutes)
+    {
         // Shape bounds are asked for many times per render (routing, containers, edges): compute each once.
         var raw = bounds;
         var memo = new Dictionary<DiagramNode, Bounds>(d.Nodes.Count, ReferenceEqualityComparer.Instance);
@@ -245,7 +268,12 @@ public static partial class SvgRenderer
     {
         if (d.Get(FieldKeys.Legend) != "true" || d.Nodes.Count == 0) return;
         var entries = new List<(string Color, string Label)>();
-        foreach (var g in d.Nodes.GroupBy(n => HeaderColor(m, n, t)))
+        // Colour rules first (in rule order), then the kinds and stereotypes of the shapes no rule colours.
+        var rules = _rules ?? ColorRules.Evaluate(m, d);
+        var ruleEntries = new List<(string Fill, string? Stroke, string Label)>();
+        foreach (var r in rules.Active)
+            ruleEntries.Add((RuleColor(r, "fill") ?? t.NodeFill, RuleColor(r, "stroke"), r.LegendText));
+        foreach (var g in d.Nodes.Where(n => RuleColor(rules.ForNode(n.Id), "fill") == null).GroupBy(n => HeaderColor(m, n, t)))
         {
             var n = g.First();
             var label = n.Style.ContainsKey("fill") ? "Highlighted"
@@ -256,10 +284,16 @@ public static partial class SvgRenderer
         }
         var all = d.Nodes.Select(bounds).ToList();
         var x = all.Max(b => b.Right) + 40; var y = all.Min(b => b.Y);
-        var h = 30 + entries.Count * 20;
+        var h = 30 + (entries.Count + ruleEntries.Count) * 20;
         sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"190\" height=\"{F(h)}\" rx=\"6\" fill=\"{t.NodeFill}\" stroke=\"{t.Stroke}\"/>");
         Text(sb, x + 10, y + 18, "Legend", true, "start", size: 12, color: t.Text);
         var yy = y + 34;
+        foreach (var (fill, stroke, label) in ruleEntries)
+        {
+            sb.Append($"<rect class=\"legend-rule\" x=\"{F(x + 10)}\" y=\"{F(yy - 10)}\" width=\"18\" height=\"12\" rx=\"2\" fill=\"{fill}\" stroke=\"{stroke ?? t.Stroke}\"{(stroke != null ? " stroke-width=\"2\"" : "")}/>");
+            Text(sb, x + 36, yy, Trunc(label, 140), false, "start", size: 11.5, color: t.Text);
+            yy += 20;
+        }
         foreach (var (color, label) in entries)
         {
             sb.Append($"<rect x=\"{F(x + 10)}\" y=\"{F(yy - 10)}\" width=\"18\" height=\"12\" rx=\"2\" fill=\"{color}\" stroke=\"{t.Stroke}\"/>");
@@ -324,6 +358,11 @@ public static partial class SvgRenderer
         var width = StyleNumber(e.Style, "width", 0.5, 12) ?? 1.3;
         var labelSize = StyleNumber(e.Style, "fontSize", 6, 48) ?? 11;
         if (e.Style.TryGetValue("text", out var etc) && SafeColor(etc) is { } labelColor) t = t with { Muted = labelColor };
+        if (_rules?.ForEdge(e.Id) is { } rule)
+        {
+            if ((RuleColor(rule, "stroke") ?? RuleColor(rule, "fill")) is { } rl) t = t with { Edge = rl };
+            if (RuleColor(rule, "text") is { } rt) t = t with { Muted = rt };
+        }
         if (e.Relationship.Kind == ElementKind.Message)
             style = e.Relationship.Get(FieldKeys.MessageSort) switch
             {
@@ -514,6 +553,7 @@ public static partial class SvgRenderer
         try { RenderNodeCore(sb, m, d, n, b, t); }
         finally { _fontScale = scale; }
         if (link != null) LinkBadge(sb, b, link, t);
+        if (_rules?.ForNode(n.Id) is { Badge: { Length: > 0 } badge } rule) RuleBadge(sb, b, badge, rule, t);
         if (anchor) sb.Append("</a>");
         // Elements of used projects (libraries) shown on the project's own diagrams get a subtle marker.
         if (m.HasLibraries && m.LibraryOf(n.Element) is { } lib && !m.IsLibraryElement(d)) LibraryMarker(sb, b, lib.Info, t);
@@ -557,6 +597,31 @@ public static partial class SvgRenderer
             sb.Append($"<path d=\"M{F(cx - 6)},{F(cy - 2)} h12 v10 h-12 Z M{F(cx - 4)},{F(cy - 2)} v-3 a4,4 0 0 1 8,0 v3\" fill=\"none\" stroke=\"{t.Muted}\" stroke-width=\"1.5\"/>");
         if (b.Height >= 44 && b.Width >= 70) Text(sb, cx, cy + 22, "Restricted", false, "middle", italic: true, size: 11, color: t.Muted);
         sb.Append("</g>");
+    }
+
+    /// <summary>A colour rule's badge: a small pill with short text in the top-left corner of the shape.</summary>
+    private static void RuleBadge(StringBuilder sb, Bounds b, string badge, ColorRule rule, SvgTheme t)
+    {
+        if (b.Width < 24 || b.Height < 14) return;
+        var bg = RuleColor(rule, "stroke") ?? RuleColor(rule, "fill") ?? t.TraceTitle;
+        var ink = Contrast(bg) ?? t.Text;
+        var w = Math.Min(b.Width - 6, Math.Max(16, badge.Length * 6.6 + 8));
+        double x = b.X - 6, y = b.Y - 8, h = 16;
+        sb.Append($"<g class=\"rule-badge\"><title>{E(rule.LegendText)}</title>");
+        sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" rx=\"8\" fill=\"{bg}\" stroke=\"{t.NodeFill}\" stroke-width=\"1.2\"/>");
+        sb.Append($"<text x=\"{F(x + w / 2)}\" y=\"{F(y + 11.5)}\" text-anchor=\"middle\" font-size=\"10.5\" font-weight=\"600\" fill=\"{ink}\">{E(Trunc(badge, w - 6))}</text>");
+        sb.Append("</g>");
+    }
+
+    /// <summary>Black or white, whichever reads better on a hex colour; null for other colour forms.</summary>
+    private static string? Contrast(string color)
+    {
+        var c = color.TrimStart('#');
+        if (!color.StartsWith('#') || c.Length is not (3 or 6)) return null;
+        if (c.Length == 3) c = string.Concat(c.Select(ch => $"{ch}{ch}"));
+        if (!int.TryParse(c, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var v)) return null;
+        var lum = (0.299 * (v >> 16 & 255) + 0.587 * (v >> 8 & 255) + 0.114 * (v & 255)) / 255;
+        return lum > 0.6 ? "#1a2233" : "#ffffff";
     }
 
     /// <summary>The small chain-link icon in the bottom-right corner of a shape that has a hyperlink.</summary>

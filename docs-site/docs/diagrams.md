@@ -166,4 +166,39 @@ operational and resource performers, services, security controls and more).
 ## Legends
 
 Select a diagram and switch on **Show legend** in the inspector to add an automatic legend of the element kinds,
-stereotype colours and highlights used on it.
+stereotype colours and highlights used on it. Colour rules that colour at least one shape are listed first, with
+their label.
+
+## Colour rules
+
+Colour rules colour shapes by their data, like conditional formatting in a spreadsheet: failed requirements in red,
+ASIL D blocks in orange, anything heavier than 50 kg with a badge.
+
+1. Select the diagram in the model explorer, or open it and use ⌘K *Colour rules for this diagram* (or *Add colour
+   rule to this diagram*).
+2. Under **Colour rules** in the inspector, press **+**.
+3. Pick the condition: a kind (*Shapes of kind*), then *Where* a value, an operator and a value. For example
+   `tag:ASIL` `=` `D`, or `verificationResult` `contains` `fail`.
+4. Pick a **Fill**, **Line** and **Text** colour (each is optional), an optional **Badge** (a short mark such as `!`
+   drawn on the shape's corner) and a **Label** for the legend.
+
+The condition is a [model query](tables-queries.md#queries), so the **Condition (query)** field accepts the full text
+form: `kind:Block stereotype:critical where mass > 50 and not has:satisfy`. Numbers compare as numbers, also with
+units (`mass > "1 t"` matches `1200 kg`). Useful keys:
+
+| Key | Matches |
+| --- | --- |
+| `kind:Requirement` | one kind of element |
+| `stereotype:S`, `stereotype contains S` | elements with a stereotype |
+| `tag:ASIL`, `field:status`, `mass` | tagged values, raw fields, value properties |
+| `verificationResult` | a requirement's last verification result (`pass`, `fail`, `inconclusive`, with `(stale)`) |
+
+How rules apply:
+
+- Rules are checked from the top; the **first rule that matches** a shape colours it. Use the arrows to reorder.
+- A rule's colours **replace the shape's own colours** (from the format bar or the inspector), but only the ones the
+  rule sets: a rule with just a fill keeps a manual line colour. Shapes no rule matches keep their own colours.
+- Rules with a kind of relationship (`kind:Satisfy`) colour the matching paths with their line colour.
+- Each rule shows how many shapes it colours; a condition that doesn't parse shows *invalid* and colours nothing.
+- Rules belong to the diagram: they are saved with the project and in XMI, shared with collaborators, and every
+  change is one undo step. SVG and PNG export, printing and reports show the same colours as the canvas.

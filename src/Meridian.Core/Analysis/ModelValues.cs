@@ -26,7 +26,7 @@ public static class ViewFields
 /// <item>a bare word resolves to a special key, then a raw field, a tagged value, and finally an owned value property</item>
 /// </list>
 /// </summary>
-public static class ModelValues
+public static partial class ModelValues
 {
     private static readonly Dictionary<string, string> Aliases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -215,6 +215,21 @@ public static class ModelValues
 
     public static bool TryNumber(string s, out double d) =>
         double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out d);
+
+    /// <summary>A number with an optional unit ("1400 kg", "12.5", "3 m/s"); <paramref name="unit"/> is null for a bare number.</summary>
+    public static bool TryQuantity(string s, out double value, out Unit? unit)
+    {
+        value = 0; unit = null;
+        var m = QuantityPattern().Match(s ?? "");
+        if (!m.Success || !double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return false;
+        var symbol = m.Groups[2].Value.Trim();
+        if (symbol.Length == 0) return true;
+        try { return Units.TryParse(symbol, out var u, out _) && (unit = u) != null; }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException or InvalidOperationException or KeyNotFoundException) { return false; }
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(\S.{0,31})?\s*$")]
+    private static partial System.Text.RegularExpressions.Regex QuantityPattern();
 
     private static string ElementLabel(Element e) => e.Kind == ElementKind.Requirement && e.Get(FieldKeys.RequirementId) is { Length: > 0 } id ? $"{id} {e.Name}" : e.DisplayName;
 

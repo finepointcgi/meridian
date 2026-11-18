@@ -101,6 +101,7 @@ public partial class Workbench
         list.AddRange(FindReplacePaletteCommands());   // Workbench.FindReplace.cs
         list.AddRange(PrintPaletteCommands());   // Workbench.Print.cs
         list.AddRange(InstancePaletteCommands());     // Workbench.Instances.cs
+        list.AddRange(ColorRulePaletteCommands());   // Workbench.ColorRules.cs
         foreach (var t in Enum.GetValues<DiagramType>())
         {
             var type = t;
