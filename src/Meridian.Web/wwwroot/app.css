@@ -802,3 +802,4 @@ main.workbench > section.card.center, .diagram-host { overflow: clip; }
 .derive-dialog .chg-legend-inline .chg-sw.added i { border-color: var(--chg-added); }
 .derive-dialog .chg-legend-inline .chg-sw.changed i { border-color: var(--chg-changed); }
 .derive-dialog .chg-legend-inline .chg-sw.removed i { border-color: var(--chg-removed); border-style: dashed; }
+.canvas.drawing { cursor: crosshair; touch-action: none; }

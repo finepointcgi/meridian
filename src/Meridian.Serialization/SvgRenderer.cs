@@ -966,6 +966,9 @@ public static partial class SvgRenderer
                     WrappedCentered(sb, cx, bo + 14, Math.Max(40, w), text, StyleColor(n, "text") ?? t.Text);
                 return;
             }
+            case Strokes.PenSubtype or Strokes.HighlighterSubtype:
+                RenderStroke(sb, n, b, t);
+                return;
             case OrgChart.CardSubtype:
                 RenderCard(sb, n, b, text, fill, stroke, t);
                 return;
@@ -1036,6 +1039,18 @@ public static partial class SvgRenderer
         }
         var ink = StyleColor(n, "text") ?? t.Text;
         if (!string.IsNullOrEmpty(text)) WrappedCentered(sb, cx, textY, Math.Max(20, textW), text, ink);
+    }
+
+    /// <summary>A freehand pen or highlighter stroke: a smoothed path through its points, scaled to the shape's bounds.</summary>
+    private static void RenderStroke(StringBuilder sb, DiagramNode n, Bounds b, SvgTheme t)
+    {
+        var pts = Strokes.PointsOf(n, b);
+        if (pts.Count == 0) return;
+        var highlighter = Strokes.IsHighlighter(n.Element);
+        var color = StyleColor(n, "stroke") ?? (highlighter ? Strokes.HighlighterColor : t.Stroke);
+        var dash = DashArray(n.Style.GetValueOrDefault("dash")) is { } da ? $" stroke-dasharray=\"{da}\"" : "";
+        var opacity = highlighter ? $" stroke-opacity=\"{F(Strokes.HighlighterOpacity)}\"" : "";
+        sb.Append($"<path d=\"{Strokes.SmoothPath(pts)}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{F(Strokes.WidthOf(n))}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"{opacity}{dash}/>");
     }
 
     /// <summary>An org chart card: the person's name in bold, their title below, the department small, and a coloured band on top.</summary>

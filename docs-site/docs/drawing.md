@@ -82,6 +82,22 @@ selected shapes on a layer. Hidden layers are left out of SVG and PNG exports.
 Drop an image file onto the canvas, paste one from the clipboard, or use the *Image* tile in the shapes panel. Images
 are downscaled to at most 2 MB and stored in the model, so they travel with the project, its versions and exports.
 
+## Pen and highlighter
+
+Whiteboards have a **Draw** section in the shapes panel with three tools:
+
+- **Pen**: drag to draw a line by hand. Hold **Shift** for a straight line.
+- **Highlighter**: the same, but wide and see-through.
+- **Eraser**: click or drag over a pen or highlighter stroke to delete it. Other shapes are not touched.
+
+The tools work with a mouse, a pen or a finger, and stay on until you press **Esc** or click the tile again. Strokes
+are smoothed as you let go.
+
+A stroke is a shape like any other: click it to select it, drag to move it, drag a handle to stretch it, press
+**Backspace** to remove it, **⌘Z** to undo. The format bar sets its **line colour**, **line width** and **line
+pattern**; the next stroke you draw with the same tool keeps that colour and width. A stroke goes on the active
+layer, and it shows in SVG, PNG and printed exports.
+
 ## Links
 
 Right-click a shape and choose **Add link…** to attach a web address (`http`, `https` or `mailto`) or a link to another

@@ -100,11 +100,12 @@ function onDown(e) {
     if (!canvas) return;
   }
 
-  // Edit mode: a single finger goes to the canvas's own handlers (select, move, connect…).
-  if (editMode && pointers.size === 0 && passthroughId === null) {
+  // Edit mode: a single finger goes to the canvas's own handlers (select, move, connect…). So does a finger drawing
+  // with the pen, highlighter or eraser of a whiteboard (the canvas has the "drawing" class), in any mode.
+  if ((editMode || canvas.classList.contains("drawing")) && pointers.size === 0 && passthroughId === null) {
     passthroughId = e.pointerId;
     passthroughPos = { x: e.clientX, y: e.clientY };
-    armPassthroughLongPress(canvas, e);
+    if (!canvas.classList.contains("drawing")) armPassthroughLongPress(canvas, e);
     return;
   }
   cancelPassthroughLongPress();
