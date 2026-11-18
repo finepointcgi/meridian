@@ -15,6 +15,9 @@ Sync) and Enterprise Architect's *CSV import / export specifications*.
 | Ribbon **Requirements → Exchange → Import / re-import Excel / CSV**, and **Re-import** in the requirements table | the dialog with the **Requirements** preset |
 | ⌘K **Import spreadsheet**, **Export to spreadsheet with a mapping**, **Import parts list (BOM)** | the dialog (the last one with the parts-list preset) |
 
+To draw an org chart from a list of people instead, use **Import ▸ Org chart from spreadsheet…** (see
+[Org charts](org-chart.md)).
+
 The dialog has three steps: **Source**, **Mapping** and **Review**. Nothing changes in the model until you press
 **Apply**, and applying is **one undo step** (⌘Z puts everything back).
 

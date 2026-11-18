@@ -966,6 +966,9 @@ public static partial class SvgRenderer
                     WrappedCentered(sb, cx, bo + 14, Math.Max(40, w), text, StyleColor(n, "text") ?? t.Text);
                 return;
             }
+            case OrgChart.CardSubtype:
+                RenderCard(sb, n, b, text, fill, stroke, t);
+                return;
             case "text":
                 sb.Append($"<rect x=\"{F(x)}\" y=\"{F(y)}\" width=\"{F(w)}\" height=\"{F(h)}\" fill=\"transparent\"/>");
                 break;
@@ -1033,6 +1036,25 @@ public static partial class SvgRenderer
         }
         var ink = StyleColor(n, "text") ?? t.Text;
         if (!string.IsNullOrEmpty(text)) WrappedCentered(sb, cx, textY, Math.Max(20, textW), text, ink);
+    }
+
+    /// <summary>An org chart card: the person's name in bold, their title below, the department small, and a coloured band on top.</summary>
+    private static void RenderCard(StringBuilder sb, DiagramNode n, Bounds b, string name, string fill, string stroke, SvgTheme t)
+    {
+        sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" rx=\"6\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.2\" filter=\"url(#msh)\"/>");
+        if (StyleColor(n, OrgChart.AccentStyle) is { } band)
+            sb.Append($"<path d=\"M{F(b.X)},{F(b.Y + 6)} A6,6 0 0 1 {F(b.X + 6)},{F(b.Y)} H{F(b.Right - 6)} A6,6 0 0 1 {F(b.Right)},{F(b.Y + 6)} V{F(b.Y + 7)} H{F(b.X)} Z\" fill=\"{band}\"/>");
+        var ink = StyleColor(n, "text") ?? t.Text;
+        var muted = StyleColor(n, "text") ?? t.Muted;
+        var title = n.Element.Get(OrgChart.TitleField) ?? "";
+        var dept = n.Element.Get(OrgChart.DepartmentField) ?? "";
+        var lines = 1 + (title.Length > 0 ? 1 : 0) + (dept.Length > 0 ? 1 : 0);
+        var cx = b.Center.X;
+        var textW = b.Width - 12;
+        var y = b.Center.Y - (lines - 1) * 8 + 5 + 2;
+        Text(sb, cx, y, Trunc(name, textW, 7.4), true, "middle", size: 13, color: ink);
+        if (title.Length > 0) { y += 16; Text(sb, cx, y, Trunc(title, textW, 6.4), false, "middle", size: 11.5, color: ink); }
+        if (dept.Length > 0) { y += 15; Text(sb, cx, y, Trunc(dept, textW, 5.8), false, "middle", size: 10, color: muted); }
     }
 
     private static void RenderCompartments(StringBuilder sb, Bounds b, NodeContent c, string fill, ElementKind kind, SvgTheme t, string headerColor)

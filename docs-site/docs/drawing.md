@@ -123,4 +123,5 @@ package overview, structure, internal structure, requirement and behaviour views
 ## Diagram templates
 
 **+** on the tab strip → **From template…** creates a ready-made diagram in the selected package: flowchart, mind map,
-BPMN process, ER diagram, requirement tree, system context or ArchiMate layered view.
+BPMN process, ER diagram, requirement tree, system context, ArchiMate layered view or org chart. To draw an org chart
+from your own people list, see [Org charts](org-chart.md).

@@ -72,6 +72,8 @@
     href: import-export.md
   - name: Spreadsheet import (Excel / CSV)
     href: spreadsheet-import.md
+  - name: Org charts from a spreadsheet
+    href: org-chart.md
   - name: Integrations (Jira, DOORS, Polarion, webhooks)
     href: integrations.md
   - name: AI assistants (MCP)
