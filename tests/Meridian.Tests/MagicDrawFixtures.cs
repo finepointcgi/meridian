@@ -234,7 +234,12 @@ internal static class MagicDrawFixtures
                 </node>
                 <node xmi:type='uml:SendSignalAction' xmi:id='_a3' name='Notify' signal='_sigStart'/>
                 <node xmi:type='uml:ActivityFinalNode' xmi:id='_fin'/>
-                <node xmi:type='uml:StructuredActivityNode' xmi:id='_san' name='Block of work'/>
+                <node xmi:type='uml:StructuredActivityNode' xmi:id='_san' name='Block of work'>
+                  <node xmi:type='uml:InitialNode' xmi:id='_san_in'/>
+                  <node xmi:type='uml:CallBehaviorAction' xmi:id='_san_a' name='Plan route' behavior='_ob'/>
+                  <edge xmi:type='uml:ControlFlow' xmi:id='_san_cf' source='_san_in' target='_san_a'/>
+                </node>
+                <edge xmi:type='uml:ControlFlow' xmi:id='_cf5' source='_a3' target='_san'/>
                 <edge xmi:type='uml:ControlFlow' xmi:id='_cf1' source='_in' target='_a1'>
                   <guard xmi:type='uml:LiteralBoolean' xmi:id='_cf1_g' value='true'/>
                 </edge>
@@ -248,6 +253,7 @@ internal static class MagicDrawFixtures
                 {D("_actd", "Fly mission", "_act1", "SysML Activity Diagram", "Activity Diagram", ActViews)}
               </packagedElement>
               <packagedElement xmi:type='uml:Activity' xmi:id='_act2' name='Take off'/>
+              <packagedElement xmi:type='uml:OpaqueBehavior' xmi:id='_ob' name='Compute route'><body>route = plan(waypoints)</body><language>Python</language></packagedElement>
               <packagedElement xmi:type='uml:Activity' xmi:id='_tc' name='Hover test'>
                 <node xmi:type='uml:OpaqueAction' xmi:id='_tca' name='Hover 60 s'/>
               </packagedElement>
@@ -343,7 +349,7 @@ internal static class MagicDrawFixtures
           <StandardProfile:Refine xmi:id='_ref1_st' base_Abstraction='_ref1'/>
           <StandardProfile:Trace xmi:id='_tr1_st' base_Abstraction='_tr1'/>
           <sysml:Allocate xmi:id='_alloc1_st' base_Abstraction='_alloc1'/>
-          <MyProfile:Critical xmi:id='_crit' base_Class='_drone' level='high'><reviewers>Ana</reviewers><reviewers>Bo</reviewers></MyProfile:Critical>
+          <MyProfile:Critical xmi:id='_crit' base_Class='_drone' level='high' relatedTo='_req1 _req2'><reviewers>Ana</reviewers><reviewers>Bo</reviewers><owner xmi:idref='_ctrl'/><backup href='other.mdzip#_ext_99'/></MyProfile:Critical>
           <MagicDraw_Profile:DiagramInfo xmi:id='_di' base_Diagram='_bdd' Creation_date='2024-01-01'/>
           <xmi:Extension extender='MagicDraw UML 2021x'><filePart name='project.options' type='XML'>ignored</filePart></xmi:Extension>
         </xmi:XMI>

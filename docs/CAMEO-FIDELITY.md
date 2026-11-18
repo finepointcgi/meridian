@@ -10,8 +10,23 @@ importer reaches one of three outcomes:
 | Outcome | Meaning |
 | --- | --- |
 | **Imported** | The element became a Meridian element (its XMI id is in the builder's id map). |
-| **Folded** | Its content went into a field of another element: documentation comments, the constraint on a constraint block, interaction operands (guards on the combined fragment), the collaboration that wraps an interaction and its attributes (shown through lifelines), `base_` properties of stereotypes, item flows that become a connector's item flow. The builder calls `Fold(id)` at each of those places. |
+| **Folded** | Its content went into a field of another element: documentation comments, the constraint on a constraint block, interaction operands (guards on the combined fragment), the collaboration that wraps an interaction and its attributes (shown through lifelines), `base_` properties of stereotypes, item flows that become a connector's item flow, conditional node clauses (tags on the conditional node). The builder calls `Fold(id)` at each of those places. |
 | **Not imported** | Everything else. This is the measure of loss. |
+
+### Approximated constructs
+
+These are counted as **imported**, because they become a Meridian element under their own id, but the import changes
+their shape. Each one adds a warning to the report.
+
+| Cameo construct | In Meridian |
+| --- | --- |
+| `StructuredActivityNode`, `LoopNode`, `ConditionalNode`, `SequenceNode`, `ExpansionRegion` | Action stereotyped «structured» / «loopNode» / «conditionalNode» / «sequenceNode» / «expansionRegion» (tag `actionKind` holds the UML type). It keeps its pins and the flows into and out of it. The nodes and flows inside are moved into the owning activity. Loop `setupPart` / `test` / `bodyPart` and clause `test` / `body` become tags that name the actions. `ExpansionNode` becomes an object node. |
+| `OpaqueBehavior`, `FunctionBehavior` | Activity stereotyped «opaqueBehavior» / «functionBehavior», with the body in the body field and the language in tag `language`. An opaque behavior used as a state's entry / exit / do behavior or a transition effect is still read into that field and not counted separately. |
+| Orthogonal regions | Merged into the state's one region (warning per state). Meridian has no region element; the region ids map to the owning state. |
+
+Tagged values that reference elements (an `xmi:idref` / `href` child, or an attribute made only of ids from the file) are
+written as the referenced elements' names once the model is built. An id that nothing in the file names (an element of a
+used project that was not loaded) is kept as the id, and the report warns how many there were.
 
 The following are not counted as model elements: value specifications (`Literal*`, `OpaqueExpression`, `InstanceValue`…),
 events, occurrence and execution specifications, imports, profile applications, and features that the parent element

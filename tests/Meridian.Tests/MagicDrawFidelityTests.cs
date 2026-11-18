@@ -38,8 +38,13 @@ public sealed class MagicDrawFidelityTests : IDisposable
         var lost = r.Losses.ToDictionary(l => l.Type, l => l.Tally.NotImported);
         Assert.DoesNotContain("InstanceSpecification", lost.Keys);   // imported as instances since 0.10
         Assert.Equal(1, lost["Frobnicator"]);
-        Assert.Equal(1, lost["StructuredActivityNode"]);   // nested under an activity: found by the inventory, not only the skip list
         Assert.Equal(1, lost["Message"]);                  // the lost message
+        Assert.Equal(1, lost["Dependency"]);               // its supplier is not in the project
+        Assert.Equal(3, lost.Count);
+        // Structured activity nodes (as actions, contents flattened into the activity) and opaque behaviors now come across.
+        Assert.Equal(1, r.SourceTypes["StructuredActivityNode"].Imported);
+        Assert.Equal(1, r.SourceTypes["OpaqueBehavior"].Imported);
+        Assert.DoesNotContain("InteractionConstraint", r.SourceTypes.Keys);   // operand guards are read by the fragment
         Assert.DoesNotContain("Class", lost.Keys);          // blocks all came across
         Assert.DoesNotContain("Comment", lost.Keys);        // documentation comments are folded into the element, not lost
         Assert.Equal(r.ElementsInFile, r.ElementsKept + r.ElementsNotImported);
@@ -53,7 +58,7 @@ public sealed class MagicDrawFidelityTests : IDisposable
         Assert.Contains(r.Lines("drone.mdzip"), l => l.StartsWith("  Fidelity: Kept "));
         var md = r.ToMarkdown("drone.mdzip");
         Assert.Contains("| Model elements |", md);
-        Assert.Contains("| uml:StructuredActivityNode | 1 | 0 | 0 | 1 |", md);
+        Assert.Contains("| uml:Frobnicator | 1 | 0 | 0 | 1 |", md);
     }
 
     [Fact]
@@ -79,6 +84,77 @@ public sealed class MagicDrawFidelityTests : IDisposable
         Assert.Equal(1, r.SourceTypes["Comment"].Folded);
         Assert.Equal(2, r.StereotypeApplications);   // the tool profile's application is not counted
         Assert.StartsWith("Nothing lost", r.FidelitySummary);
+    }
+
+    [Fact]
+    public void Structured_Nodes_And_Opaque_Behaviors_Are_Accounted_For()
+    {
+        var r = ImportXmi("""
+            <packagedElement xmi:type='uml:Class' xmi:id='_a' name='A'>
+              <ownedAttribute xmi:type='uml:Property' xmi:id='_a_x' name='x'/>
+            </packagedElement>
+            <packagedElement xmi:type='uml:InstanceSpecification' xmi:id='_i' name='a1' classifier='_a'>
+              <ownedComment xmi:type='uml:Comment' xmi:id='_i_doc' body='The first A'><annotatedElement xmi:idref='_i'/></ownedComment>
+              <slot xmi:type='uml:Slot' xmi:id='_i_s' definingFeature='_a_x'><value xmi:type='uml:LiteralInteger' xmi:id='_i_v' value='3'/></slot>
+            </packagedElement>
+            <packagedElement xmi:type='uml:FunctionBehavior' xmi:id='_fb' name='square'><body>x * x</body></packagedElement>
+            <packagedElement xmi:type='uml:Activity' xmi:id='_act' name='Work'>
+              <node xmi:type='uml:LoopNode' xmi:id='_loop' name='Repeat' isTestedFirst='true' test='_t' bodyPart='_b'>
+                <loopVariableInput xmi:type='uml:InputPin' xmi:id='_lvi' name='n'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_t' name='More?'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_b' name='Step'/>
+                <edge xmi:type='uml:ControlFlow' xmi:id='_tb' source='_t' target='_b'/>
+              </node>
+              <node xmi:type='uml:ConditionalNode' xmi:id='_cond' name='Choose'>
+                <clause xmi:type='uml:Clause' xmi:id='_cl1' test='_c1t' body='_c1b'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_c1t' name='Is hot'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_c1b' name='Cool'/>
+              </node>
+              <node xmi:type='uml:ExpansionRegion' xmi:id='_er' name='Each' mode='parallel'>
+                <inputElement xmi:idref='_en'/>
+                <node xmi:type='uml:CallBehaviorAction' xmi:id='_sq' name='Square it' behavior='_fb'/>
+              </node>
+              <node xmi:type='uml:ExpansionNode' xmi:id='_en' name='items' regionAsInput='_er'/>
+              <edge xmi:type='uml:ControlFlow' xmi:id='_f1' source='_loop' target='_cond'/>
+            </packagedElement>
+            """);
+
+        Assert.True(r.IsLossless, string.Join("\n", r.Lines("small.mdxml")));
+        Assert.Equal(1, r.SourceTypes["Clause"].Folded);
+        Assert.Equal(1, r.SourceTypes["LoopNode"].Imported);
+        Assert.Equal(1, r.SourceTypes["ExpansionNode"].Imported);
+        Assert.Equal(1, r.SourceTypes["FunctionBehavior"].Imported);
+        Assert.Equal(3, r.Warnings.Count(w => w.Contains("flattened")));
+        Assert.Empty(r.Skipped);
+    }
+
+    [Fact]
+    public void Structured_Node_Details_Are_Kept_As_Tags()
+    {
+        var path = Path.Combine(_dir.FullName, "loop.mdxml");
+        File.WriteAllText(path, Head + """
+            <packagedElement xmi:type='uml:Activity' xmi:id='_act' name='Work'>
+              <node xmi:type='uml:LoopNode' xmi:id='_loop' name='Repeat' isTestedFirst='true' test='_t' bodyPart='_b'>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_t' name='More?'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_b' name='Step'/>
+              </node>
+              <node xmi:type='uml:ConditionalNode' xmi:id='_cond' name='Choose'>
+                <clause xmi:type='uml:Clause' xmi:id='_cl1' test='_c1t' body='_c1b'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_c1t' name='Is hot'/>
+                <node xmi:type='uml:OpaqueAction' xmi:id='_c1b' name='Cool'/>
+              </node>
+            </packagedElement>
+            """ + "</uml:Model></xmi:XMI>");
+        var m = MagicDrawImporter.Import(path).Model;
+        var loop = m.Find("_loop")!;
+        Assert.Contains("loopNode", loop.Stereotypes);
+        Assert.Equal("More?", loop.Get(Meridian.Core.Model.FieldKeys.TagPrefix + "test"));
+        Assert.Equal("Step", loop.Get(Meridian.Core.Model.FieldKeys.TagPrefix + "bodyPart"));
+        Assert.Equal("true", loop.Get(Meridian.Core.Model.FieldKeys.TagPrefix + "isTestedFirst"));
+        Assert.Same(m.Find("_act"), m.Find("_b")!.Owner);
+        var cond = m.Find("_cond")!;
+        Assert.Equal("Is hot", cond.Get(Meridian.Core.Model.FieldKeys.TagPrefix + "clause1.test"));
+        Assert.Equal("Cool", cond.Get(Meridian.Core.Model.FieldKeys.TagPrefix + "clause1.body"));
     }
 
     [Fact]
