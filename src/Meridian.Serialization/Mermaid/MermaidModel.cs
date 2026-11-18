@@ -1,7 +1,7 @@
 namespace Meridian.Serialization.Mermaid;
 
 /// <summary>The Mermaid diagram types the importer understands.</summary>
-public enum MermaidDiagramKind { Flowchart, Class, State, Sequence, Requirement, EntityRelationship, C4, Unsupported }
+public enum MermaidDiagramKind { Flowchart, Class, State, Sequence, Requirement, EntityRelationship, C4, Ishikawa, Radar, Treemap, Unsupported }
 
 /// <summary>A parsed node: flowchart shape, class, state, participant, requirement, entity or C4 element.</summary>
 internal sealed class MNode
@@ -72,6 +72,8 @@ internal sealed class MGraph
     public List<MGroup> Groups { get; } = new();
     public List<MNote> Notes { get; } = new();
     public List<MSeq> Sequence { get; } = new();
+    /// <summary>The data of an Ishikawa, radar or treemap chart (drawn on a whiteboard).</summary>
+    public MChart? Chart { get; set; }
     public List<string> Warnings { get; } = new();
 
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);

@@ -4,7 +4,7 @@
 
 | Menu | What it does |
 | --- | --- |
-| Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml, Mermaid .mmd / .md) | creates a new project from a file |
+| Project menu → **Open a file as a new project…** (.meridian, .xmi, .sysml, EA .qea, Cameo .mdzip / .mdxml, Mermaid .mmd / .md, draw.io, Gliffy .gliffy) | creates a new project from a file |
 | Project menu → **Import into this project…** (BPMN, ArchiMate, SQL, C#, Mermaid, Cameo re-import) | adds the content of one or more files to the open project |
 | Project menu → **Paste Mermaid…** | imports Mermaid text, for example from an AI assistant, with a preview ([Mermaid](#mermaid)) |
 | Project menu → **Export ▸** **Download .meridian file**, **Export XMI 2.5.1**, **Export SysML v2 text**, **Export diagram as SVG / PNG / Mermaid**, **Copy diagram as Mermaid** | exports |
@@ -201,12 +201,23 @@ the ```` ```mermaid ```` blocks of Markdown files.
   block definition diagrams (blocks, interface blocks, enumerations, properties, operations, generalization,
   composition with part properties, aggregation, association, dependency, realization), state diagrams state machines,
   sequence diagrams interactions with messages and combined fragments, requirement diagrams requirements with
-  satisfy / verify / trace / derive / refine / copy, and ER and C4 diagrams blocks. Gantt charts, pie charts, mind maps
-  and other non-SysML types are skipped with a warning.
+  satisfy / verify / trace / derive / refine / copy, and ER and C4 diagrams blocks. Ishikawa (fishbone), radar and
+  treemap charts become editable whiteboard drawings. Gantt charts, pie charts, mind maps and other non-SysML types are
+  skipped with a warning.
 - **Export diagram as Mermaid (.mmd)** and **Copy diagram as Mermaid** write activity, state machine, sequence, block
-  definition and requirement diagrams back out.
+  definition and requirement diagrams back out, and the Ishikawa, radar and treemap drawings as those charts.
 
 See [Mermaid](mermaid.md) for the whole workflow and what each Mermaid diagram becomes.
+
+## draw.io and Gliffy
+
+**Open a file as a new project…**, **Import into this project…**, dropping files on the canvas and **Folder of
+diagrams…** read draw.io files (`.drawio`, `.drawio.svg`, `.drawio.png`) and Gliffy files (`.gliffy`, from Gliffy for
+Confluence or Gliffy Online). Pages drawn with UML shapes (classes, actors and use cases, lifelines, start / end states,
+or a flowchart with Start and End shapes) become model elements at the positions they had; every other page becomes a
+whiteboard drawing with its shapes, colours, text and lines. Lines not attached at both ends, rotation and library icons
+are listed as warnings. Details: [draw.io](https://github.com/finepointcgi/meridian/blob/main/docs/DRAWIO.md) and
+[Gliffy](https://github.com/finepointcgi/meridian/blob/main/docs/GLIFFY.md).
 
 ## Images
 

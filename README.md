@@ -129,9 +129,11 @@ opens it again.
   - Cameo / MagicDraw `.mdzip` and Enterprise Architect `.qea` import.
   - **Mermaid** import (flowchart, class, state, sequence, requirement, ER and C4) and export.
     ([guide](docs-site/docs/mermaid.md), [reference](docs/MERMAID.md))
+  - Mermaid **Ishikawa (fishbone), radar and treemap** charts import as editable whiteboard drawings and export back.
   - **draw.io** import and export (`.drawio`, `.drawio.svg`, `.drawio.png`): UML pages become model elements at their drawn
     positions, other pages whiteboard drawings; and **folders of diagrams** (Mermaid and draw.io, one package per folder,
     re-import updates in place). ([reference](docs/DRAWIO.md))
+  - **Gliffy** import (`.gliffy` from Confluence or Gliffy Online), the same way as draw.io. ([reference](docs/GLIFFY.md))
   - Excel and CSV import with round-trip sync for any element kind. ([guide](docs-site/docs/spreadsheet-import.md))
   - A read-only SysML v2 REST API.
 - **Reports**: program deliverables (SRS, ICD, SDD, VCRM / test report, model overview) as PDF, Word and HTML from

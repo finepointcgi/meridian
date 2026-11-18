@@ -13,7 +13,7 @@ runtime, no extra packages) and never calls the network.
 | Project menu → **Open a file as a new project…** with a `.mmd`, `.mermaid` or `.md` file | Creates a new project holding the imported diagrams. The desktop app opens these files from its file dialog, the start screen and the command line too. |
 | Drop a `.mmd` / `.mermaid` / `.md` file on the canvas | Imports it straight into the active diagram's package. |
 | Project menu → Import → **Folder of diagrams (Mermaid, draw.io)…** (also ⌘K), or drop a folder on the canvas | Reads every `.mmd`, `.mermaid` and Markdown file (and draw.io file) in a folder and its subfolders. Each folder becomes a package, an untitled diagram is named after its file, and importing the same folder again replaces the diagrams it made last time. See [DRAWIO.md](DRAWIO.md#folders-of-diagrams). |
-| Project menu → Export → **Export diagram as Mermaid (.mmd)**, **Copy diagram as Mermaid** (also ⌘K, and Generate → Formats → **Mermaid .mmd**) | Writes the active activity, state machine, sequence, block definition / class or requirement diagram. |
+| Project menu → Export → **Export diagram as Mermaid (.mmd)**, **Copy diagram as Mermaid** (also ⌘K, and Generate → Formats → **Mermaid .mmd**) | Writes the active activity, state machine, sequence, block definition / class or requirement diagram, or a whiteboard drawn from an Ishikawa, radar or treemap chart. |
 
 ### Mermaid from an AI assistant
 
@@ -182,10 +182,33 @@ lanes (an `LR` direction is noted in a warning).
 | boundaries | not imported as elements, their contents are (warning) |
 | `UpdateElementStyle`, `UpdateRelStyle`, `UpdateLayoutConfig` … | skipped (warning) |
 
+### Charts drawn on a whiteboard (`ishikawa-beta`, `radar-beta`, `treemap-beta`)
+
+These charts have no SysML meaning, but they are common in reviews and trade-offs, so Meridian draws them as a
+**whiteboard** made of ordinary shapes and lines. Everything stays editable: move, recolour or rename any piece.
+
+| Mermaid | Meridian |
+| --- | --- |
+| `ishikawa-beta` (or `ishikawa`): the first line is the effect, the lines under it are causes nested by indentation | A **fishbone**: a spine ending in an arrow on the effect (the head, on the right); each top-level cause is a category box on a slanted bone, alternating above and below the spine; its causes are labels with arrows onto the bone, and deeper causes have arrows onto their parent's arrow. |
+| `radar-beta`: `axis id["Label"], …`, `curve id["Label"]{1, 2, 3}` or `{axisId: value, …}` (also over several lines), `title`, `max`, `min`, `ticks`, `graticule`, `showLegend` | A **radar chart**: one ring per tick, one spoke per axis with its label, one closed coloured line per curve with a dot on each axis, and a legend. `max` defaults to the largest value, `min` to 0. Each dot keeps its value as the tagged value `value`. |
+| `treemap-beta` (or `treemap`): quoted names nested by indentation; `"Name": 10` (or `"Name", 10`) is an item with a value, `"Name"` alone is a section; `:::class` with `classDef` | A **treemap**: nested rectangles sized by value with a squarified layout. Each section is a framed area with its name on top; each item shows its name and value. Each top-level section has its own colour; `classDef` fill, stroke and text colours are applied. |
+
+What is approximated or skipped (each with a warning): a polygon `graticule` is drawn as circles; a curve value for an
+axis that does not exist is skipped, and a missing value is drawn at the minimum; a treemap item without a positive
+value is drawn as a thin strip along the bottom of its section; a treemap line that is not a quoted name is skipped.
+Fishbone and radar charts with more than three or four levels or a few dozen axes still import, but get crowded.
+
+### Why a whiteboard and not a trade study for radar charts
+
+A radar chart is often a trade study in disguise (curves = alternatives, axes = criteria). Meridian's trade studies
+read their numbers from value properties of blocks, so mapping onto one would invent blocks and properties the
+author never wrote, and it would not look like the chart that was imported. The whiteboard keeps the picture and keeps
+the numbers editable on the dots (tagged value `value`) and in the export, so nothing is lost.
+
 ### Skipped diagram types
 
 `C4Dynamic`, `C4Deployment`, `mindmap`, `gantt`, `pie`, `journey`, `gitGraph`, `quadrantChart`, `timeline`, `sankey`,
-`xychart`, `block`, `packet`, `kanban`, `architecture`, `radar`, `treemap` and `zenuml` have no SysML equivalent. They are
+`xychart`, `block`, `packet`, `kanban`, `architecture` and `zenuml` have no SysML equivalent. They are
 listed as *Skipped* in the preview and reported with a warning; the other diagrams of the same input are still
 imported.
 
@@ -201,6 +224,7 @@ imported.
 | Sequence | `sequenceDiagram`: participants (actors when typed by an actor), messages in time order (`->>`, `-->>`, `-)`), combined fragments with an `else` / `and` / `option` line where each later operand starts (so every message stays in its operand), comments as notes |
 | Block definition, class | `classDiagram`: blocks with annotations, properties, operations and enumeration literals, generalization, realization, composition (with the part name), aggregation, association (multiplicities at both ends), dependency; comments as notes; other relationships (satisfy, allocate …) as `%%` comments |
 | Requirement | `requirementDiagram`: requirements with id, text, risk and verification method (and their Mermaid type), other elements as `element`, containment as `contains`, satisfy / verify / trace / deriveReqt / refine / copy |
+| Whiteboard drawn from an Ishikawa, radar or treemap chart | the same chart type again, with the shapes' current text: renamed causes, axes, curves (legend entries) and items are written with their new names, a radar dot's tagged value `value` is its value, and a treemap item's value is the number on the last line of its text. Shapes added by hand are not written. Other whiteboards cannot be exported as Mermaid. |
 
 Importing an exported diagram gives back the same elements and the same relationships between them, including
 operands with their guards and which operand each message is in, pseudostate kinds, data store / central buffer nodes

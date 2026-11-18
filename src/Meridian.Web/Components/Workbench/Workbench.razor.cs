@@ -828,7 +828,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian (or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid and draw.io files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian (or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid, draw.io and Gliffy files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 

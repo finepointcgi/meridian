@@ -17,6 +17,9 @@ internal static partial class MermaidParser
         "requirementDiagram" => MermaidDiagramKind.Requirement,
         "erDiagram" => MermaidDiagramKind.EntityRelationship,
         "C4Context" or "C4Container" or "C4Component" => MermaidDiagramKind.C4,
+        "ishikawa-beta" or "ishikawa" => MermaidDiagramKind.Ishikawa,
+        "radar-beta" => MermaidDiagramKind.Radar,
+        "treemap-beta" or "treemap" => MermaidDiagramKind.Treemap,
         _ => MermaidDiagramKind.Unsupported,
     };
 
@@ -34,6 +37,9 @@ internal static partial class MermaidParser
                 case MermaidDiagramKind.Requirement: Requirement(g, block); break;
                 case MermaidDiagramKind.EntityRelationship: Er(g, block); break;
                 case MermaidDiagramKind.C4: C4(g, block); break;
+                case MermaidDiagramKind.Ishikawa: Ishikawa(g, block); break;
+                case MermaidDiagramKind.Radar: Radar(g, block); break;
+                case MermaidDiagramKind.Treemap: Treemap(g, block); break;
                 default:
                     g.Warnings.Add($"{block.Keyword} (line {block.Line}): this Mermaid diagram type has no SysML equivalent and was skipped.");
                     break;

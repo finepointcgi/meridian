@@ -8,18 +8,20 @@ namespace Meridian.Serialization.Mermaid;
 /// <summary>
 /// Writes a diagram as Mermaid text: activity diagrams as flowcharts, state machine diagrams as stateDiagram-v2,
 /// sequence diagrams as sequenceDiagram, block definition / class diagrams as classDiagram and requirement diagrams as
-/// requirementDiagram. <see cref="MermaidImporter"/> reads the result back with the same elements and relationships.
+/// requirementDiagram, and whiteboards drawn from Ishikawa, radar and treemap charts back as those charts.
+/// <see cref="MermaidImporter"/> reads the result back with the same elements and relationships.
 /// </summary>
 public static class MermaidExporter
 {
     public static bool CanExport(Diagram? d) => d?.DiagramType is DiagramType.Activity or DiagramType.StateMachine or DiagramType.Sequence
-        or DiagramType.BlockDefinition or DiagramType.Class or DiagramType.Requirement;
+        or DiagramType.BlockDefinition or DiagramType.Class or DiagramType.Requirement || MermaidChartFields.IsChart(d);
 
     /// <summary>The diagram as Mermaid text (with a front matter title). Throws <see cref="InvalidOperationException"/> for other diagram types.</summary>
     public static string Export(ModelRepository m, Diagram d)
     {
         var sb = new StringBuilder();
         sb.Append("---\ntitle: \"").Append(Plain(d.Name).Replace('"', '\'')).Append("\"\n---\n");
+        if (MermaidChartFields.IsChart(d)) { MermaidCharts.Export(d, sb); return sb.ToString(); }
         switch (d.DiagramType)
         {
             case DiagramType.Activity: Activity(d, sb); break;

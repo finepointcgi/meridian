@@ -15,7 +15,8 @@ desktop app); nothing is sent anywhere.
 | Project menu → Export → **Export diagram as draw.io**, **Export all diagrams as draw.io**; a diagram tab's menu → Export; right-click the canvas | A `.drawio` file with one page per diagram. Open it in draw.io (desktop, web, or the VS Code extension). |
 
 Accepted files: `.drawio`, `.dio`, `.drawio.xml`, and pictures with the diagram embedded: `.drawio.svg` and `.drawio.png`
-(draw.io's "Include a copy of my diagram" export). Compressed and uncompressed pages both work; every page of a file is
+(draw.io's "Include a copy of my diagram" export). Gliffy files (`.gliffy`) are read as draw.io pages too; see
+[GLIFFY.md](GLIFFY.md). Compressed and uncompressed pages both work; every page of a file is
 imported.
 
 ## What a page becomes

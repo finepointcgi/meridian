@@ -54,13 +54,13 @@ internal static class MermaidSource
         "flowchart-elk", "flowchart", "graph", "classDiagram-v2", "classDiagram", "stateDiagram-v2", "stateDiagram", "sequenceDiagram",
         "requirementDiagram", "erDiagram", "C4Context", "C4Container", "C4Component", "C4Dynamic", "C4Deployment",
         "gantt", "journey", "gitGraph", "quadrantChart", "sankey-beta", "xychart-beta", "block-beta", "packet-beta", "architecture-beta",
-        "zenuml", "radar-beta", "treemap-beta", "mindmap", "timeline", "pie", "kanban", "info", "sankey", "xychart", "block", "packet",
-        "architecture",
+        "zenuml", "radar-beta", "treemap-beta", "ishikawa-beta", "mindmap", "timeline", "pie", "kanban", "info", "sankey", "xychart", "block", "packet",
+        "architecture", "treemap", "ishikawa",
     ];
 
     /// <summary>Header keywords that are ordinary words: recognised only when they stand alone (with their usual arguments).</summary>
     private static readonly HashSet<string> GenericWords = new(StringComparer.Ordinal)
-        { "mindmap", "timeline", "pie", "kanban", "info", "sankey", "xychart", "block", "packet", "architecture", "gantt", "journey" };
+        { "mindmap", "timeline", "pie", "kanban", "info", "sankey", "xychart", "block", "packet", "architecture", "gantt", "journey", "treemap", "ishikawa" };
 
     private static readonly Regex FlowHeader = new(@"^(flowchart-elk|flowchart|graph)(?:\s+(TB|TD|BT|RL|LR)\b)?\s*(?:;(.*))?$", RegexOptions.CultureInvariant);
 

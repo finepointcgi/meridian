@@ -49,7 +49,7 @@ public sealed record MermaidImportResult(IReadOnlyList<Diagram> Diagrams, int El
 /// Imports Mermaid diagrams (a .mmd file, several diagrams in one file, or the ```mermaid blocks of a Markdown file)
 /// as SysML model elements and diagrams: flowcharts as activities, class diagrams as BDDs, state diagrams as state
 /// machines, sequence diagrams as interactions, requirement diagrams as requirements with their relationships, ER and
-/// C4 diagrams as blocks. The whole import is one undo step; nothing here throws on bad input (see the warnings).
+/// C4 diagrams as blocks; Ishikawa (fishbone), radar and treemap charts as whiteboard drawings. The whole import is one undo step; nothing here throws on bad input (see the warnings).
 /// See docs/MERMAID.md for the mapping.
 /// </summary>
 public static class MermaidImporter
@@ -127,6 +127,9 @@ public static class MermaidImporter
         MermaidDiagramKind.Requirement => "Requirement diagram",
         MermaidDiagramKind.EntityRelationship => "Block definition diagram",
         MermaidDiagramKind.C4 => "Block definition diagram",
+        MermaidDiagramKind.Ishikawa => "Whiteboard drawing (fishbone)",
+        MermaidDiagramKind.Radar => "Whiteboard drawing (radar chart)",
+        MermaidDiagramKind.Treemap => "Whiteboard drawing (treemap)",
         _ => "Skipped (not supported)",
     };
 
@@ -139,12 +142,27 @@ public static class MermaidImporter
         MermaidDiagramKind.Requirement => "Requirement diagram",
         MermaidDiagramKind.EntityRelationship => "ER diagram",
         MermaidDiagramKind.C4 => "C4 diagram",
+        MermaidDiagramKind.Ishikawa => "Ishikawa diagram",
+        MermaidDiagramKind.Radar => "Radar chart",
+        MermaidDiagramKind.Treemap => "Treemap",
         _ => "Diagram",
     };
 
     private static MermaidDiagramSummary Summarize(MGraph g)
     {
         int nodes, edges;
+        if (g.Chart is { } chart)
+        {
+            // Ishikawa: causes / categories; radar: axes / curves; treemap: values / sections.
+            var all = chart.Root.Descendants().ToList();
+            var (n, e, gr) = g.Kind switch
+            {
+                MermaidDiagramKind.Ishikawa => (all.Count - chart.Root.Children.Count, 0, chart.Root.Children.Count),
+                MermaidDiagramKind.Radar => (chart.Radar.Axes.Count, chart.Radar.Curves.Count, 0),
+                _ => (all.Count(x => x.Children.Count == 0), 0, all.Count(x => x.Children.Count > 0)),
+            };
+            return new MermaidDiagramSummary(g.Line, g.Kind, g.Keyword, g.Title ?? "", Becomes(g.Kind), n, e, gr, 0, g.Warnings.Count);
+        }
         if (g.Kind == MermaidDiagramKind.Sequence)
         {
             nodes = g.Nodes.Count;
@@ -175,6 +193,12 @@ public static class MermaidImporter
     {
         if (!s.Supported) return "skipped";
         static string P(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
+        switch (s.Kind)
+        {
+            case MermaidDiagramKind.Ishikawa: return $"{P(s.Groups, "category", "categories")} · {P(s.Nodes, "cause", "causes")}";
+            case MermaidDiagramKind.Radar: return $"{P(s.Nodes, "axis", "axes")} · {P(s.Edges, "curve", "curves")}";
+            case MermaidDiagramKind.Treemap: return $"{P(s.Nodes, "value", "values")} · {P(s.Groups, "section", "sections")}";
+        }
         var (node, nodes, edge, edges, group, groups) = s.Kind switch
         {
             MermaidDiagramKind.Flowchart => ("node", "nodes", "flow", "flows", "swimlane", "swimlanes"),
