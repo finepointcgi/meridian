@@ -695,7 +695,7 @@
         var t = C.Diagram.DiagramType;
         var q = _shapeQuery?.Trim();
         IReadOnlyList<PaletteItem> F(IEnumerable<PaletteItem> items) =>
-            string.IsNullOrEmpty(q) ? items.ToList() : items.Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+            string.IsNullOrEmpty(q) ? items.ToList() : items.Where(i => IconLibrary.Matches(i, q)).ToList();
         var sections = t == DiagramType.Whiteboard
             ? new List<(string, IReadOnlyList<PaletteItem>)> { ("Shapes", F(Metamodel.PaletteItems(t).Append(ImageItem))), ("Connectors", F(Metamodel.PaletteLinks(t))) }
             : [
@@ -704,6 +704,7 @@
                 ("General", F(Metamodel.GeneralItems.Append(ImageItem))),
                 ("Lines", F(Metamodel.GeneralLinks)),
               ];
+        sections.AddRange(IconLibrary.PaletteSections(t).Select(x => (x.Title, F(x.Items))));   // cloud and network icons
         return sections.Where(x => x.Item2.Count > 0);
     }
 
@@ -728,9 +729,10 @@
     private IEnumerable<PaletteItem> QuickAddItems()
     {
         var t = C.Diagram.DiagramType;
-        var all = Metamodel.PaletteItems(t).Concat(t == DiagramType.Whiteboard ? [] : Metamodel.GeneralItems);
+        var all = Metamodel.PaletteItems(t).Concat(t == DiagramType.Whiteboard ? [] : Metamodel.GeneralItems)
+            .Concat(IconLibrary.PaletteSections(t).SelectMany(x => x.Items));
         var q = _quickQuery?.Trim();
-        return (string.IsNullOrEmpty(q) ? all : all.Where(i => i.Title.Contains(q, StringComparison.OrdinalIgnoreCase))).Take(12);
+        return (string.IsNullOrEmpty(q) ? all : all.Where(i => IconLibrary.Matches(i, q))).Take(12);
     }
 
     private void QuickKey(KeyboardEventArgs e)
@@ -820,6 +822,7 @@
             (ElementKind.Line, "dashedArrow") => $"<line x1=\"4\" y1=\"20\" x2=\"27\" y2=\"8\" {a} stroke-dasharray=\"4,3\"/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/>",
             (ElementKind.Line, "bidirectional") => $"<line x1=\"7\" y1=\"18\" x2=\"27\" y2=\"8\" {a}/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/><polygon points=\"4,20 13,19.5 8,13\" fill=\"currentColor\"/>",
             (ElementKind.Line, _) => $"<line x1=\"4\" y1=\"20\" x2=\"27\" y2=\"8\" {a}/><polygon points=\"30,6 21,6.5 26,13\" fill=\"currentColor\"/>",
+            (ElementKind.Shape, { } icon) when IconLibrary.IsIcon(icon) => IconLibrary.Markup(IconLibrary.Find(icon)!, 6, 2, 22, "currentColor", 1.6),
             _ => null,
         };
         return body == null ? null : $"<svg viewBox=\"0 0 34 26\" width=\"34\" height=\"26\">{body}</svg>";

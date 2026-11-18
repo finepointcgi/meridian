@@ -200,6 +200,7 @@ public static class DrawIoExporter
     private static XElement FreeShape(Element e, string id, string parent, Bounds b, string colours)
     {
         const string basic = "whiteSpace=wrap;html=1;";
+        if (IconLibrary.IsIcon(e.Get(FieldKeys.Subtype))) return IconShape(e, id, parent, b, colours);
         var style = e.Get(FieldKeys.Subtype) switch
         {
             "rounded" => "rounded=1;" + basic,
@@ -217,6 +218,22 @@ public static class DrawIoExporter
             _ => "rounded=0;" + basic,
         };
         return Vertex(id, parent, style + colours, Html(e.Name), b);
+    }
+
+    /// <summary>
+    /// A cloud or network icon: the line drawing as an SVG picture with the name (and provider) under it; a group icon
+    /// becomes a container frame with its name in the top-left corner.
+    /// </summary>
+    private static XElement IconShape(Element e, string id, string parent, Bounds b, string colours)
+    {
+        var icon = IconLibrary.Find(e.Get(FieldKeys.Subtype))!;
+        var name = e.Name.Length > 0 ? e.Name : icon.Name;
+        var provider = e.Get(IconLibrary.ProviderField).Trim();
+        var label = provider.Length > 0 ? $"{name}\n{provider}" : name;
+        if (icon.Container)
+            return Vertex(id, parent, $"rounded=1;arcSize=4;container=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=8;fontStyle=1;{(icon.Key is "region" or "zone" or "subnet" ? "dashed=1;" : "")}" + colours, Html(label), b);
+        var svg = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(IconLibrary.Svg(icon, "#3a4458")));
+        return Vertex(id, parent, $"shape=image;html=1;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg+xml,{svg};", Html(label), b);
     }
 
     /// <summary>draw.io keeps pictures in the style as "image=data:image/png,BASE64" (';' would end the style).</summary>

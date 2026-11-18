@@ -27,6 +27,7 @@ public static partial class SvgRenderer
             sb.Append($"<path class=\"node-3d\" d=\"M{F(b.X)},{F(b.Y)} L{F(b.X + k)},{F(b.Y - k)} H{F(b.Right + k)} V{F(b.Bottom - k)} L{F(b.Right)},{F(b.Bottom)} V{F(b.Y)} Z\" fill=\"{header}\" stroke=\"{t.Stroke}\"/>");
             sb.Append($"<path d=\"M{F(b.Right)},{F(b.Y)} L{F(b.Right + k)},{F(b.Y - k)}\" fill=\"none\" stroke=\"{t.Stroke}\"/>");
             RenderCompartments(sb, b, content, fill, kind, t, header);
+            RenderNodeIcon(sb, n.Element, b, t);
             return true;
         }
         RenderCompartments(sb, b, content, fill, kind, t, header);

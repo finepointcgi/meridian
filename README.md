@@ -65,6 +65,8 @@ opens it again.
 
 - **Drawing as easy as draw.io**
   - A searchable shapes panel: click to add, drag to place.
+  - Cloud and network icon sets on whiteboards (server, database, queue, load balancer, firewall…), with group frames
+    for regions, networks and subnets.
   - Hover arrows that add connected shapes; lines pick their relationship type (satisfy, verify, composition…)
     and a chip switches it in one click.
   - Alignment guides and resize handles.

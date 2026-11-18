@@ -25,6 +25,10 @@ the new environment is created inside it (and owned by it), so a device holding 
 boxes inside each other. Give a node a stereotype such as «server» or «container» in the Inspector, and its capacities
 as value properties (for example `cores = 8` and `ramGb = 32`): they are listed in the node's box.
 
+A node, device or execution environment can also show an **Icon** in its top-left corner: pick one in the Inspector
+(Server / VM, Database, Router, Mobile device…). These are the same line icons as the whiteboard's
+[cloud and network icons](drawing.md#cloud-and-network-icons).
+
 ## Deploy, manifest and connect
 
 Draw a line between two shapes (hover a shape and drag one of its arrows onto another) and Meridian picks the

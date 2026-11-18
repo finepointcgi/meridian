@@ -39,6 +39,9 @@ public static class Subtypes
         "rectangle", "rounded", "ellipse", "diamond", "text", "cylinder", "hexagon", "parallelogram", "triangle", "document", "cloud", "callout",
     ];
 
+    /// <summary>Free shapes followed by the cloud and network icons (<see cref="IconLibrary"/>).</summary>
+    public static readonly IReadOnlyList<string> ShapesAndIcons = [.. Shapes, .. IconLibrary.Subtypes];
+
     /// <summary>Plain connector styles.</summary>
     public static readonly IReadOnlyList<string> Lines = ["arrow", "line", "dashedArrow", "dashed", "bidirectional", "dotted"];
 
@@ -65,7 +68,7 @@ public static class Subtypes
         ElementKind.BpmnFlow => BpmnFlows,
         ElementKind.ArchiElement => ArchiElements,
         ElementKind.ArchiRelation => ArchiRelations,
-        ElementKind.Shape => Shapes,
+        ElementKind.Shape => ShapesAndIcons,
         ElementKind.Line => Lines,
         ElementKind.Table => DataModeling.DbFields.TableKinds,
         ElementKind.DbConstraint => DataModeling.DbFields.ConstraintKinds,
@@ -79,6 +82,7 @@ public static class Subtypes
     {
         if (string.IsNullOrEmpty(subtype)) return "";
         if (subtype == DataStore) return "Data Store";
+        if (IconLibrary.Find(subtype) is { } icon && subtype.StartsWith(IconLibrary.Prefix, StringComparison.Ordinal)) return icon.Name;
         var sb = new System.Text.StringBuilder();
         foreach (var c in subtype)
         {
@@ -181,6 +185,7 @@ public static class Subtypes
     /// <summary>The outline used for connector clipping and hit testing of a free shape.</summary>
     public static NodeShape ShapeOutline(string subtype) => subtype switch
     {
+        _ when IconLibrary.IsContainer(subtype) => NodeShape.Swimlane,   // group frames: shapes created inside nest
         "ellipse" or "cloud" => NodeShape.Ellipse,
         "diamond" => NodeShape.Diamond,
         "rounded" => NodeShape.Rounded,
@@ -189,6 +194,7 @@ public static class Subtypes
 
     public static (double W, double H) ShapeSize(string subtype) => subtype switch
     {
+        _ when IconLibrary.IsIcon(subtype) => IconLibrary.DefaultSize(IconLibrary.Find(subtype)!),
         "ellipse" => (130, 80),
         "diamond" => (110, 90),
         "text" => (120, 36),
