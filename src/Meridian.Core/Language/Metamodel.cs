@@ -587,6 +587,7 @@ public static class Metamodel
         if (k is ElementKind.TableView or ElementKind.QueryView or ElementKind.ValidationRule) f.Add(Analysis.ViewFields.Query);
         if (k == ElementKind.ValidationRule) { f.Add(Analysis.ViewFields.Severity); f.Add(Analysis.ViewFields.Message); }
         f.AddRange(DeploymentFields.EditableFields(k));
+        f.AddRange(IconLibrary.EditableFields(k));
         f.AddRange(Safety.SafetyFields.EditableFields(k).Where(x => x != FieldKeys.Subtype || !f.Contains(FieldKeys.Subtype)));
         f.AddRange(ExtFieldKeys.EditableFields(k));
         f.AddRange(InteractionNotation.EditableFields(k));

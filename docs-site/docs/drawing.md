@@ -82,6 +82,31 @@ selected shapes on a layer. Hidden layers are left out of SVG and PNG exports.
 Drop an image file onto the canvas, paste one from the clipboard, or use the *Image* tile in the shapes panel. Images
 are downscaled to at most 2 MB and stored in the model, so they travel with the project, its versions and exports.
 
+## Cloud and network icons
+
+On a whiteboard the shapes panel has two more sections, **Cloud** and **Network**, with simple line icons for
+architecture sketches:
+
+- **Cloud**: Cloud, Region, Availability zone, Virtual network, Subnet, Container cluster, Server / VM, Container,
+  Serverless function, API gateway, Database, Cache, Object storage, File storage, Queue, Event bus, Stream,
+  Data warehouse, Monitoring, Identity / key, Secret vault.
+- **Network**: Internet, Load balancer, CDN, DNS, Firewall, VPN / gateway, Router, Switch, Wi-Fi access point,
+  User / client, Mobile device, Laptop.
+
+Search finds them by common names too: *lambda* finds Serverless function, *s3* or *bucket* finds Object storage,
+*vm* or *ec2* finds Server / VM, *kubernetes* finds Container cluster.
+
+The name goes under the icon. To say which product it is, fill in **Provider / product** in the Inspector (for
+example `AWS Lambda` or `Azure SQL`): it shows as a smaller line under the name. The icons are generic drawings, not
+vendor logos. They take the shape's line colour, so they work in light and dark themes.
+
+**Region**, **Availability zone**, **Virtual network**, **Subnet** and **Container cluster** are group frames with the
+icon in the top-left corner. Click inside a frame with another icon to put it in the frame; the frame grows to fit
+and moves with its contents.
+
+Icons export to SVG, PNG and print like any shape. draw.io export writes them as pictures with their label (group
+frames become draw.io containers).
+
 ## Links
 
 Right-click a shape and choose **Add link…** to attach a web address (`http`, `https` or `mailto`) or a link to another

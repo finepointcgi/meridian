@@ -1654,6 +1654,7 @@ public sealed partial class DiagramController
                 var e = Model.Create(owner, kind, subtype != null && kind is ElementKind.BpmnNode && Subtypes.BpmnShape(subtype) is NodeShape.Event or NodeShape.Gateway ? "" : null);
                 if (subtype != null) Model.Set(e, FieldKeys.Subtype, subtype);
                 if (kind == ElementKind.Comment) Model.Set(e, FieldKeys.Body, "Comment");
+                if (kind == ElementKind.Shape && IconLibrary.IsIcon(subtype)) Model.Set(e, FieldKeys.Name, IconLibrary.Find(subtype)!.Name);
                 if (stereotype != null)
                 {
                     // UAF viewpoints: the profile (or a stereotype missing from an older copy of it) comes along with the element.

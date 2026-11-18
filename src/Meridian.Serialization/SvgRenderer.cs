@@ -1002,6 +1002,7 @@ public static partial class SvgRenderer
     /// <summary>General drawing shapes: a plain outline with centred, wrapped text (draw.io style).</summary>
     private static void RenderFreeShape(StringBuilder sb, DiagramNode n, Bounds b, string text, SvgTheme t)
     {
+        if (IconLibrary.IsIcon(n.Element.Get(FieldKeys.Subtype))) { RenderIconShape(sb, n, b, text, IconLibrary.Find(n.Element.Get(FieldKeys.Subtype))!, t); return; }
         var fill = StyleColor(n, "fill") ?? t.NodeFill;
         var stroke = StyleColor(n, "stroke") ?? t.Stroke;
         var attrs = $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.4\" filter=\"url(#msh)\"";
