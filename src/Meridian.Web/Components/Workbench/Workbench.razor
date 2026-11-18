@@ -33,7 +33,7 @@
                 <MudMenuItem Disabled="true" Class="menu-heading">Import</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.UploadFile" OnClick="@(() => PickFile("file-open"))" title="Meridian (.meridian, or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo / MagicDraw .mdzip, Mermaid .mmd / Markdown, draw.io">Open a file as a new project…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Input" OnClick="@(() => ImportInto("file-into"))" Disabled="Ws.ReadOnly" title="BPMN, ArchiMate, SQL DDL, C# source, Mermaid (.mmd, Markdown), draw.io, a .zip of diagrams, or a Cameo / MagicDraw re-import">Import into this project…</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFolderUpload" OnClick="ImportDiagramFolder" Disabled="Ws.ReadOnly" data-testid="menu-import-folder" title="Every Mermaid (.mmd, Markdown) and draw.io (.drawio, .drawio.svg, .drawio.png) file in a folder and its subfolders, one package per folder; importing it again updates those diagrams">Folder of diagrams (Mermaid, draw.io)…</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFolderUpload" OnClick="ImportDiagramFolder" Disabled="Ws.ReadOnly" data-testid="menu-import-folder" title="Every Mermaid (.mmd, Markdown) draw.io (.drawio, .drawio.svg, .drawio.png) and Gliffy (.gliffy) file in a folder and its subfolders, one package per folder; importing it again updates those diagrams">Folder of diagrams (Mermaid, draw.io)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Schema" OnClick="@(() => PasteMermaid())" Disabled="Ws.ReadOnly" title="Flowcharts, class, state, sequence, requirement, ER and C4 diagrams written in Mermaid (for example by an AI assistant)">Paste Mermaid…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.GridOn" OnClick="@(() => ImportSpreadsheet())" Disabled="Ws.ReadOnly" data-testid="menu-import-spreadsheet" title="Any element kind from Excel (.xlsx) or CSV with a column mapping; re-importing updates and offers removals for review">Spreadsheet (Excel / CSV)…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Storage" OnClick="ImportDatabaseSchema" Disabled="Ws.ReadOnly" data-testid="menu-import-database" title="PostgreSQL, SQL Server, MySQL / MariaDB, SQLite or Oracle DDL, a SQL Server .dacpac or a Mermaid erDiagram">Database schema (DDL / .dacpac)…</MudMenuItem>
@@ -520,9 +520,9 @@
     <OnboardingTour @ref="_tour" OnReveal="RevealForTour" />
 
     <div style="display:none">
-        <InputFile id="file-open" accept=".meridian,.zip,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml,.mmd,.mermaid,.md,.drawio,.dio,.svg,.png" OnChange="OnOpenFile" />
+        <InputFile id="file-open" accept=".meridian,.zip,.json,.xmi,.xml,.uml,.sysml,.qea,.qeax,.mdzip,.mdxml,.mmd,.mermaid,.md,.drawio,.dio,.gliffy,.svg,.png" OnChange="OnOpenFile" />
         <InputFile id="file-reqif" accept=".reqif,.reqifz,.xml" OnChange="OnReqIfFile" />
-        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.dacpac,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md,.drawio,.dio,.svg,.png" multiple OnChange="OnImportInto" />
+        <InputFile id="file-into" accept=".bpmn,.xml,.sql,.ddl,.dacpac,.cs,.zip,.mdzip,.mdxml,.mmd,.mermaid,.md,.drawio,.dio,.gliffy,.svg,.png" multiple OnChange="OnImportInto" />
         <InputFile id="file-csv" accept=".csv,text/csv" OnChange="OnCsvFile" />
         <InputFile id="file-sheet-import" accept=".xlsx,.xlsm,.csv,.tsv" OnChange="OnSpreadsheetFile" />
     </div>

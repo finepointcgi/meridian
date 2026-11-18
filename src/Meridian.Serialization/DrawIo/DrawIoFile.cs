@@ -6,7 +6,11 @@ using System.Xml.Linq;
 namespace Meridian.Serialization.DrawIo;
 
 /// <summary>One page of a draw.io file: its name and its <c>mxGraphModel</c>.</summary>
-public sealed record DrawIoPage(string Name, XElement Model);
+public sealed record DrawIoPage(string Name, XElement Model)
+{
+    /// <summary>What was lost reading the page (a Gliffy page converted to draw.io reports here).</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+}
 
 /// <summary>
 /// Reads draw.io / diagrams.net files into pages: <c>.drawio</c> / <c>.dio</c> / <c>.xml</c> (an <c>mxfile</c> whose pages are
@@ -22,7 +26,8 @@ public static class DrawIoFile
     /// <summary>Largest XML a compressed page may inflate to.</summary>
     private const int MaxInflated = 64 * 1024 * 1024;
 
-    public static readonly IReadOnlyList<string> Extensions = [".drawio", ".dio", ".drawio.xml", ".drawio.svg", ".drawio.png", ".dio.svg", ".dio.png"];
+    /// <summary>draw.io files, and Gliffy files (<c>.gliffy</c>), which are read as draw.io pages (see <see cref="Gliffy.GliffyFile"/>).</summary>
+    public static readonly IReadOnlyList<string> Extensions = [".drawio", ".dio", ".drawio.xml", ".drawio.svg", ".drawio.png", ".dio.svg", ".dio.png", .. Gliffy.GliffyFile.Extensions];
 
     /// <summary>True for a draw.io file name. A plain <c>.xml</c> is only draw.io when its content says so (see <see cref="LooksLikeDrawIo(string)"/>).</summary>
     public static bool IsDrawIoFile(string? name)
@@ -46,6 +51,7 @@ public static class DrawIoFile
     public static IReadOnlyList<DrawIoPage> Read(string fileName, byte[] bytes)
     {
         if (bytes.Length > MaxBytes) throw new FormatException($"{fileName} is larger than {MaxBytes / (1024 * 1024)} MB.");
+        if (Gliffy.GliffyFile.IsGliffyFile(fileName)) return Gliffy.GliffyFile.Read(fileName, bytes);
         if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G')
             return ReadText(FromPng(bytes) ?? throw new FormatException("the PNG has no draw.io diagram embedded (save it from draw.io with \"Include a copy of my diagram\")."));
         return ReadText(Encoding.UTF8.GetString(bytes));

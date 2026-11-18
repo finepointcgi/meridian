@@ -33,6 +33,7 @@
     <None Include="Fmi\native\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fmi\reference\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="SysMLv2Corpus\*.sysml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Gliffy\*.gliffy" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

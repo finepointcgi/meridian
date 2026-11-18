@@ -13,6 +13,7 @@ This page maps the concepts, windows and menus of **Cameo Systems Modeler / Magi
 | Older EA (`.eap`, Access) | convert to `.qea` in EA, or export XMI 2.5 from EA | |
 | DOORS Next, Polarion | **Integrations ▸ DOORS & Polarion**: a live two-way requirements sync, or ReqIF | see [Integrations](integrations.md#doors-next-and-polarion) |
 | Jama, Codebeamer, classic DOORS | **ReqIF** or CSV / Excel | see [Import and export](import-export.md#requirements) |
+| Gliffy (Confluence), draw.io | open or drop the `.gliffy` / `.drawio` file | UML pages become model elements, other pages whiteboard drawings ([details](import-export.md#drawio-and-gliffy)) |
 
 A new, empty project offers **Open a Cameo file** in the middle of the screen as well.
 

@@ -69,9 +69,9 @@ public static class DrawIoImporter
         var elementsBefore = m.AllElements.Count(e => e is not Relationship && e is not Diagram);
         var relationshipsBefore = m.Relationships.Count();
         List<Diagram> diagrams;
-        using (m.History.Transaction("Import draw.io"))
+        using (m.History.Transaction("Import " + SourceOf(fileName)))
         {
-            var builder = new MermaidBuilder(m, target, new MermaidImportOptions { Match = options.Match }, warnings) { Source = "draw.io" };
+            var builder = new MermaidBuilder(m, target, new MermaidImportOptions { Match = options.Match }, warnings) { Source = SourceOf(fileName) };
             diagrams = ImportPages(m, builder, fileName, pages, options, warnings);
         }
         return new MermaidImportResult(diagrams,
@@ -83,7 +83,7 @@ public static class DrawIoImporter
     public static (ModelRepository Model, ImportReport Report) ImportAsNewProject(string fileName, byte[] bytes)
     {
         var name = BaseName(fileName);
-        var model = new ModelRepository(name.Length > 0 ? name : "draw.io import");
+        var model = new ModelRepository(name.Length > 0 ? name : SourceOf(fileName) + " import");
         var result = Import(model, model.Root, fileName, DrawIoFile.Read(fileName, bytes));
         model.History.Clear();
         return (model, result.ToReport());
@@ -98,6 +98,9 @@ public static class DrawIoImporter
         return Path.GetFileNameWithoutExtension(n);
     }
 
+    /// <summary>"Gliffy" for a .gliffy file, else "draw.io" (for warnings and the diagrams' documentation).</summary>
+    internal static string SourceOf(string? fileName) => Gliffy.GliffyFile.IsGliffyFile(fileName) ? "Gliffy" : "draw.io";
+
     private static bool IsDefaultPageName(string name) => Regex.IsMatch(name, @"^(Page|Seite|Página|Pagina|Страница)[- ]?\d+$", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
 
     /// <summary>The page's name, or the file's for a single page left with draw.io's default name.</summary>
@@ -105,7 +108,7 @@ public static class DrawIoImporter
     {
         var page = pages[index].Name.Trim();
         var file = BaseName(fileName);
-        if (file.Length == 0) file = "draw.io";
+        if (file.Length == 0) file = SourceOf(fileName);
         if (!IsDefaultPageName(page) && page.Length > 0) return page;
         return pages.Count == 1 ? file : $"{file} {page}";
     }
@@ -113,14 +116,16 @@ public static class DrawIoImporter
     internal static List<Diagram> ImportPages(ModelRepository m, MermaidBuilder builder, string fileName, IReadOnlyList<DrawIoPage> pages, DrawIoImportOptions options, List<string> warnings)
     {
         var diagrams = new List<Diagram>();
+        var source = SourceOf(fileName);
         for (var i = 0; i < pages.Count; i++)
         {
             var g = DGraph.From(pages[i]);
+            warnings.AddRange(pages[i].Warnings);
             warnings.AddRange(g.Warnings);
             var kind = Classify(g, options.ModelElements);
-            if (kind == DrawIoPageKind.Empty) { warnings.Add($"draw.io page “{pages[i].Name}” is empty; skipped."); continue; }
+            if (kind == DrawIoPageKind.Empty) { warnings.Add($"{source} page “{pages[i].Name}” is empty; skipped."); continue; }
             var name = Unique(m, DiagramName(fileName, pages, i));
-            var page = new PageBuilder(m, builder, g, name, warnings);
+            var page = new PageBuilder(m, builder, g, name, warnings, source);
             try
             {
                 var d = kind switch
@@ -137,7 +142,7 @@ public static class DrawIoImporter
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
             {
-                warnings.Add($"draw.io page “{pages[i].Name}” could not be imported completely: {ex.Message}");
+                warnings.Add($"{source} page “{pages[i].Name}” could not be imported completely: {ex.Message}");
             }
         }
         return diagrams;
@@ -251,9 +256,9 @@ public static class DrawIoImporter
 
     // ================================================================== building one page
 
-    private sealed class PageBuilder(ModelRepository m, MermaidBuilder builder, DGraph g, string name, List<string> warnings)
+    private sealed class PageBuilder(ModelRepository m, MermaidBuilder builder, DGraph g, string name, List<string> warnings, string source = "draw.io")
     {
-        private readonly MGraph _mg = new() { Kind = MermaidDiagramKind.Flowchart, Keyword = "draw.io page", Line = 0, Title = name };
+        private readonly MGraph _mg = new() { Kind = MermaidDiagramKind.Flowchart, Keyword = source + " page", Line = 0, Title = name };
         private Element Target => builder.Target;
 
         /// <summary>Page coordinates moved so the drawing starts at (40, 40).</summary>
@@ -269,7 +274,7 @@ public static class DrawIoImporter
 
         private Pt Place(Pt p) => new(Math.Round(p.X - _origin.Value.X), Math.Round(p.Y - _origin.Value.Y));
 
-        private void Warn(string message) => warnings.Add($"draw.io page “{name}”: {message}");
+        private void Warn(string message) => warnings.Add($"{source} page “{name}”: {message}");
 
         private static string Name(string text) => MermaidSource.Name(text);
 
@@ -278,7 +283,7 @@ public static class DrawIoImporter
         public Diagram Drawing()
         {
             var d = m.CreateDiagram(Target, DiagramType.Whiteboard, name);
-            m.Set(d, FieldKeys.Documentation, "Imported from draw.io.");
+            m.Set(d, FieldKeys.Documentation, $"Imported from {source}.");
             var made = new Dictionary<string, Element>(StringComparer.Ordinal);
             var icons = 0;
             foreach (var v in g.Vertices)
@@ -462,7 +467,7 @@ public static class DrawIoImporter
         public Diagram UseCase()
         {
             var d = m.CreateDiagram(Target, DiagramType.UseCase, name);
-            m.Set(d, FieldKeys.Documentation, "Imported from draw.io.");
+            m.Set(d, FieldKeys.Documentation, $"Imported from {source}.");
             var made = new Dictionary<string, Element>(StringComparer.Ordinal);
             var top = TopShapes(g);
             // Larger shapes first, so a system boundary is drawn behind its use cases.
@@ -516,7 +521,7 @@ public static class DrawIoImporter
 
         public Diagram? Class()
         {
-            var g2 = new MGraph { Kind = MermaidDiagramKind.Class, Keyword = "draw.io page", Line = 0, Title = name };
+            var g2 = new MGraph { Kind = MermaidDiagramKind.Class, Keyword = source + " page", Line = 0, Title = name };
             var top = TopShapes(g);
             var classes = top.Where(IsClassBox).ToList();
             // Packages drawn as folders (or UML frames) holding classes become packages.
@@ -651,7 +656,7 @@ public static class DrawIoImporter
 
         public Diagram? Requirement()
         {
-            var g2 = new MGraph { Kind = MermaidDiagramKind.Requirement, Keyword = "draw.io page", Line = 0, Title = name };
+            var g2 = new MGraph { Kind = MermaidDiagramKind.Requirement, Keyword = source + " page", Line = 0, Title = name };
             var top = TopShapes(g);
             foreach (var v in top)
             {
@@ -711,7 +716,7 @@ public static class DrawIoImporter
 
         public Diagram? Activity()
         {
-            var g2 = new MGraph { Kind = MermaidDiagramKind.Flowchart, Keyword = "draw.io page", Line = 0, Title = name };
+            var g2 = new MGraph { Kind = MermaidDiagramKind.Flowchart, Keyword = source + " page", Line = 0, Title = name };
             var top = TopShapes(g);
             bool IsLane(DCell c) => IsSwimlane(c) && c.Children.Any(ch => ch.Vertex && !IsSwimlane(ch));
             var nodes = top.Where(v => !IsLane(v) && !IsSwimlane(v) && !IsNote(v) && !IsText(v) && !IsFrame(v) && (v.Local.Width > 0 || v.Local.Height > 0)).ToList();
@@ -738,7 +743,7 @@ public static class DrawIoImporter
             warnings.AddRange(g2.Warnings);
             if (d == null) return null;
             if (g2.Groups.Count == 0) ApplyGeometry(d, builder.LastMade);
-            else Warn("swimlanes were laid out again, one lane per draw.io lane.");
+            else Warn($"swimlanes were laid out again, one lane per {source} lane.");
             AddNotes(d, d.Owner, top.Where(v => IsNote(v) || IsText(v) && v.Text.Length > 0));
             return d;
         }
@@ -753,7 +758,7 @@ public static class DrawIoImporter
 
         public Diagram? State()
         {
-            var g2 = new MGraph { Kind = MermaidDiagramKind.State, Keyword = "draw.io page", Line = 0, Title = name };
+            var g2 = new MGraph { Kind = MermaidDiagramKind.State, Keyword = source + " page", Line = 0, Title = name };
             var top = TopShapes(g);
             var states = top.Where(v => !IsNote(v) && !IsText(v) && (v.Local.Width > 0 || v.Local.Height > 0)).ToList();
             var ids = states.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
@@ -792,7 +797,7 @@ public static class DrawIoImporter
 
         public Diagram? Sequence()
         {
-            var g2 = new MGraph { Kind = MermaidDiagramKind.Sequence, Keyword = "draw.io page", Line = 0, Title = name };
+            var g2 = new MGraph { Kind = MermaidDiagramKind.Sequence, Keyword = source + " page", Line = 0, Title = name };
             var top = TopShapes(g);
             var lifelines = top.Where(IsLifeline).OrderBy(l => l.Abs.X).ToList();
             foreach (var l in lifelines)

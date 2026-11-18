@@ -73,8 +73,8 @@
   }
 
   // Diagram files read from a folder or a drop (DiagramFolderImport.Extensions / limits).
-  const DIAGRAM_FILE = /\.(mmd|mermaid|md|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png)$/i;
-  const DRAWIO_FILE = /\.(drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png)$/i;
+  const DIAGRAM_FILE = /\.(mmd|mermaid|md|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy)$/i;
+  const DRAWIO_FILE = /\.(drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy)$/i;
   const MAX_DIAGRAM_FILE = 32 * 1024 * 1024, MAX_DIAGRAM_TOTAL = 128 * 1024 * 1024, MAX_DIAGRAM_FILES = 2000, BATCH_BYTES = 8 * 1024 * 1024;
   const SKIP_DIR = /(^|\/)(node_modules|\.git|bin|obj|dist|build|\.venv|__MACOSX)(\/|$)/;
 
