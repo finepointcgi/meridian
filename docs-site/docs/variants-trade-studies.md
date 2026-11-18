@@ -49,9 +49,10 @@ To use a variant elsewhere:
 - **New project from variant** creates a project from it directly.
 - **Inclusion CSV** exports the element-by-configuration inclusion table.
 
-> [!NOTE]
-> **TODO (screenshot):** the Configurations tab with the *Touring* configuration selected and excluded elements
-> highlighted.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/variants-touring-dark.png">
+  <img src="../images/variants-touring-light.png" alt="The Configurations tab with the Touring configuration selected and the features it leaves out greyed on the feature diagram">
+</picture>
 
 ## Trade studies
 

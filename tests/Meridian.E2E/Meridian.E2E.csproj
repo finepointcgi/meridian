@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Meridian.Web\Meridian.Web.csproj" />
+    <!-- The desktop start screen (StartPage) for the user guide screenshot; never launched. -->
+    <ProjectReference Include="..\..\src\Meridian.Desktop\Meridian.Desktop.csproj" />
   </ItemGroup>
 
 </Project>

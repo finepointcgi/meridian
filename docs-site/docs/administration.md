@@ -15,8 +15,10 @@ administrator**. Administrators get **Administration** in the avatar menu (`/adm
 | **Audit log** | a filterable, append-only log with CSV export |
 | **Backups** | download and restore backups |
 
-> [!NOTE]
-> **TODO (screenshot):** the Administration page, Users tab.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/admin-users-dark.png">
+  <img src="../images/admin-users-light.png" alt="The Administration page, Users tab, listing the accounts with their roles and status">
+</picture>
 
 ## Configuration
 
@@ -91,9 +93,17 @@ restores, exports, backups and restores. Filter it in the Audit tab and export i
 
 ## Backups
 
-**Administration → Backups** downloads a zip with every project's latest model, its full version history and members,
-and (optionally) the user directory without password hashes. Uploading a backup there restores the selected projects
-with their history; a project whose id still exists comes back as a copy.
+**Administration → Backups** downloads a zip with every project's latest model, its full version history, comments,
+reviews, baselines and members, and (optionally) the user directory without password hashes. Uploading a backup there
+restores the selected projects with their history; a project whose id still exists comes back as a copy. Authors,
+reviewers and members are matched to accounts by id, then username. Older backups (format 1) have no comments,
+reviews or baselines and still restore.
+
+A project owner can take a single project in the same format with **Export ▸ Download project with history (.zip)**,
+and anyone can open such a file as a new project they own (see
+[Moving a project with its history](version-control.md#moving-a-project-with-its-history)). Restoring that file here
+instead keeps its authors and members where their accounts exist. Both are recorded in the audit log
+(`project.export`, `project.import-history`, `backup.restore`).
 
 Scheduled backups (under `Meridian`):
 

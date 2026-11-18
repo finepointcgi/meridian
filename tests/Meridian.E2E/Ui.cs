@@ -31,7 +31,7 @@ public static class Ui
 
     /// <summary>The exports that sit in the project menu's Export ▸ submenu (since 0.7.1).</summary>
     private static readonly string[] ExportItems =
-        ["Download .meridian file", "Export XMI", "Export SysML v2", "Export diagram as", "Copy diagram as"];
+        ["Download .meridian file", "Download project with history", "Export XMI", "Export SysML v2", "Export diagram as", "Copy diagram as"];
 
     /// <summary>Opens the project menu in the title bar and clicks an item (opening Export ▸ first for the exports).</summary>
     public static async Task ProjectMenuAsync(this IPage p, string item)

@@ -363,14 +363,16 @@ public sealed partial class SqliteStore
         var id = await ScalarAsync("select 1 from projects where id = $1", S(project.Id)) is null ? project.Id : Guid.NewGuid();
         await using var c = await OpenAsync();
         await using var tx = (SqliteTransaction)await c.BeginTransactionAsync();
-        async Task Run(string sql, params object?[] args)
+        async Task<object?> Run(string sql, params object?[] args)
         {
             await using var cmd = c.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = sql;
             for (var i = 0; i < args.Length; i++) cmd.Parameters.AddWithValue("$" + (i + 1), args[i] ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            return await cmd.ExecuteScalarAsync();
         }
+        static string T(DateTime t) => t.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        static object? U(Guid? g) => g is { } v ? S(v) : null;
         var now = Now();
         await Run("insert into projects(id, name, model, created_at, updated_at) values ($1,$2,$3,$4,$4)", S(id), project.Name.Trim(), project.ModelJson, now);
         foreach (var m in project.Members)
@@ -379,6 +381,44 @@ public sealed partial class SqliteStore
         foreach (var v in project.Versions)
             await Run("insert into project_versions(project_id, number, message, model, author, created_at) values ($1,$2,$3,$4,(select id from users where id = $5),$6)",
                 S(id), v.Number, v.Message, VersionBlob.Encode(v.ModelJson), v.AuthorId is { } a ? S(a) : null, v.CreatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+
+        // Version numbers → the new version rows (reviews and baselines point at versions by row id).
+        var versionIds = new Dictionary<int, long>();
+        foreach (var v in project.Versions)
+            if (await Run("select id from project_versions where project_id = $1 and number = $2", S(id), v.Number) is long vid) versionIds[v.Number] = vid;
+        object? VersionId(int? number) => number is { } n && versionIds.TryGetValue(n, out var vid) ? vid : null;
+
+        var commentIds = new Dictionary<long, long>();
+        foreach (var cm in project.Comments ?? [])
+            commentIds[cm.Key] = (long)(await Run("insert into comments(project_id, element_id, author, body, resolved, created_at) values ($1,$2,(select id from users where id = $3),$4,$5,$6) returning id",
+                S(id), cm.ElementId, U(cm.AuthorId), cm.Body, cm.Resolved ? 1 : 0, T(cm.CreatedAt)))!;
+        foreach (var cm in project.Comments ?? [])
+            if (cm.ParentKey is { } pk && commentIds.TryGetValue(pk, out var parent))
+                await Run("insert into comment_replies(comment_id, parent_id) values ($1,$2) on conflict (comment_id) do nothing", commentIds[cm.Key], parent);
+
+        foreach (var r in project.Reviews ?? [])
+        {
+            var rid = (long)(await Run("""
+                insert into reviews(project_id, title, description, author, state, scope_kind, scope_ids, base_version, head_version, apply_status, created_at, updated_at)
+                values ($1,$2,$3,(select id from users where id = $4),$5,$6,$7,$8,$9,$10,$11,$12) returning id
+                """, S(id), r.Title, r.Description, U(r.AuthorId), (int)r.State, (int)r.ScopeKind, ReviewRules.EncodeIds(r.ElementIds),
+                VersionId(r.BaseVersion), VersionId(r.HeadVersion), r.ApplyStatus ? 1 : 0, T(r.CreatedAt), T(r.UpdatedAt)))!;
+            foreach (var rv in r.Reviewers)
+                await Run("insert into review_reviewers(review_id, user_id, vote, voted_at) select $1, $2, $3, $4 where exists (select 1 from users where id = $2) on conflict do nothing",
+                    rid, S(rv.UserId), (int)rv.Vote, rv.VotedAt is { } va ? T(va) : null);
+            var reviewCommentIds = new Dictionary<long, long>();
+            foreach (var rc in r.Comments)   // parents come first: replies are written after the comment they answer
+                reviewCommentIds[rc.Key] = (long)(await Run("insert into review_comments(review_id, element_id, parent_id, author, body, created_at) values ($1,$2,$3,(select id from users where id = $4),$5,$6) returning id",
+                    rid, rc.ElementId, rc.ParentKey is { } pk && reviewCommentIds.TryGetValue(pk, out var parent) ? parent : null, U(rc.AuthorId), rc.Body, T(rc.CreatedAt)))!;
+            foreach (var ck in r.Checks)
+                await Run("insert into review_checks(review_id, element_id, user_id, checked_at) select $1, $2, $3, $4 where exists (select 1 from users where id = $3) on conflict do nothing",
+                    rid, ck.ElementId, S(ck.UserId), T(r.UpdatedAt));
+        }
+
+        foreach (var b in project.Baselines ?? [])
+            if (VersionId(b.VersionNumber) is { } vid)
+                await Run("insert into baselines(project_id, version_id, name, description, created_at) values ($1,$2,$3,$4,$5) on conflict (project_id, name) do nothing",
+                    S(id), vid, b.Name, b.Description, T(b.CreatedAt));
         await tx.CommitAsync();
         return id;
     }

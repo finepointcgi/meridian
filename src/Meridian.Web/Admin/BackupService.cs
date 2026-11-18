@@ -11,12 +11,17 @@ namespace Meridian.Web.Admin;
 
 /// <summary>
 /// Full-server backups as a zip of JSON: <c>manifest.json</c>, optional <c>users.json</c> (never password hashes) and,
-/// per project, <c>projects/{id}/project.json</c>, <c>model.meridian</c> (latest state, including unsaved live edits)
-/// and every committed version under <c>versions/</c>. Restore recreates projects with their history.
+/// per project, <c>projects/{id}/project.json</c>, <c>model.meridian</c> (latest state, including unsaved live edits),
+/// every committed version under <c>versions/</c> and (format 2) <c>comments.json</c>, <c>reviews.json</c> and
+/// <c>baselines.json</c>. Restore recreates projects with their history. A project archive
+/// (<see cref="WriteProjectAsync"/>, "Download project with history") is the same format holding one project, so a
+/// project moves from the desktop's local workspace to a team server, or between servers, with its history.
 /// </summary>
 public sealed class BackupService(IMeridianStore db, CollaborationHub hub, IAuditLog audit, AdminSettings settings, ILogger<BackupService> log)
 {
     public const string Format = "meridian-backup";
+    /// <summary>2 added comments, reviews and baselines; format 1 backups still restore (without them).</summary>
+    public const int CurrentFormatVersion = 2;
     private const long MaxEntryBytes = 512L * 1024 * 1024;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
@@ -28,6 +33,14 @@ public sealed class BackupService(IMeridianStore db, CollaborationHub hub, IAudi
     public sealed record BackupMember(Guid UserId, string Username, string Role);
     public sealed record ProjectDoc(Guid Id, string Name, long Revision, DateTime CreatedAt, DateTime UpdatedAt, List<BackupMember> Members);
     public sealed record VersionDoc(int Number, string Message, Guid? AuthorId, DateTime CreatedAt, string File);
+    public sealed record CommentDoc(long Id, string ElementId, Guid? AuthorId, string? Author, string Body, bool Resolved, DateTime CreatedAt, long? ParentId);
+    public sealed record ReviewerDoc(Guid UserId, string Username, ReviewVote Vote, DateTime? VotedAt);
+    public sealed record ReviewCommentDoc(long Id, string? ElementId, long? ParentId, Guid? AuthorId, string? Author, string Body, DateTime CreatedAt);
+    public sealed record ReviewCheckDoc(string ElementId, Guid UserId);
+    public sealed record ReviewDoc(string Title, string Description, Guid? AuthorId, string? Author, ReviewState State, ReviewScopeKind ScopeKind,
+        List<string> ElementIds, int? BaseVersion, int? HeadVersion, bool ApplyStatus, DateTime CreatedAt, DateTime UpdatedAt,
+        List<ReviewerDoc> Reviewers, List<ReviewCommentDoc> Comments, List<ReviewCheckDoc> Checks);
+    public sealed record BaselineDoc(int Version, string Name, string Description, DateTime CreatedAt);
 
     public sealed record RestoreResult(Guid SourceId, string Name, Guid? NewId, int Versions, string? Error);
 
@@ -38,29 +51,12 @@ public sealed class BackupService(IMeridianStore db, CollaborationHub hub, IAudi
     {
         await hub.FlushAllAsync();
         var projects = await db.ListAllProjectsAsync();
-        var manifest = new Manifest(Format, 1, DateTime.UtcNow, createdBy, includeUsers, []);
+        var manifest = new Manifest(Format, CurrentFormatVersion, DateTime.UtcNow, createdBy, includeUsers, []);
         using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
         foreach (var p in projects)
         {
             ct.ThrowIfCancellationRequested();
-            var row = await db.LoadProjectAsync(p.Id);
-            if (row is null) continue; // deleted meanwhile
-            var model = hub.Find(p.Id)?.Snapshot() ?? row.Value.ModelJson;
-            var members = await db.MembersAsync(p.Id);
-            var versions = await db.ListVersionSnapshotsAsync(p.Id);
-            var dir = $"projects/{p.Id:D}/";
-            await WriteJson(zip, dir + "project.json", new ProjectDoc(p.Id, row.Value.Name, row.Value.Revision, p.CreatedAt, p.UpdatedAt,
-                members.Select(m => new BackupMember(m.User.Id, m.User.Username, m.Role.ToString().ToLowerInvariant())).ToList()));
-            await WriteText(zip, dir + "model.meridian", model);
-            var docs = new List<VersionDoc>();
-            foreach (var v in versions)
-            {
-                var file = $"versions/{v.Number:D4}.meridian";
-                await WriteText(zip, dir + file, v.ModelJson);
-                docs.Add(new VersionDoc(v.Number, v.Message, v.AuthorId, v.CreatedAt, file));
-            }
-            await WriteJson(zip, dir + "versions.json", docs);
-            manifest.Projects.Add(new ManifestProject(p.Id, row.Value.Name, row.Value.Revision, p.UpdatedAt, versions.Count, p.Owner?.Username));
+            if (await WriteProjectEntriesAsync(zip, p) is { } entry) manifest.Projects.Add(entry);
         }
         if (includeUsers)
         {
@@ -69,6 +65,71 @@ public sealed class BackupService(IMeridianStore db, CollaborationHub hub, IAudi
         }
         await WriteJson(zip, "manifest.json", manifest);
         return manifest;
+    }
+
+    /// <summary>
+    /// "Download project with history": one project with its versions, comments, reviews and baselines, in the backup
+    /// format (no accounts). Only the project's owners may call this (the caller checks): owners see every package.
+    /// </summary>
+    public async Task<Manifest> WriteProjectAsync(Stream output, Guid projectId, string createdBy, CancellationToken ct = default)
+    {
+        await hub.FlushAllAsync();
+        var project = (await db.ListAllProjectsAsync()).FirstOrDefault(p => p.Id == projectId)
+            ?? throw new InvalidOperationException("The project no longer exists.");
+        var manifest = new Manifest(Format, CurrentFormatVersion, DateTime.UtcNow, createdBy, false, []);
+        using var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+        ct.ThrowIfCancellationRequested();
+        if (await WriteProjectEntriesAsync(zip, project) is { } entry) manifest.Projects.Add(entry);
+        await WriteJson(zip, "manifest.json", manifest);
+        return manifest;
+    }
+
+    public static string ProjectFileName(string projectName)
+    {
+        var safe = string.Concat(projectName.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is '/' or '\\' or ':' ? '_' : c)).Trim();
+        return $"{(safe.Length == 0 ? "project" : safe)} (with history).zip";
+    }
+
+    private async Task<ManifestProject?> WriteProjectEntriesAsync(ZipArchive zip, AdminProject p)
+    {
+        var row = await db.LoadProjectAsync(p.Id);
+        if (row is null) return null; // deleted meanwhile
+        var model = hub.Find(p.Id)?.Snapshot() ?? row.Value.ModelJson;
+        var members = await db.MembersAsync(p.Id);
+        var versions = await db.ListVersionSnapshotsAsync(p.Id);
+        var dir = $"projects/{p.Id:D}/";
+        await WriteJson(zip, dir + "project.json", new ProjectDoc(p.Id, row.Value.Name, row.Value.Revision, p.CreatedAt, p.UpdatedAt,
+            members.Select(m => new BackupMember(m.User.Id, m.User.Username, m.Role.ToString().ToLowerInvariant())).ToList()));
+        await WriteText(zip, dir + "model.meridian", model);
+        var docs = new List<VersionDoc>();
+        foreach (var v in versions)
+        {
+            var file = $"versions/{v.Number:D4}.meridian";
+            await WriteText(zip, dir + file, v.ModelJson);
+            docs.Add(new VersionDoc(v.Number, v.Message, v.AuthorId, v.CreatedAt, file));
+        }
+        await WriteJson(zip, dir + "versions.json", docs);
+
+        // Discussion and reviews refer to versions by number (row ids differ on the server that restores them).
+        var numberOf = (await db.ListVersionsAsync(p.Id)).ToDictionary(v => v.Id, v => v.Number);
+        int? Number(long? versionId) => versionId is { } id && numberOf.TryGetValue(id, out var n) ? n : null;
+        var parents = await db.ListCommentParentsAsync(p.Id);
+        await WriteJson(zip, dir + "comments.json", (await db.ListCommentsAsync(p.Id)).OrderBy(c => c.Id).Select(c =>
+            new CommentDoc(c.Id, c.ElementId, c.Author.Id, c.Author.Username, c.Body, c.Resolved, c.CreatedAt, parents.TryGetValue(c.Id, out var parent) ? parent : null)).ToList());
+        var reviews = new List<ReviewDoc>();
+        foreach (var r in (await db.ListReviewsAsync(p.Id)).OrderBy(r => r.Id))
+        {
+            var comments = (await db.ListReviewCommentsAsync(r.Id)).OrderBy(c => c.Id)
+                .Select(c => new ReviewCommentDoc(c.Id, c.ElementId, c.ParentId, c.Author.Id, c.Author.Username, c.Body, c.CreatedAt)).ToList();
+            var checks = (await db.ListReviewChecksAsync(r.Id)).Select(c => new ReviewCheckDoc(c.ElementId, c.UserId)).ToList();
+            reviews.Add(new ReviewDoc(r.Title, r.Description, r.Author.Id, r.Author.Username, r.State, r.ScopeKind, r.ElementIds.ToList(),
+                Number(r.BaseVersionId), Number(r.HeadVersionId), r.ApplyStatus, r.CreatedAt, r.UpdatedAt,
+                r.Reviewers.Select(x => new ReviewerDoc(x.User.Id, x.User.Username, x.Vote, x.VotedAt)).ToList(), comments, checks));
+        }
+        await WriteJson(zip, dir + "reviews.json", reviews);
+        await WriteJson(zip, dir + "baselines.json", (await db.ListBaselinesAsync(p.Id)).OrderBy(b => b.Id)
+            .Select(b => new BaselineDoc(b.VersionNumber, b.Name, b.Description, b.CreatedAt)).ToList());
+        return new ManifestProject(p.Id, row.Value.Name, row.Value.Revision, p.UpdatedAt, versions.Count, p.Owner?.Username);
     }
 
     public static string FileName(DateTime utc) => $"meridian-backup-{utc:yyyyMMdd-HHmmss}.zip";
@@ -141,41 +202,86 @@ public sealed class BackupService(IMeridianStore db, CollaborationHub hub, IAudi
         }
 
         foreach (var mp in manifest.Projects.Where(p => only is null || only.Contains(p.Id)))
-        {
-            var dir = $"projects/{mp.Id:D}/";
-            try
-            {
-                var doc = ReadJson<ProjectDoc>(zip, dir + "project.json") ?? throw new InvalidDataException("project.json is missing");
-                var model = ReadText(zip, dir + "model.meridian") ?? throw new InvalidDataException("model.meridian is missing");
-                ProjectFile.Deserialize(model); // validate before writing anything
-                var versions = new List<VersionSnapshot>();
-                foreach (var v in ReadJson<List<VersionDoc>>(zip, dir + "versions.json") ?? [])
-                {
-                    if (v.File.Contains("..") || !v.File.StartsWith("versions/", StringComparison.Ordinal)) throw new InvalidDataException($"Bad version path {v.File}");
-                    var vjson = ReadText(zip, dir + v.File) ?? throw new InvalidDataException($"{v.File} is missing");
-                    Guid? author = v.AuthorId is { } a ? await MapUser(a, backupUsers.GetValueOrDefault(a)?.Username) : null;
-                    versions.Add(new VersionSnapshot(v.Number, v.Message, vjson, author, v.CreatedAt));
-                }
-                var members = new List<RestoredMember>();
-                foreach (var m in doc.Members)
-                    if (await MapUser(m.UserId, m.Username) is { } uid && Enum.TryParse<ProjectRole>(m.Role, true, out var role))
-                        members.Add(new RestoredMember(uid, role));
-                if (members.All(m => m.Role != ProjectRole.Owner)) members.Add(new RestoredMember(actor.Id, ProjectRole.Owner));
-
-                var exists = await db.LoadProjectAsync(doc.Id) is not null;
-                var name = exists ? $"{doc.Name} (restored {DateTime.UtcNow:yyyy-MM-dd})" : doc.Name;
-                var newId = await db.RestoreProjectAsync(new RestoredProject(doc.Id, name, model, versions, members));
-                await audit.RecordAsync(AuditActions.BackupRestore, actor, newId, name, target: name,
-                    details: new { sourceId = doc.Id, versions = versions.Count, members = members.Count, backupCreated = manifest.CreatedAt.ToString("O", CultureInfo.InvariantCulture), copy = exists }, ip: ip);
-                results.Add(new RestoreResult(mp.Id, name, newId, versions.Count, null));
-            }
-            catch (Exception ex) when (ex is InvalidDataException or JsonException or FormatException or InvalidOperationException or IOException)
-            {
-                log.LogWarning(ex, "Restore of project {Project} failed", mp.Name);
-                results.Add(new RestoreResult(mp.Id, mp.Name, null, 0, ex.Message));
-            }
-        }
+            results.Add(await RestoreProjectAsync(zip, manifest, mp, (id, username) => MapUser(id, username ?? backupUsers.GetValueOrDefault(id)?.Username),
+                keepMembers: true, actor, AuditActions.BackupRestore, ip));
         return results;
+    }
+
+    /// <summary>
+    /// "Open project with history" for any signed-in user: every project in the archive becomes a new project owned by
+    /// <paramref name="actor"/> alone, with its versions, comments, reviews and baselines. Nothing is matched to other
+    /// accounts on this server: what someone else wrote is attributed to <paramref name="actor"/> (a local workspace has
+    /// one author anyway), and the archive's members are not added. Administrators use <see cref="RestoreAsync"/> to keep them.
+    /// </summary>
+    public async Task<IReadOnlyList<RestoreResult>> ImportProjectsAsync(ZipArchive zip, UserAccount actor, string? ip = null)
+    {
+        var manifest = ReadManifest(zip);
+        var results = new List<RestoreResult>();
+        foreach (var mp in manifest.Projects)
+            results.Add(await RestoreProjectAsync(zip, manifest, mp, (_, _) => Task.FromResult<Guid?>(actor.Id), keepMembers: false, actor, AuditActions.ProjectImportHistory, ip));
+        return results;
+    }
+
+    private async Task<RestoreResult> RestoreProjectAsync(ZipArchive zip, Manifest manifest, ManifestProject mp, Func<Guid, string?, Task<Guid?>> mapUser,
+        bool keepMembers, UserAccount actor, string auditAction, string? ip)
+    {
+        var dir = $"projects/{mp.Id:D}/";
+        try
+        {
+            var doc = ReadJson<ProjectDoc>(zip, dir + "project.json") ?? throw new InvalidDataException("project.json is missing");
+            var model = ReadText(zip, dir + "model.meridian") ?? throw new InvalidDataException("model.meridian is missing");
+            ProjectFile.Deserialize(model); // validate before writing anything
+            async Task<Guid?> Author(Guid? id, string? username) => id is { } a ? await mapUser(a, username) : null;
+
+            var versions = new List<VersionSnapshot>();
+            foreach (var v in ReadJson<List<VersionDoc>>(zip, dir + "versions.json") ?? [])
+            {
+                if (v.File.Contains("..") || !v.File.StartsWith("versions/", StringComparison.Ordinal)) throw new InvalidDataException($"Bad version path {v.File}");
+                var vjson = ReadText(zip, dir + v.File) ?? throw new InvalidDataException($"{v.File} is missing");
+                versions.Add(new VersionSnapshot(v.Number, v.Message, vjson, await Author(v.AuthorId, null), v.CreatedAt));
+            }
+            var members = new List<RestoredMember>();
+            if (keepMembers)
+                foreach (var m in doc.Members)
+                    if (await mapUser(m.UserId, m.Username) is { } uid && Enum.TryParse<ProjectRole>(m.Role, true, out var role))
+                        members.Add(new RestoredMember(uid, role));
+            if (members.All(m => m.Role != ProjectRole.Owner)) members.Add(new RestoredMember(actor.Id, ProjectRole.Owner));
+
+            var comments = new List<RestoredComment>();
+            foreach (var c in ReadJson<List<CommentDoc>>(zip, dir + "comments.json") ?? [])
+                comments.Add(new RestoredComment(c.Id, c.ElementId, await Author(c.AuthorId, c.Author), c.Body, c.Resolved, c.CreatedAt, c.ParentId));
+            var reviews = new List<RestoredReview>();
+            foreach (var r in ReadJson<List<ReviewDoc>>(zip, dir + "reviews.json") ?? [])
+            {
+                var reviewers = new List<RestoredReviewer>();
+                foreach (var x in r.Reviewers)
+                    if (await mapUser(x.UserId, x.Username) is { } uid && reviewers.All(y => y.UserId != uid))
+                        reviewers.Add(new RestoredReviewer(uid, x.Vote, x.VotedAt));
+                var rc = new List<RestoredReviewComment>();
+                foreach (var c in r.Comments)
+                    rc.Add(new RestoredReviewComment(c.Id, c.ElementId, c.ParentId, await Author(c.AuthorId, c.Author), c.Body, c.CreatedAt));
+                var checks = new List<RestoredReviewCheck>();
+                foreach (var c in r.Checks)
+                    if (await mapUser(c.UserId, null) is { } uid) checks.Add(new RestoredReviewCheck(c.ElementId, uid));
+                reviews.Add(new RestoredReview(r.Title, r.Description, await Author(r.AuthorId, r.Author), r.State, r.ScopeKind, r.ElementIds,
+                    r.BaseVersion, r.HeadVersion, r.ApplyStatus, r.CreatedAt, r.UpdatedAt, reviewers, rc, checks));
+            }
+            var baselines = (ReadJson<List<BaselineDoc>>(zip, dir + "baselines.json") ?? [])
+                .Select(b => new RestoredBaseline(b.Version, b.Name, b.Description, b.CreatedAt)).ToList();
+
+            var exists = await db.LoadProjectAsync(doc.Id) is not null;
+            var name = exists ? $"{doc.Name} (restored {DateTime.UtcNow:yyyy-MM-dd})" : doc.Name;
+            var newId = await db.RestoreProjectAsync(new RestoredProject(doc.Id, name, model, versions, members, comments, reviews, baselines));
+            await audit.RecordAsync(auditAction, actor, newId, name, target: name,
+                details: new { sourceId = doc.Id, versions = versions.Count, comments = comments.Count, reviews = reviews.Count, members = members.Count,
+                    backupCreated = manifest.CreatedAt.ToString("O", CultureInfo.InvariantCulture), copy = exists }, ip: ip);
+            return new RestoreResult(mp.Id, name, newId, versions.Count, null);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException or FormatException or InvalidOperationException or IOException)
+        {
+            log.LogWarning(ex, "Restore of project {Project} failed", mp.Name);
+            return new RestoreResult(mp.Id, mp.Name, null, 0, ex.Message);
+        }
     }
 
     // ------------------------------------------------------------------ zip helpers

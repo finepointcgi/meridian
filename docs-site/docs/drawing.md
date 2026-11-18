@@ -4,9 +4,10 @@ Every diagram in Meridian is drawn on the same canvas, whether it is a SysML blo
 whiteboard. Shapes on a modeling diagram are views of model elements: renaming a block on one diagram renames it
 everywhere, and deleting it from the model removes it from every diagram.
 
-> [!NOTE]
-> **TODO (screenshot):** a block definition diagram with the shapes panel open, a selected block showing its hover
-> arrows, and the format bar.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/drawing-bdd-dark.png">
+  <img src="../images/drawing-bdd-light.png" alt="A block definition diagram with the shapes panel open, the Engine block selected with its hover arrows, and the format bar">
+</picture>
 
 ## Adding shapes
 

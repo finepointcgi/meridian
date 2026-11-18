@@ -54,8 +54,15 @@ Trace matrices (*Requirement × design*, *Requirement × test case*) can **hide 
 the built-in SDD and VCRM; a checkbox in the template editor). In a big model most cells of a full matrix are empty:
 16,000 requirements against 6,000 blocks is five million rows, where the links fit in a few thousand.
 
-> [!NOTE]
-> **TODO (screenshot):** the *Generate document* dialog with the size warning, and a background report in the status bar.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/report-size-warning-dark.png">
+  <img src="../images/report-size-warning-light.png" alt="The Generate document dialog warning that the Huge matrix template would be about 3,930 pages, with Split per top-level package, Limit to a package or depth and Generate anyway">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/report-background-dark.png">
+  <img src="../images/report-background-light.png" alt="The status bar with a Model Overview PDF generating in the background at 76 %">
+</picture>
 
 ## Diagram images
 

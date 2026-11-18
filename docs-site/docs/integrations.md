@@ -36,8 +36,10 @@ Select a package (or the model) to **Push N requirements as issues…**: one iss
 issue in that tracker yet, as one undo step. **Sync status** in the Integrations dialog refreshes every link of the
 project. Links are stored on the element, so they are versioned, exported and replicated like any other edit.
 
-> [!NOTE]
-> **TODO (screenshot):** the Linked issues section of a requirement with a Jira issue.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/linked-issues-dark.png">
+  <img src="../images/linked-issues-light.png" alt="The Linked issues section of a requirement with the Jira issue VEH-42, In Progress, assigned to Priya Patel">
+</picture>
 
 ## Webhooks
 

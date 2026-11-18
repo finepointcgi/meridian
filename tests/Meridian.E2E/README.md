@@ -30,7 +30,7 @@ Playwright cache (`~/Library/Caches/ms-playwright` on macOS, `~/.cache/ms-playwr
 
 ```bash
 dotnet test tests/Meridian.E2E
-MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter DocsScreenshotTests   # refresh docs-site/images
+MERIDIAN_DOCS_SCREENSHOTS=1 dotnet test tests/Meridian.E2E --filter "DocsScreenshotTests|GuideScreenshotTests|DatabaseDocsScreenshotTests"   # refresh docs-site/images
 ```
 
 - Without the browser installed, every test is **skipped** with a message saying how to install it, so a plain

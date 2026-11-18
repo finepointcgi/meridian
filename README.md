@@ -38,62 +38,81 @@ When it first starts, the desktop app asks where to work:
 
 You can change the choice later from your avatar menu (**Switch workspace or server…**).
 
-## Features
+## What's new
 
-New in **0.6 and 0.7** (marked ★): database modelling with subject areas, used projects (shared libraries), package
-permissions, DOORS Next and Polarion sync, simulation-driven requirement verification and variants on diagrams,
-TypeScript / Java / Python code sync with submodules, pull request previews and architecture checks, the tabbed
-ribbon, and a guided tour for people coming from Cameo or EA.
+- **0.10**: draw.io import and export (`.drawio`, `.drawio.svg`, `.drawio.png`) and **Import ▸ Folder of diagrams…**
+  for whole folders of Mermaid and draw.io files, one package per folder; importing again updates them in place.
+- **0.9.1**: diagrams draw lines above shapes by default (a per-diagram switch keeps the old order), context menus stay
+  open in the Windows desktop app, and a failed start-up update check no longer stops the desktop app.
+- **0.9**: code sync draws **behaviour from code**: activity and sequence diagrams from C#, TypeScript, Java and
+  Python method bodies (on demand or for entry points). The first sync of a repository goes straight into `main`.
+  Encryption keys are stored in the Meridian database, so saved tokens keep working after an upgrade or a move.
+- **0.8**: instance specifications and object diagrams, deployment diagrams, the relation map, model-wide find and
+  replace, per-element history with restore, Excel / CSV import and round-trip sync, printing and PDF, FMEA and fault
+  trees, AI assistants over MCP, several verification criteria per requirement, and lock-free live collaboration.
+- **0.6 and 0.7**: database modelling, used projects (shared libraries), package permissions, DOORS Next and Polarion
+  sync, simulation-driven requirement verification, variants on diagrams, TypeScript / Java / Python code sync with
+  submodules, pull request previews, architecture checks, the tabbed ribbon and a tour for Cameo and EA users.
+
 Earlier: code sync, creating diagrams from diagrams, Mermaid, more AI providers and multi-select (0.5); Settings and
-themes, Auto-diagram and one-click SDD (0.4).
+themes, Auto-diagram and one-click SDD (0.4). The app shows a What's new card once after an upgrade; ⌘K ▸ *What's new*
+opens it again.
+
+## Features
 
 **Coming from Cameo or Enterprise Architect?** Open your `.mdzip` or `.qea` directly, then see
 [Coming from Cameo / EA](docs-site/docs/migration.md) or **Help (?) ▸ Coming from Cameo or EA** in the app.
 
 - **Drawing as easy as draw.io**
   - A searchable shapes panel: click to add, drag to place.
-  - Hover arrows that add connected shapes; ★ lines pick their relationship type (satisfy, verify, composition…)
+  - Hover arrows that add connected shapes; lines pick their relationship type (satisfy, verify, composition…)
     and a chip switches it in one click.
   - Alignment guides and resize handles.
   - Double-click empty canvas to add a shape; start typing to label one.
   - A format bar for fill, line and text colors and line width, with a format painter.
-  - ★ **Multi-select** shapes and connectors, edit them together in the Inspector, and **Link to…** one element in a
+  - **Multi-select** shapes and connectors, edit them together in the Inspector, and **Link to…** one element in a
     single undo step. ([guide](docs-site/docs/multi-select.md))
 - **Generate diagrams**
   - **Auto-diagram** draws a package overview, structure, internal structure, requirement and behavior views from
     the model, with no AI.
-  - ★ **Create diagrams from diagrams**: requirements → use cases → activity → sequence → BDD / IBD → state machine,
+  - **Create diagrams from diagrams**: requirements → use cases → activity → sequence → BDD / IBD → state machine,
     reviewed before anything changes, with **Update from source** that keeps your edits.
     ([guide](docs-site/docs/derivation.md), [reference](docs/DERIVATION.md))
 - **SysML and UML**
   - Block definition, internal block (ports, item flows), parametric (with an equation solver), activity
     (swimlanes, pins, call behavior), state machine (composite states), sequence (fragments), use case,
     package and class diagrams.
+  - Instance specifications, object diagrams and an instance table; deployment diagrams (nodes, devices, execution
+    environments, artifacts). ([instances](docs-site/docs/instances.md), [deployment](docs-site/docs/deployment-diagrams.md))
   - Profiles and stereotypes, including UAF.
 - **Requirements**
   - A requirements table, traceability matrix, traceability table and impact analysis.
   - Satisfy, verify, refine, derive and trace links, plus allocation.
-  - ★ **Verification**: give a requirement a criterion (`mass <= 1500 kg`) and **Simulate ▸ Verify** checks it with
+  - **Verification**: give a requirement a criterion (`mass <= 1500 kg`) and **Simulate ▸ Verify** checks it with
     parametrics, Monte Carlo, timed simulation or co-simulation; pass / fail shows on diagrams.
     ([guide](docs-site/docs/verification.md), [reference](docs/VERIFICATION.md))
-  - ★ **DOORS Next and Polarion** two-way sync, plus ReqIF, CSV and Excel round trips.
-- ★ **Database modelling**: crow's-foot diagrams with tables, views, keys, indexes and colour-framed **subject areas**;
+  - **DOORS Next and Polarion** two-way sync, plus ReqIF, CSV and Excel round trips.
+- **Database modelling**: crow's-foot diagrams with tables, views, keys, indexes and colour-framed **subject areas**;
   DDL / `.dacpac` / live-database import with refresh, DDL and migration scripts for five dialects, a data dictionary.
   ([guide](docs-site/docs/database.md), [reference](docs/DATABASE.md))
 - **Other languages**: BPMN 2.0, ArchiMate 3, C# reverse engineering, and a free-drawing whiteboard.
-- **Code sync**: connect a GitHub, GitLab or Bitbucket repository (C#, ★ TypeScript, Java, Python, ★ submodules); each
+- **Code sync**: connect a GitHub, GitLab or Bitbucket repository (C#, TypeScript, Java, Python, submodules); each
   push updates a review branch of the model, pull requests get a preview, diagrams highlight what changed, and you
-  accept or reject **Code changes** into `main`. ★ **Architecture checks** flag code dependencies the model does not
-  allow. ([guide](docs-site/docs/code-sync.md), [reference](docs/CODE-SYNC.md), [checks](docs/ARCHITECTURE-CHECKS.md))
-- ★ **Used projects**: reuse a package of another project, read-only and pinned to a version, branch or baseline,
+  accept or reject **Code changes** into `main`. **Architecture checks** flag code dependencies the model does not
+  allow. Activity and sequence diagrams can be drawn from method bodies (**Behaviour diagrams**).
+  ([guide](docs-site/docs/code-sync.md), [reference](docs/CODE-SYNC.md), [checks](docs/ARCHITECTURE-CHECKS.md))
+- **Used projects**: reuse a package of another project, read-only and pinned to a version, branch or baseline,
   with an update review. ([guide](docs-site/docs/libraries.md), [reference](docs/LIBRARIES.md))
 - **AI assistant**: ask about the model, review it, generate requirements and trace links, or **Diagram my model**.
-  Every change is shown as a diff you apply or discard. Runs on Claude (API key), ★ a local model (Ollama, LM Studio
-  or any OpenAI-compatible server) or ★ Claude Code with your own login.
+  Every change is shown as a diff you apply or discard. Runs on Claude (API key), a local model (Ollama, LM Studio
+  or any OpenAI-compatible server) or Claude Code with your own login.
   ([guide](docs-site/docs/ai-assistant.md), [reference](docs/AI.md))
 - **AI assistants over MCP** (team server): Hearth, Claude Code and other MCP clients read your models with read-only
   tools at `/api/mcp`, using a personal access token and your package permissions. ([guide](docs-site/docs/mcp.md))
 - **Simulation**: step through activities and state machines.
+- **Find your way around**: the **relation map** explores everything connected to an element, and model-wide
+  **find and replace** (⇧⌘F) searches names, documentation and values. ([relation map](docs-site/docs/relation-map.md),
+  [find and replace](docs-site/docs/find-replace.md))
 - **Safety & reliability**: FMEA worksheet on blocks, parts and functions (S/O/D, RPN, AIAG-VDA action priority,
   mitigating requirements, verifying tests, CSV) and fault tree diagrams (AND / OR / k-of-n gates) with minimal cut sets,
   exact top-event probability and importance measures. ([guide](docs-site/docs/safety.md), [reference](docs/SAFETY.md))
@@ -102,15 +121,17 @@ themes, Auto-diagram and one-click SDD (0.4).
 - **Exchange**
   - XMI 2.5.1 (with diagrams), SysML v2 text, ReqIF, BPMN XML and ArchiMate exchange files.
   - Cameo / MagicDraw `.mdzip` and Enterprise Architect `.qea` import.
-  - ★ **Mermaid** import (flowchart, class, state, sequence, requirement, ER and C4) and export.
+  - **Mermaid** import (flowchart, class, state, sequence, requirement, ER and C4) and export.
     ([guide](docs-site/docs/mermaid.md), [reference](docs/MERMAID.md))
-  - ★ **draw.io** import and export (`.drawio`, `.drawio.svg`, `.drawio.png`): UML pages become model elements at their drawn
+  - **draw.io** import and export (`.drawio`, `.drawio.svg`, `.drawio.png`): UML pages become model elements at their drawn
     positions, other pages whiteboard drawings; and **folders of diagrams** (Mermaid and draw.io, one package per folder,
     re-import updates in place). ([reference](docs/DRAWIO.md))
+  - Excel and CSV import with round-trip sync for any element kind. ([guide](docs-site/docs/spreadsheet-import.md))
   - A read-only SysML v2 REST API.
 - **Reports**: program deliverables (SRS, ICD, SDD, VCRM / test report, model overview) as PDF, Word and HTML from
   editable templates: numbered sections, TOC, lists of figures / tables, captions and cross-references, query-driven
-  loops and tables, traceability matrices and vector diagrams. Templates are stored in the model or as JSON. Plus SVG export.
+  loops and tables, traceability matrices and vector diagrams. Templates are stored in the model or as JSON. Plus SVG export and **Print / PDF…** for
+  diagrams with page setup and tiling. ([printing](docs-site/docs/printing.md))
 - **Settings and themes**: light, dark or match system, accent colors, density and font size; settings follow your
   account. ([guide](docs-site/docs/settings.md))
 - **Getting started**: a guided tour with chapters for each feature, including one for Cameo and EA users
@@ -118,10 +139,10 @@ themes, Auto-diagram and one-click SDD (0.4).
   ("dependency matrix", "report wizard"), and empty projects that offer Paste Mermaid, Open a Cameo file, Start from a
   sample and Auto-diagram.
 - **Collaboration** (server)
-  - Accounts and project roles (owner, editor, viewer), and ★ **package permissions** (none, read, edit, manage per
+  - Accounts and project roles (owner, editor, viewer), and **package permissions** (none, read, edit, manage per
     person or team). ([guide](docs-site/docs/permissions.md))
   - Live co-editing with presence, branches and merge, baselines, reviews and comments.
-  - Version history with diff and restore.
+  - Version history with diff and restore, and per-element history (**History…**) with field diffs.
 
 <table>
   <tr>
@@ -248,9 +269,11 @@ environment variables (`Meridian__Sso__Providers__0__ClientSecret=…`):
   and failures, SSO provisioning, user, role, team and member changes, project create/rename/delete/transfer,
   version commits and restores, exports, backups and restores.
 - **Backups**: *Administration → Backups* downloads a zip with every project's latest model, its full version
-  history and members, plus (optionally) the user directory without password hashes. Uploading a backup there
+  history, comments, reviews, baselines and members, plus (optionally) the user directory without password hashes. Uploading a backup there
   restores selected projects with their history; a project whose id still exists comes back as a copy. With
   `Backup:Folder` set, the server also writes a backup every `IntervalHours` and keeps the newest `Retain` files.
+  Project owners can take one project in the same format (**Export ▸ Download project with history**), which is how
+  a project moves from the desktop's local workspace to a team server with its history.
 
 ## Build the desktop apps
 

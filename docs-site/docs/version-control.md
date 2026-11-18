@@ -16,8 +16,10 @@ history:
   version for everyone in the project (the current state is committed as a version first, so you can restore it again), **Download** saves it as a `.meridian` file, **Branch** starts a branch from
   it and **Baseline…** tags it.
 
-> [!NOTE]
-> **TODO (screenshot):** the version history dialog comparing a version with the current model.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/version-history-dark.png">
+  <img src="../images/version-history-light.png" alt="The Version history dialog comparing v1 Initial architecture with the current model: two renamed elements">
+</picture>
 
 ## Element history
 
@@ -91,8 +93,10 @@ For each conflict choose **ours** (the target), **theirs** (the source) or, for 
 message and confirm: the result is committed as a new version on the target, becomes its head for everyone editing it,
 and the merge base moves forward so the next merge only sees newer changes.
 
-> [!NOTE]
-> **TODO (screenshot):** the merge dialog with one field conflict and the incoming changes preview.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/merge-conflict-dark.png">
+  <img src="../images/merge-conflict-light.png" alt="The merge dialog for lighter-engine into main with one name conflict and the result preview">
+</picture>
 
 ## Baselines
 
@@ -104,6 +108,35 @@ A **baseline** is an immutable, named tag on a committed version, for example `P
   between them; **Export CSV** writes the comparison.
 - A review can compare against a baseline, and **Request review** can commit a new baseline for that purpose (see
   [Reviews](reviews.md)).
+
+## Moving a project with its history
+
+A project can move from the desktop app's local workspace to a team server, or from one server to another, without
+leaving its history behind.
+
+1. Open the project and choose **Export ▸ Download project with history (.zip)** in the project menu. Only the
+   project's **owners** see this item: the file holds the whole project, and package permissions never hide anything
+   from an owner. In the local workspace you own every project.
+2. On the other server, choose **Open a file as a new project…** (project menu or **Projects… ▸ Open a file**) and
+   pick the `.zip`.
+
+The new project has:
+
+| Kept | Notes |
+| --- | --- |
+| the model, including edits not yet committed | |
+| every committed version, with its message and date | branch commits are kept as versions; branches themselves are not |
+| element comments, replies and their resolved state | |
+| reviews with their scope, state, votes, discussion and checklist | the versions a review compares are matched by number |
+| baselines | |
+
+You become the project's only member and its owner, and what was written in the archive is attributed to you: a
+local workspace has a single author, and nothing in the file is matched to other people's accounts on the server.
+Add people with **Share & members…**. Opening the same file twice gives two separate projects.
+
+The `.zip` uses the [backup format](administration.md#backups) and holds one project. An administrator who restores it
+through **Administration ▸ Backups** instead keeps the original authors and members wherever their accounts exist
+on the server. **Download .meridian file** still exports only the current model, without history.
 
 ## Element locks (server)
 

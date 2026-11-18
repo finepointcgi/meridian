@@ -5,8 +5,10 @@ starting points; the four worked examples below are complete models that validat
 fit together. Each opens with every diagram laid out, saved tables and rules in a `Views` package, and test cases
 with verdicts.
 
-> [!NOTE]
-> **TODO (screenshot):** the New project gallery showing the Aerospace, Automotive and Medical sample cards.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/samples-gallery-dark.png">
+  <img src="../images/samples-gallery-light.png" alt="The New project gallery with the CubeSat mission, Adaptive cruise control and Infusion pump sample cards">
+</picture>
 
 ## Vehicle sample (SysML)
 

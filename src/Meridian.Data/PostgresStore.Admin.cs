@@ -382,6 +382,47 @@ public sealed partial class PostgresStore
         foreach (var v in project.Versions)
             await Run("insert into project_versions(project_id, number, message, model, author, created_at) values ($1,$2,$3,$4,(select id from users where id = $5),$6)",
                 id, v.Number, v.Message, Typed(v.ModelJson, NpgsqlDbType.Jsonb), Typed(v.AuthorId, NpgsqlDbType.Uuid), DateTime.SpecifyKind(v.CreatedAt.ToUniversalTime(), DateTimeKind.Utc));
+
+        static DateTime T(DateTime t) => DateTime.SpecifyKind(t.ToUniversalTime(), DateTimeKind.Utc);
+        static NpgsqlParameter U(Guid? g) => Typed(g, NpgsqlDbType.Uuid);
+        // Version numbers → the new version rows (reviews and baselines point at versions by row id).
+        var versionIds = new Dictionary<int, long>();
+        foreach (var v in project.Versions)
+            if (await Run("select id from project_versions where project_id = $1 and number = $2", id, v.Number) is long vid) versionIds[v.Number] = vid;
+        NpgsqlParameter VersionId(int? number) => Typed(number is { } n && versionIds.TryGetValue(n, out var vid) ? vid : null, NpgsqlDbType.Bigint);
+
+        var commentIds = new Dictionary<long, long>();
+        foreach (var cm in project.Comments ?? [])
+            commentIds[cm.Key] = (long)(await Run("insert into comments(project_id, element_id, author, body, resolved, created_at) values ($1,$2,(select id from users where id = $3),$4,$5,$6) returning id",
+                id, cm.ElementId, U(cm.AuthorId), cm.Body, cm.Resolved, T(cm.CreatedAt)))!;
+        foreach (var cm in project.Comments ?? [])
+            if (cm.ParentKey is { } pk && commentIds.TryGetValue(pk, out var parent))
+                await Run("insert into comment_replies(comment_id, parent_id) values ($1,$2) on conflict (comment_id) do nothing", commentIds[cm.Key], parent);
+
+        foreach (var r in project.Reviews ?? [])
+        {
+            var rid = (long)(await Run("""
+                insert into reviews(project_id, title, description, author, state, scope_kind, scope_ids, base_version, head_version, apply_status, created_at, updated_at)
+                values ($1,$2,$3,(select id from users where id = $4),$5,$6,$7,$8,$9,$10,$11,$12) returning id
+                """, id, r.Title, r.Description, U(r.AuthorId), (short)r.State, (short)r.ScopeKind, Typed(ReviewRules.EncodeIds(r.ElementIds), NpgsqlDbType.Jsonb),
+                VersionId(r.BaseVersion), VersionId(r.HeadVersion), r.ApplyStatus, T(r.CreatedAt), T(r.UpdatedAt)))!;
+            foreach (var rv in r.Reviewers)
+                await Run("insert into review_reviewers(review_id, user_id, vote, voted_at) select $1, $2, $3, $4 where exists (select 1 from users where id = $2) on conflict do nothing",
+                    rid, rv.UserId, (short)rv.Vote, Typed(rv.VotedAt is { } va ? T(va) : null, NpgsqlDbType.TimestampTz));
+            var reviewCommentIds = new Dictionary<long, long>();
+            foreach (var rc in r.Comments)   // parents come first: replies are written after the comment they answer
+                reviewCommentIds[rc.Key] = (long)(await Run("insert into review_comments(review_id, element_id, parent_id, author, body, created_at) values ($1,$2,$3,(select id from users where id = $4),$5,$6) returning id",
+                    rid, Typed(rc.ElementId, NpgsqlDbType.Text), Typed(rc.ParentKey is { } pk && reviewCommentIds.TryGetValue(pk, out var parent) ? parent : null, NpgsqlDbType.Bigint),
+                    U(rc.AuthorId), rc.Body, T(rc.CreatedAt)))!;
+            foreach (var ck in r.Checks)
+                await Run("insert into review_checks(review_id, element_id, user_id, checked_at) select $1, $2, $3, $4 where exists (select 1 from users where id = $3) on conflict do nothing",
+                    rid, ck.ElementId, ck.UserId, T(r.UpdatedAt));
+        }
+
+        foreach (var b in project.Baselines ?? [])
+            if (versionIds.TryGetValue(b.VersionNumber, out var vid))
+                await Run("insert into baselines(project_id, version_id, name, description, created_at) values ($1,$2,$3,$4,$5) on conflict (project_id, name) do nothing",
+                    id, vid, b.Name, b.Description, T(b.CreatedAt));
         await tx.CommitAsync();
         return id;
     }

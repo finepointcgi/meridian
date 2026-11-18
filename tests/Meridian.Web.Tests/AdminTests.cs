@@ -145,6 +145,105 @@ public sealed class AdminTests : TestContext, IAsyncLifetime
     }
 
     [Fact]
+    public async Task Project_With_History_Moves_From_A_Local_Workspace_To_A_Team_Server()
+    {
+        var settings = new AdminSettings(new(), new(), new());
+        BackupService Service(IMeridianStore db) => new(db, new CollaborationHub(db, NullLogger<CollaborationHub>.Instance),
+            new AuditLog(db, NullLogger<AuditLog>.Instance), settings, NullLogger<BackupService>.Instance);
+
+        // The desktop's local workspace: one account, a project with versions, a comment thread, a review and a baseline.
+        var local = await NewStore();
+        var me = await local.CreateUserAsync("local", "Me", "password-1");
+        var pid = await local.CreateProjectAsync("Rover", Json, me.Id);
+        var other = await local.CreateProjectAsync("Not this one", Json, me.Id);
+        await local.CommitVersionAsync(pid, "first", Json, me.Id);
+        await local.CommitVersionAsync(pid, "second", Json, me.Id);
+        var v1 = (await local.ListVersionsAsync(pid)).Single(v => v.Number == 1);
+        var question = await local.AddCommentAsync(pid, "el-1", me.Id, "Is the mass right?");
+        var answer = await local.AddCommentAsync(pid, "el-1", me.Id, "Checked: yes.");
+        await local.SetCommentParentAsync(answer, question);
+        await local.SetCommentResolvedAsync(question, true);
+        var review = await local.CreateReviewAsync(pid, new ReviewDraft("Design review", "", ReviewScopeKind.Versions, [], v1.Id, null, false, [me.Id]), me.Id);
+        await local.AddReviewCommentAsync(review, "el-1", null, me.Id, "Fine by me");
+        await local.SetReviewVoteAsync(review, me.Id, ReviewVote.Approve);
+        await local.CreateBaselineAsync(pid, v1.Id, "PDR", "Preliminary design", me.Id);
+
+        using var ms = new MemoryStream();
+        var manifest = await Service(local).WriteProjectAsync(ms, pid, me.Username);
+        Assert.Equal((BackupService.CurrentFormatVersion, false), (manifest.FormatVersion, manifest.IncludesUsers));
+        Assert.Equal(pid, Assert.Single(manifest.Projects).Id);   // only this project
+        Assert.Equal("Rover (with history).zip", BackupService.ProjectFileName("Rover"));
+        ms.Position = 0;
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Read, leaveOpen: true))
+        {
+            Assert.Null(zip.GetEntry("users.json"));
+            Assert.Null(zip.GetEntry($"projects/{other:D}/project.json"));
+            Assert.NotNull(zip.GetEntry($"projects/{pid:D}/comments.json"));
+        }
+
+        // A team server where someone else happens to be called "local": the import must not hand them anything.
+        var server = await NewStore();
+        var dana = await server.CreateUserAsync("dana", "Dana", "password-2");
+        var namesake = await server.CreateUserAsync("local", "Someone else", "password-3");
+        ms.Position = 0;
+        BackupService.RestoreResult result;
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Read, leaveOpen: true))
+            result = Assert.Single(await Service(server).ImportProjectsAsync(zip, dana));
+        Assert.Null(result.Error);
+        var id = result.NewId!.Value;
+        Assert.Equal(("Rover", 2), ((await server.LoadProjectAsync(id))!.Value.Name, result.Versions));
+        Assert.Equal([(dana.Id, ProjectRole.Owner)], (await server.MembersAsync(id)).Select(m => (m.User.Id, m.Role)));
+        Assert.Null(await server.RoleOfAsync(id, namesake.Id));
+
+        var versions = await server.ListVersionsAsync(id);
+        Assert.Equal(["second", "first"], versions.Select(v => v.Message));
+        Assert.All(versions, v => Assert.Equal("Dana", v.Author));
+        var comments = (await server.ListCommentsAsync(id)).OrderBy(c => c.Id).ToList();
+        Assert.Equal(["Is the mass right?", "Checked: yes."], comments.Select(c => c.Body));
+        Assert.All(comments, c => Assert.Equal(dana.Id, c.Author.Id));
+        Assert.True(comments[0].Resolved);
+        Assert.Equal(comments[0].Id, (await server.ListCommentParentsAsync(id))[comments[1].Id]);
+        var r = Assert.Single(await server.ListReviewsAsync(id));
+        Assert.Equal(("Design review", dana.Id), (r.Title, r.Author.Id));
+        Assert.Equal(versions.Single(v => v.Number == 1).Id, r.BaseVersionId);
+        Assert.Equal([(dana.Id, ReviewVote.Approve)], r.Reviewers.Select(x => (x.User.Id, x.Vote)));
+        Assert.Equal(["Fine by me"], (await server.ListReviewCommentsAsync(r.Id)).Select(c => c.Body));
+        var baseline = Assert.Single(await server.ListBaselinesAsync(id));
+        Assert.Equal(("PDR", 1), (baseline.Name, baseline.VersionNumber));
+        Assert.Contains((await server.QueryAuditAsync(new AuditQuery(Action: AuditActions.ProjectImportHistory))).Items, e => e.ProjectId == id);
+
+        // Opening it a second time makes a copy; the first stays as it was.
+        ms.Position = 0;
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Read, leaveOpen: true))
+            Assert.NotEqual(id, Assert.Single(await Service(server).ImportProjectsAsync(zip, dana)).NewId);
+    }
+
+    [Fact]
+    public async Task Format_1_Backups_Without_Comments_Still_Restore()
+    {
+        var store = await NewStore();
+        var admin = await store.CreateUserAsync("root", "Root", "password-1");
+        var pid = Guid.NewGuid();
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            void Write(string path, string text) { using var w = new StreamWriter(zip.CreateEntry(path).Open()); w.Write(text); }
+            Write("manifest.json", $$"""{"format":"meridian-backup","formatVersion":1,"createdAt":"2025-01-01T00:00:00Z","createdBy":"x","includesUsers":false,"projects":[{"id":"{{pid}}","name":"Old","revision":1,"updatedAt":"2025-01-01T00:00:00Z","versions":0}]}""");
+            Write($"projects/{pid:D}/project.json", $$"""{"id":"{{pid}}","name":"Old","revision":1,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-01T00:00:00Z","members":[]}""");
+            Write($"projects/{pid:D}/model.meridian", Json);
+            Write($"projects/{pid:D}/versions.json", "[]");
+        }
+        ms.Position = 0;
+        using var read = new ZipArchive(ms, ZipArchiveMode.Read);
+        var settings = new AdminSettings(new(), new(), new());
+        var service = new BackupService(store, new CollaborationHub(store, NullLogger<CollaborationHub>.Instance), new AuditLog(store, NullLogger<AuditLog>.Instance), settings, NullLogger<BackupService>.Instance);
+        var result = Assert.Single(await service.RestoreAsync(read, null, false, admin));
+        Assert.Null(result.Error);
+        Assert.Empty(await store.ListCommentsAsync(pid));
+        Assert.Equal(ProjectRole.Owner, await store.RoleOfAsync(pid, admin.Id));
+    }
+
+    [Fact]
     public async Task Admin_Users_Tab_Lists_Accounts_And_Admin_Checks_Are_Live()
     {
         var db = await NewStore();

@@ -802,6 +802,7 @@ public partial class Workbench
                 Snackbar.Add($"Imported {file.Name} as a new project", Severity.Success);
                 return;
             }
+            if (ext == ".zip") { await OpenProjectArchive(file); return; }
             if (IsMagicDrawFile(file.Name)) { await OpenMagicDrawProject(file); return; }
             if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name)) { await OpenDrawIoProject(file); return; }
             if (MermaidImporter.IsMermaidFile(file.Name)) { await OpenMermaidProject(file); return; }
@@ -825,7 +826,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian, XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid and draw.io files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian (or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid and draw.io files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 

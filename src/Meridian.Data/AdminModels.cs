@@ -30,7 +30,32 @@ public sealed record VersionSnapshot(int Number, string Message, string ModelJso
 
 public sealed record RestoredMember(Guid UserId, ProjectRole Role);
 
-public sealed record RestoredProject(Guid Id, string Name, string ModelJson, IReadOnlyList<VersionSnapshot> Versions, IReadOnlyList<RestoredMember> Members);
+/// <summary>
+/// A project to recreate from a backup or a project-with-history archive. <see cref="Comments"/>, <see cref="Reviews"/>
+/// and <see cref="Baselines"/> refer to versions by <see cref="VersionSnapshot.Number"/>; authors that have no account
+/// on this server are dropped (comments and reviews stay, without an author).
+/// </summary>
+public sealed record RestoredProject(Guid Id, string Name, string ModelJson, IReadOnlyList<VersionSnapshot> Versions, IReadOnlyList<RestoredMember> Members,
+    IReadOnlyList<RestoredComment>? Comments = null, IReadOnlyList<RestoredReview>? Reviews = null, IReadOnlyList<RestoredBaseline>? Baselines = null);
+
+/// <summary>An element comment; <see cref="ParentKey"/> is the <see cref="Key"/> of the comment it replies to.</summary>
+public sealed record RestoredComment(long Key, string ElementId, Guid? AuthorId, string Body, bool Resolved, DateTime CreatedAt, long? ParentKey = null);
+
+/// <summary>A review with its reviewers, discussion and checklist. Versions are numbers (null head = the live model).</summary>
+public sealed record RestoredReview(
+    string Title, string Description, Guid? AuthorId, ReviewState State, ReviewScopeKind ScopeKind, IReadOnlyList<string> ElementIds,
+    int? BaseVersion, int? HeadVersion, bool ApplyStatus, DateTime CreatedAt, DateTime UpdatedAt,
+    IReadOnlyList<RestoredReviewer> Reviewers, IReadOnlyList<RestoredReviewComment> Comments, IReadOnlyList<RestoredReviewCheck> Checks);
+
+public sealed record RestoredReviewer(Guid UserId, ReviewVote Vote, DateTime? VotedAt);
+
+/// <summary>A review comment; <see cref="ParentKey"/> is the <see cref="Key"/> of the comment it replies to.</summary>
+public sealed record RestoredReviewComment(long Key, string? ElementId, long? ParentKey, Guid? AuthorId, string Body, DateTime CreatedAt);
+
+public sealed record RestoredReviewCheck(string ElementId, Guid UserId);
+
+/// <summary>A baseline on the version with this <see cref="VersionNumber"/>.</summary>
+public sealed record RestoredBaseline(int VersionNumber, string Name, string Description, DateTime CreatedAt);
 
 /// <summary>One append-only audit record. <see cref="DetailsJson"/> is a JSON object (or null).</summary>
 public sealed record AuditEntry(
