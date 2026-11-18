@@ -52,6 +52,12 @@ around them is ignored.
 | `requirementDiagram` | requirements with id, text, risk and verification method; elements as blocks or test cases; satisfy, verify, trace, derive, refine, copy and containment |
 | `erDiagram` | blocks with typed properties, and associations with multiplicities at both ends |
 | `C4Context`, `C4Container`, `C4Component` | actors, blocks and dependencies |
+| `ishikawa-beta` | a whiteboard with a fishbone: the effect as the head, categories on slanted bones, causes with arrows onto them |
+| `radar-beta` | a whiteboard with a radar chart: rings, one spoke per axis, one coloured line per curve and a legend |
+| `treemap-beta` | a whiteboard with nested rectangles sized by value, one colour per top-level section |
+
+The three charts are made of ordinary shapes and lines, so you can move, recolour and rename every piece. A radar
+dot keeps its number as the tagged value `value`; a treemap item shows its value on its last line.
 
 Mind maps, Gantt charts, pie charts and other types with no SysML meaning are skipped with a warning.
 
@@ -69,6 +75,7 @@ Inputs are cut at 4 million characters, and uploads and drops at 8 MB. Each limi
 | Sequence | `sequenceDiagram` |
 | Block definition, class | `classDiagram` |
 | Requirement | `requirementDiagram` |
+| Whiteboard made from an Ishikawa, radar or treemap chart | the same chart, with your edited names and values |
 
 Importing an exported diagram gives back the same elements and relationships. Layout, styles and a few details (pins,
 some comments, junction / entry / exit / terminate pseudostates) are not carried.

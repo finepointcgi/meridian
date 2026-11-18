@@ -46,6 +46,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
                 MermaidDiagramKind.Requirement => Requirement(g, name),
                 MermaidDiagramKind.EntityRelationship => Er(g, name),
                 MermaidDiagramKind.C4 => C4(g, name),
+                MermaidDiagramKind.Ishikawa or MermaidDiagramKind.Radar or MermaidDiagramKind.Treemap => new MermaidCharts(m, target, Source).Build(g, name),
                 _ => null,
             };
         }
