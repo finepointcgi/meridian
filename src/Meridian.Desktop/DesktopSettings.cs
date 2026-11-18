@@ -27,6 +27,9 @@ internal sealed class DesktopSettings
 
     public DateTimeOffset? LastUpdateCheck { get; set; }
 
+    /// <summary>After a crash, offer "Report this problem" on the next start (a prefilled GitHub issue; nothing is sent automatically).</summary>
+    public bool OfferCrashReports { get; set; } = true;
+
     /// <summary>The last check's result, as shown in Settings ▸ Desktop ("You're up to date (0.5.0)").</summary>
     public string? LastUpdateMessage { get; set; }
     public UpdateStatus? LastUpdateStatus { get; set; }

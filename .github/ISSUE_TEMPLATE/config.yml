@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: User guide and FAQ
+    url: https://github.com/finepointcgi/meridian/tree/main/docs-site/docs
+    about: How-tos, and what Meridian stores and reports. Check the FAQ first.

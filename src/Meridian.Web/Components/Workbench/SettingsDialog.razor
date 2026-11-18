@@ -270,6 +270,10 @@
                 Toggle("updates", _desktopUpdates, v => { _desktopUpdates = v; Bridge("updates", v); return Task.CompletedTask; }), "update release version automatic");
             yield return new(SettingsSection.Desktop, "Update source", "Where Meridian looks for new versions.", Scope.Device,
                 UpdateSourceForm, "update source github gitlab token private repository project manifest url server self-hosted", "desktop-update-source");
+            yield return new(SettingsSection.Desktop, "Offer to report crashes", "After an unexpected error, offer a prefilled GitHub issue on the next start. Nothing is sent automatically.", Scope.Device,
+                Toggle("crash-prompt", _desktopCrashPrompt, v => { _desktopCrashPrompt = v; Bridge("crashPrompt", v); return Task.CompletedTask; }), "crash report problem bug issue privacy telemetry");
+            yield return new(SettingsSection.Desktop, "Crash files", _desktopCrashes == 0 ? "Crash files stay on this computer. None waiting to be reported." : $"{_desktopCrashes} crash file{(_desktopCrashes == 1 ? "" : "s")} not yet reported. They stay on this computer.", Scope.Device,
+                CrashFiles, "crash report problem bug issue folder log", "desktop-crashes");
             yield return new(SettingsSection.Desktop, "Recent files", _desktopRecent == 0 ? "No recent files." : $"{_desktopRecent} recent file{(_desktopRecent == 1 ? "" : "s")} on the start screen.", Scope.Device,
                 ClearRecent, "history recent clear");
         }
@@ -780,8 +784,8 @@
 
     // ---------------------------------------------------------------- desktop (Photino bridge)
 
-    private bool _desktopAutoOpen, _desktopUpdates = true;
-    private int _desktopRecent;
+    private bool _desktopAutoOpen, _desktopUpdates = true, _desktopCrashPrompt = true;
+    private int _desktopRecent, _desktopCrashes;
     // Updates: what the desktop host reported (Program.DesktopState / update-status messages).
     private string? _dVersion, _dLastCheck, _dMessage, _dStatus, _dAvailable, _dManifestUrl;
     private string _dSource = "GitHub", _dDraftSource = "GitHub", _dDraftUrl = "", _dGitLabUrl = "", _dGitLabProject = "", _dDraftGitLabUrl = "", _dDraftGitLabProject = "";
@@ -792,7 +796,8 @@
     /// <summary>The desktop host's settings (the GitHub token is never part of it, only whether one is saved).</summary>
     public sealed record DesktopState(bool AutoOpen, bool CheckForUpdates, int RecentFiles, string? Version = null, string? LastCheck = null,
         string? LastMessage = null, string? LastStatus = null, string? Available = null, string? UpdateSource = null, string? ManifestUrl = null,
-        bool HasToken = false, bool ChecksDisabled = false, string? GitLabUrl = null, string? GitLabProject = null, bool HasGitLabToken = false);
+        bool HasToken = false, bool ChecksDisabled = false, string? GitLabUrl = null, string? GitLabProject = null, bool HasGitLabToken = false,
+        bool CrashPrompt = true, int PendingCrashes = 0);
 
     private async Task LoadDesktopAsync()
     {
@@ -812,6 +817,7 @@
     private void ApplyDesktopState(DesktopState d)
     {
         (_desktopAutoOpen, _desktopUpdates, _desktopRecent) = (d.AutoOpen, d.CheckForUpdates, d.RecentFiles);
+        (_desktopCrashPrompt, _desktopCrashes) = (d.CrashPrompt, d.PendingCrashes);
         _dVersion = d.Version;
         _dLastCheck = d.LastCheck;
         _dMessage ??= d.LastMessage;
@@ -1013,6 +1019,23 @@
         _ = JS.InvokeVoidAsync("meridianSettings.desktop", "clearRecent", null).AsTask().ContinueWith(_ => { });
         _desktopRecent = 0;
     }
+
+    private void ReportCrash()
+    {
+        DesktopCommand("reportProblem");
+        _desktopCrashes = 0;
+    }
+
+    private RenderFragment CrashFiles => __builder =>
+    {
+        <div class="settings-local desktop-crashes">
+            @if (_desktopCrashes > 0)
+            {
+                <button class="settings-btn primary desktop-crash-report" @onclick="ReportCrash" title="Opens a prefilled GitHub issue in your browser to review before submitting">Report the latest crash…</button>
+            }
+            <button class="settings-btn desktop-crash-folder" @onclick="@(() => DesktopCommand("openCrashFolder"))">Show crash files</button>
+        </div>
+    };
 
     private RenderFragment ClearRecent => __builder =>
     {

@@ -103,6 +103,7 @@
                 <MudMenuItem Icon="@Icons.Material.Outlined.Search" OnClick="() => _palette!.Show()">All commands… <Key>⌘K</Key></MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.NewReleases" OnClick="ShowWhatsNew">What's new in @TourChapters.WhatsNewVersion</MudMenuItem>
                 <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Outlined.BugReport" OnClick="ReportProblem" data-testid="help-report-problem" title="Opens a prefilled GitHub issue in your browser to review before submitting">Report a problem…</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Outlined.Info" OnClick="ShowAbout">About Meridian</MudMenuItem>
             </ChildContent>
         </MudMenu>

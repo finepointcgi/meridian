@@ -44,6 +44,7 @@ public static class MeridianServer
         var builder = WebApplication.CreateBuilder(options ?? new WebApplicationOptions { Args = args });
         customize?.Invoke(builder);
         Hosting.OperationsHosting.AddMeridianOperations(builder);   // health, JSON/request logging, OpenTelemetry (docs/DEPLOYMENT.md)
+        builder.Logging.AddProvider(new Hosting.CrashLogProvider());   // crash files (desktop) / recent-log context and circuit errors (Hosting/ProblemReports.cs)
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents()
@@ -95,6 +96,16 @@ public static class MeridianServer
         Hosting.UserGuide.AddMeridianUserGuide(builder);   // the bundled user guide at /guide (Hosting/UserGuide.cs)
 
         var app = builder.Build();
+        // A team server has no one to offer a report to: unhandled process and task exceptions are logged (redacted); circuit errors
+        // are already in ASP.NET's own log. The desktop app configures crash files itself.
+        if (!host.LocalMode && Hosting.CrashReports.Folder is null)
+        {
+            var crashLog = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Meridian.Crash");
+            Hosting.CrashReports.Configure(null, "server", r =>
+            {
+                if (r.Source != "Blazor circuit") crashLog.LogCritical("Unhandled exception ({Source}) in Meridian {Version}: {Details}", r.Source, r.Version, r.Details);
+            });
+        }
         Hosting.OperationsHosting.UseMeridianRequestLogging(app);
 
         var meridianDb = app.Services.GetRequiredService<IMeridianStore>();

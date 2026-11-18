@@ -61,7 +61,7 @@ server (desktop app). See [AI assistant](ai-assistant.md).
 ## Account, desktop and server
 
 - **Account** (team server): display name, avatar colour, password, API tokens and **Sign out everywhere**.
-- **Desktop** (desktop app): open the last workspace automatically, check for updates, recent files.
+- **Desktop** (desktop app): open the last workspace automatically, check for updates, offer to report crashes and show crash files (see [Reporting problems](faq.md#reporting-problems)), recent files.
 - **Server** (administrators): a link to the administration console. See [Administration](administration.md).
 
 ## The guided tour

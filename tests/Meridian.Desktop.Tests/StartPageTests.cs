@@ -18,6 +18,27 @@ public class StartPageTests
     }
 
     [Fact]
+    public void Offers_to_report_a_crash_with_its_summary_encoded()
+    {
+        var crash = new Meridian.Web.Hosting.CrashReport { ExceptionType = "System.InvalidOperationException", Message = "<b>bad</b> '…'" };
+        var html = StartPage.Html(new DesktopSettings(), crash: crash);
+        Assert.Contains("Meridian ran into an unexpected error last time.", html);
+        Assert.Contains("System.InvalidOperationException: &lt;b&gt;bad&lt;/b&gt;", html);
+        Assert.Contains("id=\"crash-report\"", html);
+        Assert.Contains("command: 'reportCrash'", html);
+        Assert.DoesNotContain("id=\"crash\"", StartPage.Html(new DesktopSettings()));
+    }
+
+    [Fact]
+    public void The_crash_prompt_is_on_by_default_and_survives_a_round_trip()
+    {
+        Assert.True(new DesktopSettings().OfferCrashReports);
+        var json = System.Text.Json.JsonSerializer.Serialize(new DesktopSettings { OfferCrashReports = false });
+        Assert.False(System.Text.Json.JsonSerializer.Deserialize<DesktopSettings>(json)!.OfferCrashReports);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<DesktopSettings>("{}")!.OfferCrashReports);
+    }
+
+    [Fact]
     public void Keeps_ten_recent_files_most_recent_first()
     {
         var settings = new DesktopSettings();

@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest something Meridian should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or workflow, and what makes it hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: How you imagine it working. Screenshots or examples from other tools are welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Diagrams and modeling
+        - Requirements and traceability
+        - Import / export (Cameo, XMI, SysML v2, …)
+        - Collaboration, versions and reviews
+        - Simulation and analysis
+        - Scripting, plugins and integrations
+        - Desktop app
+        - Team server and administration
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything else?
+      description: Workarounds you use now, or other context.

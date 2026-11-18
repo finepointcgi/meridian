@@ -1,3 +1,4 @@
+using Microsoft.JSInterop;
 using MudBlazor;
 
 namespace Meridian.Web.Components.Workbench;
@@ -15,6 +16,21 @@ public partial class Workbench
     public Task StartTourChapter(string id) => _tour?.StartChapterAsync(id) ?? Task.CompletedTask;
 
     public Task ShowWhatsNew() => _tour?.ShowWhatsNewAsync() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Help ▸ Report a problem: a prefilled GitHub issue (version and OS; in the desktop app, the newest unreported crash)
+    /// opens in the browser, where the user reviews it before submitting. Nothing is sent by Meridian.
+    /// </summary>
+    public async Task ReportProblem()
+    {
+        try
+        {
+            if (_desktop) await JS.InvokeVoidAsync("meridianSettings.desktop", "reportProblem");
+            else await JS.InvokeVoidAsync("open", Hosting.IssueLinks.ForProblem(Hosting.CrashReports.Version(), "Web browser (team server)"), "_blank", "noopener");
+            Snackbar.Add("Opened a new GitHub issue in your browser. Review it there before submitting.", Severity.Info);
+        }
+        catch (Exception e) when (e is JSException or InvalidOperationException or TaskCanceledException) { }
+    }
 
     private Task EmptyProjectAction(string action) => action switch
     {
@@ -42,6 +58,7 @@ public partial class Workbench
         yield return new($"What's new in {TourChapters.WhatsNewVersion}", "Command", Icons.Material.Outlined.NewReleases, ShowWhatsNew);
         yield return new("Keyboard & mouse shortcuts", "Command", Icons.Material.Outlined.Keyboard, ShowHelp);
         yield return new("User guide", "Command", Icons.Material.Outlined.MenuBook, () => OpenGuide());
+        yield return new("Report a problem…", "Command", Icons.Material.Outlined.BugReport, ReportProblem);
 
         // Cameo / MagicDraw and Enterprise Architect names, so ⌘K finds the Meridian equivalent by the name people know.
         foreach (var (alias, icon, run) in CameoAliases())

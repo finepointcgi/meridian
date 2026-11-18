@@ -283,7 +283,8 @@ window.meridian = (() => {
   };
 })();
 
-// Desktop app: the host announces a newer Meridian release over the Photino bridge; show a small dismissible notice.
+// Desktop app: the host announces a newer Meridian release, or a crash in the last run, over the Photino bridge; show a
+// small dismissible notice. A crash report only opens a prefilled GitHub issue in the browser: nothing is sent from here.
 (() => {
   const ext = window.external;
   if (typeof ext?.sendMessage !== "function" || typeof ext?.receiveMessage !== "function") return;
@@ -292,7 +293,8 @@ window.meridian = (() => {
     "font:13px/1.4 Inter,-apple-system,'Segoe UI',system-ui,sans-serif;display:flex;gap:10px;align-items:center;";
   const btn = "border:none;border-radius:7px;cursor:pointer;font:inherit;";
   let box = null;
-  const show = (text, action) => {
+  // actions: [{ label, command, primary, then }] — each sends { command } to the host; `then` is the notice text afterwards.
+  const show = (text, action, actions) => {
     if (!box) {
       box = document.createElement("div");
       box.setAttribute("role", "status");
@@ -310,9 +312,20 @@ window.meridian = (() => {
       go.onclick = () => { ext.sendMessage(JSON.stringify({ command: "update" })); show("Downloading the update…"); };
       box.appendChild(go);
     }
+    const column = actions ? document.createElement("div") : null;
+    for (const a of actions || []) {
+      const b = Object.assign(document.createElement("button"), { textContent: a.label });
+      b.style.cssText = btn + (a.primary ? "background:#4f8cff;color:#fff;padding:5px 10px;font-weight:600;" : "background:none;color:#a3aec4;padding:5px 6px;");
+      b.onclick = () => {
+        for (const c of [].concat(a.command)) ext.sendMessage(JSON.stringify(typeof c === "string" ? { command: c } : c));
+        if (a.then) show(a.then); else { box?.remove(); box = null; }
+      };
+      column.appendChild(b);
+    }
+    if (column) { column.style.cssText = "display:flex;flex-direction:column;gap:4px;align-items:stretch;"; box.appendChild(column); }
     const x = Object.assign(document.createElement("button"), { textContent: "×", title: "Dismiss" });
     x.style.cssText = btn + "background:none;color:#a3aec4;font-size:16px;";
-    x.onclick = () => { box?.remove(); box = null; };
+    x.onclick = () => { if (actions?.dismiss) ext.sendMessage(JSON.stringify({ command: actions.dismiss })); box?.remove(); box = null; };
     box.appendChild(x);
   };
   ext.receiveMessage(raw => {
@@ -320,6 +333,15 @@ window.meridian = (() => {
     if (m?.type === "update") show(`Meridian ${m.version} is available.`, "Install");
     else if (m?.type === "update-progress" && box) show(`Downloading Meridian… ${Math.round(m.percent)}%`);
     else if (m?.type === "update-error") show(`Update failed: ${m.message}`);
+    else if (m?.type === "crash") {
+      const actions = [
+        { label: "Report this problem", command: "reportCrash", primary: true, then: "Opened a prefilled issue in your browser. Review it there before submitting." },
+        { label: "Don't ask again", command: [{ command: "crashPrompt", enabled: false }, "dismissCrash"] },
+      ];
+      actions.dismiss = "dismissCrash";
+      const summary = String(m.summary || "").slice(0, 160);
+      show(`Meridian ran into an unexpected error last time${summary ? ` (${summary})` : ""}.`, null, actions);
+    }
   });
   const hello = () => ext.sendMessage(JSON.stringify({ command: "hello" }));
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hello); else hello();

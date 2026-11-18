@@ -91,3 +91,33 @@ Builds that are not notarized need right-click → **Open** the first time.
 
 **How do I turn off update checks?**
 Turn off *Check for updates* on the start screen, or set `MERIDIAN_NO_UPDATE_CHECK=1` for managed installs.
+
+## Reporting problems
+
+**How do I report a bug or a crash?**
+Use **Help ▸ Report a problem** (also in the command palette, ⌘K). It opens a new issue on GitHub in your browser with the
+Meridian version and your operating system filled in. You review and edit everything there, and nothing is submitted until you
+press **Submit new issue**. For a Cameo / MagicDraw import that lost something, choose the **Cameo import problem** form and
+paste the report from the **Import check** dialog's **Download report** button: it counts what came across and what did not,
+without your model's content.
+
+**Does Meridian send crash reports or usage data?**
+No. Meridian has no telemetry and never sends anything by itself. When the desktop app crashes or hits an unhandled error it writes a crash
+file on your computer. On the next start it shows *Meridian ran into an unexpected error last time* with **Report this problem**, which
+opens the same prefilled GitHub issue for you to review. **×** dismisses it; **Don't ask again** turns the prompt off (turn it
+back on under **Settings ▸ Desktop ▸ Offer to report crashes**).
+
+**What is in a crash file?**
+Crash files are JSON files in the `crashes` folder of your data folder (**Settings ▸ Desktop ▸ Show crash files**). Each one
+holds:
+
+- the Meridian version, operating system and .NET runtime, and whether it was the desktop app or a server;
+- where the error was caught (the app, a background task, or the workbench connection) and the error's type, message and stack trace;
+- the last 60 lines of Meridian's own application log (warnings, errors and desktop-app messages), not the Output panel.
+
+Before anything is written, Meridian removes: paths under your home folder (shown as `~/…`, keeping only the file
+extension), your user and computer names, e-mail addresses, web addresses' query strings and credentials, access tokens,
+and quoted text in messages, which is where element, diagram and project names usually appear. Crash files never contain
+your model. The newest 20 are kept.
+
+A team server doesn't write crash files: it logs unhandled errors, redacted the same way, to its normal log.
