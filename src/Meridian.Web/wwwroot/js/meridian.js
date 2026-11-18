@@ -9,6 +9,17 @@ window.meridian = (() => {
     if (id && e.dataTransfer) { e.dataTransfer.setData("text/plain", id); e.dataTransfer.effectAllowed = "copyMove"; }
   });
 
+  // No browser context menu over the app: Meridian has its own. On Windows (WebView2 and Chrome) "contextmenu" fires when the
+  // right button is released, after the canvas already opened Meridian's menu on press, so it lands on that menu, and the
+  // desktop window's native menu (Back, Refresh, Print…) would open on top of it. Text fields and selected text keep the
+  // native menu for cut, copy and paste. Blazor's own contextmenu handlers still run; this only cancels the default.
+  document.addEventListener("contextmenu", e => {
+    const t = e.target;
+    if (t?.closest?.("input, textarea, [contenteditable=''], [contenteditable='true'], [data-native-menu]")) return;
+    if (String(window.getSelection?.() ?? "").trim() && !t?.closest?.(".ctx-menu, .ctx-backdrop, .canvas")) return;
+    e.preventDefault();
+  }, true);
+
   // The user guide (/guide/…, served by this app): a new browser tab, or the system browser from the desktop app.
   const openGuide = path => {
     const p = typeof path === "string" && path.startsWith("/guide") ? path : "/guide/";
