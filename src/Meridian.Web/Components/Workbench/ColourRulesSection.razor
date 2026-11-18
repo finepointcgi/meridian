@@ -1,0 +1,194 @@
+@using Meridian.Core.Analysis
+@inherits WorkspaceComponent
+
+@* Colour rules of a diagram (docs-site/docs/diagrams.md "Colour rules"): shapes whose data matches a rule get its colours and badge. *@
+@if (E is Diagram d && Ws.Model.Contains(d))
+{
+    var rules = ColorRules.Of(d);
+    var counts = ColorRules.MatchCounts(Ws.Model, d);
+    var ro = !Ws.CanEdit(d);
+    // A rule just added (here or by the ⌘K command) opens for editing.
+    if (_seenDiagram == d.Id && rules.Count > _seenCount) _open = rules.Count - 1;
+    else if (_seenDiagram != d.Id) _open = -1;
+    _seenDiagram = d.Id;
+    _seenCount = rules.Count;
+    <div class="section-title" data-testid="colour-rules">
+        Colour rules <span class="grow"></span>
+        @if (!ro)
+        {
+            <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Add" OnClick="() => Add(d)" aria-label="Add colour rule" title="Add colour rule" data-testid="colour-rule-add" />
+        }
+    </div>
+    @if (rules.Count == 0)
+    {
+        <div class="cr-empty">Colour shapes by their data, for example failed requirements in red.</div>
+    }
+    else
+    {
+        <div class="cr-empty">The first rule that matches a shape wins. Rule colours replace the shape's own.</div>
+    }
+    @for (var i = 0; i < rules.Count; i++)
+    {
+        var index = i;
+        var rule = rules[i];
+        var error = ColorRules.QueryError(rule.Query);
+        <div class="cr-rule @(_open == index ? "open" : "")" data-testid="colour-rule">
+            <div class="cr-head" @onclick="() => _open = _open == index ? -1 : index">
+                <span class="cr-swatch" style="@SwatchStyle(rule)">@rule.Badge</span>
+                <span class="cr-label" title="@rule.Query">@rule.LegendText</span>
+                <span class="cr-count" title="Shapes this rule colours">@(error != null ? "invalid" : counts[index].ToString())</span>
+                @if (!ro)
+                {
+                    <span class="cr-tools" @onclick:stopPropagation="true">
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowUpward" Disabled="index == 0" OnClick="() => Move(d, index, -1)" aria-label="Move up" title="Move up (higher priority)" />
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ArrowDownward" Disabled="index == rules.Count - 1" OnClick="() => Move(d, index, 1)" aria-label="Move down" title="Move down" />
+                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Close" OnClick="() => Remove(d, index)" aria-label="Remove rule" title="Remove rule" data-testid="colour-rule-remove" />
+                    </span>
+                }
+            </div>
+            @if (_open == index)
+            {
+                var simple = ColorRules.AsSimple(rule.Query);
+                var key = d.Id + "cr" + index + "\u0001";
+                <div class="cr-body">
+                    <MudTextField @key="@(key + "label" + rule.Label)" T="string" Label="Label (shown in the legend)" Value="@rule.Label" ValueChanged="v => Update(d, index, rule with { Label = v ?? string.Empty })"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="ro" data-testid="colour-rule-label" />
+                    @if (simple != null)
+                    {
+                        <div class="cr-cond">
+                            <MudSelect @key="@(key + "kind" + simple.Kind)" T="string" Label="Shapes of kind" Value="@(simple.Kind?.ToString() ?? "")" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="ro"
+                                       ValueChanged="v => Update(d, index, rule with { Query = (simple with { Kind = Enum.TryParse<ElementKind>(v, out var k) ? k : null }).ToQuery() })"
+                                       ToStringFunc="@(v => string.IsNullOrEmpty(v) ? "Any" : Enum.TryParse<ElementKind>(v, out var k) ? Metamodel.DisplayName(k) : v)" MaxHeight="360">
+                                <MudSelectItem Value="@("")">Any</MudSelectItem>
+                                @foreach (var k in Metamodel.ElementKinds.Where(k => k != ElementKind.Model).OrderBy(Metamodel.DisplayName)) { <MudSelectItem Value="@k.ToString()">@Metamodel.DisplayName(k)</MudSelectItem> }
+                            </MudSelect>
+                            <MudAutocomplete @key="@(key + "field" + simple.Field)" T="string" Label="Where" Value="@simple.Field" CoerceValue="true" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                             SearchFunc="(q, ct) => Task.FromResult(FieldSuggestions(q))" MaxItems="40" ShowProgressIndicator="false" Disabled="ro" Placeholder="name, tag:ASIL…"
+                                             ValueChanged="v => Update(d, index, rule with { Query = (simple with { Field = v }).ToQuery() })" data-testid="colour-rule-field" />
+                            <MudSelect @key="@(key + "op" + simple.Op)" T="QueryOp" Label="Is" Value="simple.Op" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="ro"
+                                       ValueChanged="v => Update(d, index, rule with { Query = (simple with { Op = v }).ToQuery() })" ToStringFunc="OpLabel">
+                                @foreach (var op in Enum.GetValues<QueryOp>()) { <MudSelectItem Value="op">@OpLabel(op)</MudSelectItem> }
+                            </MudSelect>
+                            @if (simple.Op is not (QueryOp.Empty or QueryOp.NotEmpty))
+                            {
+                                <MudTextField @key="@(key + "value" + simple.Value)" T="string" Label="Value" Value="@simple.Value" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="ro"
+                                              ValueChanged="v => Update(d, index, rule with { Query = (simple with { Value = v ?? string.Empty }).ToQuery() })" data-testid="colour-rule-value" />
+                            }
+                        </div>
+                    }
+                    <MudTextField @key="@(key + "query" + rule.Query)" T="string" Label="Condition (query)" Value="@rule.Query" ValueChanged="v => Update(d, index, rule with { Query = v ?? string.Empty })"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="ro" Error="error != null" ErrorText="@error" data-testid="colour-rule-query"
+                                  HelperText="@(error == null ? "Same as the query panel, e.g. kind:Requirement where verificationResult contains fail" : null)" />
+                    <div class="cr-colours">
+                        @ColourSlot(d, index, rule, "Fill", rule.Fill, (r, c) => r with { Fill = c }, "#fbdede", ro)
+                        @ColourSlot(d, index, rule, "Line", rule.Line, (r, c) => r with { Line = c }, "#c0392b", ro)
+                        @ColourSlot(d, index, rule, "Text", rule.Text, (r, c) => r with { Text = c }, "#1a2233", ro)
+                    </div>
+                    <div class="swatches">
+                        @foreach (var c in Presets)
+                        {
+                            var colour = c;
+                            <span class="swatch @(string.Equals(rule.Fill, colour, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@colour" title="Fill @colour"
+                                  @onclick="() => { if (!ro) Update(d, index, rule with { Fill = colour }); }"></span>
+                        }
+                    </div>
+                    <MudTextField @key="@(key + "badge" + rule.Badge)" T="string" Label="Badge (optional)" Value="@rule.Badge" ValueChanged="v => Update(d, index, rule with { Badge = v })"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="ro" MaxLength="ColorRules.MaxBadgeLength" HelperText="A short mark on the shape, e.g. ! or ✓" />
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Element? E { get; set; }
+
+    private int _open = -1;
+    private string? _seenDiagram;
+    private int _seenCount;
+
+    private static readonly string[] Presets = ["#fbdede", "#ffeec4", "#d9f1e1", "#dce8ff", "#ece2ff", "#e3e6eb", "#ff6b6b", "#f0b429", "#3fbf7f", "#4f8cff"];
+
+    private RenderFragment ColourSlot(Diagram d, int index, ColorRule rule, string label, string? value, Func<ColorRule, string?, ColorRule> with, string seed, bool ro) => __builder =>
+    {
+        <span class="cr-colour">
+            <span class="cr-colour-label">@label</span>
+            @if (value != null)
+            {
+                <input type="color" value="@(Hex(value) ?? seed)" disabled="@ro" aria-label="@($"{label} colour")"
+                       @onchange="e => Update(d, index, with(rule, e.Value?.ToString()))" />
+                @if (!ro)
+                {
+                    <span class="cr-clear" title="@($"No {label.ToLowerInvariant()} colour")" @onclick="() => Update(d, index, with(rule, null))">×</span>
+                }
+            }
+            else
+            {
+                <span class="swatch none" title="@($"Set a {label.ToLowerInvariant()} colour")" @onclick="() => { if (!ro) Update(d, index, with(rule, seed)); }">+</span>
+            }
+        </span>
+    };
+
+    /// <summary>#rrggbb for the colour input (it accepts nothing else); null for named or rgb() colours.</summary>
+    private static string? Hex(string c) =>
+        c.StartsWith('#') && c.Length == 7 ? c.ToLowerInvariant()
+        : c.StartsWith('#') && c.Length == 4 ? "#" + string.Concat(c[1..].Select(ch => $"{ch}{ch}")).ToLowerInvariant() : null;
+
+    private static string SwatchStyle(ColorRule r) =>
+        $"background:{(r.Fill is { } f && ColorRules.IsSafeColor(f) ? f : "transparent")}; border-color:{(r.Line is { } l && ColorRules.IsSafeColor(l) ? l : "var(--border-strong)")}" +
+        (r.Text is { } t && ColorRules.IsSafeColor(t) ? $"; color:{t}" : "");
+
+    private static string OpLabel(QueryOp op) => op switch
+    {
+        QueryOp.Eq => "=", QueryOp.Ne => "≠", QueryOp.Lt => "<", QueryOp.Le => "≤", QueryOp.Gt => ">", QueryOp.Ge => "≥",
+        QueryOp.Contains => "contains", QueryOp.Empty => "is empty", _ => "is not empty",
+    };
+
+    /// <summary>Value keys worth offering: general properties, verification, and the tags and fields used in this model.</summary>
+    private IEnumerable<string> FieldSuggestions(string? q)
+    {
+        var keys = new List<string> { "name", "stereotype", "kind", "owner", "documentation", "type", ModelValues.VerificationResultKey, "reqId", "text", "satisfiedBy", "verifiedBy" };
+        var tags = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in Ws.Model.AllElements.Take(20000))
+        {
+            foreach (var (k, _) in e.TaggedValues) tags.Add("tag:" + k);
+            if (e.Kind == ElementKind.TagDefinition) tags.Add("tag:" + e.Name);
+        }
+        keys.AddRange(tags);
+        return keys.Distinct(StringComparer.OrdinalIgnoreCase).Where(k => string.IsNullOrEmpty(q) || k.Contains(q, StringComparison.OrdinalIgnoreCase)).Take(40);
+    }
+
+    private void Add(Diagram d)
+    {
+        try { Ws.Model.AddColorRule(d); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Update(Diagram d, int index, ColorRule rule)
+    {
+        try { Ws.Model.UpdateColorRule(d, index, rule); }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Remove(Diagram d, int index)
+    {
+        try
+        {
+            Ws.Model.RemoveColorRule(d, index);
+            if (_open == index) _open = -1;
+            else if (_open > index) _open--;
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+
+    private void Move(Diagram d, int index, int delta)
+    {
+        try
+        {
+            Ws.Model.MoveColorRule(d, index, delta);
+            if (_open == index) _open = index + Math.Sign(delta);
+            else if (_open == index + Math.Sign(delta)) _open = index;
+        }
+        catch (InvalidOperationException ex) { Ws.SetStatus(ex.Message); }
+    }
+}

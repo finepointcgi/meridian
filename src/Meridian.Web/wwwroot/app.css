@@ -802,3 +802,19 @@ main.workbench > section.card.center, .diagram-host { overflow: clip; }
 .derive-dialog .chg-legend-inline .chg-sw.added i { border-color: var(--chg-added); }
 .derive-dialog .chg-legend-inline .chg-sw.changed i { border-color: var(--chg-changed); }
 .derive-dialog .chg-legend-inline .chg-sw.removed i { border-color: var(--chg-removed); border-style: dashed; }
+
+/* Colour rules (inspector, ColourRulesSection.razor) */
+.cr-empty { color: var(--text-3); font-size: 12px; margin: 0 2px 6px; }
+.cr-rule { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+.cr-rule.open { border-color: var(--border-strong); }
+.cr-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 8px; cursor: pointer; min-height: 32px; }
+.cr-swatch { flex: none; min-width: 22px; height: 18px; padding: 0 3px; border-radius: 5px; border: 2px solid var(--border-strong); font-size: 10.5px; font-weight: 600; display: grid; place-items: center; }
+.cr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.cr-count { font-size: 11px; color: var(--text-3); }
+.cr-tools { display: flex; }
+.cr-body { padding: 0 8px 8px; }
+.cr-cond { display: grid; grid-template-columns: 1fr 1fr; gap: 0 6px; }
+.cr-colours { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 4px; }
+.cr-colour { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); }
+.cr-colour input[type=color] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--border-strong); border-radius: 5px; background: none; cursor: pointer; }
+.cr-clear { cursor: pointer; color: var(--text-3); padding: 0 2px; }

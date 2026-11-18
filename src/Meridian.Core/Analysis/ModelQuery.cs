@@ -42,9 +42,20 @@ public sealed record CompareExpr(string Field, QueryOp Op, string Value = "") : 
         }
     }
 
-    /// <summary>Numeric when both sides are numbers, otherwise case-insensitive text comparison.</summary>
-    internal static int Compare(string a, string b) =>
-        ModelValues.TryNumber(a, out var x) && ModelValues.TryNumber(b, out var y) ? x.CompareTo(y) : string.Compare(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Numeric when both sides are numbers, also with units ("1.2 t" &gt; "900 kg"; a bare number compares with the number
+    /// of a quantity), otherwise case-insensitive text comparison.
+    /// </summary>
+    internal static int Compare(string a, string b)
+    {
+        if (ModelValues.TryNumber(a, out var x) && ModelValues.TryNumber(b, out var y)) return x.CompareTo(y);
+        if (ModelValues.TryQuantity(a, out var qa, out var ua) && ModelValues.TryQuantity(b, out var qb, out var ub))
+        {
+            if (ua == null || ub == null) return qa.CompareTo(qb);
+            if (Units.Compatible(ua, ub)) return ua.ToSi(qa).CompareTo(ub.ToSi(qb));
+        }
+        return string.Compare(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
 
     public override string ToString() => Op switch
     {

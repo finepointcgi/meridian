@@ -158,7 +158,7 @@ public static class XmiExchange
     }
 
     /// <summary>Diagram settings carried as Meridian attributes of the DI diagram (routing style, line jumps, legend, time unit).</summary>
-    private static readonly string[] DiagramFields = [EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, InteractionNotation.TimeUnit];
+    private static readonly string[] DiagramFields = [EdgeRouter.DiagramKey, EdgeRouter.LineJumpsKey, FieldKeys.Legend, InteractionNotation.TimeUnit, ColorRules.Field];
 
     /// <summary>Fields with no standard UML/SysML home; they round-trip through the Meridian XMI extension.</summary>
     private static readonly HashSet<string> ExtensionOnlyFields =
