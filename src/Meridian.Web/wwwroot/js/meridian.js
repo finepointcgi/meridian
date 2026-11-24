@@ -235,9 +235,73 @@ window.meridian = (() => {
           .catch(() => { })
           .finally(() => { wheel.busy = false; if ((wheel.dx || wheel.dy || wheel.zoom) && !wheel.raf) wheel.raf = requestAnimationFrame(sendWheel); });
       };
+      // Drag to pan (middle button, Alt+drag, Space+drag) is handled here, not by Blazor: the view moves under the pointer
+      // at once, and .NET hears the new position once per frame with at most one call in flight (DiagramView.OnPan), so
+      // it can redraw what scrolls into view. While the drag lasts, a re-render from .NET (which may still hold an
+      // older position) is put back to the pointer's position before it is painted.
+      const overlays = ".toolbox, .selbar, .quickadd, .conn-chip, .dv-legends, .chg-legend, .layers-fab, .layers-pop, .minimap, .inline-editor";
+      let pan = null, space = false;
+      const round = v => Math.round(v * 100) / 100;
+      const applyPan = p => {
+        const t = `translate(${round(p.x)},${round(p.y)}) scale(${p.zoom})`;
+        if (p.g.getAttribute("transform") !== t) p.g.setAttribute("transform", t);
+      };
+      const endPan = p => { p.observer.disconnect(); el.style.cursor = ""; };
+      const sendPan = p => {
+        p.raf = 0;
+        if (p.busy) return;
+        if (p.sentX === p.x && p.sentY === p.y) { if (p.ended) endPan(p); return; }
+        const x = p.x, y = p.y;
+        p.busy = true;
+        dotnet.invokeMethodAsync("OnPan", x, y)
+          .catch(() => { })
+          .finally(() => {
+            p.busy = false; p.sentX = x; p.sentY = y;
+            if (!p.raf) p.raf = requestAnimationFrame(() => sendPan(p));
+          });
+      };
+      el.addEventListener("keydown", e => { if (e.key === " " && !["INPUT", "TEXTAREA"].includes(e.target.tagName)) space = true; });
+      el.addEventListener("keyup", e => { if (e.key === " ") space = false; });
+      el.addEventListener("blur", () => { space = false; });
+      el.addEventListener("pointerdown", e => {
+        if (pan || e.pointerType === "touch" || e.target.closest?.(overlays)) return;
+        if (!(e.button === 1 || (e.button === 0 && (e.altKey || space)))) return;
+        const g = el.querySelector("svg.main > g.viewport");
+        const m = /translate\(([-\d.e]+),([-\d.e]+)\)\s*scale\(([-\d.e]+)\)/.exec(g?.getAttribute("transform") || "");
+        if (!m) return;
+        e.stopPropagation();   // Blazor listens on document: the canvas's .NET pointer handlers never see this gesture
+        e.preventDefault();
+        try { el.setPointerCapture(e.pointerId); } catch { }
+        const p = { id: e.pointerId, g, x0: +m[1], y0: +m[2], zoom: m[3], sx: e.clientX, sy: e.clientY, x: +m[1], y: +m[2],
+                    sentX: +m[1], sentY: +m[2], busy: false, raf: 0, ended: false };
+        p.observer = new MutationObserver(() => applyPan(p));
+        p.observer.observe(g, { attributes: true, attributeFilter: ["transform"] });
+        pan = p;
+        el.style.cursor = "grabbing";
+      });
+      el.addEventListener("pointermove", e => {
+        if (!pan || e.pointerId !== pan.id) return;
+        e.stopPropagation();
+        pan.x = pan.x0 + e.clientX - pan.sx;
+        pan.y = pan.y0 + e.clientY - pan.sy;
+        applyPan(pan);
+        if (!pan.raf) pan.raf = requestAnimationFrame(() => sendPan(pan));
+      });
+      const finishPan = e => {
+        if (!pan || e.pointerId !== pan.id) return;
+        e.stopPropagation();
+        const p = pan;
+        pan = null;
+        p.ended = true;
+        if (!p.raf) sendPan(p);   // sends the last position, or ends at once if .NET already has it
+      };
+      el.addEventListener("pointerup", finishPan);
+      el.addEventListener("pointercancel", finishPan);
+      el.addEventListener("lostpointercapture", finishPan);
+
       el.addEventListener("wheel", e => {
         e.preventDefault();
-        if (e.target.closest?.(".toolbox, .selbar, .quickadd, .conn-chip, .dv-legends, .chg-legend, .layers-fab, .layers-pop")) return;
+        if (pan || e.target.closest?.(".toolbox, .selbar, .quickadd, .conn-chip, .dv-legends, .chg-legend, .layers-fab, .layers-pop")) return;
         wheel.x = e.clientX; wheel.y = e.clientY;
         if (e.ctrlKey || e.metaKey) wheel.zoom += e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0;   // pinch / Ctrl+wheel: one step per event
         else if (e.shiftKey) wheel.dx += e.deltaY;                                           // Shift+wheel scrolls sideways

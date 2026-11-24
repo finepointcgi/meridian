@@ -14,8 +14,8 @@
      @ondragenter:preventDefault="true" @ondragover:preventDefault="true" @ondrop="Drop">
     <svg class="main" xmlns="http://www.w3.org/2000/svg">
         @((MarkupString)Theme.Defs)
-        <g transform="translate(@F(C.PanX),@F(C.PanY)) scale(@F(C.Zoom))" font-size="12">
-            @((MarkupString)Body())
+        <g class="viewport" transform="translate(@F(C.PanX),@F(C.PanY)) scale(@F(C.Zoom))" font-size="12">
+            @BodyParts()
             @Adorners()
         </g>
     </svg>
@@ -861,6 +861,18 @@
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Drag to pan (middle button, Alt or Space + drag) runs in the browser (meridian.installCanvas), which moves the view at
+    /// once and reports where it is about once per frame, so this render only catches up (shapes scrolling into view on
+    /// large, culled diagrams; the minimap).
+    /// </summary>
+    [JSInvokable]
+    public void OnPan(double panX, double panY)
+    {
+        C.SetPan(panX, panY);
+        StateHasChanged();
+    }
+
     /// <summary>What <see cref="OnWheel"/> does to the view, one <see cref="DiagramController.Wheel"/> call per zoom step.</summary>
     public static void ApplyWheel(DiagramController c, double sx, double sy, double dx, double dy, int zoomSteps)
     {
@@ -977,21 +989,35 @@
         _ = JS.InvokeVoidAsync("meridian.focus", _canvas);
     }
 
-    private string Body()
+    /// <summary>
+    /// The drawing as separate markup pieces (frame header, one per shape and connector, overlays). Blazor compares each
+    /// piece with the last render's, so dragging a shape sends and redraws only its piece and its connectors' pieces; one
+    /// big string would be replaced, and re-parsed by the browser, whole on every pointer move.
+    /// </summary>
+    private RenderFragment BodyParts() => builder =>
     {
+        foreach (var part in Body()) builder.AddMarkupContent(0, part);
+    };
+
+    private List<string> Body()
+    {
+        var parts = new List<string>();
         var sb = new StringBuilder();
         var cb = C.ContentBounds();
         var frame = C.Diagram.DiagramType == DiagramType.InternalBlock && C.Diagram.Nodes.Count > 0 ? 40 : 0;
         SvgRenderer.RenderHeader(sb, C.Diagram, cb.X - frame, cb.Y - 34 - frame, Theme);
+        if (sb.Length > 0) parts.Add(sb.ToString());
         // Pictures are drawn from a URL served by ImageCache, so megabytes of base64 aren't resent on every render.
-        SvgRenderer.RenderBody(sb, C.Model, C.Diagram, C.BoundsOf, C.WaypointsFor, Theme with { ImageHref = Images.Href }, C.Viewport);
+        parts.AddRange(SvgRenderer.RenderBodyParts(C.Model, C.Diagram, C.BoundsOf, C.WaypointsFor, Theme with { ImageHref = Images.Href }, C.Viewport));
+        sb.Clear();
         // Code-sync review: added / changed / removed outlines, and ghosts of removed shapes at main's positions.
         if (Ws.HighlightCodeChanges && Ws.CodeChanges is { } changes)
             SvgRenderer.RenderChangeHighlights(sb, C.Diagram, C.BoundsOf, C.WaypointsFor, changes.Kinds, changes.GhostSource?.Find(C.Diagram.Id) as Diagram);
         // Architecture check: red dashed edges between blocks whose code violates the architecture.
         if (Ws.ArchitectureViolations is { } violations)
             SvgRenderer.RenderViolationEdges(sb, C.Diagram, C.BoundsOf, violations);
-        return sb.ToString();
+        if (sb.Length > 0) parts.Add(sb.ToString());
+        return parts;
     }
 
     private RenderFragment Adorners() => builder =>
