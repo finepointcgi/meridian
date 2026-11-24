@@ -9,6 +9,11 @@ public enum Density { Comfortable, Compact }
 public enum FontScale { Small, Normal, Large }
 public enum GridStyle { Dots, Lines }
 public enum DefaultZoom { Fit, Actual }
+/// <summary>
+/// Shape shadows and frosted-glass panels. <see cref="Automatic"/> drops them when the browser draws without a GPU (a
+/// virtual machine, a remote desktop), where they are redrawn on the CPU on every pan and zoom step.
+/// </summary>
+public enum VisualEffects { Automatic, Full, Reduced }
 /// <summary>Connector routing for new diagrams; <see cref="Automatic"/> keeps the per-type default (straight on whiteboards).</summary>
 public enum ConnectorDefault { Automatic, Orthogonal, Straight, Curved }
 
@@ -141,19 +146,24 @@ public sealed class UserPreferences
 /// Per-device preferences: how big and dense the UI is depends on the screen, so these stay on this device (a cookie,
 /// which also lets the server render them before the first paint).
 /// </summary>
-public sealed record DevicePreferences(Density Density = Density.Comfortable, FontScale FontScale = FontScale.Normal)
+public sealed record DevicePreferences(Density Density = Density.Comfortable, FontScale FontScale = FontScale.Normal,
+                                       VisualEffects Effects = VisualEffects.Automatic)
 {
     public const string CookieName = "meridian.device";
 
-    public string ToCookie() => $"{(Density == Density.Compact ? "compact" : "comfortable")}.{FontScale.ToString().ToLowerInvariant()}";
+    public string ToCookie() =>
+        $"{(Density == Density.Compact ? "compact" : "comfortable")}.{FontScale.ToString().ToLowerInvariant()}.{Effects.ToString().ToLowerInvariant()}";
 
+    /// <summary>Parses the cookie; older two-part cookies (no effects part) keep the automatic effects.</summary>
     public static DevicePreferences FromCookie(string? value)
     {
         if (string.IsNullOrEmpty(value) || value.Length > 40) return new();
         var parts = value.Split('.');
         var density = parts[0] == "compact" ? Density.Compact : Density.Comfortable;
         var font = parts.Length > 1 && Enum.TryParse<FontScale>(parts[1], ignoreCase: true, out var f) && Enum.IsDefined(f) ? f : FontScale.Normal;
-        return new(density, font);
+        var effects = parts.Length > 2 && Enum.TryParse<VisualEffects>(parts[2], ignoreCase: true, out var v) && Enum.IsDefined(v)
+            ? v : VisualEffects.Automatic;
+        return new(density, font, effects);
     }
 
     public double Scale => FontScale switch { FontScale.Small => 0.92, FontScale.Large => 1.12, _ => 1.0 };

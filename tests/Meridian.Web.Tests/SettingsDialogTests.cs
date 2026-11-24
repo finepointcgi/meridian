@@ -96,7 +96,20 @@ public class SettingsDialogTests : TestContext
         Assert.Contains("compact", theme.AppClass);
         Assert.Contains("m-font-large", theme.BodyClass);
         Assert.Null(_db.GetUserPreferencesAsync(_me.Id).GetAwaiter().GetResult());   // nothing saved server-side
-        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.setDevice" && (string)i.Arguments[0]! == "compact.large");
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.setDevice" && (string)i.Arguments[0]! == "compact.large.automatic");
+    }
+
+    [Fact]
+    public void Visual_Effects_Is_Per_Device()
+    {
+        var theme = Setup();
+        var d = Open(this);
+        Assert.Contains("This device", d.Find(".settings-row[data-setting='Visual effects']").TextContent);
+        Choose(d, "effects", "Reduced");
+        Assert.Equal(VisualEffects.Reduced, theme.Device.Effects);
+        Assert.Contains("m-reduce-effects", theme.BodyClass);
+        Assert.Null(_db.GetUserPreferencesAsync(_me.Id).GetAwaiter().GetResult());   // nothing saved server-side
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "meridianSettings.setDevice" && (string)i.Arguments[0]! == "comfortable.normal.reduced");
     }
 
     [Fact]

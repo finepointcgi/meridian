@@ -74,6 +74,9 @@ public sealed class ThemeService
         else if (p.GridStyle == GridStyle.Lines) c.Add(prefix + "grid-lines");
         if (dark && p.CanvasAlwaysLight) c.Add(prefix + "canvas-light");
         if (p.ReducedMotion) c.Add(prefix + "reduce-motion");
+        // Automatic adds nothing: settings.js marks <html> "software-render" when the browser has no GPU (app.css).
+        if (d.Effects == VisualEffects.Reduced) c.Add(prefix + "reduce-effects");
+        else if (d.Effects == VisualEffects.Full) c.Add(prefix + "full-effects");
         return string.Join(' ', c);
     }
 

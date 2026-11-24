@@ -156,6 +156,14 @@ body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-ser
 .canvas { position: relative; flex: 1; min-height: 0; overflow: hidden; outline: none; background-color: var(--canvas);
   background-image: radial-gradient(var(--grid) 1.2px, transparent 1.2px); background-size: 20px 20px; }
 .canvas svg.main { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; font-family: Inter, Helvetica, Arial, sans-serif; }
+/* Reduced visual effects (Settings ▸ Appearance ▸ Visual effects, or automatic when settings.js finds no GPU): without a GPU
+   the browser redraws every shape's drop shadow and every frosted panel's blur on the CPU on each pan and zoom step. */
+.app.reduce-effects, body.m-reduce-effects,
+html.software-render .app:not(.full-effects), html.software-render body:not(.m-full-effects) { --panel: var(--panel-solid); }
+.app.reduce-effects *, body.m-reduce-effects *,
+html.software-render .app:not(.full-effects) *, html.software-render body:not(.m-full-effects) * { backdrop-filter: none !important; }
+.app.reduce-effects .canvas svg [filter], body.m-reduce-effects .canvas svg [filter],
+html.software-render .app:not(.full-effects) .canvas svg [filter] { filter: none; }
 .canvas.tool-active { cursor: crosshair; }
 .canvas.panning { cursor: grabbing; }
 

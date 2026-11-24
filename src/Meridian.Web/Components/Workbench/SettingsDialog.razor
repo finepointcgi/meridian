@@ -184,6 +184,9 @@
         yield return new(SettingsSection.Appearance, "Font size", "Scales the whole interface (the diagram canvas keeps its own zoom).", Scope.Device,
             Seg("font", Theme.Device.FontScale, [(FontScale.Small, "Small"), (FontScale.Normal, "Normal"), (FontScale.Large, "Large")], v => { SetDevice(Theme.Device with { FontScale = v }); return Task.CompletedTask; }),
             "text size zoom scale bigger smaller");
+        yield return new(SettingsSection.Appearance, "Visual effects", "Shape shadows and see-through panels. Reduced keeps panning and zooming smooth on computers without a graphics card; Automatic turns them off when the browser draws without one.", Scope.Device,
+            Seg("effects", Theme.Device.Effects, [(VisualEffects.Automatic, "Automatic"), (VisualEffects.Full, "Full"), (VisualEffects.Reduced, "Reduced")], v => { SetDevice(Theme.Device with { Effects = v }); return Task.CompletedTask; }),
+            "performance slow lag shadows blur gpu graphics virtual machine remote desktop");
         yield return new(SettingsSection.Appearance, "Background grid", "Show a grid behind diagrams.", Scope.User,
             Toggle("grid", P.ShowGrid, v => Set(p => p.ShowGrid = v)), "canvas dots lines");
         yield return new(SettingsSection.Appearance, "Grid style", null, Scope.User,

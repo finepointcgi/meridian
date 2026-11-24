@@ -27,6 +27,7 @@ Each setting has a tag that says where it is kept:
 | Accent colour | buttons, selection, links and focus rings; eight presets |
 | Density | **Compact** fits more on smaller screens (per device) |
 | Font size | scales the whole interface; the canvas keeps its own zoom (per device) |
+| Visual effects | shape shadows and see-through panels. **Reduced** keeps panning and zooming smooth on a computer without a graphics card (a virtual machine, a remote desktop); **Automatic** turns them off when the browser draws without one (per device). Exported pictures keep their shadows. |
 | Background grid, Grid style | dots or lines behind diagrams |
 | Snap to grid | shapes, bend points and alignment land on a 10 px grid |
 | Diagram canvas | **Always light** keeps diagrams white in dark mode, and is then also the default for copied and exported pictures |

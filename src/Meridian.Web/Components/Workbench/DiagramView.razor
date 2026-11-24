@@ -10,7 +10,7 @@
 <div class="canvas @(C.ProtectedByPermissions ? "perm-locked" : "") @(C.Tool != null ? "tool-active" : "") @(C.InkTool ? "drawing" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !C.ReadOnly ? "shapes-open" : "")"
      tabindex="0" @ref="_canvas"
      @onpointerdown="Down" @onpointermove="Move" @onpointerup="Up" @onpointerleave="Leave"
-     @onwheel="Wheel" @onkeydown="Key" @onkeyup="KeyUp"
+     @onkeydown="Key" @onkeyup="KeyUp"
      @ondragenter:preventDefault="true" @ondragover:preventDefault="true" @ondrop="Drop">
     <svg class="main" xmlns="http://www.w3.org/2000/svg">
         @((MarkupString)Theme.Defs)
@@ -849,7 +849,25 @@
         return body == null ? null : $"<svg viewBox=\"0 0 34 26\" width=\"34\" height=\"26\">{body}</svg>";
     }
 
-    private void Wheel(WheelEventArgs e) => C.Wheel(e.ClientX - _origin.Left, e.ClientY - _origin.Top, e.DeltaX, e.DeltaY, ModsOf(e));
+    /// <summary>
+    /// Wheel and trackpad input, added up in the browser over one animation frame (meridian.installCanvas): a pan by
+    /// (<paramref name="dx"/>, <paramref name="dy"/>) and <paramref name="zoomSteps"/> zoom steps (positive zooms in),
+    /// drawn in one render however many events there were.
+    /// </summary>
+    [JSInvokable]
+    public void OnWheel(double sx, double sy, double dx, double dy, int zoomSteps)
+    {
+        ApplyWheel(C, sx, sy, dx, dy, zoomSteps);
+        StateHasChanged();
+    }
+
+    /// <summary>What <see cref="OnWheel"/> does to the view, one <see cref="DiagramController.Wheel"/> call per zoom step.</summary>
+    public static void ApplyWheel(DiagramController c, double sx, double sy, double dx, double dy, int zoomSteps)
+    {
+        // Each step is one wheel notch (×1.1); more than 40 in a frame is not a person scrolling.
+        for (var i = 0; i < Math.Min(Math.Abs(zoomSteps), 40); i++) c.Wheel(sx, sy, 0, zoomSteps > 0 ? -1 : 1, Mods.Ctrl);
+        if (dx != 0 || dy != 0) c.Wheel(sx, sy, dx, dy, Mods.None);
+    }
 
     private void Key(KeyboardEventArgs e)
     {

@@ -16,6 +16,21 @@ window.meridianSettings = (() => {
   // The browser's colour scheme, for the server's next render of "Match system" (also the sign-in page).
   setCookie("meridian.scheme", systemDark() ? "dark" : "light");
 
+  // No GPU (a virtual machine, a remote desktop, a blocklisted driver): the browser rasterises on the CPU, where shape
+  // shadows and backdrop blur are redrawn on every pan and zoom step. Mark <html> so app.css drops them unless the user
+  // chose "Full" effects (Settings ▸ Appearance ▸ Visual effects).
+  const softwareRendering = () => {
+    try {
+      const gl = document.createElement("canvas").getContext("webgl", { failIfMajorPerformanceCaveat: true });
+      if (!gl) return true;
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || "") : "";
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return /swiftshader|llvmpipe|softpipe|basic render|software|warp/i.test(renderer);
+    } catch { return false; }
+  };
+  if (softwareRendering()) document.documentElement.classList.add("software-render");
+
   let schemeListener = null;
   let shortcut = null;
   let desktopListener = null, desktopHooked = false;
