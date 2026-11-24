@@ -108,7 +108,11 @@ public class GitLabCiTests
     public void Tests_mirror_ci_yml_with_postgres_and_playwright()
     {
         var jobs = AllJobs();
-        Assert.Contains(Strings(Get(jobs["test"], "script")), s => s.Contains("dotnet test Meridian.slnx") && s.Contains("!~Meridian.E2E"));
+        // Every non-browser test project, one at a time (as ci.yml's test job), and never the browser tests.
+        var testScript = Strings(Get(jobs["test"], "script")).ToList();
+        foreach (var project in new[] { "tests/Meridian.Tests", "tests/Meridian.Web.Tests", "tests/Meridian.Desktop.Tests" })
+            Assert.Contains(testScript, s => s.StartsWith("dotnet test " + project + " ", StringComparison.Ordinal));
+        Assert.DoesNotContain(testScript, s => s.Contains("Meridian.E2E", StringComparison.Ordinal) || s.Contains("dotnet test Meridian.slnx", StringComparison.Ordinal));
 
         var e2e = jobs["e2e"];
         Assert.Equal("require", Str((YamlMappingNode)Get(e2e, "variables")!, "MERIDIAN_E2E"));
