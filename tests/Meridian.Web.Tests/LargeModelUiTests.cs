@@ -15,6 +15,7 @@ namespace Meridian.Web.Tests;
 /// UI responsiveness with a 60,000-element model (LargeModelGenerator): the model tree and the traceability panel must
 /// render and re-render quickly. Thresholds are generous (~10× a laptop) so they only catch regressions in kind.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public class LargeModelUiTests : TestContext
 {
     private static readonly Lazy<string> LargeJson = new(() => ProjectFile.Serialize(LargeModelGenerator.Generate()));

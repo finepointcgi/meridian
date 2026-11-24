@@ -7,6 +7,7 @@ using Meridian.Serialization;
 
 namespace Meridian.Tests;
 
+[Collection(TimingCollection.Name)]
 public class ScaleTests
 {
     /// <summary>~10,000 elements: blocks with properties, requirements, satisfy links, and a 400-shape diagram.</summary>

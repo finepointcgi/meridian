@@ -25,6 +25,12 @@ if (args.Length == 2 && args[0] == "--code-sync")
     CodeSyncBench.Run(args[1]);
     return;
 }
+if (args.Length >= 2 && args[0] == "--diagrams")
+{
+    // Per-render canvas cost of every diagram in a real project file (body SVG, minimap routes, bounds).
+    DiagramRenderBench.Run(args[1], args.Length >= 3 ? int.Parse(args[2], CultureInfo.InvariantCulture) : 20);
+    return;
+}
 if (args.Contains("--quick"))
 {
     var scale = args.SkipWhile(a => a != "--scale").Skip(1).Select(s => double.Parse(s, CultureInfo.InvariantCulture)).FirstOrDefault(1.0);

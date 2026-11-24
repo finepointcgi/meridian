@@ -218,9 +218,32 @@ window.meridian = (() => {
       window.open(url, "_blank");
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     },
-    // Canvas: non-passive wheel, keys that must not scroll/navigate, size reporting.
+    // Canvas: wheel pan and zoom, keys that must not scroll/navigate, size reporting.
     installCanvas: (el, dotnet) => {
-      el.addEventListener("wheel", e => e.preventDefault(), { passive: false });
+      // Wheel and trackpad events arrive far faster than a slow machine can redraw the diagram, so they are added up and
+      // sent once per animation frame, with at most one call in flight (DiagramView.OnWheel). Panels over the canvas
+      // (shapes, selection bar, legends) keep the wheel to themselves.
+      const wheel = { dx: 0, dy: 0, zoom: 0, x: 0, y: 0, raf: 0, busy: false };
+      const sendWheel = () => {
+        wheel.raf = 0;
+        if (wheel.busy || !el.isConnected || (!wheel.dx && !wheel.dy && !wheel.zoom)) return;
+        const r = el.getBoundingClientRect();
+        const { dx, dy, zoom } = wheel;
+        wheel.dx = wheel.dy = wheel.zoom = 0;
+        wheel.busy = true;
+        dotnet.invokeMethodAsync("OnWheel", wheel.x - r.left, wheel.y - r.top, dx, dy, zoom)
+          .catch(() => { })
+          .finally(() => { wheel.busy = false; if ((wheel.dx || wheel.dy || wheel.zoom) && !wheel.raf) wheel.raf = requestAnimationFrame(sendWheel); });
+      };
+      el.addEventListener("wheel", e => {
+        e.preventDefault();
+        if (e.target.closest?.(".toolbox, .selbar, .quickadd, .conn-chip, .dv-legends, .chg-legend, .layers-fab, .layers-pop")) return;
+        wheel.x = e.clientX; wheel.y = e.clientY;
+        if (e.ctrlKey || e.metaKey) wheel.zoom += e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0;   // pinch / Ctrl+wheel: one step per event
+        else if (e.shiftKey) wheel.dx += e.deltaY;                                           // Shift+wheel scrolls sideways
+        else { wheel.dx += e.deltaX; wheel.dy += e.deltaY; }
+        if (!wheel.raf) wheel.raf = requestAnimationFrame(sendWheel);
+      }, { passive: false });
       el.addEventListener("keydown", e => {
         if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
         // The label editor is open but lost focus (e.g. a re-render focused the canvas): keep typing into it.

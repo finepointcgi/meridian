@@ -54,6 +54,12 @@ public sealed class ReportCounters
 /// </summary>
 public sealed class DocResolver
 {
+    /// <summary>
+    /// Percentages as "85%" whatever the server's culture: "P0" with the current culture writes "85 %" under the invariant
+    /// culture (Linux containers and CI runners), so the same report differed between machines.
+    /// </summary>
+    private static readonly NumberFormatInfo RatioFormat = new() { PercentPositivePattern = 1, PercentNegativePattern = 1 };
+
     private sealed class Scope
     {
         public Element? Current;
@@ -723,7 +729,8 @@ public sealed class DocResolver
             if (pk.Count > 1)
                 Emit(new TableNode(NewCaption("Table", "Coverage by package", null), ["Package", "Requirements", "Satisfied", "Verified", "Suspect"],
                     pk.Select(p => (IReadOnlyList<string>)[p.Package.QualifiedName, p.Total.ToString(CultureInfo.InvariantCulture),
-                        $"{p.Satisfied} ({p.SatisfiedRatio:P0})", $"{p.Verified} ({p.VerifiedRatio:P0})", p.Suspect.ToString(CultureInfo.InvariantCulture)]).ToList(),
+                        $"{p.Satisfied} ({p.SatisfiedRatio.ToString("P0", RatioFormat)})", $"{p.Verified} ({p.VerifiedRatio.ToString("P0", RatioFormat)})",
+                        p.Suspect.ToString(CultureInfo.InvariantCulture)]).ToList(),
                     [3, 1, 1.2, 1.2, 0.8], Compact: true));
         }
         if (c.ListGaps)

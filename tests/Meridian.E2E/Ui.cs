@@ -83,9 +83,14 @@ public static class Ui
     {
         await p.ProjectMenuAsync("New project…");
         var dlg = p.MudDialog();
-        await dlg.Locator(".tpl-card").Filter(new() { Has = p.Locator(".tpl-name", new() { HasTextString = templateName }) }).First.ClickAsync();
+        var card = dlg.Locator(".tpl-card").Filter(new() { Has = p.Locator(".tpl-name", new() { HasTextString = templateName }) }).First;
+        await card.ClickAsync();
+        // Picking a template also fills in its default name, in the same render that marks the card: wait for it, or on a
+        // slow runner that name can land after the fill below ("Vehicle SystemBOM de090a").
+        await Expect(card).ToHaveClassAsync(new Regex(@"\bon\b"));
         var name = dlg.GetByLabel("Project name");
         await name.FillAsync(projectName);
+        await Expect(name).ToHaveValueAsync(projectName);
         await dlg.GetByRole(AriaRole.Button, new() { Name = "Create project" }).ClickAsync();
         await Expect(p.ProjectTitle()).ToHaveTextAsync(projectName, new() { Timeout = 20_000 });
     }
