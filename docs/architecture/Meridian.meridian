@@ -1,0 +1,3520 @@
+{
+  "format": "meridian",
+  "version": 1,
+  "root": {
+    "id": "_8481baf4db6e48fb862c4b9c2831c166",
+    "kind": "Model",
+    "fields": {
+      "architecture.disabledRules": "missing-in-model",
+      "documentation": "Meridian\u0027s own architecture, modeled in Meridian. The \u00ABlayer\u00BB packages and the \u00ABimplemented\u00BB extension points are checked against the source code (src/) by Meridian\u0027s architecture checks on every test run (tests/Meridian.Tests/SelfArchitectureTests.cs). See docs/ARCHITECTURE.md.",
+      "name": "Meridian"
+    },
+    "children": [
+      {
+        "id": "_43b4b4f02e1244aa94304997e948920c",
+        "kind": "Package",
+        "fields": {
+          "documentation": "Architecture principles: the rules the structure below exists to keep.",
+          "name": "Principles"
+        },
+        "children": [
+          {
+            "id": "_596f0cbc8d594156878cdc2b76682e6c",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Independent core",
+              "reqId": "ARCH-001",
+              "text": "Meridian.Core shall not depend on any other Meridian assembly, storage engine or UI framework."
+            }
+          },
+          {
+            "id": "_f3c92acca89e4d52977965bfd34006b5",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Acyclic assemblies",
+              "reqId": "ARCH-002",
+              "text": "Each assembly shall use only the assemblies its \u00ABallowed\u00BB dependencies name; the assembly graph shall stay acyclic."
+            }
+          },
+          {
+            "id": "_0fe79c79bd9a4e189686b7f80fe113ab",
+            "kind": "Requirement",
+            "fields": {
+              "name": "One application, two hosts",
+              "reqId": "ARCH-003",
+              "text": "The team server and the desktop app shall run the same Meridian.Web application; the desktop app shall host it in-process."
+            }
+          },
+          {
+            "id": "_c8bf1f357e9a4b1dab6058306d755cb5",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Storage behind one contract",
+              "reqId": "ARCH-004",
+              "text": "All persistence shall go through IMeridianStore, with PostgreSQL for team servers and SQLite for local mode."
+            }
+          },
+          {
+            "id": "_00e16f6011c84caabdb8b700970d9765",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Undoable, replicable edits",
+              "reqId": "ARCH-005",
+              "text": "Every model change shall go through ModelRepository as an undoable operation that can be replicated to other sessions."
+            }
+          },
+          {
+            "id": "_a6f317d5fcdc47ce87954679f1795579",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Native code out of process",
+              "reqId": "ARCH-006",
+              "text": "FMU native code shall run in a separate Meridian.FmuHost process so a crash cannot take down the server."
+            }
+          },
+          {
+            "id": "_9f4268c6b930435aac991dcae869fd93",
+            "kind": "Requirement",
+            "fields": {
+              "name": "Pluggable back ends",
+              "reqId": "ARCH-007",
+              "text": "Code readers, Git hosts, chat providers, requirements tools and plugins shall plug in through the interfaces in this model."
+            }
+          },
+          {
+            "id": "_10872b069819404c88ae03d7776993c7",
+            "kind": "Requirement",
+            "fields": {
+              "name": "AI proposes, people decide",
+              "reqId": "ARCH-008",
+              "text": "Assistant changes shall be shown as a change set that the user applies or discards."
+            }
+          },
+          {
+            "id": "_f435c5f8f6734444b03481afb03d26a1",
+            "kind": "TestCase",
+            "fields": {
+              "documentation": "tests/Meridian.Tests/SelfArchitectureTests.cs reads src/ with CSharpCodeReader and runs ArchitectureConformance against this model; any error fails the build.",
+              "name": "Self-architecture check"
+            }
+          },
+          {
+            "id": "_24e473491bdd4aebbf92e033e0c53ca9",
+            "kind": "Verify",
+            "source": "_f435c5f8f6734444b03481afb03d26a1",
+            "target": "_596f0cbc8d594156878cdc2b76682e6c"
+          },
+          {
+            "id": "_6d2249cb797145379b015a6df2fa03f7",
+            "kind": "Verify",
+            "source": "_f435c5f8f6734444b03481afb03d26a1",
+            "target": "_f3c92acca89e4d52977965bfd34006b5"
+          },
+          {
+            "id": "_763ba42fdc714aa8a99b4722b55f3965",
+            "kind": "Verify",
+            "source": "_f435c5f8f6734444b03481afb03d26a1",
+            "target": "_c8bf1f357e9a4b1dab6058306d755cb5"
+          },
+          {
+            "id": "_f54f491cacee40cf801d43c231aad78c",
+            "kind": "Verify",
+            "source": "_f435c5f8f6734444b03481afb03d26a1",
+            "target": "_9f4268c6b930435aac991dcae869fd93"
+          },
+          {
+            "id": "_36416a4dc3c34e3ea51840080fb49bef",
+            "kind": "TestCase",
+            "fields": {
+              "documentation": "tests/Meridian.E2E/LocalModeTests.cs: Meridian.Web in local mode, the desktop app\u0027s private in-process server.",
+              "name": "Local mode end-to-end"
+            }
+          },
+          {
+            "id": "_b0e486e3dc784d9eae2c4c6d7b9aced1",
+            "kind": "Verify",
+            "source": "_36416a4dc3c34e3ea51840080fb49bef",
+            "target": "_0fe79c79bd9a4e189686b7f80fe113ab"
+          },
+          {
+            "id": "_038e114bc2e04fddbc1fbc7f7d4950d1",
+            "kind": "TestCase",
+            "fields": {
+              "documentation": "tests/Meridian.Tests/RepositoryTests.cs (undo, redo, transactions) and ReplicationTests.cs (replicas converge through edits, deletes, undo and redo).",
+              "name": "Undo and replication"
+            }
+          },
+          {
+            "id": "_6b7ce3a5477945d495c95d2dd4fc342e",
+            "kind": "Verify",
+            "source": "_038e114bc2e04fddbc1fbc7f7d4950d1",
+            "target": "_00e16f6011c84caabdb8b700970d9765"
+          },
+          {
+            "id": "_cda00bc2a9c54c1785d214efa9299c7c",
+            "kind": "TestCase",
+            "fields": {
+              "documentation": "tests/Meridian.Tests/Fmi/CoSimulationTests.cs: A_Crashing_Fmu_Ends_The_Run_But_Not_The_Test_Host.",
+              "name": "FMU crash isolation"
+            }
+          },
+          {
+            "id": "_9cd399eb8099425887ac18396d2888d8",
+            "kind": "Verify",
+            "source": "_cda00bc2a9c54c1785d214efa9299c7c",
+            "target": "_a6f317d5fcdc47ce87954679f1795579"
+          },
+          {
+            "id": "_8aa07d401d7d436684ebfadca5522e08",
+            "kind": "TestCase",
+            "fields": {
+              "documentation": "tests/Meridian.Tests/AssistantTests.cs: Apply_Is_One_Undoable_Replicated_Step.",
+              "name": "Assistant change sets"
+            }
+          },
+          {
+            "id": "_c23df880448545d7a51545407487d184",
+            "kind": "Verify",
+            "source": "_8aa07d401d7d436684ebfadca5522e08",
+            "target": "_10872b069819404c88ae03d7776993c7"
+          },
+          {
+            "id": "_cab06187e6004e6eab03d14aed88445d",
+            "kind": "Verify",
+            "source": "_8aa07d401d7d436684ebfadca5522e08",
+            "target": "_00e16f6011c84caabdb8b700970d9765"
+          },
+          {
+            "id": "_df4c840836954e97bb0884460ab92d9a",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Architecture principles"
+            },
+            "diagramType": "Requirement",
+            "nodes": [
+              {
+                "id": "_c95d46896be9436cabed7dcb9ab6e174",
+                "element": "_596f0cbc8d594156878cdc2b76682e6c",
+                "x": 40,
+                "y": 40,
+                "w": 240,
+                "h": 220,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_f401b2aa261d4dee89638c58c9b6c5fe",
+                "element": "_f3c92acca89e4d52977965bfd34006b5",
+                "x": 310,
+                "y": 40,
+                "w": 240,
+                "h": 220,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_602d7f43cfc54f1ab30a7d1736ddab44",
+                "element": "_0fe79c79bd9a4e189686b7f80fe113ab",
+                "x": 580,
+                "y": 40,
+                "w": 240,
+                "h": 230,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_c997177e0a574118b671700390d052fe",
+                "element": "_c8bf1f357e9a4b1dab6058306d755cb5",
+                "x": 850,
+                "y": 40,
+                "w": 240,
+                "h": 220,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_1783bdf486364c30a7f4ef936a2df97a",
+                "element": "_00e16f6011c84caabdb8b700970d9765",
+                "x": 40,
+                "y": 310,
+                "w": 240,
+                "h": 230,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_ea980901a0ba403a826e30ef9c755fd8",
+                "element": "_a6f317d5fcdc47ce87954679f1795579",
+                "x": 310,
+                "y": 310,
+                "w": 240,
+                "h": 220,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_2df40c1eed0b482dadcae7edacd80252",
+                "element": "_9f4268c6b930435aac991dcae869fd93",
+                "x": 580,
+                "y": 310,
+                "w": 240,
+                "h": 250,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_f5262351bb7b4843b7297707d92ae4e5",
+                "element": "_10872b069819404c88ae03d7776993c7",
+                "x": 850,
+                "y": 310,
+                "w": 240,
+                "h": 200,
+                "parent": null,
+                "style": null
+              }
+            ],
+            "edges": []
+          }
+        ]
+      },
+      {
+        "id": "_ad2bb2baa2654c58a9bae7d7cdfd2e38",
+        "kind": "Package",
+        "fields": {
+          "documentation": "Meridian and the people and systems it works with.",
+          "name": "Context"
+        },
+        "children": [
+          {
+            "id": "_654726a0689c442aa29f1b13515299d8",
+            "kind": "Block",
+            "fields": {
+              "documentation": "Model-based systems engineering workbench: a team server (web) and a desktop app (Windows, macOS, Linux). Its subsystems, by assembly, are on the Subsystems by assembly diagram.",
+              "name": "Meridian",
+              "stereotypes": "system"
+            }
+          },
+          {
+            "id": "_c75a41a2999a4a809b70080d046efe75",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "Models, diagrams, reviews and reports, in a browser or the desktop app.",
+              "name": "Systems engineer"
+            }
+          },
+          {
+            "id": "_250d2ebd78c048739a9b3897a94fb154",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "Users, teams, SSO, backups and server settings.",
+              "name": "Server administrator"
+            }
+          },
+          {
+            "id": "_bf98056e39ce44a596ae0f1b222d6678",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "GitHub, GitLab or Bitbucket: push webhooks in, commit statuses and pull request comments out.",
+              "name": "Git host"
+            }
+          },
+          {
+            "id": "_acc91fe0bbc241ec9a8e42fcc8572f56",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "DOORS Next or Polarion, synced both ways.",
+              "name": "Requirements tool"
+            }
+          },
+          {
+            "id": "_b55a8fcb916943bd9648673a98ef311e",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "Claude Code, Hearth or another MCP client reading models at /api/mcp.",
+              "name": "AI client"
+            }
+          },
+          {
+            "id": "_d08b44087afc41b2acea688726f54add",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "Claude API, a local OpenAI-compatible server or Claude Code, used by the assistant.",
+              "name": "AI model service"
+            }
+          },
+          {
+            "id": "_1a9a08416b734053916f46ff4a6476f7",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "OpenID Connect single sign-on (Entra ID, Okta, Google, Keycloak, GitLab).",
+              "name": "Identity provider"
+            }
+          },
+          {
+            "id": "_3507961d62974c6692d1df616f2a83d4",
+            "kind": "Actor",
+            "fields": {
+              "documentation": "Jira, Azure DevOps, GitHub or GitLab issues linked to elements.",
+              "name": "Issue tracker"
+            }
+          },
+          {
+            "id": "_1f5e8e4e76fc41d1a14325481c9f6766",
+            "kind": "Association",
+            "source": "_c75a41a2999a4a809b70080d046efe75",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "HTTPS \u002B WebSocket"
+            }
+          },
+          {
+            "id": "_780f199e61d241548d0afc915bbf38c1",
+            "kind": "Association",
+            "source": "_250d2ebd78c048739a9b3897a94fb154",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "HTTPS"
+            }
+          },
+          {
+            "id": "_09e37e269d5c4d799b68990b5a591934",
+            "kind": "Association",
+            "source": "_bf98056e39ce44a596ae0f1b222d6678",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "webhooks, REST"
+            }
+          },
+          {
+            "id": "_d3c792d4ae524ae7a9370d30075edf61",
+            "kind": "Association",
+            "source": "_acc91fe0bbc241ec9a8e42fcc8572f56",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "OSLC / REST"
+            }
+          },
+          {
+            "id": "_80ec098fde364a68b22649a76673eed3",
+            "kind": "Association",
+            "source": "_b55a8fcb916943bd9648673a98ef311e",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "MCP"
+            }
+          },
+          {
+            "id": "_80b47beb718943da867313bfe92ffa16",
+            "kind": "Association",
+            "source": "_d08b44087afc41b2acea688726f54add",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "HTTPS"
+            }
+          },
+          {
+            "id": "_e762dad18a664bd89dc58c545c7ec4e6",
+            "kind": "Association",
+            "source": "_1a9a08416b734053916f46ff4a6476f7",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "OIDC"
+            }
+          },
+          {
+            "id": "_4e6bbe5742fd47cfb73fd95f77028276",
+            "kind": "Association",
+            "source": "_3507961d62974c6692d1df616f2a83d4",
+            "target": "_654726a0689c442aa29f1b13515299d8",
+            "fields": {
+              "multiplicity": "*",
+              "name": "REST"
+            }
+          },
+          {
+            "id": "_a44064be59c046ad826b2986bf169be0",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "System context"
+            },
+            "diagramType": "BlockDefinition",
+            "nodes": [
+              {
+                "id": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa",
+                "element": "_654726a0689c442aa29f1b13515299d8",
+                "x": 330,
+                "y": 70,
+                "w": 240,
+                "h": 500,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_fdef9a81c25d4809a5c1115b8b872b8c",
+                "element": "_c75a41a2999a4a809b70080d046efe75",
+                "x": 40,
+                "y": 40,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_a879a868ca0140cdb5566c96d796905d",
+                "element": "_bf98056e39ce44a596ae0f1b222d6678",
+                "x": 770,
+                "y": 40,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_4c3046d4411d432294c1ca4b0299676f",
+                "element": "_250d2ebd78c048739a9b3897a94fb154",
+                "x": 40,
+                "y": 190,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_d2559988d71a4531a7dd873125971f03",
+                "element": "_acc91fe0bbc241ec9a8e42fcc8572f56",
+                "x": 770,
+                "y": 190,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_d87ff83b994c4f7e93bac91fe4124127",
+                "element": "_b55a8fcb916943bd9648673a98ef311e",
+                "x": 40,
+                "y": 340,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_b3684cc75f8243aa93742fc28831dfd2",
+                "element": "_d08b44087afc41b2acea688726f54add",
+                "x": 770,
+                "y": 340,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_70211cb29201442eab92497f93a8f335",
+                "element": "_1a9a08416b734053916f46ff4a6476f7",
+                "x": 40,
+                "y": 490,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_0f2f000b84724580bc840741e7026ff5",
+                "element": "_3507961d62974c6692d1df616f2a83d4",
+                "x": 770,
+                "y": 490,
+                "w": 90,
+                "h": 110,
+                "parent": null,
+                "style": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "_17c446ff4ea841e6b8e80851f67d0d22",
+                "relationship": "_1f5e8e4e76fc41d1a14325481c9f6766",
+                "source": "_fdef9a81c25d4809a5c1115b8b872b8c",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_792f07a2eed34be296e16a86b184e3f6",
+                "relationship": "_780f199e61d241548d0afc915bbf38c1",
+                "source": "_4c3046d4411d432294c1ca4b0299676f",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_1af8205385034a8ea312c84bb9efc700",
+                "relationship": "_09e37e269d5c4d799b68990b5a591934",
+                "source": "_a879a868ca0140cdb5566c96d796905d",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_c6254f5221d84bf0847862e927d1893e",
+                "relationship": "_d3c792d4ae524ae7a9370d30075edf61",
+                "source": "_d2559988d71a4531a7dd873125971f03",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_ec8982b2501c41c59bd00ae0880b7124",
+                "relationship": "_80ec098fde364a68b22649a76673eed3",
+                "source": "_d87ff83b994c4f7e93bac91fe4124127",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_bd7a738f3d5c41d184630baf97d2a8dc",
+                "relationship": "_80b47beb718943da867313bfe92ffa16",
+                "source": "_b3684cc75f8243aa93742fc28831dfd2",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_19f88981faf14eb5841e7c54e9eba561",
+                "relationship": "_e762dad18a664bd89dc58c545c7ec4e6",
+                "source": "_70211cb29201442eab92497f93a8f335",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              },
+              {
+                "id": "_a18b1b382e0c480883ba7aba0465e38a",
+                "relationship": "_4e6bbe5742fd47cfb73fd95f77028276",
+                "source": "_0f2f000b84724580bc840741e7026ff5",
+                "target": "_b8fc0f2d8f464a45b0d9dc3186f9f8aa"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "_55d0c78899da4c4bb6b3aec0a597b190",
+        "kind": "Package",
+        "fields": {
+          "documentation": "One \u00ABlayer\u00BB package per assembly under src/. Each layer\u0027s namespaces tag maps code to it, and its \u00ABallowed\u00BB dependencies are the only other assemblies its code may use. Mirrors the \u003CProjectReference\u003E graph.",
+          "name": "Assemblies"
+        },
+        "children": [
+          {
+            "id": "_09fbf361e67a41819def294cbaffcdbf",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Model repository, metamodel and notation, layout, analysis, simulation, validation, code-sync mapping. Depends on nothing else in Meridian.",
+              "name": "Meridian.Core",
+              "stereotypes": "layer",
+              "tag:allowed": "none",
+              "tag:namespaces": "Meridian.Core"
+            },
+            "children": [
+              {
+                "id": "_b887304fa6394bc891ff59dd8d1b10b2",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "ModelRepository: containment tree, id and incidence indexes, undo history. Every public mutator is undoable and raises Changed. Namespaces: Meridian.Core.Model, Meridian.Core.Commands.",
+                  "name": "Model kernel",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_668a811d9da5480981b9e5fc6bbfcebd",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Metamodel (what may own and connect what), notation and default sizes, auto-layout, edge routing, the auto-diagrammer, UAF viewpoints. Namespaces: Meridian.Core.Language.",
+                  "name": "Language and notation",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_c06fb94e3c6040c491ad3d39c84a27a7",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Traceability, queries and tables, parametrics, activity / state machine / timed simulation, Monte Carlo, co-simulation master, verification, trade studies, variability, model diff and merge. Namespaces: Meridian.Core.Analysis.",
+                  "name": "Analysis and simulation",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_083116c31c46411cafc076c1676ed6b0",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Maps a language-neutral CodeModel onto the model, plans behaviour diagrams from method bodies, and checks code against the drawn architecture. Namespaces: Meridian.Core.CodeSync, Meridian.Core.CodeSync.Conformance.",
+                  "name": "Code mapping and conformance",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_223471fded394e938970e9241b181ef1",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Create diagrams from diagrams (requirements \u2192 use cases \u2192 activity \u2192 sequence \u2192 structure \u2192 state machine), with Update from source. Namespaces: Meridian.Core.Derivation.",
+                  "name": "Derivation workflows",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_7071430f846b409f941823ea169e2a4f",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Database modeling, deployment, instances, FMEA and fault trees, used projects, package permissions and validation rules. Namespaces: Meridian.Core.DataModeling, .Deployment, .Instances, .Safety, .Libraries, .Permissions, .Validation.",
+                  "name": "Domain extensions",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_de489ff9bf96465fa87dadb3207db5df",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Replication operations, local batches waiting for the server, and shared-text operations for lock-free live editing. Namespaces: Meridian.Core.Collaboration.",
+                  "name": "Replication",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_61fecb7533ed404e98b4611a793cdb0f",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "Reads source files into a language-neutral CodeModel.",
+                  "name": "ICodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_d5b7d3eb86d446cbb0ca6f52670b6a47",
+                "kind": "Satisfy",
+                "source": "_b887304fa6394bc891ff59dd8d1b10b2",
+                "target": "_00e16f6011c84caabdb8b700970d9765"
+              },
+              {
+                "id": "_fbd622e70b4e4d15862c93f776b4671c",
+                "kind": "Satisfy",
+                "source": "_61fecb7533ed404e98b4611a793cdb0f",
+                "target": "_9f4268c6b930435aac991dcae869fd93"
+              }
+            ]
+          },
+          {
+            "id": "_1565656864b3459788fb66821ab59c04",
+            "kind": "Package",
+            "fields": {
+              "documentation": "The .meridian project format, SVG rendering, reports and every import / export format, plus the code readers.",
+              "name": "Meridian.Serialization",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Serialization"
+            },
+            "children": [
+              {
+                "id": "_802bca59ad034c32b0fe154899892386",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "The diff-friendly JSON .meridian format and compact version history. Namespaces: Meridian.Serialization (ProjectFile), Meridian.Serialization.History.",
+                  "name": "Project format and history",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_f02d54f69535429187842743f857c4e6",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "XMI 2.5.1, SysML v2 text and JSON, ReqIF, BPMN, ArchiMate, Cameo / MagicDraw .mdzip and Enterprise Architect .qea import. Namespaces: Meridian.Serialization, .MagicDraw.",
+                  "name": "Model interchange",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_071073bb5fa1479aa9496701652bd839",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Mermaid, PlantUML, draw.io, Visio and Gliffy import / export, and folders of diagram files. Namespaces: Meridian.Serialization.Mermaid, .PlantUml, .DrawIo, .Visio, .Gliffy, .DiagramFiles.",
+                  "name": "Diagrams as code",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_8b0a3ad56c6947f99102da37bb0e1733",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Reads C# (Roslyn), TypeScript, Java and Python into a CodeModel. Namespaces: Meridian.Serialization.CodeSync.",
+                  "name": "Language readers",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_c8087a9fba0045698bea9e6d38cd0bf4",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "SVG rendering, document templates (PDF, Word, HTML), printing and tiling. Namespaces: Meridian.Serialization (SvgRenderer), .Reports, .Printing.",
+                  "name": "Rendering and reports",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_7454f76925854f2cb86844a327c1583f",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Excel / CSV import with round-trip sync, DDL for five SQL dialects and .dacpac import. Namespaces: Meridian.Serialization.Spreadsheets, .Database.",
+                  "name": "Spreadsheets and DDL",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_c2cb19e620ef43fe834f333bb9637d82",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Reads FMU descriptions and drives Meridian.FmuHost child processes. Namespaces: Meridian.Serialization.Fmi.",
+                  "name": "FMI runtime",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_fc4cc40954ea4c2ab12bdec3f2f11dfd",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Roslyn, one compilation for all files.",
+                  "name": "CSharpCodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_9ea9689ba56e440087c303dcad01e4da",
+                "kind": "Realization",
+                "source": "_fc4cc40954ea4c2ab12bdec3f2f11dfd",
+                "target": "_61fecb7533ed404e98b4611a793cdb0f"
+              },
+              {
+                "id": "_a823067440f942d4a058a67a4f4e392c",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Hand-written parser.",
+                  "name": "TypeScriptCodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_a553041221544d35b0da544d8e0a38cc",
+                "kind": "Realization",
+                "source": "_a823067440f942d4a058a67a4f4e392c",
+                "target": "_61fecb7533ed404e98b4611a793cdb0f"
+              },
+              {
+                "id": "_e40dc5ad7cc1472a97435623a6e4667c",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Hand-written parser.",
+                  "name": "JavaCodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_ab0c1aa40b38478384e223062ec120f2",
+                "kind": "Realization",
+                "source": "_e40dc5ad7cc1472a97435623a6e4667c",
+                "target": "_61fecb7533ed404e98b4611a793cdb0f"
+              },
+              {
+                "id": "_8006d5eab872490fb368fb1932fb7093",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Hand-written parser.",
+                  "name": "PythonCodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_68576dbe40844acfa3dd3da2501781c5",
+                "kind": "Realization",
+                "source": "_8006d5eab872490fb368fb1932fb7093",
+                "target": "_61fecb7533ed404e98b4611a793cdb0f"
+              },
+              {
+                "id": "_c1d81d12683a4d9fa724b6089ae0ecb7",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "The \u0022auto\u0022 reader: routes each file to the first reader that handles it.",
+                  "name": "MultiLanguageCodeReader",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_6dfb2072e95f468bb1fa6261d5e30a3e",
+                "kind": "Realization",
+                "source": "_c1d81d12683a4d9fa724b6089ae0ecb7",
+                "target": "_61fecb7533ed404e98b4611a793cdb0f"
+              }
+            ]
+          },
+          {
+            "id": "_82a01101895341d4a8cadce9a5e020be",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Stable scripting and plugin API (IModelApi), the Roslyn script engine and the plugin loader.",
+              "name": "Meridian.Scripting",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Scripting"
+            },
+            "children": [
+              {
+                "id": "_69ffa3195f79404a9673873d013ad170",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Runs C# scripts as one undo step with a time limit; the script policy is a guard rail, not a sandbox. Namespaces: Meridian.Scripting.Scripts.",
+                  "name": "C# scripting",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_de67b84f7ad14b71882b6fc1e2941ca0",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Loads IMeridianPlugin assemblies that add commands, validation rules, exporters and importers. Namespaces: Meridian.Scripting.Plugins.",
+                  "name": "Plugin loader",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_c87566c03d314fc5a034be5507b99b43",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "The stable IModelApi facade that scripts and plugins program against. Namespaces: Meridian.Scripting.Api.",
+                  "name": "Scripting API",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_3b0e53f2de5c43278ce75c9a5993fc61",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "The stable model API scripts and plugins use.",
+                  "name": "IModelApi",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_52f0d32da20a4369929b6bd49dddf9f2",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Wraps a ModelRepository; one script run is one undo step.",
+                  "name": "ModelApi",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_a7b6c3f5d17c45c2ac8746dcda35b82b",
+                "kind": "Realization",
+                "source": "_52f0d32da20a4369929b6bd49dddf9f2",
+                "target": "_3b0e53f2de5c43278ce75c9a5993fc61"
+              },
+              {
+                "id": "_223093e336ef43f48371f665085fa402",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "Entry point of a plugin assembly (see samples/HelloPlugin).",
+                  "name": "IMeridianPlugin",
+                  "stereotypes": "implemented"
+                }
+              }
+            ]
+          },
+          {
+            "id": "_109070ec0b9747698928737bbf5047f5",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Storage: PostgreSQL for team servers, SQLite for the desktop app\u0027s local mode, and live database connectors.",
+              "name": "Meridian.Data",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Data"
+            },
+            "children": [
+              {
+                "id": "_32430fa371ea4c24b4b53e0ec9c0b683",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Accounts, projects, versions, branches, reviews, permissions, integrations and the append-only audit log. Namespaces: Meridian.Data.",
+                  "name": "Relational store",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_65749392749e4c62bde85adcefe08b40",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Live database import for SQL Server, PostgreSQL, MySQL, Oracle and SQLite. Namespaces: Meridian.Data.Databases.",
+                  "name": "Database connectors",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_4eec0fcce78a4c69ba529a1a141ab28c",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "System of record for accounts, projects, version history and comments.",
+                  "name": "IMeridianStore",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_2a3e874291a145ecbd738fcbc6538a88",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Team servers.",
+                  "name": "PostgresStore",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_61699960b30443e798d486ad811fa485",
+                "kind": "Realization",
+                "source": "_2a3e874291a145ecbd738fcbc6538a88",
+                "target": "_4eec0fcce78a4c69ba529a1a141ab28c"
+              },
+              {
+                "id": "_476afde31877459ca259ac1300c558ff",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "The desktop app\u0027s local (single-user, offline) mode.",
+                  "name": "SqliteStore",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_99cfe7e58b9d457993f1a10fb884f564",
+                "kind": "Realization",
+                "source": "_476afde31877459ca259ac1300c558ff",
+                "target": "_4eec0fcce78a4c69ba529a1a141ab28c"
+              },
+              {
+                "id": "_7b2c3ab1283c491190670af25a8e1322",
+                "kind": "Satisfy",
+                "source": "_4eec0fcce78a4c69ba529a1a141ab28c",
+                "target": "_c8bf1f357e9a4b1dab6058306d755cb5"
+              }
+            ]
+          },
+          {
+            "id": "_c774cdbe8caa41f2bcba464935f61b40",
+            "kind": "Package",
+            "fields": {
+              "documentation": "AI assistant: conversation engine, chat providers (Claude API, OpenAI-compatible, Claude Code) and model tools.",
+              "name": "Meridian.Assistant",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Assistant"
+            },
+            "children": [
+              {
+                "id": "_c1d7bfb22fa140dc883f2eeaf04809fd",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Conversations, prompts, narrative and derivation writers. Namespaces: Meridian.Assistant.Engine.",
+                  "name": "Assistant orchestration",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_6e3d64a945524773aa085ad5bb51b3c1",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Claude API, OpenAI-compatible local models and Claude Code (through a loopback MCP server). Namespaces: Meridian.Assistant.Providers.",
+                  "name": "Chat providers",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_523397f6ef444b93bf39536c50b8c1d0",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Read, write and diagram tools; every write is a proposed change set the user applies or discards. Namespaces: Meridian.Assistant.Tools, Meridian.Assistant.Changes.",
+                  "name": "Assistant tools",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_dbe31d22a2744875933a336a6268eeb6",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "One AI back end the assistant talks to.",
+                  "name": "IChatProvider",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_69959cd780c549e69146c60e1bbb150d",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Claude through the Anthropic API with the user\u0027s key.",
+                  "name": "AnthropicChatProvider",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_b2e1b00b41d141399eebd7cc1b7a6b1e",
+                "kind": "Realization",
+                "source": "_69959cd780c549e69146c60e1bbb150d",
+                "target": "_dbe31d22a2744875933a336a6268eeb6"
+              },
+              {
+                "id": "_d0315ab2f43c4bb4b43638f52a494fdb",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Ollama, LM Studio or any OpenAI-compatible server.",
+                  "name": "OpenAiCompatibleProvider",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_5bb52a94f7794841bf7deb876cecd703",
+                "kind": "Realization",
+                "source": "_d0315ab2f43c4bb4b43638f52a494fdb",
+                "target": "_dbe31d22a2744875933a336a6268eeb6"
+              },
+              {
+                "id": "_6961ce44dfbf4cb2ba332a45f13c6ae6",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Claude Code with the user\u0027s own login; model tools are served over a loopback MCP server.",
+                  "name": "ClaudeCodeProvider",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_26477821533b4058a28285cb1bb13c49",
+                "kind": "Realization",
+                "source": "_6961ce44dfbf4cb2ba332a45f13c6ae6",
+                "target": "_dbe31d22a2744875933a336a6268eeb6"
+              },
+              {
+                "id": "_f72219d0e34b4804902850e6f4a4ddbd",
+                "kind": "Satisfy",
+                "source": "_dbe31d22a2744875933a336a6268eeb6",
+                "target": "_9f4268c6b930435aac991dcae869fd93"
+              },
+              {
+                "id": "_1d6022675d3a40d187ec33817c55bc37",
+                "kind": "Satisfy",
+                "source": "_523397f6ef444b93bf39536c50b8c1d0",
+                "target": "_10872b069819404c88ae03d7776993c7"
+              }
+            ]
+          },
+          {
+            "id": "_cb4e16dc9e1f48e98289244bd5150513",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Child process that loads one FMU\u0027s native code (crash isolation, not a sandbox). Talks JSON lines over stdin / stdout.",
+              "name": "Meridian.FmuHost",
+              "stereotypes": "layer",
+              "tag:allowed": "none",
+              "tag:namespaces": "Meridian.FmuHost"
+            },
+            "children": [
+              {
+                "id": "_847e6bcc804648ad93826eb5e2a8523f",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Loads one FMU and answers JSON-line requests. Namespaces: Meridian.FmuHost.",
+                  "name": "FMU process",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_677e2bb2770a4e11aa3bd9a41022a6b2",
+                "kind": "Satisfy",
+                "source": "_847e6bcc804648ad93826eb5e2a8523f",
+                "target": "_a6f317d5fcdc47ce87954679f1795579"
+              }
+            ]
+          },
+          {
+            "id": "_74429be2228e4212a1f87a17211f87d2",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Blazor Server application: workbench UI, live collaboration, code sync, integrations, REST and MCP endpoints, administration.",
+              "name": "Meridian.Web",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Web"
+            },
+            "children": [
+              {
+                "id": "_1d9fd016390143b3af55563bbc2e98bc",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Blazor and MudBlazor components: ribbon, explorer, diagram canvas, inspector, tables, docks. Namespaces: Meridian.Web.Components.",
+                  "name": "Workbench UI",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_98feb2ca4a774aacb1c1832e64ae04a7",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Workspace (one per browser tab) holds a replica of the open model; ProjectSession orders everyone\u0027s operations and persists them. Namespaces: Meridian.Web.Services.",
+                  "name": "Project sessions",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_217e4ee5d2a54aebbb92d7715407fc40",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Webhooks, Git hosts, sync runs, review branches, pull request previews and architecture checks. Namespaces: Meridian.Web.CodeSync.",
+                  "name": "Code sync service",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_51cd74ff8068478a8ed7f0be473f65d0",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "MCP endpoint, SysML v2 REST API, DOORS Next and Polarion, issue trackers, live databases. Namespaces: Meridian.Web.Integrations.",
+                  "name": "Integrations",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_621bde0a52d8457c8189b4568125ac9b",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Users, organizations, teams, single sign-on, audit log, backups and settings. Namespaces: Meridian.Web.Admin, Meridian.Web.Settings.",
+                  "name": "Administration",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_87ed38233cb9429eb97733c90150f4f8",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Startup, operations endpoints, data protection key ring and the bundled user guide. Namespaces: Meridian.Web.Hosting, Meridian.Web.",
+                  "name": "Hosting",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_530e4cead2ef4768ba1e5ef1aa195d06",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "Fetches snapshots and posts commit statuses for one repository connection.",
+                  "name": "IGitHost",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_57a95141b4ea4fcba45f29bedfd61539",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "GitHub and GitHub Enterprise.",
+                  "name": "GitHubHost",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_74e45c4a69964f97972d312ee3317f77",
+                "kind": "Realization",
+                "source": "_57a95141b4ea4fcba45f29bedfd61539",
+                "target": "_530e4cead2ef4768ba1e5ef1aa195d06"
+              },
+              {
+                "id": "_9ad8ec19e0244146afbb5258227b2fc5",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "gitlab.com and self-managed GitLab.",
+                  "name": "GitLabHost",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_6429548565e344819e8460539ed92711",
+                "kind": "Realization",
+                "source": "_9ad8ec19e0244146afbb5258227b2fc5",
+                "target": "_530e4cead2ef4768ba1e5ef1aa195d06"
+              },
+              {
+                "id": "_be699f3cc986414e83a507b82261748b",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Bitbucket Cloud and Data Center.",
+                  "name": "BitbucketHost",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_6f8df0fa5ac5448a8d246d4abf8cf254",
+                "kind": "Realization",
+                "source": "_be699f3cc986414e83a507b82261748b",
+                "target": "_530e4cead2ef4768ba1e5ef1aa195d06"
+              },
+              {
+                "id": "_fd65b5e3b58f47fabab25f5cc8d2e796",
+                "kind": "InterfaceBlock",
+                "fields": {
+                  "documentation": "Two-way requirements sync with an external tool.",
+                  "name": "IRequirementsSource",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_917f37cdf1c44067a1f99084ed219044",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "IBM DOORS Next over OSLC RM 2.0.",
+                  "name": "DoorsNextSource",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_8efb9beec9df453f9b6a7a96ae02c3f8",
+                "kind": "Realization",
+                "source": "_917f37cdf1c44067a1f99084ed219044",
+                "target": "_fd65b5e3b58f47fabab25f5cc8d2e796"
+              },
+              {
+                "id": "_0166a31e96d7458594984d3eae651f30",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Siemens Polarion over its REST API.",
+                  "name": "PolarionSource",
+                  "stereotypes": "implemented"
+                }
+              },
+              {
+                "id": "_5d8a3171cd8d4cf49e4222eabc746aaf",
+                "kind": "Realization",
+                "source": "_0166a31e96d7458594984d3eae651f30",
+                "target": "_fd65b5e3b58f47fabab25f5cc8d2e796"
+              },
+              {
+                "id": "_d68c6278b07a4261ba8c928938d1e48c",
+                "kind": "Satisfy",
+                "source": "_530e4cead2ef4768ba1e5ef1aa195d06",
+                "target": "_9f4268c6b930435aac991dcae869fd93"
+              }
+            ]
+          },
+          {
+            "id": "_1b00486a19b640b5889b24a6b602d874",
+            "kind": "Package",
+            "fields": {
+              "documentation": "Photino desktop host: a native window around Meridian.Web, running it in-process (local mode) or pointing at a team server.",
+              "name": "Meridian.Desktop",
+              "stereotypes": "layer",
+              "tag:namespaces": "Meridian.Desktop"
+            },
+            "children": [
+              {
+                "id": "_51b126e2e8394178aaf0dec68a52948b",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Native window, start page, workspace choice, native file dialogs and the in-process local server. Namespaces: Meridian.Desktop.",
+                  "name": "Desktop shell",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_798e18cfc29b48c2a68a8787237fd277",
+                "kind": "Block",
+                "fields": {
+                  "documentation": "Velopack updates from GitHub, GitLab or a Meridian server, verified by SHA-256. Namespaces: Meridian.Desktop.",
+                  "name": "Self-update",
+                  "stereotypes": "subsystem"
+                }
+              },
+              {
+                "id": "_a8041f9abc0b46e7a3035a2d94d00e73",
+                "kind": "Satisfy",
+                "source": "_51b126e2e8394178aaf0dec68a52948b",
+                "target": "_0fe79c79bd9a4e189686b7f80fe113ab"
+              }
+            ]
+          },
+          {
+            "id": "_e963edd195314f109d6ddfd4bd08b365",
+            "kind": "Dependency",
+            "source": "_1565656864b3459788fb66821ab59c04",
+            "target": "_09fbf361e67a41819def294cbaffcdbf",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_24fa9f38b82c4c15909f75fa4de0946c",
+            "kind": "Dependency",
+            "source": "_82a01101895341d4a8cadce9a5e020be",
+            "target": "_09fbf361e67a41819def294cbaffcdbf",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_25a0b8e1a00e4ee7a5bebd1e337988c4",
+            "kind": "Dependency",
+            "source": "_109070ec0b9747698928737bbf5047f5",
+            "target": "_09fbf361e67a41819def294cbaffcdbf",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_a223d223b9f04396b2d2d97b12ae37b8",
+            "kind": "Dependency",
+            "source": "_109070ec0b9747698928737bbf5047f5",
+            "target": "_1565656864b3459788fb66821ab59c04",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_c8a19d2693504f8b9c62b95af119315f",
+            "kind": "Dependency",
+            "source": "_c774cdbe8caa41f2bcba464935f61b40",
+            "target": "_09fbf361e67a41819def294cbaffcdbf",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_0d79f3aec7f343af94f5a345bd80ec3f",
+            "kind": "Dependency",
+            "source": "_c774cdbe8caa41f2bcba464935f61b40",
+            "target": "_1565656864b3459788fb66821ab59c04",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_887be55b813d42318b8fb7ed154738df",
+            "kind": "Dependency",
+            "source": "_c774cdbe8caa41f2bcba464935f61b40",
+            "target": "_82a01101895341d4a8cadce9a5e020be",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_3e7173a02e94421882d764884c011baa",
+            "kind": "Dependency",
+            "source": "_74429be2228e4212a1f87a17211f87d2",
+            "target": "_09fbf361e67a41819def294cbaffcdbf",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_3d1a2d890d314458a18ab91d297aa4cd",
+            "kind": "Dependency",
+            "source": "_74429be2228e4212a1f87a17211f87d2",
+            "target": "_1565656864b3459788fb66821ab59c04",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_a3bbc46e52ec4017869c36e35928c399",
+            "kind": "Dependency",
+            "source": "_74429be2228e4212a1f87a17211f87d2",
+            "target": "_109070ec0b9747698928737bbf5047f5",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_e31bf817d879454886519e2dea8e6ac9",
+            "kind": "Dependency",
+            "source": "_74429be2228e4212a1f87a17211f87d2",
+            "target": "_82a01101895341d4a8cadce9a5e020be",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_e94e0ca98ea94ee7872f467e7676a990",
+            "kind": "Dependency",
+            "source": "_74429be2228e4212a1f87a17211f87d2",
+            "target": "_c774cdbe8caa41f2bcba464935f61b40",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_17dcd60241024fa2a07cad33074949c6",
+            "kind": "Dependency",
+            "source": "_1b00486a19b640b5889b24a6b602d874",
+            "target": "_74429be2228e4212a1f87a17211f87d2",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_0ffce8fd637d481d9c1392523e84a9f6",
+            "kind": "Dependency",
+            "source": "_1b00486a19b640b5889b24a6b602d874",
+            "target": "_1565656864b3459788fb66821ab59c04",
+            "fields": {
+              "stereotypes": "allowed"
+            }
+          },
+          {
+            "id": "_a87e45bbc1574a40bee5b080dbbda4ee",
+            "kind": "Satisfy",
+            "source": "_09fbf361e67a41819def294cbaffcdbf",
+            "target": "_596f0cbc8d594156878cdc2b76682e6c"
+          },
+          {
+            "id": "_dde7f2e806be49ebb8845589d15e6aff",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Assembly layers"
+            },
+            "diagramType": "Package",
+            "nodes": [
+              {
+                "id": "_ec666cb761ce4e2d97a7a569876f48d2",
+                "element": "_1b00486a19b640b5889b24a6b602d874",
+                "x": 400,
+                "y": 40,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "element": "_74429be2228e4212a1f87a17211f87d2",
+                "x": 400,
+                "y": 220,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_fd76c1d1143f4b59927f86fd494d6f62",
+                "element": "_c774cdbe8caa41f2bcba464935f61b40",
+                "x": 100,
+                "y": 400,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_aca87e9e1fb549eca170d9e6f525b699",
+                "element": "_109070ec0b9747698928737bbf5047f5",
+                "x": 700,
+                "y": 400,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_609653f1b3b5431e9baebdd70343c5c6",
+                "element": "_82a01101895341d4a8cadce9a5e020be",
+                "x": 100,
+                "y": 580,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_0d7edd8444cb4d40b34e2176b41c0466",
+                "element": "_1565656864b3459788fb66821ab59c04",
+                "x": 700,
+                "y": 580,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_d5cd1464a6ab42b284cb6e5e5a321a91",
+                "element": "_09fbf361e67a41819def294cbaffcdbf",
+                "x": 400,
+                "y": 760,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_2ff5f4f692dd4ab9a5da7167207cd459",
+                "element": "_cb4e16dc9e1f48e98289244bd5150513",
+                "x": 1000,
+                "y": 760,
+                "w": 220,
+                "h": 90,
+                "parent": null,
+                "style": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "_ddaaeaa40c4f4223963e5c0e0ac6e39f",
+                "relationship": "_e963edd195314f109d6ddfd4bd08b365",
+                "source": "_0d7edd8444cb4d40b34e2176b41c0466",
+                "target": "_d5cd1464a6ab42b284cb6e5e5a321a91"
+              },
+              {
+                "id": "_02e6a9de645e4808860cc1179ec9f487",
+                "relationship": "_24fa9f38b82c4c15909f75fa4de0946c",
+                "source": "_609653f1b3b5431e9baebdd70343c5c6",
+                "target": "_d5cd1464a6ab42b284cb6e5e5a321a91"
+              },
+              {
+                "id": "_ed2e8f18b9874909acdd5a8fa6e72e4f",
+                "relationship": "_25a0b8e1a00e4ee7a5bebd1e337988c4",
+                "source": "_aca87e9e1fb549eca170d9e6f525b699",
+                "target": "_d5cd1464a6ab42b284cb6e5e5a321a91"
+              },
+              {
+                "id": "_d29d7b79abcc4204a32571dae18771ec",
+                "relationship": "_a223d223b9f04396b2d2d97b12ae37b8",
+                "source": "_aca87e9e1fb549eca170d9e6f525b699",
+                "target": "_0d7edd8444cb4d40b34e2176b41c0466"
+              },
+              {
+                "id": "_f0688c05fbdb4adab7200807d05c2c37",
+                "relationship": "_c8a19d2693504f8b9c62b95af119315f",
+                "source": "_fd76c1d1143f4b59927f86fd494d6f62",
+                "target": "_d5cd1464a6ab42b284cb6e5e5a321a91"
+              },
+              {
+                "id": "_c85ce6c1c23f423d85868d772fa881d5",
+                "relationship": "_0d79f3aec7f343af94f5a345bd80ec3f",
+                "source": "_fd76c1d1143f4b59927f86fd494d6f62",
+                "target": "_0d7edd8444cb4d40b34e2176b41c0466"
+              },
+              {
+                "id": "_85f616eb2a324081bacbd7703bcd1a68",
+                "relationship": "_887be55b813d42318b8fb7ed154738df",
+                "source": "_fd76c1d1143f4b59927f86fd494d6f62",
+                "target": "_609653f1b3b5431e9baebdd70343c5c6"
+              },
+              {
+                "id": "_b91f0f1ec98d4ad3bc6da624a1f8be40",
+                "relationship": "_3e7173a02e94421882d764884c011baa",
+                "source": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "target": "_d5cd1464a6ab42b284cb6e5e5a321a91"
+              },
+              {
+                "id": "_f6798a1838d24b60aaccfa9e8fabc2dd",
+                "relationship": "_3d1a2d890d314458a18ab91d297aa4cd",
+                "source": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "target": "_0d7edd8444cb4d40b34e2176b41c0466"
+              },
+              {
+                "id": "_45975b65ad8c4bcea2005ea5a90c4377",
+                "relationship": "_a3bbc46e52ec4017869c36e35928c399",
+                "source": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "target": "_aca87e9e1fb549eca170d9e6f525b699"
+              },
+              {
+                "id": "_9cdcc4902e864d6a8e097aa0b0cc8ba3",
+                "relationship": "_e31bf817d879454886519e2dea8e6ac9",
+                "source": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "target": "_609653f1b3b5431e9baebdd70343c5c6"
+              },
+              {
+                "id": "_756d703db8b54a1d9a033e80e3773c30",
+                "relationship": "_e94e0ca98ea94ee7872f467e7676a990",
+                "source": "_3fc53e0e1e474dff9d2785ee809bb290",
+                "target": "_fd76c1d1143f4b59927f86fd494d6f62"
+              },
+              {
+                "id": "_0e4a14205032436b92e0e2035eb4ec67",
+                "relationship": "_17dcd60241024fa2a07cad33074949c6",
+                "source": "_ec666cb761ce4e2d97a7a569876f48d2",
+                "target": "_3fc53e0e1e474dff9d2785ee809bb290"
+              },
+              {
+                "id": "_c64bb13b0152497ea523bf24721a081b",
+                "relationship": "_0ffce8fd637d481d9c1392523e84a9f6",
+                "source": "_ec666cb761ce4e2d97a7a569876f48d2",
+                "target": "_0d7edd8444cb4d40b34e2176b41c0466"
+              }
+            ]
+          },
+          {
+            "id": "_c9fb5ddde847406d9bc086bff45c77e2",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Subsystems by assembly"
+            },
+            "diagramType": "Package",
+            "nodes": [
+              {
+                "id": "_5d3e8c52bd3b426ca3654a1eaded9fd3",
+                "element": "_1b00486a19b640b5889b24a6b602d874",
+                "x": 40,
+                "y": 40,
+                "w": 500,
+                "h": 164,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_849ebfa9665242edb5fe4a9c6268a9a6",
+                "element": "_51b126e2e8394178aaf0dec68a52948b",
+                "x": 60,
+                "y": 80,
+                "w": 220,
+                "h": 84,
+                "parent": "_5d3e8c52bd3b426ca3654a1eaded9fd3",
+                "style": null
+              },
+              {
+                "id": "_62d285cc1c4b4413bc4a5e8249fa214f",
+                "element": "_798e18cfc29b48c2a68a8787237fd277",
+                "x": 300,
+                "y": 80,
+                "w": 220,
+                "h": 84,
+                "parent": "_5d3e8c52bd3b426ca3654a1eaded9fd3",
+                "style": null
+              },
+              {
+                "id": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "element": "_74429be2228e4212a1f87a17211f87d2",
+                "x": 580,
+                "y": 40,
+                "w": 740,
+                "h": 268,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_f32f832e1a9a4bf4b2ae60ac3dc8c608",
+                "element": "_1d9fd016390143b3af55563bbc2e98bc",
+                "x": 600,
+                "y": 80,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_52e1b2a8c454446386fd7662f9af938b",
+                "element": "_98feb2ca4a774aacb1c1832e64ae04a7",
+                "x": 840,
+                "y": 80,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_b21926ef3df442339837214b7867a638",
+                "element": "_217e4ee5d2a54aebbb92d7715407fc40",
+                "x": 1080,
+                "y": 80,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_6aa4bf9417c64ccb9637ce7693da3218",
+                "element": "_51cd74ff8068478a8ed7f0be473f65d0",
+                "x": 600,
+                "y": 184,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_1f115c080a6942378aaa9e93035caae3",
+                "element": "_621bde0a52d8457c8189b4568125ac9b",
+                "x": 840,
+                "y": 184,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_46b6d21ca9d84b7ea2135c6ffedeb7ce",
+                "element": "_87ed38233cb9429eb97733c90150f4f8",
+                "x": 1080,
+                "y": 184,
+                "w": 220,
+                "h": 84,
+                "parent": "_0ad80a346eae4ec9be6f88db6cb31be1",
+                "style": null
+              },
+              {
+                "id": "_2a1cb307d477436ca5b73ef1578cddba",
+                "element": "_c774cdbe8caa41f2bcba464935f61b40",
+                "x": 40,
+                "y": 348,
+                "w": 500,
+                "h": 268,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_3989b555e2204712884c86b8231d3020",
+                "element": "_c1d7bfb22fa140dc883f2eeaf04809fd",
+                "x": 60,
+                "y": 388,
+                "w": 220,
+                "h": 84,
+                "parent": "_2a1cb307d477436ca5b73ef1578cddba",
+                "style": null
+              },
+              {
+                "id": "_6565d2d1943b4a60850c9072b3b9ca2a",
+                "element": "_6e3d64a945524773aa085ad5bb51b3c1",
+                "x": 300,
+                "y": 388,
+                "w": 220,
+                "h": 84,
+                "parent": "_2a1cb307d477436ca5b73ef1578cddba",
+                "style": null
+              },
+              {
+                "id": "_6eb19d5669714321897a40b7c1a11801",
+                "element": "_523397f6ef444b93bf39536c50b8c1d0",
+                "x": 60,
+                "y": 492,
+                "w": 220,
+                "h": 84,
+                "parent": "_2a1cb307d477436ca5b73ef1578cddba",
+                "style": null
+              },
+              {
+                "id": "_3921011672eb412fa2a2843b69473473",
+                "element": "_109070ec0b9747698928737bbf5047f5",
+                "x": 580,
+                "y": 348,
+                "w": 500,
+                "h": 164,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_d50b33cf30bd421b8cb693960c01957b",
+                "element": "_32430fa371ea4c24b4b53e0ec9c0b683",
+                "x": 600,
+                "y": 388,
+                "w": 220,
+                "h": 84,
+                "parent": "_3921011672eb412fa2a2843b69473473",
+                "style": null
+              },
+              {
+                "id": "_d127d3e7c13c4ed79dc56641a2f5d725",
+                "element": "_65749392749e4c62bde85adcefe08b40",
+                "x": 840,
+                "y": 388,
+                "w": 220,
+                "h": 84,
+                "parent": "_3921011672eb412fa2a2843b69473473",
+                "style": null
+              },
+              {
+                "id": "_36202e5c74ff4df48a0a498f25e730e9",
+                "element": "_82a01101895341d4a8cadce9a5e020be",
+                "x": 1140,
+                "y": 348,
+                "w": 260,
+                "h": 372,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_f4070015b59246a5a61280f74862d310",
+                "element": "_69ffa3195f79404a9673873d013ad170",
+                "x": 1160,
+                "y": 388,
+                "w": 220,
+                "h": 84,
+                "parent": "_36202e5c74ff4df48a0a498f25e730e9",
+                "style": null
+              },
+              {
+                "id": "_3846d80cfd244c56a841013b16c70eab",
+                "element": "_de67b84f7ad14b71882b6fc1e2941ca0",
+                "x": 1160,
+                "y": 492,
+                "w": 220,
+                "h": 84,
+                "parent": "_36202e5c74ff4df48a0a498f25e730e9",
+                "style": null
+              },
+              {
+                "id": "_55156039b739470faa3eb757ab205ad1",
+                "element": "_c87566c03d314fc5a034be5507b99b43",
+                "x": 1160,
+                "y": 596,
+                "w": 220,
+                "h": 84,
+                "parent": "_36202e5c74ff4df48a0a498f25e730e9",
+                "style": null
+              },
+              {
+                "id": "_feb123be0cc9473d8de51eb2101f705e",
+                "element": "_1565656864b3459788fb66821ab59c04",
+                "x": 40,
+                "y": 760,
+                "w": 980,
+                "h": 268,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_32cc9dc66fc143bf9207463c0b65611d",
+                "element": "_802bca59ad034c32b0fe154899892386",
+                "x": 60,
+                "y": 800,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_18653c97cb48403bb4c6fbd72a177778",
+                "element": "_f02d54f69535429187842743f857c4e6",
+                "x": 300,
+                "y": 800,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_3fc963d2797b47e28851c758685e6283",
+                "element": "_071073bb5fa1479aa9496701652bd839",
+                "x": 540,
+                "y": 800,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_db97ad2155ea4a4997e86c81684b4a1c",
+                "element": "_8b0a3ad56c6947f99102da37bb0e1733",
+                "x": 780,
+                "y": 800,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_c2f40958458942328dfb97b86891c85f",
+                "element": "_c8087a9fba0045698bea9e6d38cd0bf4",
+                "x": 60,
+                "y": 904,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_eeca6241a7cf41baadf250bfbf1c79d9",
+                "element": "_7454f76925854f2cb86844a327c1583f",
+                "x": 300,
+                "y": 904,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_1a93256d7af641acaec3706d528ac34b",
+                "element": "_c2cb19e620ef43fe834f333bb9637d82",
+                "x": 540,
+                "y": 904,
+                "w": 220,
+                "h": 84,
+                "parent": "_feb123be0cc9473d8de51eb2101f705e",
+                "style": null
+              },
+              {
+                "id": "_3c8ce88c2b5d4f0dae65c517070ef741",
+                "element": "_cb4e16dc9e1f48e98289244bd5150513",
+                "x": 1140,
+                "y": 760,
+                "w": 260,
+                "h": 164,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_2afaa0532f734234b6e269cecbfa2a1a",
+                "element": "_847e6bcc804648ad93826eb5e2a8523f",
+                "x": 1160,
+                "y": 800,
+                "w": 220,
+                "h": 84,
+                "parent": "_3c8ce88c2b5d4f0dae65c517070ef741",
+                "style": null
+              },
+              {
+                "id": "_5913765326584b9a9150c3654f65546d",
+                "element": "_09fbf361e67a41819def294cbaffcdbf",
+                "x": 40,
+                "y": 1068,
+                "w": 980,
+                "h": 268,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_7d127ca167e74d07a09790e314d97bc2",
+                "element": "_b887304fa6394bc891ff59dd8d1b10b2",
+                "x": 60,
+                "y": 1108,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_7dca7ac870094990ac87841f3cb7c576",
+                "element": "_668a811d9da5480981b9e5fc6bbfcebd",
+                "x": 300,
+                "y": 1108,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_3210f911fdd5468696e0b01d0ffd78fd",
+                "element": "_c06fb94e3c6040c491ad3d39c84a27a7",
+                "x": 540,
+                "y": 1108,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_c2b4b079061e42a19af99bcfe17947db",
+                "element": "_083116c31c46411cafc076c1676ed6b0",
+                "x": 780,
+                "y": 1108,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_c85611df046449d4bb370b6dd8d050fc",
+                "element": "_223471fded394e938970e9241b181ef1",
+                "x": 60,
+                "y": 1212,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_68564d86b74041c4815dd66fc757f183",
+                "element": "_7071430f846b409f941823ea169e2a4f",
+                "x": 300,
+                "y": 1212,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              },
+              {
+                "id": "_28fb096c790d48be92753ea9231434df",
+                "element": "_de489ff9bf96465fa87dadb3207db5df",
+                "x": 540,
+                "y": 1212,
+                "w": 220,
+                "h": 84,
+                "parent": "_5913765326584b9a9150c3654f65546d",
+                "style": null
+              }
+            ],
+            "edges": []
+          },
+          {
+            "id": "_071ae8ee4b6849ba8465bd4d606c7f3d",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Extension points"
+            },
+            "diagramType": "BlockDefinition",
+            "nodes": [
+              {
+                "id": "_a0424c663d674b9e82ca03173a435d7e",
+                "element": "_61fecb7533ed404e98b4611a793cdb0f",
+                "x": 270,
+                "y": 40,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_45232c63a47446eead18e419f4bac571",
+                "element": "_fc4cc40954ea4c2ab12bdec3f2f11dfd",
+                "x": 40,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_357ebe5ca6b142e78540d7c3112d7638",
+                "element": "_a823067440f942d4a058a67a4f4e392c",
+                "x": 270,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_24e4bc7f0af1491f97d731f39ed64bbb",
+                "element": "_e40dc5ad7cc1472a97435623a6e4667c",
+                "x": 500,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_5f6fc771fe784f7ea1f7ead967f93004",
+                "element": "_8006d5eab872490fb368fb1932fb7093",
+                "x": 40,
+                "y": 370,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_567822bd674a4512bcefeaf95b6b6840",
+                "element": "_c1d81d12683a4d9fa724b6089ae0ecb7",
+                "x": 270,
+                "y": 370,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_519898bac5f6458e8765f387ad73b92c",
+                "element": "_dbe31d22a2744875933a336a6268eeb6",
+                "x": 1020,
+                "y": 40,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_aa35b6da81394c3eb6239e52a60bfae9",
+                "element": "_69959cd780c549e69146c60e1bbb150d",
+                "x": 790,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_c4dc0e319aec4ef59dc6e4571138e42d",
+                "element": "_d0315ab2f43c4bb4b43638f52a494fdb",
+                "x": 1020,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_ca8aa8bb57874ef487869a744bfaa6b2",
+                "element": "_6961ce44dfbf4cb2ba332a45f13c6ae6",
+                "x": 1250,
+                "y": 220,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_8cc0bd799f9445fa9a1d484d65aa8520",
+                "element": "_530e4cead2ef4768ba1e5ef1aa195d06",
+                "x": 270,
+                "y": 560,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_5a042c44a0ad4c3ab294bb63587b40c2",
+                "element": "_57a95141b4ea4fcba45f29bedfd61539",
+                "x": 40,
+                "y": 740,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_2f4acd4b222b424e89ac8fc6648a37fb",
+                "element": "_9ad8ec19e0244146afbb5258227b2fc5",
+                "x": 270,
+                "y": 740,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_c8b05dbabd3e400fb25baddc8b5ea436",
+                "element": "_be699f3cc986414e83a507b82261748b",
+                "x": 500,
+                "y": 740,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_55c1a522a5a942a4947c9041f0618f4c",
+                "element": "_4eec0fcce78a4c69ba529a1a141ab28c",
+                "x": 905,
+                "y": 560,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_1ba3cdba09a742669cbe2d7ece9ab038",
+                "element": "_2a3e874291a145ecbd738fcbc6538a88",
+                "x": 790,
+                "y": 740,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_9df6f602ffba4c788678604fee9b6df1",
+                "element": "_476afde31877459ca259ac1300c558ff",
+                "x": 1020,
+                "y": 740,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_3adf21f247b345a2a8101aefbe8af94b",
+                "element": "_fd65b5e3b58f47fabab25f5cc8d2e796",
+                "x": 155,
+                "y": 930,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_19b125b51a7545ef84eaa9862f74639a",
+                "element": "_917f37cdf1c44067a1f99084ed219044",
+                "x": 40,
+                "y": 1110,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_1161280e24b84f6091659b31aaf5a3f8",
+                "element": "_0166a31e96d7458594984d3eae651f30",
+                "x": 270,
+                "y": 1110,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_5ea36b11784342bfa2b89fae146387d5",
+                "element": "_3b0e53f2de5c43278ce75c9a5993fc61",
+                "x": 560,
+                "y": 930,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_8272690d34a64732842bf514580c4cbc",
+                "element": "_52f0d32da20a4369929b6bd49dddf9f2",
+                "x": 560,
+                "y": 1110,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_ae41b2baad3c4bbab8f6cd11338f416e",
+                "element": "_223093e336ef43f48371f665085fa402",
+                "x": 850,
+                "y": 930,
+                "w": 200,
+                "h": 110,
+                "parent": null,
+                "style": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "_b146cb40a99044699ea26295150ce5af",
+                "relationship": "_61699960b30443e798d486ad811fa485",
+                "source": "_1ba3cdba09a742669cbe2d7ece9ab038",
+                "target": "_55c1a522a5a942a4947c9041f0618f4c"
+              },
+              {
+                "id": "_1648cdf337da4d1a81fc1058fb9c7f87",
+                "relationship": "_99cfe7e58b9d457993f1a10fb884f564",
+                "source": "_9df6f602ffba4c788678604fee9b6df1",
+                "target": "_55c1a522a5a942a4947c9041f0618f4c"
+              },
+              {
+                "id": "_038eca9634aa4ff6ac7560c0f8155320",
+                "relationship": "_9ea9689ba56e440087c303dcad01e4da",
+                "source": "_45232c63a47446eead18e419f4bac571",
+                "target": "_a0424c663d674b9e82ca03173a435d7e"
+              },
+              {
+                "id": "_068c716e0a2743a5ac95286bb93d959d",
+                "relationship": "_a553041221544d35b0da544d8e0a38cc",
+                "source": "_357ebe5ca6b142e78540d7c3112d7638",
+                "target": "_a0424c663d674b9e82ca03173a435d7e"
+              },
+              {
+                "id": "_eefd7e08221243139994fe0d0a30da74",
+                "relationship": "_ab0c1aa40b38478384e223062ec120f2",
+                "source": "_24e4bc7f0af1491f97d731f39ed64bbb",
+                "target": "_a0424c663d674b9e82ca03173a435d7e"
+              },
+              {
+                "id": "_efe12aee90494b17828c46a57d1d44dc",
+                "relationship": "_68576dbe40844acfa3dd3da2501781c5",
+                "source": "_5f6fc771fe784f7ea1f7ead967f93004",
+                "target": "_a0424c663d674b9e82ca03173a435d7e"
+              },
+              {
+                "id": "_9908d2ca93ec4e26946c90d9b960f410",
+                "relationship": "_6dfb2072e95f468bb1fa6261d5e30a3e",
+                "source": "_567822bd674a4512bcefeaf95b6b6840",
+                "target": "_a0424c663d674b9e82ca03173a435d7e"
+              },
+              {
+                "id": "_4cc0dcaf12fa4eabb7a58b956e7f4b7c",
+                "relationship": "_b2e1b00b41d141399eebd7cc1b7a6b1e",
+                "source": "_aa35b6da81394c3eb6239e52a60bfae9",
+                "target": "_519898bac5f6458e8765f387ad73b92c"
+              },
+              {
+                "id": "_ec34885856364905a1f8b584e9d08d33",
+                "relationship": "_5bb52a94f7794841bf7deb876cecd703",
+                "source": "_c4dc0e319aec4ef59dc6e4571138e42d",
+                "target": "_519898bac5f6458e8765f387ad73b92c"
+              },
+              {
+                "id": "_abc22c6c5b6f4ff89358f7508a181e28",
+                "relationship": "_26477821533b4058a28285cb1bb13c49",
+                "source": "_ca8aa8bb57874ef487869a744bfaa6b2",
+                "target": "_519898bac5f6458e8765f387ad73b92c"
+              },
+              {
+                "id": "_366fc49e0e994667823a2771acab7500",
+                "relationship": "_74e45c4a69964f97972d312ee3317f77",
+                "source": "_5a042c44a0ad4c3ab294bb63587b40c2",
+                "target": "_8cc0bd799f9445fa9a1d484d65aa8520"
+              },
+              {
+                "id": "_b471c4ee3dbc4dcaba6c9e0b2893bc4f",
+                "relationship": "_6429548565e344819e8460539ed92711",
+                "source": "_2f4acd4b222b424e89ac8fc6648a37fb",
+                "target": "_8cc0bd799f9445fa9a1d484d65aa8520"
+              },
+              {
+                "id": "_e00cd60c961149e3a5146f1e5191f8bb",
+                "relationship": "_6f8df0fa5ac5448a8d246d4abf8cf254",
+                "source": "_c8b05dbabd3e400fb25baddc8b5ea436",
+                "target": "_8cc0bd799f9445fa9a1d484d65aa8520"
+              },
+              {
+                "id": "_7a46fed6e62b4bc395adb5578c22f730",
+                "relationship": "_8efb9beec9df453f9b6a7a96ae02c3f8",
+                "source": "_19b125b51a7545ef84eaa9862f74639a",
+                "target": "_3adf21f247b345a2a8101aefbe8af94b"
+              },
+              {
+                "id": "_d9f029c1fede457e9addafac10b826a7",
+                "relationship": "_5d8a3171cd8d4cf49e4222eabc746aaf",
+                "source": "_1161280e24b84f6091659b31aaf5a3f8",
+                "target": "_3adf21f247b345a2a8101aefbe8af94b"
+              },
+              {
+                "id": "_569eed63c79940a98b275cb8891ce708",
+                "relationship": "_a7b6c3f5d17c45c2ac8746dcda35b82b",
+                "source": "_8272690d34a64732842bf514580c4cbc",
+                "target": "_5ea36b11784342bfa2b89fae146387d5"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "_74be79e7f5ac4685a09f1ff2e6984e5b",
+        "kind": "Package",
+        "fields": {
+          "documentation": "Where Meridian runs: a team server, and the desktop app on one computer.",
+          "name": "Deployment"
+        },
+        "children": [
+          {
+            "id": "_98cd321ea26b41e691fb1db53f1e9f50",
+            "kind": "Device",
+            "fields": {
+              "documentation": "Linux host running Docker Compose (or a Kubernetes cluster with the Helm chart).",
+              "name": "Server host",
+              "stereotypes": "server"
+            },
+            "children": [
+              {
+                "id": "_da2552ef76304340a6b86f762fe1f675",
+                "kind": "ExecutionEnvironment",
+                "fields": {
+                  "documentation": "Caddy 2: TLS termination and reverse proxy (ports 80 / 443).",
+                  "name": "caddy",
+                  "stereotypes": "container"
+                }
+              },
+              {
+                "id": "_9a1eb34e0c28492a950e2aad5c1fbbc2",
+                "kind": "ExecutionEnvironment",
+                "fields": {
+                  "documentation": "ASP.NET Core 10 runtime (image ghcr.io/finepointcgi/meridian).",
+                  "name": "meridian",
+                  "stereotypes": "container"
+                }
+              },
+              {
+                "id": "_1e4df8db900b4caa92bf7d4de86cf659",
+                "kind": "ExecutionEnvironment",
+                "fields": {
+                  "documentation": "PostgreSQL 17.",
+                  "name": "db",
+                  "stereotypes": "container"
+                }
+              },
+              {
+                "id": "_db772e5baa404877b3292091630bcbb3",
+                "kind": "ExecutionEnvironment",
+                "fields": {
+                  "documentation": "OpenTelemetry Collector: traces, metrics and logs.",
+                  "name": "otel-collector",
+                  "stereotypes": "container"
+                }
+              },
+              {
+                "id": "_d136362cff294485b44cc6633b493dc0",
+                "kind": "CommunicationPath",
+                "source": "_da2552ef76304340a6b86f762fe1f675",
+                "target": "_9a1eb34e0c28492a950e2aad5c1fbbc2",
+                "fields": {
+                  "name": "HTTP",
+                  "protocol": "HTTP"
+                }
+              },
+              {
+                "id": "_3da351da3dc24da884633f0d725d387d",
+                "kind": "CommunicationPath",
+                "source": "_9a1eb34e0c28492a950e2aad5c1fbbc2",
+                "target": "_1e4df8db900b4caa92bf7d4de86cf659",
+                "fields": {
+                  "name": "PostgreSQL (Npgsql)",
+                  "protocol": "PostgreSQL (Npgsql)"
+                }
+              },
+              {
+                "id": "_82cdc22d007b4ace82f6f401e015a83b",
+                "kind": "CommunicationPath",
+                "source": "_9a1eb34e0c28492a950e2aad5c1fbbc2",
+                "target": "_db772e5baa404877b3292091630bcbb3",
+                "fields": {
+                  "name": "OTLP",
+                  "protocol": "OTLP"
+                }
+              }
+            ]
+          },
+          {
+            "id": "_5769036b564343619a1b124661f977d9",
+            "kind": "Device",
+            "fields": {
+              "documentation": "Any modern browser; Blazor Server keeps one SignalR circuit per tab.",
+              "name": "User workstation",
+              "stereotypes": "client"
+            }
+          },
+          {
+            "id": "_95f0653fc45647899038e650bac1863c",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "The web application with its libraries and the bundled user guide.",
+              "fileName": "Meridian.Web.dll",
+              "name": "Meridian.Web"
+            }
+          },
+          {
+            "id": "_38df98e9cd7f427db6f84a029026a73d",
+            "kind": "Manifestation",
+            "source": "_95f0653fc45647899038e650bac1863c",
+            "target": "_74429be2228e4212a1f87a17211f87d2"
+          },
+          {
+            "id": "_8fbdaa9879384c00abe9289c042bedfa",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "Started per FMU co-simulation; off on servers unless Meridian:Fmi:Enabled.",
+              "fileName": "Meridian.FmuHost(.exe)",
+              "name": "Meridian.FmuHost"
+            }
+          },
+          {
+            "id": "_8506b9f622e846c4885ad1e1f15338a2",
+            "kind": "Manifestation",
+            "source": "_8fbdaa9879384c00abe9289c042bedfa",
+            "target": "_cb4e16dc9e1f48e98289244bd5150513"
+          },
+          {
+            "id": "_3ee31c13f89f4f409262d7f8a30d8b9e",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "Projects, versions, branches, reviews, users, audit log.",
+              "fileName": "meridian database",
+              "name": "Meridian schema"
+            }
+          },
+          {
+            "id": "_4816758d64e54c5e8c886d699c9ecb75",
+            "kind": "Manifestation",
+            "source": "_3ee31c13f89f4f409262d7f8a30d8b9e",
+            "target": "_109070ec0b9747698928737bbf5047f5"
+          },
+          {
+            "id": "_ae9e1285b2c149d5b04a0ef00eb56dd7",
+            "kind": "Deployment",
+            "source": "_95f0653fc45647899038e650bac1863c",
+            "target": "_9a1eb34e0c28492a950e2aad5c1fbbc2"
+          },
+          {
+            "id": "_704186567d85452dade56d1b0618bd42",
+            "kind": "Deployment",
+            "source": "_8fbdaa9879384c00abe9289c042bedfa",
+            "target": "_9a1eb34e0c28492a950e2aad5c1fbbc2"
+          },
+          {
+            "id": "_f1da30f13f70439fa64052b62ecdac39",
+            "kind": "Deployment",
+            "source": "_3ee31c13f89f4f409262d7f8a30d8b9e",
+            "target": "_1e4df8db900b4caa92bf7d4de86cf659"
+          },
+          {
+            "id": "_6c5e6182fd7b4224bf66b043e4269172",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "Script served by Meridian.Web that keeps the SignalR circuit to the server; the UI itself renders on the server.",
+              "fileName": "_framework/blazor.web.js",
+              "name": "Blazor client"
+            }
+          },
+          {
+            "id": "_f51e4737f9914589959955d6178acec4",
+            "kind": "Deployment",
+            "source": "_6c5e6182fd7b4224bf66b043e4269172",
+            "target": "_5769036b564343619a1b124661f977d9"
+          },
+          {
+            "id": "_7f91c5f101014c35a79583489fb652ea",
+            "kind": "CommunicationPath",
+            "source": "_5769036b564343619a1b124661f977d9",
+            "target": "_da2552ef76304340a6b86f762fe1f675",
+            "fields": {
+              "name": "HTTPS, WebSocket",
+              "protocol": "HTTPS, WebSocket"
+            }
+          },
+          {
+            "id": "_752c1f4c7d00468e8ad5c8f4c6cff28e",
+            "kind": "Device",
+            "fields": {
+              "documentation": "Windows 10/11, macOS or Linux.",
+              "name": "Desktop computer",
+              "stereotypes": "workstation"
+            },
+            "children": [
+              {
+                "id": "_ad72fe55dfa6450ca79ebd572759588f",
+                "kind": "ExecutionEnvironment",
+                "fields": {
+                  "documentation": ".NET 10 process: Photino window (WebView2, WKWebView or WebKitGTK) and an in-process Kestrel server on loopback.",
+                  "name": "Meridian desktop process",
+                  "stereotypes": "process"
+                }
+              },
+              {
+                "id": "_8c11ef4a69a048298f75d9b115432308",
+                "kind": "CommunicationPath",
+                "source": "_ad72fe55dfa6450ca79ebd572759588f",
+                "target": "_48ef00c476b74270b4fb0a5c5477d7e8",
+                "fields": {
+                  "name": "HTTPS, WebSocket",
+                  "protocol": "HTTPS, WebSocket"
+                }
+              },
+              {
+                "id": "_05857910f987484abbf900ec843be610",
+                "kind": "CommunicationPath",
+                "source": "_ad72fe55dfa6450ca79ebd572759588f",
+                "target": "_d8e4388636b347f68be6e23ad2c077a1",
+                "fields": {
+                  "name": "HTTPS (Velopack)",
+                  "protocol": "HTTPS (Velopack)"
+                }
+              }
+            ]
+          },
+          {
+            "id": "_f4099206866343d395b83ff8da0521ef",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "Desktop host; also carries Meridian.Web and the user guide.",
+              "fileName": "Meridian(.exe / .app)",
+              "name": "Meridian.Desktop"
+            }
+          },
+          {
+            "id": "_0c04ba159e1746589b1a2e93d128c920",
+            "kind": "Manifestation",
+            "source": "_f4099206866343d395b83ff8da0521ef",
+            "target": "_1b00486a19b640b5889b24a6b602d874"
+          },
+          {
+            "id": "_a815b6d0edd348e8a3263e974a47dd61",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "In the user data folder (%APPDATA%\\Meridian, ~/Library/Application Support/Meridian, ~/.config/Meridian).",
+              "fileName": "meridian.db (SQLite)",
+              "name": "Local workspace"
+            }
+          },
+          {
+            "id": "_5124083fef424255bdb7f402a8795735",
+            "kind": "Manifestation",
+            "source": "_a815b6d0edd348e8a3263e974a47dd61",
+            "target": "_109070ec0b9747698928737bbf5047f5"
+          },
+          {
+            "id": "_b784de5dae5b41de87fd84b598963a50",
+            "kind": "Artifact",
+            "fields": {
+              "documentation": "On by default in local mode.",
+              "fileName": "Meridian.FmuHost(.exe)",
+              "name": "Meridian.FmuHost (desktop)"
+            }
+          },
+          {
+            "id": "_415c6ef55fc64ef08afac8edb0e1bcc5",
+            "kind": "Manifestation",
+            "source": "_b784de5dae5b41de87fd84b598963a50",
+            "target": "_cb4e16dc9e1f48e98289244bd5150513"
+          },
+          {
+            "id": "_3a4f1bb4e4154a7397037575951bebb9",
+            "kind": "Deployment",
+            "source": "_f4099206866343d395b83ff8da0521ef",
+            "target": "_ad72fe55dfa6450ca79ebd572759588f"
+          },
+          {
+            "id": "_82a1d4a6ef2d469b83bb31574e26a747",
+            "kind": "Deployment",
+            "source": "_a815b6d0edd348e8a3263e974a47dd61",
+            "target": "_752c1f4c7d00468e8ad5c8f4c6cff28e"
+          },
+          {
+            "id": "_a5345070b26f4c29a36cbab1ad9ceb4d",
+            "kind": "Deployment",
+            "source": "_b784de5dae5b41de87fd84b598963a50",
+            "target": "_752c1f4c7d00468e8ad5c8f4c6cff28e"
+          },
+          {
+            "id": "_48ef00c476b74270b4fb0a5c5477d7e8",
+            "kind": "Node",
+            "fields": {
+              "documentation": "Optional: the desktop window can point at a team server instead of the local one.",
+              "name": "Team server"
+            }
+          },
+          {
+            "id": "_d8e4388636b347f68be6e23ad2c077a1",
+            "kind": "Node",
+            "fields": {
+              "documentation": "GitHub releases, GitLab releases or a Meridian server\u0027s /api/desktop/latest.",
+              "name": "Update source"
+            }
+          },
+          {
+            "id": "_fa1ac1221fd1403480d709b389937990",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Team server deployment"
+            },
+            "diagramType": "Deployment",
+            "nodes": [
+              {
+                "id": "_8dbb2bfbe4b34d1c9ca6098f0a4f7aaf",
+                "element": "_5769036b564343619a1b124661f977d9",
+                "x": 30,
+                "y": 150,
+                "w": 250,
+                "h": 230,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_afa23d20c733441ea66feffd70d830df",
+                "element": "_6c5e6182fd7b4224bf66b043e4269172",
+                "x": 45,
+                "y": 230,
+                "w": 220,
+                "h": 120,
+                "parent": "_8dbb2bfbe4b34d1c9ca6098f0a4f7aaf",
+                "style": null
+              },
+              {
+                "id": "_af50536e19d34bd2a902aebb5fea4575",
+                "element": "_98cd321ea26b41e691fb1db53f1e9f50",
+                "x": 320,
+                "y": 40,
+                "w": 800,
+                "h": 480,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_f931881157154888b674699344aed79f",
+                "element": "_da2552ef76304340a6b86f762fe1f675",
+                "x": 350,
+                "y": 190,
+                "w": 170,
+                "h": 100,
+                "parent": "_af50536e19d34bd2a902aebb5fea4575",
+                "style": null
+              },
+              {
+                "id": "_16442aaea91f4cc8a3be13d54192d871",
+                "element": "_9a1eb34e0c28492a950e2aad5c1fbbc2",
+                "x": 600,
+                "y": 100,
+                "w": 250,
+                "h": 380,
+                "parent": "_af50536e19d34bd2a902aebb5fea4575",
+                "style": null
+              },
+              {
+                "id": "_4d0af3f79fe94111b603e91f8a9dd041",
+                "element": "_95f0653fc45647899038e650bac1863c",
+                "x": 620,
+                "y": 170,
+                "w": 210,
+                "h": 130,
+                "parent": "_16442aaea91f4cc8a3be13d54192d871",
+                "style": null
+              },
+              {
+                "id": "_f81189406ef14fe2a6d4abbc95718331",
+                "element": "_8fbdaa9879384c00abe9289c042bedfa",
+                "x": 620,
+                "y": 320,
+                "w": 210,
+                "h": 130,
+                "parent": "_16442aaea91f4cc8a3be13d54192d871",
+                "style": null
+              },
+              {
+                "id": "_f0e29fe2cedd4da5b28bdda10c94a9fd",
+                "element": "_1e4df8db900b4caa92bf7d4de86cf659",
+                "x": 900,
+                "y": 100,
+                "w": 200,
+                "h": 210,
+                "parent": "_af50536e19d34bd2a902aebb5fea4575",
+                "style": null
+              },
+              {
+                "id": "_d84d8804eb474515a63af6d9821f2aec",
+                "element": "_3ee31c13f89f4f409262d7f8a30d8b9e",
+                "x": 915,
+                "y": 165,
+                "w": 170,
+                "h": 130,
+                "parent": "_f0e29fe2cedd4da5b28bdda10c94a9fd",
+                "style": null
+              },
+              {
+                "id": "_c07381f4928d45eeac80318a9692856c",
+                "element": "_db772e5baa404877b3292091630bcbb3",
+                "x": 900,
+                "y": 370,
+                "w": 200,
+                "h": 100,
+                "parent": "_af50536e19d34bd2a902aebb5fea4575",
+                "style": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "_e0c7da3cfd3149fc818c00c247a45c3c",
+                "relationship": "_ae9e1285b2c149d5b04a0ef00eb56dd7",
+                "source": "_4d0af3f79fe94111b603e91f8a9dd041",
+                "target": "_16442aaea91f4cc8a3be13d54192d871"
+              },
+              {
+                "id": "_a14b98dfb63b4d6a9b697f71192c700c",
+                "relationship": "_704186567d85452dade56d1b0618bd42",
+                "source": "_f81189406ef14fe2a6d4abbc95718331",
+                "target": "_16442aaea91f4cc8a3be13d54192d871"
+              },
+              {
+                "id": "_d547440a1aa84c5da31af795dde369b5",
+                "relationship": "_f1da30f13f70439fa64052b62ecdac39",
+                "source": "_d84d8804eb474515a63af6d9821f2aec",
+                "target": "_f0e29fe2cedd4da5b28bdda10c94a9fd"
+              },
+              {
+                "id": "_d0b2ecc6320c47959154a70a4accd89c",
+                "relationship": "_f51e4737f9914589959955d6178acec4",
+                "source": "_afa23d20c733441ea66feffd70d830df",
+                "target": "_8dbb2bfbe4b34d1c9ca6098f0a4f7aaf"
+              },
+              {
+                "id": "_96a46f01f7c84ec3a54831df9e05ca48",
+                "relationship": "_7f91c5f101014c35a79583489fb652ea",
+                "source": "_8dbb2bfbe4b34d1c9ca6098f0a4f7aaf",
+                "target": "_f931881157154888b674699344aed79f"
+              },
+              {
+                "id": "_4b52c430c1d743ecaa6a1224fa7efe9b",
+                "relationship": "_d136362cff294485b44cc6633b493dc0",
+                "source": "_f931881157154888b674699344aed79f",
+                "target": "_16442aaea91f4cc8a3be13d54192d871"
+              },
+              {
+                "id": "_19868404fbda4fc1abd8df6dac37bd94",
+                "relationship": "_3da351da3dc24da884633f0d725d387d",
+                "source": "_16442aaea91f4cc8a3be13d54192d871",
+                "target": "_f0e29fe2cedd4da5b28bdda10c94a9fd"
+              },
+              {
+                "id": "_3b3ed3a747034e8ab1a1cd32e9e15844",
+                "relationship": "_82cdc22d007b4ace82f6f401e015a83b",
+                "source": "_16442aaea91f4cc8a3be13d54192d871",
+                "target": "_c07381f4928d45eeac80318a9692856c"
+              }
+            ]
+          },
+          {
+            "id": "_c22d1db4ac17454198873ed87f130e81",
+            "kind": "Diagram",
+            "fields": {
+              "edgeRouting": "orthogonal",
+              "name": "Desktop deployment"
+            },
+            "diagramType": "Deployment",
+            "nodes": [
+              {
+                "id": "_534515935d854fa59a2e3b609f5f3cd5",
+                "element": "_752c1f4c7d00468e8ad5c8f4c6cff28e",
+                "x": 40,
+                "y": 40,
+                "w": 560,
+                "h": 470,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_3a46570b2e714f4990dab334b5bc96db",
+                "element": "_ad72fe55dfa6450ca79ebd572759588f",
+                "x": 70,
+                "y": 100,
+                "w": 300,
+                "h": 210,
+                "parent": "_534515935d854fa59a2e3b609f5f3cd5",
+                "style": null
+              },
+              {
+                "id": "_f9a3dd29187a46a79a47b805b1d4037b",
+                "element": "_f4099206866343d395b83ff8da0521ef",
+                "x": 90,
+                "y": 160,
+                "w": 260,
+                "h": 130,
+                "parent": "_3a46570b2e714f4990dab334b5bc96db",
+                "style": null
+              },
+              {
+                "id": "_65857bccf3d64660adaf27307ab46a9c",
+                "element": "_a815b6d0edd348e8a3263e974a47dd61",
+                "x": 70,
+                "y": 350,
+                "w": 240,
+                "h": 130,
+                "parent": "_534515935d854fa59a2e3b609f5f3cd5",
+                "style": null
+              },
+              {
+                "id": "_9c5aae587290475e8f1d948179fe8c91",
+                "element": "_b784de5dae5b41de87fd84b598963a50",
+                "x": 340,
+                "y": 350,
+                "w": 240,
+                "h": 130,
+                "parent": "_534515935d854fa59a2e3b609f5f3cd5",
+                "style": null
+              },
+              {
+                "id": "_c5de131aa3604df6bd7c2b0367171d69",
+                "element": "_48ef00c476b74270b4fb0a5c5477d7e8",
+                "x": 720,
+                "y": 100,
+                "w": 200,
+                "h": 90,
+                "parent": null,
+                "style": null
+              },
+              {
+                "id": "_3b12e446775e4702ac5e8420e7d0f173",
+                "element": "_d8e4388636b347f68be6e23ad2c077a1",
+                "x": 720,
+                "y": 230,
+                "w": 200,
+                "h": 90,
+                "parent": null,
+                "style": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "_eae5477127bd4650ba469d6d22f7a149",
+                "relationship": "_3a4f1bb4e4154a7397037575951bebb9",
+                "source": "_f9a3dd29187a46a79a47b805b1d4037b",
+                "target": "_3a46570b2e714f4990dab334b5bc96db"
+              },
+              {
+                "id": "_1c7aa0e24a4f4ef3b7577d11402a672a",
+                "relationship": "_82a1d4a6ef2d469b83bb31574e26a747",
+                "source": "_65857bccf3d64660adaf27307ab46a9c",
+                "target": "_534515935d854fa59a2e3b609f5f3cd5"
+              },
+              {
+                "id": "_5d4146f57bbc429291b26761de36a609",
+                "relationship": "_a5345070b26f4c29a36cbab1ad9ceb4d",
+                "source": "_9c5aae587290475e8f1d948179fe8c91",
+                "target": "_534515935d854fa59a2e3b609f5f3cd5"
+              },
+              {
+                "id": "_8c6f493f2cb747809f0d5d3a095963cd",
+                "relationship": "_8c11ef4a69a048298f75d9b115432308",
+                "source": "_3a46570b2e714f4990dab334b5bc96db",
+                "target": "_c5de131aa3604df6bd7c2b0367171d69"
+              },
+              {
+                "id": "_439d06ace10b41d18c17112e61ac7de2",
+                "relationship": "_05857910f987484abbf900ec843be610",
+                "source": "_3a46570b2e714f4990dab334b5bc96db",
+                "target": "_3b12e446775e4702ac5e8420e7d0f173"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "_a4df4dc2442046ccaf73b4abb8bc1765",
+        "kind": "Package",
+        "fields": {
+          "documentation": "Key runtime flows.",
+          "name": "Behavior"
+        },
+        "children": [
+          {
+            "id": "_3a47aacf10c140db8af2273cedfb0412",
+            "kind": "Activity",
+            "fields": {
+              "documentation": "What one push to a connected repository does (docs/CODE-SYNC.md, docs/ARCHITECTURE-CHECKS.md). Not drawn: a failed run posts a failure meridian/model status and skips the architecture check.",
+              "name": "Code sync and architecture check"
+            },
+            "children": [
+              {
+                "id": "_7440b8e389ae4ba9814d7ac00fb82295",
+                "kind": "InitialNode"
+              },
+              {
+                "id": "_36a30b0596c345f9a0f2b9b91b389f2b",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "POST /api/code-sync/{connection}/webhook, verified per host.",
+                  "name": "Receive push webhook"
+                }
+              },
+              {
+                "id": "_52d4d1d82c3f402cbcc353459c3d31d6",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "IGitHost.FetchSnapshotAsync reads the archive at the pushed commit, with submodules at their pinned commits.",
+                  "name": "Fetch snapshot"
+                }
+              },
+              {
+                "id": "_4714addf1b9e4ebca2cd1effb2318e3e",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "ICodeReader (the auto reader) builds a CodeModel; Mermaid, PlantUML and draw.io files are re-imported.",
+                  "name": "Read code and diagram files"
+                }
+              },
+              {
+                "id": "_0ead97a132584456ae1fbc2332129f61",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "CodeModelMapper and CodeModelApplier record the changes as replication operations (ModelOp).",
+                  "name": "Map onto a copy of the branch"
+                }
+              },
+              {
+                "id": "_1fc86d222e8e4a63a4746bbec3dc5a52",
+                "kind": "DecisionNode"
+              },
+              {
+                "id": "_c42aedb52e4d482e9427a6bb418692fe",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "The first import of a repository goes straight into main.",
+                  "name": "Import into main"
+                }
+              },
+              {
+                "id": "_bf891145e88f45d6a70c3fb470dbee73",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "code-sync/\u003Crepository\u003E; open sessions on the branch receive the operations live.",
+                  "name": "Commit to review branch"
+                }
+              },
+              {
+                "id": "_e2842cf77afc4b718ec91527d88ab955",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "No branch is created.",
+                  "name": "Record No changes"
+                }
+              },
+              {
+                "id": "_d864793efc6f45b1b2c86b8e0738b6b5",
+                "kind": "DecisionNode"
+              },
+              {
+                "id": "_71232e5150db42cca4c5b0218388f758",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "CodeSyncEvents.RunCompleted(request, outcome) for every run that did not fail.",
+                  "name": "Raise RunCompleted"
+                }
+              },
+              {
+                "id": "_7d9f079773f14bb38c1430f56cc581ad",
+                "kind": "ForkNode"
+              },
+              {
+                "id": "_3978e330e7154479989639abda7a8d20",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "Commit status with the run summary and review link.",
+                  "name": "Post meridian/model status"
+                }
+              },
+              {
+                "id": "_dc65ac1c9398456bae60a4511a15acb7",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "ArchitectureCheckService runs ArchitectureConformance against main\u0027s model.",
+                  "name": "Check architecture"
+                }
+              },
+              {
+                "id": "_72b567dbd3bd4be281fd77609a717d9d",
+                "kind": "Action",
+                "fields": {
+                  "documentation": "Fails pull requests on violations when the connection says so.",
+                  "name": "Post meridian/architecture status"
+                }
+              },
+              {
+                "id": "_2d28d53276914e6bb9bbb47ffdb15371",
+                "kind": "ForkNode"
+              },
+              {
+                "id": "_75ee8ab47f044d47ac52e5684b43f9f0",
+                "kind": "ActivityFinalNode"
+              },
+              {
+                "id": "_2a74d85bb94c453da1f8200c6fd1d40e",
+                "kind": "ControlFlow",
+                "source": "_7440b8e389ae4ba9814d7ac00fb82295",
+                "target": "_36a30b0596c345f9a0f2b9b91b389f2b"
+              },
+              {
+                "id": "_18c7d6224d054fed8f14e37e9381e60e",
+                "kind": "ControlFlow",
+                "source": "_36a30b0596c345f9a0f2b9b91b389f2b",
+                "target": "_52d4d1d82c3f402cbcc353459c3d31d6"
+              },
+              {
+                "id": "_567d5d2ca6764b5a96e9de56d5a9144e",
+                "kind": "ControlFlow",
+                "source": "_52d4d1d82c3f402cbcc353459c3d31d6",
+                "target": "_4714addf1b9e4ebca2cd1effb2318e3e"
+              },
+              {
+                "id": "_2c20d8088787416c8594e963b413ec13",
+                "kind": "ControlFlow",
+                "source": "_4714addf1b9e4ebca2cd1effb2318e3e",
+                "target": "_0ead97a132584456ae1fbc2332129f61"
+              },
+              {
+                "id": "_c88d12057a8f4f2e96c414c559ee9f68",
+                "kind": "ControlFlow",
+                "source": "_0ead97a132584456ae1fbc2332129f61",
+                "target": "_1fc86d222e8e4a63a4746bbec3dc5a52"
+              },
+              {
+                "id": "_4f97d1cf92bb4b0b8919ca86923f94b3",
+                "kind": "ControlFlow",
+                "source": "_1fc86d222e8e4a63a4746bbec3dc5a52",
+                "target": "_c42aedb52e4d482e9427a6bb418692fe",
+                "fields": {
+                  "guard": "first import"
+                }
+              },
+              {
+                "id": "_17fafb50753d4dce8f44a6725ae0a5bf",
+                "kind": "ControlFlow",
+                "source": "_1fc86d222e8e4a63a4746bbec3dc5a52",
+                "target": "_bf891145e88f45d6a70c3fb470dbee73",
+                "fields": {
+                  "guard": "model changed"
+                }
+              },
+              {
+                "id": "_d0686c81b4224b129841adb3d5f2c97e",
+                "kind": "ControlFlow",
+                "source": "_1fc86d222e8e4a63a4746bbec3dc5a52",
+                "target": "_e2842cf77afc4b718ec91527d88ab955",
+                "fields": {
+                  "guard": "no change"
+                }
+              },
+              {
+                "id": "_447e8883a9fc4cd186ddb8dc9bf72bc3",
+                "kind": "ControlFlow",
+                "source": "_c42aedb52e4d482e9427a6bb418692fe",
+                "target": "_d864793efc6f45b1b2c86b8e0738b6b5"
+              },
+              {
+                "id": "_451a596fb4bb4c71ab4dd4e4cc3049eb",
+                "kind": "ControlFlow",
+                "source": "_bf891145e88f45d6a70c3fb470dbee73",
+                "target": "_d864793efc6f45b1b2c86b8e0738b6b5"
+              },
+              {
+                "id": "_f7cf8085e60040fc8bf800e65a19959d",
+                "kind": "ControlFlow",
+                "source": "_e2842cf77afc4b718ec91527d88ab955",
+                "target": "_d864793efc6f45b1b2c86b8e0738b6b5"
+              },
+              {
+                "id": "_c1c7d3eb96734be7a4f1a4e166619a26",
+                "kind": "ControlFlow",
+                "source": "_d864793efc6f45b1b2c86b8e0738b6b5",
+                "target": "_71232e5150db42cca4c5b0218388f758"
+              },
+              {
+                "id": "_1cd445906e9a4fde968ebc8206f8e1fa",
+                "kind": "ControlFlow",
+                "source": "_71232e5150db42cca4c5b0218388f758",
+                "target": "_7d9f079773f14bb38c1430f56cc581ad"
+              },
+              {
+                "id": "_0b9d1c4bea704711b27eaca5371794b5",
+                "kind": "ControlFlow",
+                "source": "_7d9f079773f14bb38c1430f56cc581ad",
+                "target": "_3978e330e7154479989639abda7a8d20"
+              },
+              {
+                "id": "_e76e6c3c3bd14b45b0512a51d8a53c15",
+                "kind": "ControlFlow",
+                "source": "_7d9f079773f14bb38c1430f56cc581ad",
+                "target": "_dc65ac1c9398456bae60a4511a15acb7"
+              },
+              {
+                "id": "_3ec9cb9b1aa24685b8680aad6aafb406",
+                "kind": "ControlFlow",
+                "source": "_dc65ac1c9398456bae60a4511a15acb7",
+                "target": "_72b567dbd3bd4be281fd77609a717d9d"
+              },
+              {
+                "id": "_2c179ab14c37419e8e9f8583e14cef61",
+                "kind": "ControlFlow",
+                "source": "_3978e330e7154479989639abda7a8d20",
+                "target": "_2d28d53276914e6bb9bbb47ffdb15371"
+              },
+              {
+                "id": "_2f162752f0cb4d3eb716a54f0775ee3c",
+                "kind": "ControlFlow",
+                "source": "_72b567dbd3bd4be281fd77609a717d9d",
+                "target": "_2d28d53276914e6bb9bbb47ffdb15371"
+              },
+              {
+                "id": "_fc3b249a8af24fbab5d6fd49fc5e8d5b",
+                "kind": "ControlFlow",
+                "source": "_2d28d53276914e6bb9bbb47ffdb15371",
+                "target": "_75ee8ab47f044d47ac52e5684b43f9f0"
+              },
+              {
+                "id": "_ce5eabd22ec346db88e719edb6e49cb6",
+                "kind": "Diagram",
+                "fields": {
+                  "edgeRouting": "orthogonal",
+                  "name": "Code sync and architecture check"
+                },
+                "diagramType": "Activity",
+                "nodes": [
+                  {
+                    "id": "_42a4772f7fa34be4af52da727e03a376",
+                    "element": "_7440b8e389ae4ba9814d7ac00fb82295",
+                    "x": 270,
+                    "y": 60,
+                    "w": 28,
+                    "h": 28,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_0fcc1a92ee0846a5aff40bc9a3b81422",
+                    "element": "_36a30b0596c345f9a0f2b9b91b389f2b",
+                    "x": 220,
+                    "y": 140,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_9bad06b0c2404882a86e2e72539d742c",
+                    "element": "_52d4d1d82c3f402cbcc353459c3d31d6",
+                    "x": 220,
+                    "y": 240,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_18991c3399964a4f8e7e323d042e26bb",
+                    "element": "_4714addf1b9e4ebca2cd1effb2318e3e",
+                    "x": 220,
+                    "y": 350,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_5d1d2c3b463c488c8b84b5c43e26b985",
+                    "element": "_0ead97a132584456ae1fbc2332129f61",
+                    "x": 220,
+                    "y": 460,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_dc09629157c346af9d403f9c35f4d3fa",
+                    "element": "_1fc86d222e8e4a63a4746bbec3dc5a52",
+                    "x": 260,
+                    "y": 560,
+                    "w": 40,
+                    "h": 40,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_1eb423589f5e40939068890470892bdb",
+                    "element": "_c42aedb52e4d482e9427a6bb418692fe",
+                    "x": 40,
+                    "y": 650,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_705406cfc6f642379e47065fb3957a56",
+                    "element": "_bf891145e88f45d6a70c3fb470dbee73",
+                    "x": 220,
+                    "y": 650,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_2e6d2590676740ea8e02451356cee00f",
+                    "element": "_e2842cf77afc4b718ec91527d88ab955",
+                    "x": 400,
+                    "y": 650,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_143be8d4794946cb851083885bca99dc",
+                    "element": "_d864793efc6f45b1b2c86b8e0738b6b5",
+                    "x": 260,
+                    "y": 760,
+                    "w": 40,
+                    "h": 40,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_d1d9ee43e5c942879eb51777c9ac6e3c",
+                    "element": "_71232e5150db42cca4c5b0218388f758",
+                    "x": 220,
+                    "y": 850,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_263145b7fddc4bd2946c048a2bc4295e",
+                    "element": "_7d9f079773f14bb38c1430f56cc581ad",
+                    "x": 240,
+                    "y": 950,
+                    "w": 100,
+                    "h": 8,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_c81ee5a4f7034e009a584252398469cf",
+                    "element": "_3978e330e7154479989639abda7a8d20",
+                    "x": 130,
+                    "y": 1010,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_0a03becb9dce44c8927aac7042e384ee",
+                    "element": "_dc65ac1c9398456bae60a4511a15acb7",
+                    "x": 310,
+                    "y": 1010,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_a678d3006c2c44b9b9668d095b0bab33",
+                    "element": "_72b567dbd3bd4be281fd77609a717d9d",
+                    "x": 220,
+                    "y": 1120,
+                    "w": 130,
+                    "h": 56,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_4aee328fee944134829570e1a49a86a3",
+                    "element": "_2d28d53276914e6bb9bbb47ffdb15371",
+                    "x": 240,
+                    "y": 1220,
+                    "w": 100,
+                    "h": 8,
+                    "parent": null,
+                    "style": null
+                  },
+                  {
+                    "id": "_ff403436f83245ee96862dc30502f59d",
+                    "element": "_75ee8ab47f044d47ac52e5684b43f9f0",
+                    "x": 270,
+                    "y": 1280,
+                    "w": 28,
+                    "h": 28,
+                    "parent": null,
+                    "style": null
+                  }
+                ],
+                "edges": [
+                  {
+                    "id": "_becea7c178aa4fadb33bf154d52baa5a",
+                    "relationship": "_2a74d85bb94c453da1f8200c6fd1d40e",
+                    "source": "_42a4772f7fa34be4af52da727e03a376",
+                    "target": "_0fcc1a92ee0846a5aff40bc9a3b81422"
+                  },
+                  {
+                    "id": "_246d9398534849ba9bb6e51a0f3b7cf0",
+                    "relationship": "_18c7d6224d054fed8f14e37e9381e60e",
+                    "source": "_0fcc1a92ee0846a5aff40bc9a3b81422",
+                    "target": "_9bad06b0c2404882a86e2e72539d742c"
+                  },
+                  {
+                    "id": "_4d013aaab8a441e3b7c6371c44b52b72",
+                    "relationship": "_567d5d2ca6764b5a96e9de56d5a9144e",
+                    "source": "_9bad06b0c2404882a86e2e72539d742c",
+                    "target": "_18991c3399964a4f8e7e323d042e26bb"
+                  },
+                  {
+                    "id": "_29d3f9c0d698408ab7f4e49c2694ac66",
+                    "relationship": "_2c20d8088787416c8594e963b413ec13",
+                    "source": "_18991c3399964a4f8e7e323d042e26bb",
+                    "target": "_5d1d2c3b463c488c8b84b5c43e26b985"
+                  },
+                  {
+                    "id": "_755302af5af844d099c22ae8d2d5dbc2",
+                    "relationship": "_c88d12057a8f4f2e96c414c559ee9f68",
+                    "source": "_5d1d2c3b463c488c8b84b5c43e26b985",
+                    "target": "_dc09629157c346af9d403f9c35f4d3fa"
+                  },
+                  {
+                    "id": "_3fdcc3f30cdb44c1b85e5483e1b4f5f0",
+                    "relationship": "_4f97d1cf92bb4b0b8919ca86923f94b3",
+                    "source": "_dc09629157c346af9d403f9c35f4d3fa",
+                    "target": "_1eb423589f5e40939068890470892bdb"
+                  },
+                  {
+                    "id": "_50188f6f0db94ff0aaa639027c03f8ce",
+                    "relationship": "_17fafb50753d4dce8f44a6725ae0a5bf",
+                    "source": "_dc09629157c346af9d403f9c35f4d3fa",
+                    "target": "_705406cfc6f642379e47065fb3957a56"
+                  },
+                  {
+                    "id": "_ca2135fd5ab741f3a959490e190c9e87",
+                    "relationship": "_d0686c81b4224b129841adb3d5f2c97e",
+                    "source": "_dc09629157c346af9d403f9c35f4d3fa",
+                    "target": "_2e6d2590676740ea8e02451356cee00f"
+                  },
+                  {
+                    "id": "_c1f49ad2ad3d4bb0ad28fc93686a38ef",
+                    "relationship": "_447e8883a9fc4cd186ddb8dc9bf72bc3",
+                    "source": "_1eb423589f5e40939068890470892bdb",
+                    "target": "_143be8d4794946cb851083885bca99dc"
+                  },
+                  {
+                    "id": "_b9474cfec0c94caca23d034d123d90fb",
+                    "relationship": "_451a596fb4bb4c71ab4dd4e4cc3049eb",
+                    "source": "_705406cfc6f642379e47065fb3957a56",
+                    "target": "_143be8d4794946cb851083885bca99dc"
+                  },
+                  {
+                    "id": "_fc4ee6415f1a45058245a242af4813d9",
+                    "relationship": "_f7cf8085e60040fc8bf800e65a19959d",
+                    "source": "_2e6d2590676740ea8e02451356cee00f",
+                    "target": "_143be8d4794946cb851083885bca99dc"
+                  },
+                  {
+                    "id": "_2f14fb644fc74e8e8876081cee6e4917",
+                    "relationship": "_c1c7d3eb96734be7a4f1a4e166619a26",
+                    "source": "_143be8d4794946cb851083885bca99dc",
+                    "target": "_d1d9ee43e5c942879eb51777c9ac6e3c"
+                  },
+                  {
+                    "id": "_d8e4fc9b60b3485f856a9ab8afca866a",
+                    "relationship": "_1cd445906e9a4fde968ebc8206f8e1fa",
+                    "source": "_d1d9ee43e5c942879eb51777c9ac6e3c",
+                    "target": "_263145b7fddc4bd2946c048a2bc4295e"
+                  },
+                  {
+                    "id": "_4569293d4c3d41b580e3afc690b9d9b7",
+                    "relationship": "_0b9d1c4bea704711b27eaca5371794b5",
+                    "source": "_263145b7fddc4bd2946c048a2bc4295e",
+                    "target": "_c81ee5a4f7034e009a584252398469cf"
+                  },
+                  {
+                    "id": "_37ce90f4eafa434883da738ac4d66188",
+                    "relationship": "_e76e6c3c3bd14b45b0512a51d8a53c15",
+                    "source": "_263145b7fddc4bd2946c048a2bc4295e",
+                    "target": "_0a03becb9dce44c8927aac7042e384ee"
+                  },
+                  {
+                    "id": "_a34777f7e4e54fcaa4e290b5c8c295a5",
+                    "relationship": "_3ec9cb9b1aa24685b8680aad6aafb406",
+                    "source": "_0a03becb9dce44c8927aac7042e384ee",
+                    "target": "_a678d3006c2c44b9b9668d095b0bab33"
+                  },
+                  {
+                    "id": "_0599ae6f3a1d422cbcba444032b72d8e",
+                    "relationship": "_2c179ab14c37419e8e9f8583e14cef61",
+                    "source": "_c81ee5a4f7034e009a584252398469cf",
+                    "target": "_4aee328fee944134829570e1a49a86a3"
+                  },
+                  {
+                    "id": "_79375b4b68184c08a6de992da3bc1ab7",
+                    "relationship": "_2f162752f0cb4d3eb716a54f0775ee3c",
+                    "source": "_a678d3006c2c44b9b9668d095b0bab33",
+                    "target": "_4aee328fee944134829570e1a49a86a3"
+                  },
+                  {
+                    "id": "_f558f2aba527472abe9f25e5b779e579",
+                    "relationship": "_fc3b249a8af24fbab5d6fd49fc5e8d5b",
+                    "source": "_4aee328fee944134829570e1a49a86a3",
+                    "target": "_ff403436f83245ee96862dc30502f59d"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "_93ba4646523b4a40b16b80658262eca1",
+        "kind": "Satisfy",
+        "source": "_55d0c78899da4c4bb6b3aec0a597b190",
+        "target": "_f3c92acca89e4d52977965bfd34006b5"
+      }
+    ]
+  }
+}
