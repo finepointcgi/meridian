@@ -16,6 +16,7 @@ namespace Meridian.Web.Tests;
 /// what the workbench does when a project opens (replica, default diagrams, tree), revealing a deep element, and opening
 /// the 500-shape diagram on the canvas. Prints the numbers recorded in docs/PERFORMANCE.md; limits are generous.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public class CameoUiTimings : TestContext
 {
     private readonly ITestOutputHelper _out;
