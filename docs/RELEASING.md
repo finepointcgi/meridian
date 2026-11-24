@@ -135,8 +135,9 @@ with a note otherwise:
 | Format | Tool | Where it exists |
 |---|---|---|
 | `.dmg` | `hdiutil` | macOS |
-| Windows installer | Inno Setup 6 `ISCC.exe` (set `ISCC=` if it is not on PATH) | Windows |
-| `.AppImage` | `appimagetool` (set `APPIMAGETOOL=`) | Linux x64 |
+| Velopack packages: Windows setup and zip, macOS bundle, feed files | `vpk` (pinned in `.config/dotnet-tools.json`, restored by the script) | anywhere (Windows is cross-packed) |
+| `.AppImage` | `mksquashfs` for Velopack's (`brew install squashfs` on a Mac); else `appimagetool` (set `APPIMAGETOOL=`) | macOS, Linux |
+| Classic Windows installer (only with `NO_VELOPACK=1`) | Inno Setup 6 `ISCC.exe` (set `ISCC=`) | Windows |
 | `.deb` | `dpkg-deb` | Debian or Ubuntu |
 
 The `.zip`, `.tar.gz` and server zip build anywhere the .NET 10 SDK runs, so a Mac can build every platform's portable
@@ -218,6 +219,43 @@ local mode, from loopback, with the launch token in `X-Meridian-Launch`, and onl
 The start page lists recent files. Opening an unchanged recent file reopens its project instead of importing it again.
 
 ## Auto-update
+
+### One-click updates (Velopack)
+
+Since 0.11 the desktop packages are built with [Velopack](https://velopack.io), as in GitForge. A copy installed from
+the Windows setup or zip, the macOS `.dmg` or `.zip`, or the AppImage updates itself: **Download and install** (start
+page) or **Install and restart** (Settings ▸ Desktop) downloads the new release, verifies it, quits Meridian (the local
+workspace is saved first), swaps the files and starts the new version. Nothing is installed without that click.
+
+- **Feed.** Each platform is a Velopack channel named by its runtime: `osx-arm64`, `osx-x64`, `win-x64`, `linux-x64`.
+  `package.sh` writes `releases.<channel>.json` (the release index: version, file name, SHA-256 and size of each package),
+  `assets.<channel>.json`, `RELEASES-<channel>` and `Meridian-<version>-<channel>-full.nupkg`. Upload them with the other
+  files to the GitHub release. The app reads the same update source as before (Settings ▸ Desktop ▸ Update source):
+  GitHub releases (with the token for a private repository), a GitLab project's releases, or, for **Custom URL**, the
+  folder the manifest is in (a team server's `/api/desktop/latest` reads Velopack files from `/api/desktop/files/`, so
+  put them in the server's updates folder too).
+- **Deltas.** Before packing, the script downloads the previous release from GitHub (`vpk download github`, with
+  `GITHUB_TOKEN` if set) and builds `Meridian-<version>-<channel>-delta.nupkg`, so an update is usually a few MB. The
+  index then lists both versions. `NO_DELTA=1` skips this. The first Velopack release has no deltas.
+- **Verification.** Velopack checks each package's SHA-256 and size against the index before applying it. The index
+  comes from the same source as everything else (HTTPS only, the token only to its own host).
+- **Release notes.** `RELEASE_NOTES=notes.md build/package.sh …` puts them in the index.
+- **Install locations.** Windows: per user in `%LOCALAPPDATA%\Meridian` (no administrator rights), with Start menu and
+  desktop shortcuts and an entry in Settings ▸ Apps. macOS: wherever the user puts Meridian.app (the bundle carries
+  `UpdateMac`). Linux: the AppImage file.
+- **Fallback.** When this copy wasn't installed from a Velopack package (a development build, the `.deb`, the `.tar.gz`,
+  or an install from 0.10.x), or the source has no Velopack files for this channel (an older release, a hand-written
+  manifest), the classic updater below does the update. Copies on 0.10.x take the classic path once: the packages it
+  installs are Velopack packages, so later updates are one-click.
+- **Signing.** Without `MACOS_SIGN_IDENTITY` the macOS bundle is ad-hoc signed, as before. With it, `vpk` signs the bundle
+  (and its updater) with that identity and the entitlements. The Windows setup and stub are not Authenticode-signed
+  when packed on a Mac, so SmartScreen warns on first run.
+- **Turning it off.** `NO_VELOPACK=1` builds the classic packages only (and the Inno Setup installer where ISCC exists).
+
+The code is in `src/Meridian.Desktop/VelopackUpdates.cs` (feed and install) and `Program.cs` (`VelopackApp.Build().Run()`
+first in `Main`, and `TryVelopackUpdateAsync`). The update check and the messages are unchanged.
+
+### Classic updater
 
 The desktop app checks for a newer version when it starts, at most once a day, if **Automatically check daily** is on
 (Settings ▸ Desktop, or **Check for updates** on the start page). It is on by default. **Check for updates** in
@@ -336,7 +374,7 @@ A Meridian team server can host this manifest: see [DEPLOYMENT.md](DEPLOYMENT.md
 ### Release asset names
 
 Asset names are part of the updater's contract. Keep the `Meridian-<version>-<os>-<arch>` prefix and the extensions
-above. Keep the archive layouts that `package.sh` produces: `Meridian/` in the Windows zip, `meridian-<version>/` in the
+above, and the Velopack files' names (`releases.<channel>.json` and the `.nupkg` files it lists). Keep the archive layouts that `package.sh` produces: `Meridian/` in the Windows zip, `meridian-<version>/` in the
 Linux tar.gz, and `Meridian.app/` in the macOS zip. Always publish `SHA256SUMS.txt`.
 
 ### What only a real release can verify

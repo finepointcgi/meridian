@@ -5,6 +5,12 @@
 #   Meridian-<ver>-linux-x64.AppImage / .deb / .tar.gz   (AppImage needs appimagetool, .deb needs dpkg-deb)
 #   Meridian-Server-<ver>.zip                       web server, needs the .NET 10 runtime (Docker image via Dockerfile)
 #   SHA256SUMS.txt                                  checksums of all of the above (the in-app updater verifies against it)
+#   releases.<rid>.json, assets.<rid>.json, RELEASES-<rid>, Meridian-<ver>-<rid>-full.nupkg (and -delta.nupkg)
+#                                                   the Velopack feed: installed copies update in one click (docs/RELEASING.md)
+#
+# The .dmg / macOS .zip, the Windows setup and .zip, and the AppImage are Velopack packages (vpk, pinned in
+# .config/dotnet-tools.json), so every copy installed from them can update itself. The Windows setup is built on any OS;
+# the AppImage needs mksquashfs (brew install squashfs). The .deb and tar.gz stay classic installs.
 #
 # Usage: build/package.sh [version] [rid ...]     e.g. build/package.sh 0.10.1 osx-arm64
 #
@@ -18,6 +24,10 @@
 #   SKIP_SERVER=1         do not build the server zip
 #   SKIP_GUIDE=1          do not build the user guide (docs-site with DocFX) into the packages' guide/ folder
 #   NO_CHECKSUMS=1        do not write SHA256SUMS.txt (CI writes one over every job's files)
+#   NO_VELOPACK=1         classic packages only (no vpk): copies installed from them update through the classic updater
+#   NO_DELTA=1            do not download the previous release to build delta packages
+#   GITHUB_TOKEN          used to download the previous release (deltas) when set; anonymous otherwise
+#   RELEASE_NOTES         Markdown file shown in the update prompt (default: none)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,6 +42,45 @@ mkdir -p "$OUT" "$WORK"
 trap 'rm -f "$WORK/signing.pfx"' EXIT
 
 note() { echo "    $*"; }
+
+# ---------------------------------------------------------------- Velopack
+
+REPO_URL="https://github.com/finepointcgi/meridian"
+VPK_OUT="$WORK/velopack"
+
+use_velopack() { [ "${NO_VELOPACK:-}" != "1" ]; }
+
+vpk() { (cd "$ROOT" && dotnet tool run vpk -- "$@" --skip-updates); }
+
+# velopack_pack <rid> <directive or ""> <pack dir> <main exe> [extra vpk args...]: packs one platform's release into
+# $VPK_OUT/<rid> (with a delta against the previous GitHub release when it can be downloaded) and copies this version's feed
+# files to $OUT. Returns non-zero when vpk failed, so the caller keeps its classic package.
+velopack_pack() {
+  local rid="$1" directive="$2" packdir="$3" mainexe="$4"; shift 4
+  local dir="$VPK_OUT/$rid" args=()
+  [ -n "$directive" ] && args+=("$directive")
+  rm -rf "$dir" && mkdir -p "$dir"
+  (cd "$ROOT" && dotnet tool restore >/dev/null)
+  if [ "${NO_DELTA:-}" != "1" ]; then
+    vpk download github --repoUrl "$REPO_URL" --channel "$rid" -o "$dir" ${GITHUB_TOKEN:+--token "$GITHUB_TOKEN"} >/dev/null 2>&1 \
+      && note "previous $rid release downloaded: building a delta package" \
+      || note "no previous Velopack release for $rid: full package only"
+  fi
+  local notes=()
+  [ -n "${RELEASE_NOTES:-}" ] && [ -f "$RELEASE_NOTES" ] && notes=(--releaseNotes "$RELEASE_NOTES")
+  note "vpk pack $rid"
+  if ! vpk ${args[@]+"${args[@]}"} pack --packId Meridian --packVersion "$VERSION" --packDir "$packdir" --mainExe "$mainexe" \
+      --channel "$rid" --runtime "$rid" --packTitle Meridian --packAuthors Meridian --outputDir "$dir" ${notes[@]+"${notes[@]}"} "$@" >"$dir.log" 2>&1; then
+    note "vpk pack failed for $rid (see below); keeping the classic package"
+    tail -5 "$dir.log" | sed 's/^/      /'
+    return 1
+  fi
+  local f
+  for f in "$dir/releases.$rid.json" "$dir/assets.$rid.json" "$dir/RELEASES-$rid" "$dir"/Meridian-"$VERSION"-"$rid"-*.nupkg; do
+    [ -f "$f" ] && cp "$f" "$OUT/"
+  done
+  return 0
+}
 
 # ---------------------------------------------------------------- user guide
 # The user guide (docs-site, DocFX, pinned in docs-site/dotnet-tools.json) is built once and copied into every package as
@@ -157,6 +206,23 @@ package_macos() {
   chmod +x "$app/Contents/MacOS/Meridian" "$app/Contents/MacOS/Meridian.FmuHost"
   macos_sign_app "$app"
 
+  if use_velopack; then
+    local vargs=(--bundleId io.meridian.desktop --icon "$ROOT/build/assets/meridian.icns" --noInst)
+    if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+      # vpk re-signs the bundle with its updater inside; it wants the entitlements file named *.entitlements.
+      cp "$ROOT/build/macos/entitlements.plist" "$WORK/meridian.entitlements"
+      vargs+=(--signAppIdentity "$MACOS_SIGN_IDENTITY" --signEntitlements "$WORK/meridian.entitlements")
+    fi
+    [ -n "${MACOS_KEYCHAIN:-}" ] && vargs+=(--keychain "$MACOS_KEYCHAIN")
+    if velopack_pack "$rid" "" "$app" Meridian "${vargs[@]}"; then
+      # The .dmg and .zip hold Velopack's bundle (the app plus its updater), so a copy installed from either updates itself.
+      rm -rf "$app"
+      ditto -x -k "$VPK_OUT/$rid/Meridian-$rid-Portable.zip" "$stage"
+      rm -rf "$stage/__MACOSX"
+      [ -z "${MACOS_SIGN_IDENTITY:-}" ] && macos_sign_app "$app"
+    fi
+  fi
+
   if command -v hdiutil >/dev/null 2>&1; then
     make_dmg "$app" "$dmg"
     if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
@@ -209,6 +275,17 @@ package_windows() {
   publish_desktop "$rid" "$dir"
   cp "$ROOT/build/windows/README.txt" "$dir/README.txt"
   windows_sign "$dir/Meridian.exe"
+
+  if use_velopack && velopack_pack "$rid" "[win]" "$dir" Meridian.exe --icon "$ROOT/build/assets/meridian.ico" --shortcuts StartMenuRoot,Desktop; then
+    # Per-user setup (no admin rights; Start menu and desktop shortcuts) and a portable zip, both self-updating.
+    # Unsigned unless signed separately: Windows SmartScreen warns on first run (docs/RELEASING.md).
+    cp "$VPK_OUT/$rid/Meridian-$rid-Setup.exe" "$OUT/Meridian-$VERSION-windows-$arch-setup.exe"
+    local portable="$WORK/$rid/portable"
+    rm -rf "$portable" && mkdir -p "$portable/Meridian"
+    (cd "$portable/Meridian" && unzip -q "$VPK_OUT/$rid/Meridian-$rid-Portable.zip")
+    make_zip "$portable" Meridian "$OUT/Meridian-$VERSION-windows-$arch.zip"
+    return 0
+  fi
   make_zip "$WORK/$rid" Meridian "$OUT/Meridian-$VERSION-windows-$arch.zip"
 
   local iscc
@@ -255,7 +332,12 @@ package_linux() {
   ln -sf meridian.png "$appdir/.DirIcon"
   cp "$ROOT/build/linux/meridian-mime.xml" "$appdir/usr/share/mime/packages/meridian.xml"
   local appimagetool
-  if appimagetool="$(find_tool "${APPIMAGETOOL:-}" appimagetool appimagetool-x86_64.AppImage)"; then
+  if use_velopack && command -v mksquashfs >/dev/null 2>&1 \
+     && velopack_pack "$rid" "[linux]" "$files" Meridian --icon "$ROOT/build/assets/meridian.png" --categories Development; then
+    # Velopack's AppImage updates itself (it registers no file types; the .deb and tar.gz do).
+    cp "$VPK_OUT/$rid/Meridian.AppImage" "$OUT/Meridian-$VERSION-linux-$arch.AppImage" 2>/dev/null \
+      || cp "$VPK_OUT/$rid"/*.AppImage "$OUT/Meridian-$VERSION-linux-$arch.AppImage"
+  elif appimagetool="$(find_tool "${APPIMAGETOOL:-}" appimagetool appimagetool-x86_64.AppImage)"; then
     ARCH="$aiarch" APPIMAGE_EXTRACT_AND_RUN=1 "$appimagetool" --no-appstream "$appdir" "$OUT/Meridian-$VERSION-linux-$arch.AppImage"
   else
     note "appimagetool not found: no AppImage (AppDir staged at $appdir)"

@@ -431,7 +431,10 @@ This is useful when the repository is private, when desktops cannot reach GitHub
 1. Put the release files in a folder the server can read, for example a volume mounted at `/data/desktop-updates`:
    - the files `build/package.sh` writes to `artifacts/`, such as `Meridian-0.10.1-windows-x64.zip`,
      `Meridian-0.10.1-linux-x64.tar.gz` and `Meridian-0.10.1-macos-arm64.zip`;
-   - the release's `SHA256SUMS.txt`, if you have it.
+   - the release's `SHA256SUMS.txt`, if you have it;
+   - the Velopack files from the same `artifacts/` folder (`releases.<channel>.json`, `assets.<channel>.json`,
+     `RELEASES-<channel>` and the `.nupkg` packages), so installed copies update in one click and download deltas
+     ([RELEASING.md, One-click updates](RELEASING.md#one-click-updates-velopack)).
 2. Set `Meridian__Desktop__UpdatesPath=/data/desktop-updates` and restart.
 3. In each desktop app, go to **Settings ▸ Desktop ▸ Update source ▸ Custom URL** and enter
    `https://meridian.example.com/api/desktop/latest`.

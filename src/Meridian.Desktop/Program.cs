@@ -36,6 +36,9 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // Velopack first: its installer and updater start Meridian with hook arguments while installing, updating or
+        // uninstalling, and Run() handles those and exits. A normal start returns at once.
+        Velopack.VelopackApp.Build().Run();
         // Crash files go to the data folder; nothing is sent anywhere (the next start offers a prefilled GitHub issue).
         CrashReports.Configure(CrashFolder, "desktop");
         CrashReports.InstallProcessHandlers();
@@ -635,6 +638,8 @@ internal static class Program
         string? downloaded = null;
         try
         {
+            if (await TryVelopackUpdateAsync(update)) return;
+
             InstallLocation? location = null;
             if (update.Kind == PackageKind.Portable)
             {
@@ -687,6 +692,43 @@ internal static class Program
             if (downloaded != null) try { Directory.Delete(Path.GetDirectoryName(downloaded)!, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
             Interlocked.Exchange(ref _updating, 0);
         }
+    }
+
+    /// <summary>
+    /// A copy installed from a Velopack package updates itself: download (a delta when possible), verify, then quit and let
+    /// Velopack swap the files and start the new version. False when this copy isn't such an install or the feed has no
+    /// Velopack release for this computer (older releases, a hand-written manifest): the classic updater takes over.
+    /// </summary>
+    private static async Task<bool> TryVelopackUpdateAsync(UpdateInfo update)
+    {
+        if (!VelopackUpdates.IsInstalled()) return false;
+        if (VelopackUpdates.SourceFor(_settings.ResolveUpdateSource(Tokens())) is not { } source) return false;
+        (Velopack.UpdateManager Manager, Velopack.VelopackAsset Release)? ready;
+        try
+        {
+            var lastPercent = -1;
+            ready = await VelopackUpdates.DownloadAsync(source, percent =>
+            {
+                if (percent == lastPercent) return;
+                lastPercent = percent;
+                Post(new { type = "update-progress", percent });
+            });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log($"Velopack update from {source.GetType().Name} failed, using the classic updater: {ex.Message}");
+            return false;
+        }
+        if (ready is not { } r)
+        {
+            Log($"The update feed has no Velopack release newer than this one for {VelopackUpdates.Channel(UpdatePlatform.Current())}; using the classic updater for {update.Version}.");
+            return false;
+        }
+        Log($"Downloaded and verified Meridian {r.Release.Version}; restarting into it.");
+        PostStatus("restarting", $"Restarting into Meridian {r.Release.Version}…");
+        VelopackUpdates.ApplyAfterExit(r.Manager, r.Release);
+        _window.Invoke(() => _window.Close());
+        return true;
     }
 
     /// <summary>The install folder can't be replaced: say why and open the release page (or the manifest's notes) to download by hand.</summary>
