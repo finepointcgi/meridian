@@ -68,7 +68,7 @@ public class SysMLv2ParameterTests
         Assert.Equal((ElementKind.InputPin, "image"), (inPin.Kind, inPin.Name));
         Assert.Equal("Image", m.ResolveType(outPin)?.Name);
 
-        var flow = Assert.Single(m.Relationships.Where(x => x.Kind == ElementKind.ObjectFlow));
+        var flow = Assert.Single(m.Relationships, x => x.Kind == ElementKind.ObjectFlow);
         Assert.Same(outPin, flow.Source);
         Assert.Same(inPin, flow.Target);
         Assert.Equal("TakePicture", flow.Owner!.Name);   // flows live with the activity, not the action
@@ -95,7 +95,7 @@ public class SysMLv2ParameterTests
     {
         var (m, _) = Apply(Actions);
         var (_, r) = Apply(Actions.Replace("        flow focus.image to shoot.image;\n", ""), m);
-        Assert.Empty(m.Relationships.Where(x => x.Kind == ElementKind.ObjectFlow));
+        Assert.DoesNotContain(m.Relationships, x => x.Kind == ElementKind.ObjectFlow);
         Assert.Empty(Named(m, "focus").OwnedElements);
         Assert.Empty(Named(m, "shoot").OwnedElements);
         Assert.Contains(r.Changes, c => c.Description.Contains("unused pin"));
@@ -122,7 +122,7 @@ public class SysMLv2ParameterTests
         Assert.DoesNotContain(r.Diagnostics, d => d.Severity != SysmlSeverity.Info);
         var grab = Named(m, "grab");
         Assert.Equal(ElementKind.OutputPin, grab.OwnedElements.Single().Kind);
-        Assert.Single(m.Relationships.Where(x => x.Kind == ElementKind.ObjectFlow));
+        Assert.Single(m.Relationships, x => x.Kind == ElementKind.ObjectFlow);
 
         var exported = SysMLv2Text.Export(m);
         Assert.Contains("out img : Image;", exported);
@@ -135,7 +135,7 @@ public class SysMLv2ParameterTests
     {
         var (m, r) = Apply(Actions.Replace("flow focus.image to shoot.image;", "flow focus.nothing to shoot.image;"));
         Assert.Contains(r.Diagnostics, d => d.Message.Contains("focus.nothing"));
-        Assert.Empty(m.Relationships.Where(x => x.Kind == ElementKind.ObjectFlow));
+        Assert.DoesNotContain(m.Relationships, x => x.Kind == ElementKind.ObjectFlow);
         Assert.Empty(Named(m, "focus").OwnedElements);
     }
 

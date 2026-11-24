@@ -60,7 +60,7 @@ public sealed class ClaudeCodeProviderTests : IDisposable
             cp "$cfg" "$dir/cfg.json" 2>/dev/null
             {{body}}
             """.Replace("\r\n", "\n"));
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return path;
     }
 

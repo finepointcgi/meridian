@@ -143,7 +143,7 @@ public class ModelReplicaTests
     }
 
     [Fact]
-    public void Replicas_Read_While_The_Source_Is_Edited()
+    public async Task Replicas_Read_While_The_Source_Is_Edited()
     {
         // The session edits its model under its lock while tabs read their replicas on other threads.
         var m = LargeModelGenerator.Generate(LargeModelOptions.Cameo(3000));
@@ -156,7 +156,7 @@ public class ModelReplicaTests
         })).ToList();
         for (var round = 0; round < 20; round++)
             foreach (var e in elements) m.Set(e, FieldKeys.Documentation, $"round {round}");
-        Task.WaitAll([.. readers]);
+        await Task.WhenAll(readers);
         Assert.All(replicas, r => Assert.Equal(expected, ProjectFile.Serialize(r)));
     }
 }

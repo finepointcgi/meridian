@@ -27,7 +27,6 @@
 @code {
     private IReadOnlyList<ValidationIssue>? _issues;
     private string _summary = "Run validation to check the model against the active rule set.";
-    private ModelRepository? _for;
 
     protected override void OnInitialized() { base.OnInitialized(); Run(); }
 

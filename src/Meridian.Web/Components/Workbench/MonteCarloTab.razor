@@ -7,8 +7,8 @@
                ToStringFunc="@(id => Ws.Model.Find(id)?.DisplayName ?? "")">
         @foreach (var b in Blocks()) { <MudSelectItem Value="@b.Id">@b.DisplayName</MudSelectItem> }
     </MudSelect>
-    <MudNumericField T="int" Label="Samples" @bind-Value="_n" Min="10" Max="50000" Step="500" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" />
-    <MudNumericField T="int" Label="Seed" @bind-Value="_seed" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:100px" />
+    <MudNumericField T="int" Label="Samples" @bind-Value="_n" Min="10" Max="50000" Step="500" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" />
+    <MudNumericField T="int" Label="Seed" @bind-Value="_seed" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:100px" />
     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Casino" Disabled="@(_blockId == null || _running)" OnClick="Run">@(_running ? "Running…" : "Run")</MudButton>
     @if (Ws.Model.Find(_blockId) is { } block)
     {
@@ -35,7 +35,7 @@
         <MudSelect T="string" Label="Meets if" @bind-Value="_op" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:90px">
             @foreach (var o in new[] { "<", "<=", ">", ">=" }) { <MudSelectItem Value="@o">@o</MudSelectItem> }
         </MudSelect>
-        <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px" HideSpinButtons="true" />
+        <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px" HideSpinButtons="true" />
     </div>
     @if (_output != null && run.Samples.TryGetValue(_output, out var xs))
     {

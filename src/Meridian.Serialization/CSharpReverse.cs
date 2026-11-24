@@ -80,7 +80,7 @@ public static class CSharpReverse
                         case MethodDeclarationSyntax md:
                         {
                             var op = m.Create(type, ElementKind.Operation, md.Identifier.Text);
-                            var ps = md.ParameterList.Parameters.Select(p => $"{p.Identifier.Text} : {TypeName(p.Type)}");
+                            var ps = md.ParameterList.Parameters.Select(p => p.Type is null ? p.Identifier.Text : $"{p.Identifier.Text} : {TypeName(p.Type)}");
                             var ret = md.ReturnType.ToString() == "void" ? "" : $" : {TypeName(md.ReturnType)}";
                             m.Set(op, FieldKeys.Signature, $"({string.Join(", ", ps)}){ret}");
                             m.Set(op, FieldKeys.Visibility, Visibility(md.Modifiers));
