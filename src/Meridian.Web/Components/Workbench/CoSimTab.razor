@@ -11,9 +11,9 @@
                ToStringFunc="@(id => Targets().FirstOrDefault(t => t.Id == id).Label ?? "")">
         @foreach (var t in Targets()) { <MudSelectItem Value="@t.Id">@t.Label</MudSelectItem> }
     </MudSelect>
-    <MudNumericField T="double" Label="Start [s]" @bind-Value="_start" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
-    <MudNumericField T="double" Label="End [s]" @bind-Value="_stop" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
-    <MudNumericField T="double" Label="Step [s]" @bind-Value="_step" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudNumericField T="double" Label="Start [s]" @bind-Value="_start" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudNumericField T="double" Label="End [s]" @bind-Value="_stop" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
+    <MudNumericField T="double" Label="Step [s]" @bind-Value="_step" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:95px" HideSpinButtons="true" />
     <MudSelect T="CoSimAlgorithm" Label="Master" @bind-Value="_algorithm" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:150px">
         <MudSelectItem Value="CoSimAlgorithm.GaussSeidel">Gauss-Seidel</MudSelectItem>
         <MudSelectItem Value="CoSimAlgorithm.Jacobi">Jacobi</MudSelectItem>
@@ -163,7 +163,7 @@ else
             <MudSelect T="string" Label="Meets if" @bind-Value="_op" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:90px">
                 @foreach (var o in new[] { "<", "<=", ">", ">=" }) { <MudSelectItem Value="@o">@o</MudSelectItem> }
             </MudSelect>
-            <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" HideSpinButtons="true" />
+            <MudNumericField T="double?" Label="Threshold" @bind-Value="_threshold" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:120px" HideSpinButtons="true" />
             <MudSelect T="string" Label="Over" @bind-Value="_mode" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width:130px">
                 <MudSelectItem Value="@("always")">whole run</MudSelectItem>
                 <MudSelectItem Value="@("final")">final value</MudSelectItem>

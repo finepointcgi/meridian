@@ -905,7 +905,7 @@ public static class DrawIoImporter
             if (d == null) return null;
             if (g2.Groups.Count == 0) ApplyGeometry(d, builder.LastMade);
             else Warn($"swimlanes were laid out again, one lane per {source} lane.");
-            AddNotes(d, d.Owner, top.Where(v => IsNote(v) || IsText(v) && v.Text.Length > 0));
+            AddNotes(d, d.Owner ?? Target, top.Where(v => IsNote(v) || IsText(v) && v.Text.Length > 0));
             return d;
         }
 
@@ -950,7 +950,7 @@ public static class DrawIoImporter
             warnings.AddRange(g2.Warnings);
             if (d == null) return null;
             if (!composite) ApplyGeometry(d, builder.LastMade);
-            AddNotes(d, d.Owner, top.Where(v => IsNote(v) || IsText(v) && v.Text.Length > 0));
+            AddNotes(d, d.Owner ?? Target, top.Where(v => IsNote(v) || IsText(v) && v.Text.Length > 0));
             return d;
         }
 
