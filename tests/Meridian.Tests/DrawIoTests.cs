@@ -270,7 +270,8 @@ public class DrawIoTests
 
         var m = new ModelRepository("Back");
         var r = DrawIoImporter.Import(m, m.Root, "vehicle.drawio", pages);
-        foreach (var d in diagrams.Where(d => d.DiagramType is DiagramType.BlockDefinition or DiagramType.UseCase or DiagramType.StateMachine or DiagramType.Sequence or DiagramType.Activity or DiagramType.Requirement))
+        foreach (var d in diagrams.Where(d => d.DiagramType is DiagramType.BlockDefinition or DiagramType.UseCase or DiagramType.StateMachine or DiagramType.Sequence or DiagramType.Activity or DiagramType.Requirement
+                     or DiagramType.InternalBlock or DiagramType.Parametric))
         {
             var back = r.Diagrams.Single(x => x.Name == d.Name);
             Assert.Equal(d.DiagramType, back.DiagramType);
@@ -279,9 +280,56 @@ public class DrawIoTests
         foreach (var block in src.AllElements.Where(e => e.Kind == ElementKind.Block && diagrams.Any(d => d.DiagramType == DiagramType.BlockDefinition && d.NodeFor(e) != null)))
         {
             var copy = m.AllElements.First(e => e.Kind == ElementKind.Block && e.Name == block.Name);
-            // Ports have no draw.io shape: they come back as properties.
-            Assert.Equal(block.OwnedElements.Count(p => p.Kind is ElementKind.Property or ElementKind.Port), copy.OwnedElements.Count(p => p.Kind == ElementKind.Property));
+            Assert.Equal(block.OwnedElements.Where(p => p.Kind == ElementKind.Property).Select(p => p.Name).Order(), copy.OwnedElements.Where(p => p.Kind == ElementKind.Property).Select(p => p.Name).Order());
+            Assert.Equal(block.OwnedElements.Where(p => p.Kind == ElementKind.Port).Select(p => p.Name).Order(), copy.OwnedElements.Where(p => p.Kind == ElementKind.Port).Select(p => p.Name).Order());
         }
+        // The internal block and parametric diagrams come back on the same block, with their parts, parameters and bindings.
+        foreach (var d in diagrams.Where(d => d.DiagramType is DiagramType.InternalBlock or DiagramType.Parametric))
+        {
+            var back = r.Diagrams.Single(x => x.Name == d.Name);
+            Assert.Equal(d.Owner!.Name, back.Owner!.Name);
+            Assert.Equal(d.Nodes.Select(n => (n.Element.Name, n.Element.Kind, Parent: d.ParentOf(n)?.Element.Name)).Order(),
+                back.Nodes.Select(n => (n.Element.Name, n.Element.Kind, Parent: back.ParentOf(n)?.Element.Name)).Order());
+            Assert.Equal(d.Edges.Select(e => (e.Relationship.Kind, e.Source.Element.Name, e.Target.Element.Name, e.Relationship.Get(FieldKeys.TargetPart).Length > 0)).Order(),
+                back.Edges.Select(e => (e.Relationship.Kind, e.Source.Element.Name, e.Target.Element.Name, e.Relationship.Get(FieldKeys.TargetPart).Length > 0)).Order());
+            foreach (var n in back.Nodes.Where(n => n.Element.Kind == ElementKind.Property))
+            {
+                var original = d.Nodes.First(o => o.Element.Name == n.Element.Name && d.ParentOf(o)?.Element.Name == back.ParentOf(n)?.Element.Name).Element;
+                var originalType = src.Find(original.TypeRef)?.Name ?? original.TypeRef;
+                Assert.Equal(originalType, m.Find(n.Element.TypeRef)?.Name ?? n.Element.TypeRef);
+            }
+        }
+    }
+
+    [Fact]
+    public void Internal_Block_Diagrams_Keep_Ports_On_Parts_And_Item_Flows()
+    {
+        var src = Meridian.Core.Samples.CubeSatSample.Create();
+        var ibd = src.Diagrams.Single(d => d.Name == "Power and Data Flow");
+        var pages = DrawIoFile.ReadText(DrawIoExporter.Export(src, [ibd]));
+        Assert.Equal(DrawIoPageKind.InternalBlock, Assert.Single(DrawIoImporter.Preview("sat.drawio", pages)).Kind);
+
+        var m = new ModelRepository("Back");
+        var back = Assert.Single(DrawIoImporter.Import(m, m.Root, "sat.drawio", pages).Diagrams);
+        Assert.Equal(DiagramType.InternalBlock, back.DiagramType);
+        Assert.Equal(ibd.Edges.Count(), back.Edges.Count());
+        foreach (var e in back.Edges)
+        {
+            var r = e.Relationship;
+            Assert.Equal(ElementKind.Connector, r.Kind);
+            // Each end sits on the port shown on the part the connector names.
+            Assert.Equal(r.Get(FieldKeys.SourcePart), back.ParentOf(e.Source)!.Element.Id);
+            Assert.Equal(r.Get(FieldKeys.TargetPart), back.ParentOf(e.Target)!.Element.Id);
+            Assert.Equal(ElementKind.Port, e.Source.Element.Kind);
+            // Ports belong to the part's type.
+            Assert.Equal(m.Find(back.ParentOf(e.Source)!.Element.TypeRef), e.Source.Element.Owner);
+        }
+        Assert.Contains(back.Edges, e => e.Relationship.Get(FieldKeys.ItemFlow) == "Power" && e.Relationship.Get(FieldKeys.FlowDirection) == "forward");
+
+        // Read back into the model it came from (matching names): the same parts and ports, nothing doubled.
+        var before = src.AllElements.Count(e => e is not Relationship && e is not Diagram);
+        DrawIoImporter.Import(src, src.Root, "sat.drawio", pages, new DrawIoImportOptions { Match = Meridian.Serialization.Mermaid.MermaidMatchMode.MatchByName });
+        Assert.Equal(before, src.AllElements.Count(e => e is not Relationship && e is not Diagram));
     }
 
     [Fact]

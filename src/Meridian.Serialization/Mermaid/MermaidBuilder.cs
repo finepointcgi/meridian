@@ -46,6 +46,7 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
                 MermaidDiagramKind.Requirement => Requirement(g, name),
                 MermaidDiagramKind.EntityRelationship => Er(g, name),
                 MermaidDiagramKind.C4 => C4(g, name),
+                MermaidDiagramKind.UseCase => UseCase(g, name),
                 MermaidDiagramKind.Ishikawa or MermaidDiagramKind.Radar or MermaidDiagramKind.Treemap => new MermaidCharts(m, target, Source).Build(g, name),
                 _ => null,
             };
@@ -801,6 +802,65 @@ internal sealed class MermaidBuilder(ModelRepository m, Element target, MermaidI
     }
 
     // ================================================================== sequence diagram → interaction
+
+    // ================================================================== use case diagram (PlantUML)
+
+    private Diagram UseCase(MGraph g, string name)
+    {
+        var made = new Dictionary<string, Element>(StringComparer.Ordinal);
+        foreach (var n in g.Nodes)
+        {
+            var kind = n.Shape == "actor" ? ElementKind.Actor : ElementKind.UseCase;
+            var label = MermaidSource.Name(n.Label.Length > 0 ? n.Label : n.Id);
+            made[n.Id] = Find(label, kind) ?? Make(target, kind, label);
+        }
+        foreach (var x in g.Edges)
+        {
+            if (!made.TryGetValue(x.From, out var a) || !made.TryGetValue(x.To, out var b)) continue;
+            var kind = x.Kind switch
+            {
+                "include" => ElementKind.Include,
+                "extend" => ElementKind.Extend,
+                "generalization" => ElementKind.Generalization,
+                "dependency" => ElementKind.Dependency,
+                _ => ElementKind.Association,
+            };
+            if (Connect(g, x.Line, kind, a, b) is { } r && x.Label.Length > 0 && kind is ElementKind.Association or ElementKind.Dependency && r.Name.Length == 0)
+                m.Set(r, FieldKeys.Name, MermaidSource.Name(x.Label));
+        }
+        var notes = Notes(g, target);
+        LastMade = made;
+        var d = Layout(g, DiagramType.UseCase, target, name, made, notes);
+        Boundaries(g, d, made);
+        return d;
+    }
+
+    /// <summary>System boundaries (rectangle / package blocks) as an outline around their use cases, with the name on top;
+    /// left out when an actor would end up inside.</summary>
+    private void Boundaries(MGraph g, Diagram d, IReadOnlyDictionary<string, Element> made)
+    {
+        foreach (var grp in g.Groups)
+        {
+            var inside = g.Nodes.Where(n => n.Group == grp.Id && n.Shape != "actor" && made.ContainsKey(n.Id)).Select(n => d.NodeFor(made[n.Id])).OfType<DiagramNode>().ToList();
+            if (inside.Count == 0) continue;
+            var x0 = inside.Min(n => n.Bounds.X) - 30;
+            var y0 = inside.Min(n => n.Bounds.Y) - 50;
+            var box = new Bounds(x0, y0, inside.Max(n => n.Bounds.Right) + 30 - x0, inside.Max(n => n.Bounds.Bottom) + 30 - y0);
+            var others = d.Nodes.Where(n => !inside.Contains(n) && n.ParentId == null).ToList();
+            if (others.Any(n => n.Bounds.X < box.Right && n.Bounds.Right > box.X && n.Bounds.Y < box.Bottom && n.Bounds.Bottom > box.Y))
+            {
+                g.WarnOnce("boundary", 0, $"the system boundary “{grp.Label}” was left out: the layout put other shapes inside it.");
+                continue;
+            }
+            var outline = m.Create(target, ElementKind.Shape);
+            m.Set(outline, FieldKeys.Subtype, "rectangle");
+            var node = m.AddNode(d, outline, box, showRelationships: false);
+            m.SetNodeStyle(d, node, "fill", "none");
+            var title = m.Create(target, ElementKind.Shape, grp.Label);
+            m.Set(title, FieldKeys.Subtype, "text");
+            m.AddNode(d, title, new Bounds(box.X + 10, box.Y + 6, Math.Max(80, box.Width - 20), 28), showRelationships: false);
+        }
+    }
 
     private Diagram Sequence(MGraph g, string name)
     {

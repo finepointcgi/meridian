@@ -56,7 +56,10 @@ public static class DrawIoExporter
             var made = NodeCells(m, d, n, ids[n.Id], parent == null ? "1" : ids[parent.Id], local).ToList();
             // A hint draw.io ignores (and keeps), so the page reads back into Meridian as the same kind of element.
             if (made.FirstOrDefault(c => c.Attribute("id")?.Value == ids[n.Id]) is { } main)
+            {
                 main.SetAttributeValue("style", main.Attribute("style")!.Value + $"meridian={n.Element.Kind};");
+                if (IsStructure(d)) StructureHints(m, d, n.Element, main);
+            }
             cells.AddRange(made);
         }
 
@@ -65,6 +68,12 @@ public static class DrawIoExporter
         {
             if (!ids.TryGetValue(e.Source.Id, out var s) || !ids.TryGetValue(e.Target.Id, out var t)) continue;
             cells.Add(EdgeCell(m, d, e, $"e{++e0}", s, t));
+        }
+
+        if (IsStructure(d) && !nodes.Any(n => n.Element.Kind is ElementKind.Property or ElementKind.Port))
+        {
+            // An empty internal block / parametric diagram still names its block.
+            cells.Add(Vertex("ctx", "1", $"text;html=1;meridian=Context;meridianDiagram={d.DiagramType};meridianContext={Hint(d.Owner?.Name)};", Html(d.Owner?.Name ?? ""), new Bounds(20, 20, 160, 30)));
         }
 
         var right = nodes.Count > 0 ? nodes.Max(n => n.Bounds.Right) + 40 : 850;
@@ -267,7 +276,7 @@ public static class DrawIoExporter
             Html(title), b);
 
         string TypeName(string t) => t.Length == 0 ? "" : m.Find(t)?.Name ?? t;
-        var attrs = new List<string>();
+        var attrs = new List<(string Text, bool Port)>();
         var ops = new List<string>();
         foreach (var c in e.OwnedElements)
         {
@@ -280,11 +289,11 @@ public static class DrawIoExporter
                     if (TypeName(c.TypeRef) is { Length: > 0 } t) s += ": " + t;
                     if (c.Get(FieldKeys.Multiplicity) is { Length: > 0 } mult && mult != "1") s += $" [{mult}]";
                     if (c.Get(FieldKeys.DefaultValue) is { Length: > 0 } dv) s += " = " + dv;
-                    attrs.Add(s);
+                    attrs.Add((s, c.Kind == ElementKind.Port));
                     break;
                 }
                 case ElementKind.EnumerationLiteral:
-                    attrs.Add(c.Name);
+                    attrs.Add((c.Name, false));
                     break;
                 case ElementKind.Operation:
                 {
@@ -297,9 +306,10 @@ public static class DrawIoExporter
         var y = (double)header;
         var i = 0;
         var rowStyle = "text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;whiteSpace=wrap;html=1;";
-        foreach (var a in attrs)
+        foreach (var (a, port) in attrs)
         {
-            yield return Vertex($"{id}a{++i}", id, rowStyle, Html(a), new Bounds(0, y, b.Width, row));
+            // Ports are rows like properties; the hint keeps them ports when the page is read back.
+            yield return Vertex($"{id}a{++i}", id, rowStyle + (port ? "meridian=Port;" : ""), Html(a), new Bounds(0, y, b.Width, row));
             y += row;
         }
         if (ops.Count > 0)
@@ -312,6 +322,29 @@ public static class DrawIoExporter
                 y += row;
             }
         }
+    }
+
+    /// <summary>Internal block and parametric diagrams: parts, ports and parameters are written as "name : Type", with hints
+    /// (diagram kind, the block the diagram belongs to, the type and its kind) so the page reads back as the same parts.</summary>
+    private static bool IsStructure(Diagram d) => d.DiagramType is DiagramType.InternalBlock or DiagramType.Parametric;
+
+    /// <summary>A style value draw.io keeps as is (';' and '=' would break the style).</summary>
+    internal static string Hint(string? s) => Uri.EscapeDataString(s ?? "");
+
+    private static void StructureHints(ModelRepository m, Diagram d, Element e, XElement cell)
+    {
+        var style = cell.Attribute("style")!.Value + $"meridianDiagram={d.DiagramType};meridianContext={Hint(d.Owner?.Name)};";
+        if (e.Kind is ElementKind.Property or ElementKind.Port)
+        {
+            var type = e.TypeRef.Length > 0 ? m.Find(e.TypeRef) : null;
+            var typeName = type?.Name ?? e.TypeRef;
+            if (typeName.Length > 0) style += $"meridianType={Hint(typeName)};";
+            if (type != null) style += $"meridianTypeKind={type.Kind};";
+            if (e.Get(FieldKeys.Multiplicity) is { Length: > 0 } mult && mult != "1") style += $"meridianMult={Hint(mult)};";
+            cell.SetAttributeValue("value", Html(typeName.Length > 0 ? $"{e.Name} : {typeName}" : e.Name));
+            if (e.Kind == ElementKind.Port) style += "labelPosition=center;verticalLabelPosition=top;verticalAlign=bottom;";
+        }
+        cell.SetAttributeValue("style", style);
     }
 
     private static XElement EdgeCell(ModelRepository m, Diagram d, DiagramEdge e, string id, string source, string target)
@@ -366,6 +399,17 @@ public static class DrawIoExporter
             default: style = "endArrow=none;"; break;
         }
         style += "html=1;rounded=0;";
+        if (IsStructure(d))
+        {
+            style += $"meridian={r.Kind};";
+            if (r.Get(FieldKeys.ItemFlow) is { Length: > 0 } item)
+            {
+                var itemName = m.Find(item)?.Name ?? item;
+                style += $"meridianItem={Hint(itemName)};endArrow=classic;";
+                if (r.Get(FieldKeys.FlowDirection) == "reverse") style += "meridianFlow=reverse;startArrow=classic;";
+                if (label.Length == 0) label = itemName;
+            }
+        }
         if (e.Style.TryGetValue("stroke", out var stroke) && SvgRenderer.SafeColor(stroke) is { } sc) style += $"strokeColor={sc};";
 
         var geo = new XElement("mxGeometry", new XAttribute("relative", "1"), new XAttribute("as", "geometry"));

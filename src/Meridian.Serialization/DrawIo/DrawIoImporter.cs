@@ -7,7 +7,7 @@ using Meridian.Serialization.Mermaid;
 namespace Meridian.Serialization.DrawIo;
 
 /// <summary>What a draw.io page becomes.</summary>
-public enum DrawIoPageKind { Drawing, UseCase, Class, Activity, State, Sequence, Requirement, Empty }
+public enum DrawIoPageKind { Drawing, UseCase, Class, Activity, State, Sequence, Requirement, Empty, InternalBlock, Parametric }
 
 public sealed record DrawIoImportOptions
 {
@@ -41,6 +41,8 @@ public static class DrawIoImporter
         DrawIoPageKind.State => "State machine diagram",
         DrawIoPageKind.Sequence => "Sequence diagram",
         DrawIoPageKind.Requirement => "Requirement diagram",
+        DrawIoPageKind.InternalBlock => "Internal block diagram",
+        DrawIoPageKind.Parametric => "Parametric diagram",
         DrawIoPageKind.Drawing => "Whiteboard drawing",
         _ => "Skipped (empty page)",
     };
@@ -98,8 +100,9 @@ public static class DrawIoImporter
         return Path.GetFileNameWithoutExtension(n);
     }
 
-    /// <summary>"Gliffy" for a .gliffy file, else "draw.io" (for warnings and the diagrams' documentation).</summary>
-    internal static string SourceOf(string? fileName) => Gliffy.GliffyFile.IsGliffyFile(fileName) ? "Gliffy" : "draw.io";
+    /// <summary>"Gliffy" for a .gliffy file, "Visio" for a .vsdx, else "draw.io" (for warnings and the diagrams' documentation).</summary>
+    internal static string SourceOf(string? fileName) =>
+        Gliffy.GliffyFile.IsGliffyFile(fileName) ? "Gliffy" : Visio.VisioFile.IsVisioFile(fileName) ? "Visio" : "draw.io";
 
     private static bool IsDefaultPageName(string name) => Regex.IsMatch(name, @"^(Page|Seite|Página|Pagina|Страница)[- ]?\d+$", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
 
@@ -136,6 +139,8 @@ public static class DrawIoImporter
                     DrawIoPageKind.State => page.State(),
                     DrawIoPageKind.Sequence => page.Sequence(),
                     DrawIoPageKind.Requirement => page.Requirement(),
+                    DrawIoPageKind.InternalBlock => page.Structure(DiagramType.InternalBlock),
+                    DrawIoPageKind.Parametric => page.Structure(DiagramType.Parametric),
                     _ => page.Drawing(),
                 };
                 if (d != null) diagrams.Add(d);
@@ -214,6 +219,12 @@ public static class DrawIoImporter
         var hints = top.Select(v => v.S("meridian")).Where(h => h.Length > 0).ToHashSet(StringComparer.Ordinal);
         if (hints.Count > 0)
         {
+            // Internal block and parametric diagrams written by Meridian name their kind.
+            if (top.Select(v => v.S("meridianDiagram")).FirstOrDefault(s => s.Length > 0) is { } structure)
+            {
+                if (structure == nameof(DiagramType.InternalBlock)) return DrawIoPageKind.InternalBlock;
+                if (structure == nameof(DiagramType.Parametric)) return DrawIoPageKind.Parametric;
+            }
             if (hints.Contains(nameof(ElementKind.Lifeline))) return DrawIoPageKind.Sequence;
             if (hints.Overlaps(["State", "InitialState", "FinalState", "Pseudostate"])) return DrawIoPageKind.State;
             if (hints.Overlaps(["Action", "InitialNode", "ActivityFinalNode", "DecisionNode", "ForkNode"])) return DrawIoPageKind.Activity;
@@ -277,6 +288,136 @@ public static class DrawIoImporter
         private void Warn(string message) => warnings.Add($"{source} page “{name}”: {message}");
 
         private static string Name(string text) => MermaidSource.Name(text);
+
+        // ---------------------------------------------------------------- internal block and parametric diagrams
+
+        private static string Unhint(string s)
+        {
+            try { return Uri.UnescapeDataString(s); }
+            catch (UriFormatException) { return s; }
+        }
+
+        /// <summary>
+        /// An internal block or parametric diagram written by Meridian: the block it belongs to (by name, else a new block),
+        /// its parts, ports and parameters ("name : Type", owned by the block / the part's type), and connectors and binding
+        /// connectors with the parts their ends sit on. Elements of the same name are reused, so a page read back into the
+        /// model it came from lands on the same parts.
+        /// </summary>
+        public Diagram Structure(DiagramType type)
+        {
+            var hinted = g.Vertices.Where(v => v.S("meridian").Length > 0).ToList();
+            var contextName = Unhint(hinted.Select(v => v.S("meridianContext")).FirstOrDefault(s => s.Length > 0) ?? "");
+            if (contextName.Length == 0) contextName = name;
+            var context = builder.FindShared(contextName, ElementKind.Block, ElementKind.ConstraintBlock, ElementKind.Class)
+                          ?? builder.MakeShared(Target, ElementKind.Block, contextName);
+            var d = m.CreateDiagram(context, type, name);
+            m.Set(d, FieldKeys.Documentation, $"Imported from {source}.");
+            var made = new Dictionary<string, (Element E, DiagramNode N)>(StringComparer.Ordinal);
+            int Depth(DCell c)
+            {
+                var depth = 0;
+                for (var p = c.Parent; p != null && depth < 50 && g.ById.TryGetValue(p, out var pc) && pc.Vertex; p = pc.Parent) depth++;
+                return depth;
+            }
+            var skipped = 0;
+            foreach (var v in g.Vertices.OrderBy(Depth))
+            {
+                var hint = v.S("meridian");
+                if (hint is "Context") continue;
+                var parent = v.Parent != null && made.TryGetValue(v.Parent, out var p) ? p : default;
+                Element? e;
+                switch (hint)
+                {
+                    case nameof(ElementKind.Property) or nameof(ElementKind.Port):
+                    {
+                        var kind = hint == nameof(ElementKind.Port) ? ElementKind.Port : ElementKind.Property;
+                        var (partName, typeName) = NameAndType(v.Text);
+                        if (Unhint(v.S("meridianType")) is { Length: > 0 } t) typeName = t;
+                        // A port or parameter drawn on a part belongs to the part's type; anything else to the block.
+                        Element? partType = null;
+                        if (parent.E is { } pe && v.Parent != null && g.ById.TryGetValue(v.Parent, out var pcell))
+                        {
+                            partType = pe.TypeRef.Length > 0 ? m.Find(pe.TypeRef) : null;
+                            // A part typed only by name (read from a class row): find or make its type from the hint.
+                            if (partType == null && Unhint(pcell.S("meridianType")) is { Length: > 0 } ptName && m.Find(TypeFor(ptName, pcell.S("meridianTypeKind"))) is { } resolved)
+                            {
+                                partType = resolved;
+                                m.Set(pe, FieldKeys.Type, resolved.Id);
+                            }
+                        }
+                        var owner = partType != null && Metamodel.CanOwn(partType.Kind, kind) ? partType : context;
+                        e = owner.OwnedElements.FirstOrDefault(c => c.Kind == kind && c.Name == partName) ?? m.Create(owner, kind, partName.Length > 0 ? partName : null);
+                        if (typeName.Length > 0 && e.TypeRef.Length == 0) m.Set(e, FieldKeys.Type, TypeFor(typeName, v.S("meridianTypeKind")));
+                        if (Unhint(v.S("meridianMult")) is { Length: > 0 } mult && e.Get(FieldKeys.Multiplicity).Length == 0) m.Set(e, FieldKeys.Multiplicity, mult);
+                        break;
+                    }
+                    case nameof(ElementKind.Comment):
+                        e = m.Create(context, ElementKind.Comment);
+                        m.Set(e, FieldKeys.Body, v.Text);
+                        break;
+                    case "":
+                        if (v.Local.Width <= 0 && v.Local.Height <= 0 || v.S("style") == "group") continue;
+                        e = AddFreeShape(d, v, context).Shape;
+                        made[v.Id] = (e, d.NodeFor(e)!);
+                        continue;
+                    default:
+                        // A block, constraint block or other element shown on the diagram: reused by name.
+                        if (!Enum.TryParse<ElementKind>(hint, out var other) || Metamodel.IsRelationship(other)) { skipped++; continue; }
+                        var label = Name(v.Text.Split('\n')[^1]);
+                        e = builder.FindShared(label, other) ?? (Metamodel.CanOwn(Target.Kind, other) ? builder.MakeShared(Target, other, label) : null);
+                        if (e == null) { skipped++; continue; }
+                        break;
+                }
+                if (d.Nodes.Any(n => ReferenceEquals(n.Element, e) && ReferenceEquals(d.ParentOf(n), parent.N))) { skipped++; continue; }
+                made[v.Id] = (e, m.AddNode(d, e, Place(v), showRelationships: false, parent.N));
+            }
+            if (skipped > 0) Warn($"{skipped} shape{(skipped == 1 ? " was" : "s were")} left out (shown twice, or of a kind that has no place here).");
+
+            foreach (var x in g.Edges)
+            {
+                if (x.Source == null || x.Target == null || !made.TryGetValue(x.Source, out var a) || !made.TryGetValue(x.Target, out var b)) continue;
+                var hint = x.S("meridian");
+                var kind = Enum.TryParse<ElementKind>(hint, out var k) && Metamodel.IsRelationship(k) ? k
+                    : a.E.Kind == ElementKind.Shape || b.E.Kind == ElementKind.Shape ? ElementKind.Line
+                    : type == DiagramType.Parametric ? ElementKind.Binding : ElementKind.Connector;
+                Relationship? r;
+                try { r = m.Connect(kind, a.E, b.E, kind is ElementKind.Connector or ElementKind.Binding ? context : null); }
+                catch (InvalidOperationException ex) { Warn($"{a.E.DisplayName} → {b.E.DisplayName}: {ex.Message}; skipped."); continue; }
+                if (d.ParentOf(a.N) is { } sp && sp.Element.Kind == ElementKind.Property) m.Set(r, FieldKeys.SourcePart, sp.Element.Id);
+                if (d.ParentOf(b.N) is { } tp && tp.Element.Kind == ElementKind.Property) m.Set(r, FieldKeys.TargetPart, tp.Element.Id);
+                var item = Unhint(x.S("meridianItem"));
+                if (item.Length > 0)
+                {
+                    m.Set(r, FieldKeys.ItemFlow, item);
+                    m.Set(r, FieldKeys.FlowDirection, x.S("meridianFlow") == "reverse" ? "reverse" : "forward");
+                }
+                if (x.FullText.Length > 0 && x.FullText != item && kind != ElementKind.Binding) m.Set(r, FieldKeys.Name, x.FullText);
+                if (m.AddEdge(d, r) is { } edge && x.Points.Count > 0) m.SetWaypoints(d, edge, x.Points.Select(Place).ToList());
+            }
+            EdgeRouter.Invalidate(d);
+            return d;
+        }
+
+        /// <summary>"engine : Engine" → ("engine", "Engine"); a name alone has no type.</summary>
+        private static (string Name, string Type) NameAndType(string text)
+        {
+            var t = Name(text);
+            var colon = t.IndexOf(':');
+            return colon < 0 ? (t, "") : (t[..colon].Trim(), t[(colon + 1)..].Trim().TrimEnd(']').Split('[')[0].Trim());
+        }
+
+        /// <summary>The id of the element called <paramref name="typeName"/> (made when missing, of the hinted kind), or a
+        /// primitive type's name as Meridian stores it (Real, Integer…).</summary>
+        private string TypeFor(string typeName, string kindHint)
+        {
+            ElementKind[] kinds = [ElementKind.Block, ElementKind.ConstraintBlock, ElementKind.InterfaceBlock, ElementKind.ValueType, ElementKind.Enumeration,
+                ElementKind.DataType, ElementKind.Class, ElementKind.Interface, ElementKind.Component];
+            if (builder.FindShared(typeName, kinds) is { } found) return found.Id;
+            var kind = Enum.TryParse<ElementKind>(kindHint, out var k) && kinds.Contains(k) ? k : (ElementKind?)null;
+            var primitive = MermaidBuilder.Primitive(typeName);
+            if (kind == null && (primitive != typeName || primitive is "Real" or "Integer" or "Boolean" or "String" or "Number")) return primitive;
+            return builder.MakeShared(Target, kind ?? ElementKind.Block, typeName).Id;
+        }
 
         // ---------------------------------------------------------------- drawing (whiteboard)
 
@@ -555,10 +696,30 @@ public static class DrawIoImporter
             var d = builder.Build(g2, name);
             warnings.AddRange(g2.Warnings);
             if (d == null) return null;
+            if (builder.LastMade is { } classMade) PortRows(classes, classMade);
             ApplyGeometry(d, builder.LastMade);
             AddNotes(d, Target, top.Where(IsNote));
             Skipped(top.Where(v => !IsClassBox(v) && !IsNote(v) && !g2.Groups.Any(p => p.Id == v.Id) && !IsText(v)), "shape");
             return d;
+        }
+
+        /// <summary>Rows Meridian wrote for ports ("meridian=Port") come back as ports rather than properties.</summary>
+        private void PortRows(List<DCell> classes, Dictionary<string, Element> made)
+        {
+            foreach (var c in classes)
+            {
+                if (!made.TryGetValue(c.Id, out var block) || !Metamodel.CanOwn(block.Kind, ElementKind.Port)) continue;
+                foreach (var row in c.Children.Where(r => r.S("meridian") == nameof(ElementKind.Port)))
+                {
+                    var portName = Name(row.Text.TrimStart('+', '-', '#', '~', ' ').Split(':')[0].Split('[')[0]);
+                    if (block.OwnedElements.Any(p => p.Kind == ElementKind.Port && p.Name == portName)) continue;
+                    if (block.OwnedElements.FirstOrDefault(p => p.Kind == ElementKind.Property && p.Name == portName) is not { } prop) continue;
+                    var port = m.Create(block, ElementKind.Port, portName);
+                    foreach (var key in new[] { FieldKeys.Type, FieldKeys.Multiplicity, FieldKeys.Visibility, FieldKeys.DefaultValue })
+                        if (prop.Get(key) is { Length: > 0 } v) m.Set(port, key, v);
+                    m.Delete(prop);
+                }
+            }
         }
 
         private static bool Inside(DCell inner, DCell outer) =>

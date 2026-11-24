@@ -1,7 +1,9 @@
 namespace Meridian.Serialization.Mermaid;
 
 /// <summary>The Mermaid diagram types the importer understands.</summary>
-public enum MermaidDiagramKind { Flowchart, Class, State, Sequence, Requirement, EntityRelationship, C4, Ishikawa, Radar, Treemap, Unsupported }
+public enum MermaidDiagramKind { Flowchart, Class, State, Sequence, Requirement, EntityRelationship, C4, Ishikawa, Radar, Treemap, Unsupported,
+    /// <summary>Use case diagrams (from PlantUML; Mermaid has none).</summary>
+    UseCase }
 
 /// <summary>A parsed node: flowchart shape, class, state, participant, requirement, entity or C4 element.</summary>
 internal sealed class MNode

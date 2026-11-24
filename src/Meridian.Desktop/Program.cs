@@ -375,7 +375,7 @@ internal static class Program
             try
             {
                 tcs.TrySetResult(await _window.ShowOpenFileAsync("Open a model", null, false,
-                    [("Models (.meridian, .sysml, .xmi, .qea, .mdzip, .mdxml, Mermaid .mmd / .md, draw.io, Gliffy, SQL DDL / .dacpac)", LocalFileImport.Extensions.Select(e => "*" + e).ToArray())]));
+                    [("Models (.meridian, .sysml, .xmi, .qea, .mdzip, .mdxml, Mermaid .mmd / .md, PlantUML .puml, draw.io, Gliffy, Visio, SQL DDL / .dacpac)", LocalFileImport.Extensions.Select(e => "*" + e).ToArray())]));
             }
             catch (Exception ex) { tcs.TrySetException(ex); }
         });

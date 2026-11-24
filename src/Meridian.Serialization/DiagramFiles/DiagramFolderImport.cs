@@ -2,13 +2,14 @@ using System.Text;
 using Meridian.Core.Model;
 using Meridian.Serialization.DrawIo;
 using Meridian.Serialization.Mermaid;
+using Meridian.Serialization.PlantUml;
 
 namespace Meridian.Serialization.DiagramFiles;
 
 /// <summary>A diagram file from a folder: its path relative to the folder's parent ("docs/flows/login.mmd") and its bytes.</summary>
 public sealed record DiagramSourceFile(string Path, byte[] Content);
 
-public enum DiagramFileFormat { Mermaid, Markdown, DrawIo }
+public enum DiagramFileFormat { Mermaid, Markdown, DrawIo, PlantUml }
 
 public sealed record DiagramFolderOptions
 {
@@ -22,6 +23,14 @@ public sealed record DiagramFolderOptions
 
     /// <summary>Diagrams made from the same file by an earlier import (into the same package) are replaced instead of added again.</summary>
     public bool ReplacePrevious { get; init; } = true;
+
+    /// <summary>A file whose content is the same as when it was imported last time is left alone (its diagrams keep their
+    /// ids and any layout changes made since). Used by code sync, so a push only touches the files it changed.</summary>
+    public bool SkipUnchanged { get; init; }
+
+    /// <summary>Diagrams under the target made from a file that is not in this set any more are deleted (code sync of a
+    /// full snapshot: the file was deleted from the repository).</summary>
+    public bool RemoveMissing { get; init; }
 }
 
 /// <summary>One diagram a file will become.</summary>
@@ -35,6 +44,12 @@ public sealed record DiagramFilePreview(string Path, DiagramFileFormat Format, I
 
 public sealed record DiagramFolderResult(IReadOnlyList<Diagram> Diagrams, int Files, int Replaced, int Elements, int Relationships, IReadOnlyList<string> Warnings)
 {
+    /// <summary>Files left alone because they had not changed (<see cref="DiagramFolderOptions.SkipUnchanged"/>).</summary>
+    public int Unchanged { get; init; }
+
+    /// <summary>Diagrams deleted because their file is gone (<see cref="DiagramFolderOptions.RemoveMissing"/>).</summary>
+    public int Removed { get; init; }
+
     public ImportReport ToReport() => new(Elements, Relationships, Warnings);
 
     public string Summary => Diagrams.Count == 0
@@ -56,6 +71,12 @@ public static class DiagramFolderImport
     /// <summary>Field on imported diagrams (and the behaviours / shapes made for them): "folder/file.mmd#1".</summary>
     public const string SourceField = "import.file";
 
+    /// <summary>Field on imported diagrams: a hash of the file's content when it was imported (for <see cref="DiagramFolderOptions.SkipUnchanged"/>).</summary>
+    public const string HashField = "import.hash";
+
+    /// <summary>A short content hash of a file, as stored in <see cref="HashField"/>.</summary>
+    public static string HashOf(byte[] content) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content))[..16].ToLowerInvariant();
+
     public const long MaxFileBytes = 32L * 1024 * 1024;
     public const long MaxTotalBytes = 128L * 1024 * 1024;
     public const int MaxFiles = 2000;
@@ -64,6 +85,7 @@ public static class DiagramFolderImport
     {
         if (string.IsNullOrEmpty(path)) return null;
         if (DrawIoFile.IsDrawIoFile(path)) return DiagramFileFormat.DrawIo;
+        if (PlantUmlImporter.IsPlantUmlFile(path)) return DiagramFileFormat.PlantUml;
         if (MermaidImporter.IsMarkdownFile(path)) return DiagramFileFormat.Markdown;
         if (MermaidImporter.IsMermaidFile(path)) return DiagramFileFormat.Mermaid;
         return null;
@@ -72,7 +94,7 @@ public static class DiagramFolderImport
     public static bool IsDiagramFile(string? path) => FormatOf(path) != null;
 
     /// <summary>Extensions picked up from a folder (also used by the browser to filter what it uploads).</summary>
-    public static IReadOnlyList<string> Extensions => [.. MermaidImporter.Extensions, .. DrawIoFile.Extensions];
+    public static IReadOnlyList<string> Extensions => [.. MermaidImporter.Extensions, .. PlantUmlImporter.Extensions, .. DrawIoFile.Extensions];
 
     private static string Normalise(string path) => path.Replace('\\', '/').Trim('/');
 
@@ -100,7 +122,7 @@ public static class DiagramFolderImport
                 }
                 else
                 {
-                    var preview = MermaidImporter.Preview(Text(f.Content), format == DiagramFileFormat.Markdown);
+                    var preview = format == DiagramFileFormat.PlantUml ? PlantUmlImporter.Preview(Text(f.Content)) : MermaidImporter.Preview(Text(f.Content), format == DiagramFileFormat.Markdown);
                     if (format == DiagramFileFormat.Markdown && preview.Diagrams.Count == 0) continue;   // ordinary documentation
                     var stem = Path.GetFileNameWithoutExtension(path);
                     var items = preview.Diagrams.Select((d, i) => new DiagramPreviewItem(
@@ -157,6 +179,8 @@ public static class DiagramFolderImport
         var relationshipsBefore = m.Relationships.Count();
         var replaced = 0;
         var fileCount = 0;
+        var unchanged = 0;
+        var removed = 0;
         var ordered = files.Select(f => f with { Path = Normalise(f.Path) }).Where(f => IsDiagramFile(f.Path))
             .OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToList();
         if (ordered.Count > MaxFiles)
@@ -166,6 +190,11 @@ public static class DiagramFolderImport
         }
         using (m.History.Transaction("Import diagrams"))
         {
+            if (options.RemoveMissing)
+            {
+                var present = ordered.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+                foreach (var gone in Stamped(m, target).Where(p => !present.Contains(p)).ToList()) removed += RemovePrevious(m, target, gone);
+            }
             var builder = new MermaidBuilder(m, target, new MermaidImportOptions { Match = options.Match }, warnings) { Source = "a diagram file" };
             var packages = new Dictionary<string, Element>(StringComparer.OrdinalIgnoreCase);
             Element PackageFor(string path)
@@ -186,6 +215,8 @@ public static class DiagramFolderImport
             {
                 if (f.Content.LongLength > MaxFileBytes) { warnings.Add($"{f.Path}: larger than {MaxFileBytes / (1024 * 1024)} MB; skipped."); continue; }
                 var format = FormatOf(f.Path)!.Value;
+                var hash = HashOf(f.Content);
+                if (options.SkipUnchanged && Unchanged(m, target, f.Path, hash)) { unchanged++; continue; }
                 var pkg = PackageFor(f.Path);
                 builder.Target = pkg;
                 if (options.ReplacePrevious) replaced += RemovePrevious(m, target, f.Path);
@@ -200,7 +231,9 @@ public static class DiagramFolderImport
                     }
                     else
                     {
-                        var graphs = MermaidImporter.Parse(Text(f.Content), format == DiagramFileFormat.Markdown, fileWarnings);
+                        var graphs = format == DiagramFileFormat.PlantUml
+                            ? PlantUmlImporter.Parse(Text(f.Content), false, fileWarnings)
+                            : MermaidImporter.Parse(Text(f.Content), format == DiagramFileFormat.Markdown, fileWarnings);
                         if (format == DiagramFileFormat.Markdown && graphs.Count == 0) continue;
                         made = new List<Diagram>();
                         var stem = Path.GetFileNameWithoutExtension(f.Path);
@@ -218,13 +251,25 @@ public static class DiagramFolderImport
                 }
                 warnings.AddRange(fileWarnings.Select(w => $"{f.Path}: {w}"));
                 if (made.Count > 0) fileCount++;
-                for (var i = 0; i < made.Count; i++) Stamp(m, made[i], pkg, made.Count == 1 ? f.Path : $"{f.Path}#{i + 1}");
+                for (var i = 0; i < made.Count; i++)
+                {
+                    Stamp(m, made[i], pkg, made.Count == 1 ? f.Path : $"{f.Path}#{i + 1}");
+                    m.Set(made[i], HashField, hash);
+                }
                 diagrams.AddRange(made);
             }
         }
         return new DiagramFolderResult(diagrams, fileCount, replaced,
             m.AllElements.Count(e => e is not Relationship && e is not Diagram) - elementsBefore,
-            m.Relationships.Count() - relationshipsBefore, warnings);
+            m.Relationships.Count() - relationshipsBefore, warnings) { Unchanged = unchanged, Removed = removed };
+    }
+
+    /// <summary>Every diagram an earlier import made from <paramref name="path"/> under <paramref name="target"/> carries
+    /// <paramref name="hash"/> (and there is at least one).</summary>
+    private static bool Unchanged(ModelRepository m, Element target, string path, string hash)
+    {
+        var earlier = m.Diagrams.Where(d => d.Get(SourceField) is { Length: > 0 } s && FileOf(s) == path && (ReferenceEquals(target, m.Root) || target.IsAncestorOf(d))).ToList();
+        return earlier.Count > 0 && earlier.All(d => d.Get(HashField) == hash);
     }
 
     /// <summary>Marks a diagram, the behaviour that owns it and the shapes, notes and lines drawn only for it with their source file.</summary>

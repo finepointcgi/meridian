@@ -44,11 +44,13 @@ public partial class Workbench
     {
         var text = await ReadMermaid(file);
         var name = Path.GetFileNameWithoutExtension(file.Name);
-        var (model, report) = MermaidImporter.ImportAsNewProject(text, name, MermaidImporter.IsMarkdownFile(file.Name));
+        var (model, report) = Meridian.Serialization.PlantUml.PlantUmlImporter.IsPlantUmlFile(file.Name)
+            ? Meridian.Serialization.PlantUml.PlantUmlImporter.ImportAsNewProject(text, name)
+            : MermaidImporter.ImportAsNewProject(text, name, MermaidImporter.IsMarkdownFile(file.Name));
         if (!model.Diagrams.Any())
         {
             foreach (var w in report.Warnings.Take(50)) Ws.Log("  warning: " + w);
-            Snackbar.Add($"{file.Name} contains no Mermaid diagram Meridian can import (see Output).", Severity.Warning);
+            Snackbar.Add($"{file.Name} contains no diagram Meridian can import (see Output).", Severity.Warning);
             OpenDock(3);
             return;
         }

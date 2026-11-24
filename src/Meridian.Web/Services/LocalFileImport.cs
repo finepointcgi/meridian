@@ -20,7 +20,7 @@ public static class LocalFileImport
     public const long MaxBytes = 64 * 1024 * 1024;
 
     /// <summary>Files the desktop app can open as a project (the same formats as "Open a file as a new project").</summary>
-    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md", ".sql", ".ddl", ".dacpac", ".drawio", ".dio", ".gliffy"];
+    public static readonly IReadOnlyList<string> Extensions = [".meridian", ".sysml", ".xmi", ".qea", ".qeax", ".mdzip", ".mdxml", ".mmd", ".mermaid", ".md", ".puml", ".plantuml", ".pu", ".wsd", ".sql", ".ddl", ".dacpac", ".drawio", ".dio", ".gliffy", ".vsdx", ".vsdm"];
 
     public static bool IsSupported(string path) =>
         Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
@@ -50,7 +50,7 @@ public static class LocalFileImport
             var path = body?.Path;
             if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || !IsSupported(path))
             {
-                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea, .mdzip/.mdxml, Mermaid (.mmd, .mermaid, .md) draw.io (.drawio) or Gliffy (.gliffy) files can be opened.");
+                await Problem(http, 400, "Only full paths to .meridian, .sysml, .xmi, .qea, .mdzip/.mdxml, Mermaid (.mmd, .mermaid, .md), PlantUML (.puml), draw.io (.drawio), Gliffy (.gliffy) or Visio (.vsdx) files can be opened.");
                 return;
             }
             var file = new FileInfo(path);
@@ -111,7 +111,13 @@ public static class LocalFileImport
                 if (!mm.Diagrams.Any()) throw new FormatException("the file contains no Mermaid diagram Meridian can import.");
                 return (mm, report);
             }
-            case ".drawio" or ".dio" or ".gliffy":
+            case ".puml" or ".plantuml" or ".pu" or ".wsd":
+            {
+                var (pm, report) = Meridian.Serialization.PlantUml.PlantUmlImporter.ImportAsNewProject(File.ReadAllText(path), Path.GetFileNameWithoutExtension(path));
+                if (!pm.Diagrams.Any()) throw new FormatException("the file contains no PlantUML diagram Meridian can import.");
+                return (pm, report);
+            }
+            case ".drawio" or ".dio" or ".gliffy" or ".vsdx" or ".vsdm":
             {
                 var (dm, report) = Meridian.Serialization.DrawIo.DrawIoImporter.ImportAsNewProject(Path.GetFileName(path), File.ReadAllBytes(path));
                 if (!dm.Diagrams.Any()) throw new FormatException("the file contains no diagram Meridian can import.");

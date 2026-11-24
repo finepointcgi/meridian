@@ -113,7 +113,8 @@ public static class CodeModelMapper
         return owner;
     }
 
-    private static string[] RootPackageNames(string? rootPackage)
+    /// <summary>The package path of a root package setting ("Acme::Sat" → Acme, Sat; empty → Code).</summary>
+    public static string[] RootPackageNames(string? rootPackage)
     {
         var names = (string.IsNullOrWhiteSpace(rootPackage) ? "Code" : rootPackage)
             .Split("::", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

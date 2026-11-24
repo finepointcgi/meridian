@@ -544,6 +544,7 @@ public sealed class CodeSyncHostServiceTests : IAsyncLifetime
         var config = GitHub();
         config.PreviewPullRequests = true;
         config.CommentOnPullRequests = false;
+        config.DiagramFiles = false;   // code only: the submodule's docs/x.md stays out
         var saved = await svc.SaveAsync(_project, null, null, config, Token);
 
         // Without a connection for the GitLab repository the push still syncs, with a warning.
