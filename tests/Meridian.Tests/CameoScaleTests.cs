@@ -14,6 +14,7 @@ namespace Meridian.Tests;
 /// laptop needs, so they only catch regressions in kind), equivalence checks for the optimised paths, and the 200,000-element
 /// budgets behind MERIDIAN_HEAVY=1. Numbers and how to run the benchmarks: docs/PERFORMANCE.md.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public class CameoScaleTests
 {
     private static readonly Lazy<ModelRepository> Medium = new(() => LargeModelGenerator.Generate(LargeModelOptions.Cameo(30_000)));

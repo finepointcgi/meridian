@@ -28,6 +28,7 @@ namespace Meridian.Web.Tests;
 /// converges. Some tabs also use the optional lock as a check-out, and three "rogue" tabs edit inside another tab's subtree
 /// lock: those actions are refused and taken back in the rogue tab itself (no resync).
 /// </remarks>
+[Collection(TimingCollection.Name)]
 public sealed class ConcurrencyLoadTests(ITestOutputHelper output)
 {
     /// <summary>p95 of a local edit, including the server's apply and relay to every other tab (lock wait included).</summary>
