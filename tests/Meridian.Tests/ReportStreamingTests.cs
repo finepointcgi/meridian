@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -18,6 +19,7 @@ namespace Meridian.Tests;
 /// what the single-pass, in-memory pipeline produced before; plus cancellation, progress, the size estimate and warning,
 /// scope, split per package, hidden-empty matrices, linear numbering and the diagram cache.
 /// </summary>
+[Collection(TimingCollection.Name)]
 public class ReportStreamingTests
 {
     private static readonly ResolveOptions Fixed = new() { Date = new DateTime(2026, 1, 2) };
@@ -130,6 +132,31 @@ public class ReportStreamingTests
             Assert.True(html == Hash(Ids(Encoding.UTF8.GetString(ReportEngine.Generate(make(), t, ReportFormat.Html, options: Fixed)))), $"{model}: HTML");
             Assert.True(word == Hash(WordXml(ReportEngine.Generate(make(), t, ReportFormat.Docx, options: Fixed))), $"{model}: Word");
         }
+    }
+
+    /// <summary>
+    /// A report is the same document whatever culture the server runs under: CI and Linux containers run under the invariant
+    /// culture, where "P0" writes "100 %", while developers' machines write "100%" (the coverage-by-package table differed).
+    /// </summary>
+    [Fact]
+    public void Reports_Do_Not_Depend_On_The_Servers_Culture()
+    {
+        var before = (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture);
+        try
+        {
+            string Html(CultureInfo c, DocTemplate t)
+            {
+                (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture) = (c, c);
+                return Ids(Encoding.UTF8.GetString(ReportEngine.Generate(Small(), t, ReportFormat.Html, options: Fixed)));
+            }
+            foreach (var t in new[] { ReportTemplates.Srs(), Builtin("Verification Cross-Reference Matrix / Test Report") })
+            {
+                var us = Html(new CultureInfo("en-US"), t);
+                Assert.True(us == Html(CultureInfo.InvariantCulture, t), $"{t.Name}: en-US and invariant output differ");
+                Assert.Contains("(100%)", us);
+            }
+        }
+        finally { (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture) = before; }
     }
 
     [Fact]

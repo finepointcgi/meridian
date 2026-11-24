@@ -13,7 +13,13 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet build Meridian.slnx -c Release
       # Browser tests run in the e2e job below (they skip themselves when Playwright's Chromium is missing anyway).
-      - run: dotnet test Meridian.slnx -c Release --no-build --filter "FullyQualifiedName!~Meridian.E2E"
+      # One test project per step: run from the solution they ran side by side, and the load test's latency targets and the
+      # perf budgets (TimingCollection) missed by a few milliseconds while sharing the runner's cores.
+      - run: dotnet test tests/Meridian.Tests -c Release --no-build
+      - run: dotnet test tests/Meridian.Web.Tests -c Release --no-build
+        if: success() || failure()
+      - run: dotnet test tests/Meridian.Desktop.Tests -c Release --no-build
+        if: success() || failure()
 
   # End-to-end browser tests: the real app in-process (SQLite) driven by Playwright's headless Chromium.
   e2e:
