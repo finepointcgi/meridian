@@ -138,7 +138,9 @@ public sealed class DrawingTests(ServerFixture f) : E2ETest(f)
         }
         var rels = (await p.CountsAsync()).Relationships;
         await p.Locator(".toolbox .shapes-sec", new() { HasTextString = "Connectors" }).ScrollIntoViewIfNeededAsync();
-        var lineTile = p.Locator(".toolbox .shapes-body .shapes-grid").Last.Locator(".tile").First;
+        // The grid right after the "Connectors" heading (a Draw section with Pen / Highlighter / Eraser follows it).
+        var lineTile = p.Locator(".toolbox .shapes-body .shapes-sec", new() { HasTextString = "Connectors" })
+            .Locator("xpath=following-sibling::div[contains(@class,'shapes-grid')][1]").Locator(".tile").First;
         await lineTile.ClickAsync();
         await p.Mouse.MoveAsync(ix, iy);
         await p.Mouse.DownAsync();

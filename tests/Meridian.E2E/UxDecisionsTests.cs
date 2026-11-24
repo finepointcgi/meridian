@@ -90,7 +90,8 @@ public sealed class UxDecisionsTests(ServerFixture f) : E2ETest(f)
         await p.Keyboard.PressAsync("ArrowRight");
         await Expect(sub.Locator(".mud-menu-item").First).ToBeFocusedAsync();
         await p.Keyboard.PressAsync("ArrowDown");
-        await Expect(sub.Locator(".mud-menu-item", new() { HasTextString = "Export XMI 2.5.1" })).ToBeFocusedAsync();
+        // The second item: "Download project with history (.zip)" for a server project, else "Export XMI 2.5.1".
+        await Expect(sub.Locator(".mud-menu-item").Nth(1)).ToBeFocusedAsync();
         await p.Keyboard.PressAsync("ArrowLeft");
         await Expect(sub).ToHaveCountAsync(0);
         await Expect(export).ToBeFocusedAsync();
