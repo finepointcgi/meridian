@@ -12,7 +12,7 @@
 # .config/dotnet-tools.json), so every copy installed from them can update itself. The Windows setup is built on any OS;
 # the AppImage needs mksquashfs (brew install squashfs). The .deb and tar.gz stay classic installs.
 #
-# Usage: build/package.sh [version] [rid ...]     e.g. build/package.sh 0.10.1 osx-arm64
+# Usage: build/package.sh [version] [rid ...]     e.g. build/package.sh 0.11.0 osx-arm64
 #
 # Optional environment (all signing is skipped when unset; see docs/RELEASING.md):
 #   MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"; otherwise ad-hoc signing
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-0.10.1}"
+VERSION="${1:-0.11.0}"
 shift || true
 RIDS=("$@")
 [ ${#RIDS[@]} -eq 0 ] && RIDS=(osx-arm64 osx-x64 win-x64 linux-x64)

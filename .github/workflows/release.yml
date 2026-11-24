@@ -22,7 +22,13 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: dotnet build Meridian.slnx -c Release
-      - run: dotnet test Meridian.slnx -c Release --no-build
+      # One test project per step, as in ci.yml: side by side they share the runner's cores and the timing budgets miss.
+      # Browser tests are left to ci.yml's e2e job (here they would only skip: this job installs no Chromium).
+      - run: dotnet test tests/Meridian.Tests -c Release --no-build
+      - run: dotnet test tests/Meridian.Web.Tests -c Release --no-build
+        if: success() || failure()
+      - run: dotnet test tests/Meridian.Desktop.Tests -c Release --no-build
+        if: success() || failure()
 
   package:
     needs: test

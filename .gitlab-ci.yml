@@ -80,8 +80,11 @@ test:
   stage: test
   script:
     - dotnet build Meridian.slnx -c Release
-    # Browser tests run in the e2e job (they skip themselves when Playwright's Chromium is missing anyway).
-    - dotnet test Meridian.slnx -c Release --no-build --filter "FullyQualifiedName!~Meridian.E2E"
+    # Browser tests run in the e2e job. One test project at a time, as in ci.yml: side by side they share the runner's
+    # cores and the timing budgets (TimingCollection) miss.
+    - dotnet test tests/Meridian.Tests -c Release --no-build
+    - dotnet test tests/Meridian.Web.Tests -c Release --no-build
+    - dotnet test tests/Meridian.Desktop.Tests -c Release --no-build
 
 # End-to-end browser tests: the real app in-process (SQLite) driven by Playwright's headless Chromium. The .NET 10 SDK
 # image plus install-browsers.sh --with-deps (the Playwright .NET image ships an older SDK), as ci.yml does.
