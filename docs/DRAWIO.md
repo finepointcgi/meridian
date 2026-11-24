@@ -8,7 +8,7 @@ desktop app); nothing is sent anywhere.
 
 | Entry point | What it does |
 | --- | --- |
-| Project menu → Import → **Folder of diagrams (Mermaid, draw.io)…** (also ⌘K) | Pick a folder. Meridian reads its Mermaid (`.mmd`, `.mermaid`, Markdown with ```` ```mermaid ```` blocks) and draw.io files, shows what each will become, then imports them as one undo step. |
+| Project menu → Import → **Folder of diagrams (Mermaid, PlantUML, draw.io)…** (also ⌘K) | Pick a folder. Meridian reads its Mermaid (`.mmd`, `.mermaid`, Markdown with ```` ```mermaid ```` blocks) and draw.io files, shows what each will become, then imports them as one undo step. |
 | Drop a folder, or `.drawio` files, on the canvas | Imports straight into the diagram's package (no dialog). |
 | Project menu → **Import into this project…** with draw.io files, or a `.zip` of a folder of diagrams | Opens the same preview dialog. |
 | Project menu → **Open a file as a new project…** with a draw.io file | A new project holding one diagram per page. The desktop app opens `.drawio` files from its file dialog, the start screen and the command line. |
@@ -51,8 +51,10 @@ Limits and warnings (all listed in the Output panel after the import):
 Each diagram becomes a page with draw.io's own shapes: class boxes with their members, actors, use cases, lifelines with
 messages at their heights, frames, notes, folders, start / end states, decisions and bars, and free shapes with their
 colours. Every shape also carries a `meridian=<kind>` style entry that draw.io keeps and ignores, so a file exported from
-Meridian, edited in draw.io and imported again comes back as the same kinds of diagram and element. Ports come back as
-properties. Internal block and parametric diagrams come back as whiteboard drawings.
+Meridian, edited in draw.io and imported again comes back as the same kinds of diagram and element. Ports in class boxes
+come back as ports. Internal block and parametric diagrams come back on the same block, with their parts ("name : Type"),
+ports and parameters on their parts, connectors and binding connectors (with the parts their ends sit on) and item flows;
+read back into the project they came from with **Match by name**, they land on the existing parts instead of copies.
 
 ## Folders of diagrams
 

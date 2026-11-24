@@ -355,6 +355,26 @@ and flows (p95 60, largest 61, 130 of 223 simplified to fit; before the folding 
 benchmark prints these sizes (`MERIDIAN_BENCH_DUMP=<name>` also lists the messages of matching sequences). Measure it with
 `dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --code-sync src`.
 
+## Diagram files
+
+Keep diagrams next to the code as text, and code sync keeps the model in step with them. Mermaid files (`.mmd`,
+`.mermaid`, Markdown with ```` ```mermaid ```` blocks), PlantUML files (`.puml`, `.plantuml`) and draw.io files (`.drawio`, `.dio`,
+`.drawio.svg`) in the synced folders become diagrams, the same way as **Import ▸ Folder of diagrams…**
+([MERMAID.md](MERMAID.md), [PLANTUML.md](PLANTUML.md), [DRAWIO.md](DRAWIO.md)).
+
+- **Where they go:** a **Diagrams** package inside the repository's model package, with one package per folder
+  (`docs/flows/release.mmd` → *sat ▸ Diagrams ▸ docs ▸ flows ▸ release*). A diagram without a title is named after its file.
+- **Only what changed:** each diagram remembers which file it came from and a hash of that file. A push imports again only
+  the files whose content changed; the diagrams of other files keep their ids and any layout you made in Meridian.
+- **Deleted files:** a full sync removes the diagrams of files that are no longer in the repository.
+- **Shared names:** a block, class, actor or requirement named like an element already in the model (the synced code too) is
+  reused, so a class diagram in `docs/` points at the classes code sync made.
+- **Review:** the diagrams arrive on the code-sync branch like any other change and wait for review (the first import goes
+  straight into main, as for code). A repository with only diagram files and no code works too.
+- **Setting:** *Sync diagram files (Mermaid, PlantUML, draw.io)* in the repository's settings. On for new connections; off for
+  connections made before 0.11 until you turn it on.
+- Binary files (`.drawio.png`, Visio `.vsdx`) are left out; save draw.io diagrams as `.drawio` or `.drawio.svg` instead.
+
 ## Reviewing code changes
 
 ### Where the changes go

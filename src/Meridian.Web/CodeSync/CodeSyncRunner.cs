@@ -4,6 +4,7 @@ using Meridian.Core.Language;
 using Meridian.Core.Model;
 using Meridian.Data;
 using Meridian.Serialization;
+using Meridian.Serialization.DiagramFiles;
 using Meridian.Web.Services;
 
 namespace Meridian.Web.CodeSync;
@@ -227,20 +228,21 @@ public sealed partial class CodeSyncRunner(
     {
         if (await db.LoadProjectAsync(request.ProjectId) is null) throw new InvalidOperationException("That project no longer exists.");
 
-        // Pick the reader that handles the pushed files.
+        var connection = await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson) : null;
+        var diagramFiles = DiagramFilesOf(request, connection);
+
+        // Pick the reader that handles the pushed files. A repository of diagram files only has no code to read.
         var reader = readers.FirstOrDefault(r => request.Files.Any(f => r.Handles(f.Path)));
-        if (reader is null)
+        if (reader is null && diagramFiles.Count == 0)
         {
             var none = "No supported source files in this push.";
             await RecordAsync(request, runId, null, CodeSyncRunStatus.NoChanges, none, [], 0, 0, 0);
             return new CodeSyncOutcome(CodeSyncStatus.NoChanges, none, null, runId);
         }
-        var files = request.Files.Where(f => reader.Handles(f.Path)).ToList();
         ct.ThrowIfCancellationRequested();
-        var code = reader.Read(files, ct);
+        var code = reader is null ? null : reader.Read(request.Files.Where(f => reader.Handles(f.Path)).ToList(), ct);
+        var input = new SyncInput(code, diagramFiles);
         ct.ThrowIfCancellationRequested();
-
-        var connection = await db.FindIntegrationAsync(request.ConnectionId) is { Kind: Hosts.CodeRepoKinds.CodeRepo } conn ? Hosts.CodeRepoConfig.Parse(conn.ConfigJson) : null;
         var runs = await db.ListCodeSyncRunsAsync(request.ProjectId, 500);
 
         // The first import of a repository goes straight into main (unless the connection asks to review it too).
@@ -251,7 +253,7 @@ public sealed partial class CodeSyncRunner(
             var mainJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, null);
             if (IsFirstImport(request, connection, runs, mainJson))
             {
-                var first = await ImportIntoMainAsync(request, code, connection, runs, mainJson, branchName, runId, ct);
+                var first = await ImportIntoMainAsync(request, input, connection, runs, mainJson, branchName, runId, ct);
                 if (first.Outcome is { } done) return done;
                 note = first.Note;   // could not go into main: review it on the branch, and say why
             }
@@ -265,7 +267,7 @@ public sealed partial class CodeSyncRunner(
 
         if (hub.Find(request.ProjectId, branchId) is { } open) await open.PersistAsync();
         var headJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, branchId);
-        var mapped = Map(request, code, connection, runs, headJson, ct);
+        var mapped = Map(request, input, connection, runs, headJson, ct);
         if (mapped.IsEmpty)
         {
             if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
@@ -279,7 +281,7 @@ public sealed partial class CodeSyncRunner(
         var json = await WriteAsync(request.ProjectId, branchId, headJson, mapped.Model, mapped.Ops);
         await db.CommitBranchVersionAsync(request.ProjectId, branchId, message, json, null);
 
-        var (list, added, changed, removed, summary) = Describe(mapped, code);
+        var (list, added, changed, removed, summary) = Describe(mapped, input);
         if (note is not null) summary = $"{summary} — {note}";
         await RecordAsync(request, runId, branchId, CodeSyncRunStatus.AwaitingReview, summary, list, added, changed, removed);
         return new CodeSyncOutcome(CodeSyncStatus.AwaitingReview, summary, ReviewUrl(request.ProjectId, branchId), runId);
@@ -291,8 +293,15 @@ public sealed partial class CodeSyncRunner(
         public bool IsEmpty => Changes.IsEmpty && Refresh.Created.Count == 0;
     }
 
-    /// <summary>Maps the code onto a copy of <paramref name="headJson"/> and refreshes the diagrams that show it.</summary>
-    private Mapped Map(CodeSyncRequest request, CodeModel code, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string headJson, CancellationToken ct)
+    /// <summary>What a run reads from the files: the code (null when no reader handles any of them) and the diagram files.</summary>
+    private sealed record SyncInput(CodeModel? Code, IReadOnlyList<DiagramSourceFile> DiagramFiles)
+    {
+        public IReadOnlyList<string> Warnings => Code?.Warnings ?? [];
+    }
+
+    /// <summary>Maps the code onto a copy of <paramref name="headJson"/>, refreshes the diagrams that show it and imports
+    /// the diagram files.</summary>
+    private Mapped Map(CodeSyncRequest request, SyncInput input, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string headJson, CancellationToken ct)
     {
         var before = ProjectFile.Deserialize(headJson);
         var model = ProjectFile.Deserialize(headJson);
@@ -318,27 +327,33 @@ public sealed partial class CodeSyncRunner(
                 .SelectMany(r => r.Changes).Where(c => c.Kind == CodeSyncChangeKind.Added && c.ElementKind == nameof(ElementKind.Diagram))
                 .Select(c => c.ElementId).ToHashSet(StringComparer.Ordinal),
         };
-        var changes = WithSubmodulePins(model, request, applier.Apply(model, code, options));
+        var changes = input.Code is { } code
+            ? WithSubmodulePins(model, request, applier.Apply(model, code, options))
+            : new CodeSyncChanges([], [], [], []);
         ct.ThrowIfCancellationRequested();
 
         // Diagrams are refreshed even when the code brought no change: a project synced before the package overview
         // existed gets it on its next sync.
-        var refresh = CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
+        var refresh = input.Code is null ? DiagramRefreshResult.None : CodeSyncDiagrams.Refresh(model, changes, createDiagrams: AutoDiagrams(root, connection),
             codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
+        if (input.DiagramFiles.Count > 0 || connection?.EffectiveDiagramFiles == true)
+            changes = Merge(changes, SyncDiagramFiles(model, input.DiagramFiles, options.RootPackage, options.RepoId, request.IsFullSnapshot));
         model.OpEmitted -= ops.Add;
         return new Mapped(before, model, ops, changes, refresh);
     }
 
     /// <summary>The change list, counts and summary of a mapping ("3 added; 2 structure, 1 activity diagram (1 warnings)").</summary>
-    private static (List<CodeSyncRunChange> List, int Added, int Changed, int Removed, string Summary) Describe(Mapped m, CodeModel code)
+    private static (List<CodeSyncRunChange> List, int Added, int Changed, int Removed, string Summary) Describe(Mapped m, SyncInput code)
     {
         var list = ChangeList(m.Before, m.Model, m.Changes, m.Refresh);
         int added = list.Count(c => c.Kind == CodeSyncChangeKind.Added), changed = list.Count(c => c.Kind == CodeSyncChangeKind.Changed),
             removed = list.Count(c => c.Kind == CodeSyncChangeKind.Removed);
         // Every diagram the run made: structure diagrams from the refresh, behaviour diagrams from the mapping.
-        var made = m.Changes.Added.Select(m.Model.Find).OfType<Diagram>().Concat(m.Refresh.Created).DistinctBy(d => d.Id).ToList();
+        var made = m.Changes.Added.Select(m.Model.Find).OfType<Diagram>().Where(d => !IsFromDiagramFile(d)).Concat(m.Refresh.Created).DistinctBy(d => d.Id).ToList();
+        var fromFiles = m.Changes.Added.Select(m.Model.Find).OfType<Diagram>().Count(IsFromDiagramFile);
         var (structure, activity, sequence) = DiagramCounts(made);
         var diagrams = DiagramSummary(structure, activity, sequence, m.Changes.TrivialDiagramsRemoved);
+        if (fromFiles > 0) diagrams = (diagrams.Length > 0 ? diagrams + ", " : "") + $"{fromFiles} from diagram file{(fromFiles == 1 ? "" : "s")}";
         var summary = Summary(added, changed, removed) + (diagrams.Length > 0 ? "; " + diagrams : "")
                       + (m.Changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({m.Changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
         return (list, added, changed, removed, summary);
@@ -367,7 +382,7 @@ public sealed partial class CodeSyncRunner(
     /// unaccepted attempt is deleted (or, while someone has it open, put back to main). Returns the outcome, or a note
     /// saying why the import must be reviewed instead (the user it runs for may not edit main).
     /// </summary>
-    private async Task<(CodeSyncOutcome? Outcome, string? Note)> ImportIntoMainAsync(CodeSyncRequest request, CodeModel code, Hosts.CodeRepoConfig? connection,
+    private async Task<(CodeSyncOutcome? Outcome, string? Note)> ImportIntoMainAsync(CodeSyncRequest request, SyncInput code, Hosts.CodeRepoConfig? connection,
         IReadOnlyList<CodeSyncRunRecord> runs, string mainJson, string branchName, Guid runId, CancellationToken ct)
     {
         var user = request.TriggeredBy;

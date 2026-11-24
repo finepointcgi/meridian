@@ -96,6 +96,8 @@ public sealed class CodeSyncHostService(
         config.ConnectedBy = existing is null ? userId : stored?.ConnectedBy;
         // New connections draw behaviour diagrams for entry points unless the form chose otherwise.
         if (existing is null) config.BehaviourDiagrams ??= Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints;
+        // New connections keep Mermaid, PlantUML and draw.io files in the repository in step too.
+        if (existing is null) config.DiagramFiles ??= true;
         if (config.ProtectedWebhookSecret is null)
         {
             newSecret = CodeWebhooks.NewSecret();
@@ -318,7 +320,8 @@ public sealed class CodeSyncHostService(
             await using var scope = scopes.CreateAsyncScope();
             var sp = scope.ServiceProvider;
             var reader = sp.GetServices<ICodeReader>().LastOrDefault(r => r.Language == config.Language);
-            Func<string, bool> include = reader is null ? DefaultInclude(config.Language) : reader.Handles;
+            Func<string, bool> code = reader is null ? DefaultInclude(config.Language) : reader.Handles;
+            Func<string, bool> include = config.EffectiveDiagramFiles ? p => code(p) || CodeSyncRunner.IsDiagramFile(p) : code;
             // The archive, then its git submodules (archives leave their code out), all within one set of limits.
             var fetched = await new SubmoduleFetcher(Host, log).FetchAsync(host, config, integrations.Unprotect(c.ProtectedSecret, c.Id) ?? "", job.Commit, include,
                 await OtherCredentialsAsync(c), new SnapshotBudget(Limits), ct);

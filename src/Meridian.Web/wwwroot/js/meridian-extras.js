@@ -73,8 +73,9 @@
   }
 
   // Diagram files read from a folder or a drop (DiagramFolderImport.Extensions / limits).
-  const DIAGRAM_FILE = /\.(mmd|mermaid|md|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy)$/i;
-  const DRAWIO_FILE = /\.(drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy)$/i;
+  const DIAGRAM_FILE = /\.(mmd|mermaid|md|puml|plantuml|pu|wsd|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy|vsdx|vsdm)$/i;
+  // draw.io, Gliffy, Visio and PlantUML files dropped on the canvas go through the diagram-files import (preview-free drop).
+  const DRAWIO_FILE = /\.(puml|plantuml|pu|wsd|drawio|dio|drawio\.xml|drawio\.svg|drawio\.png|dio\.svg|dio\.png|gliffy|vsdx|vsdm)$/i;
   const MAX_DIAGRAM_FILE = 32 * 1024 * 1024, MAX_DIAGRAM_TOTAL = 128 * 1024 * 1024, MAX_DIAGRAM_FILES = 2000, BATCH_BYTES = 8 * 1024 * 1024;
   const SKIP_DIR = /(^|\/)(node_modules|\.git|bin|obj|dist|build|\.venv|__MACOSX)(\/|$)/;
 
@@ -91,7 +92,7 @@
     for (const [path, f] of pairs) {
       if (SKIP_DIR.test(path) || !DIAGRAM_FILE.test(path)) { skipped++; continue; }
       if (f.size > MAX_DIAGRAM_FILE || total + f.size > MAX_DIAGRAM_TOTAL || count >= MAX_DIAGRAM_FILES) { skipped++; continue; }
-      const item = /\.png$/i.test(path) ? { path, base64: toBase64(await f.arrayBuffer()) } : { path, text: await f.text() };
+      const item = /\.(png|vsdx|vsdm)$/i.test(path) ? { path, base64: toBase64(await f.arrayBuffer()) } : { path, text: await f.text() };
       batch.push(item); size += f.size; total += f.size; count++;
       if (size >= BATCH_BYTES) { await dotnet.invokeMethodAsync(add, batch); batch = []; size = 0; }
     }
@@ -139,7 +140,7 @@
     return out;
   }
 
-  /** Canvas: drop picture, Mermaid (.mmd) or draw.io files or a folder of diagrams onto it, or paste a picture while it has focus. */
+  /** Canvas: drop picture, Mermaid (.mmd), PlantUML or draw.io files or a folder of diagrams onto it, or paste a picture while it has focus. */
   m.installCanvasExtras = (el, dotnet) => {
     const onDrop = e => {
       const all = [...(e.dataTransfer?.files || [])];

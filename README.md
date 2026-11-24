@@ -131,8 +131,12 @@ opens it again.
     ([guide](docs-site/docs/mermaid.md), [reference](docs/MERMAID.md))
   - Mermaid **Ishikawa (fishbone), radar and treemap** charts import as editable whiteboard drawings and export back.
   - **draw.io** import and export (`.drawio`, `.drawio.svg`, `.drawio.png`): UML pages become model elements at their drawn
-    positions, other pages whiteboard drawings; and **folders of diagrams** (Mermaid and draw.io, one package per folder,
+    positions, other pages whiteboard drawings; and **folders of diagrams** (Mermaid, PlantUML and draw.io, one package per folder,
     re-import updates in place). ([reference](docs/DRAWIO.md))
+  - **PlantUML** import (sequence, class, use case, activity and state diagrams). ([reference](docs/PLANTUML.md))
+  - **Visio** import (`.vsdx`): UML stencils become model elements, other pages whiteboard drawings. ([reference](docs/VISIO.md))
+  - **Diagrams as code**: code sync keeps Mermaid, PlantUML and draw.io files in a Git repository in step with the model,
+    re-importing only the files a push changed. ([reference](docs/CODE-SYNC.md#diagram-files))
   - **Gliffy** import (`.gliffy` from Confluence or Gliffy Online), the same way as draw.io. ([reference](docs/GLIFFY.md))
   - Excel and CSV import with round-trip sync for any element kind. ([guide](docs-site/docs/spreadsheet-import.md))
   - A read-only SysML v2 REST API.

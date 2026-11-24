@@ -16,7 +16,7 @@ public partial class Workbench
 {
     private IEnumerable<CommandPalette.Command> DiagramFilePaletteCommands() =>
     [
-        new("Import a folder of diagrams (Mermaid, draw.io)…", "Command", Icons.Material.Outlined.DriveFolderUpload, ImportDiagramFolder),
+        new("Import a folder of diagrams (Mermaid, PlantUML, draw.io)…", "Command", Icons.Material.Outlined.DriveFolderUpload, ImportDiagramFolder),
         new("Export diagram as draw.io (.drawio)", "Command", Icons.Material.Outlined.Draw, ExportDrawIo),
         new("Export all diagrams as draw.io (.drawio)", "Command", Icons.Material.Outlined.Draw, ExportAllDrawIo),
     ];
@@ -32,7 +32,7 @@ public partial class Workbench
         if (await receiver.Result is not { } got) return;
         if (got.Files.Count == 0)
         {
-            Snackbar.Add($"No Mermaid or draw.io files in {got.Folder}" + (got.Skipped > 0 ? $" ({got.Skipped} other files)" : ""), Severity.Warning);
+            Snackbar.Add($"No Mermaid, PlantUML or draw.io files in {got.Folder}" + (got.Skipped > 0 ? $" ({got.Skipped} other files)" : ""), Severity.Warning);
             return;
         }
         await ImportDiagramFiles(got.Files, target, $"Import folder {got.Folder}", got.Folder, got.Skipped);

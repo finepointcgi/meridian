@@ -807,7 +807,7 @@ public partial class Workbench
             if (ext == ".zip") { await OpenProjectArchive(file); return; }
             if (IsMagicDrawFile(file.Name)) { await OpenMagicDrawProject(file); return; }
             if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name)) { await OpenDrawIoProject(file); return; }
-            if (MermaidImporter.IsMermaidFile(file.Name)) { await OpenMermaidProject(file); return; }
+            if (MermaidImporter.IsMermaidFile(file.Name) || Meridian.Serialization.PlantUml.PlantUmlImporter.IsPlantUmlFile(file.Name)) { await OpenMermaidProject(file); return; }
             var text = await ReadText(file);
             if (ext is ".xmi" or ".xml" or ".uml")
                 (model, report) = XmiExchange.Import(System.Xml.Linq.XDocument.Parse(text));
@@ -828,7 +828,7 @@ public partial class Workbench
         }
         catch (Exception ex) when (ex is IOException or FormatException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidOperationException or ArgumentException or Microsoft.Data.Sqlite.SqliteException or InvalidDataException)
         {
-            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian (or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid, draw.io and Gliffy files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
+            ErrorWithGuide($"Could not open {file.Name}: {FriendlyError.Describe(ex)}. Meridian opens .meridian (or a .zip with history), XMI, SysML v2, Enterprise Architect .qea, Cameo .mdzip, Mermaid, PlantUML, draw.io, Gliffy and Visio (.vsdx) files.", Meridian.Web.Hosting.UserGuide.Pages.ImportExport);
         }
     }
 
@@ -851,7 +851,7 @@ public partial class Workbench
             var ext = Path.GetExtension(file.Name).ToLowerInvariant();
             try
             {
-                if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name))
+                if (Meridian.Serialization.DrawIo.DrawIoFile.IsDrawIoFile(file.Name) || Meridian.Serialization.PlantUml.PlantUmlImporter.IsPlantUmlFile(file.Name))
                 {
                     diagramFiles.Add(await ReadDiagramFile(file));
                     continue;

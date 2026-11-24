@@ -27,7 +27,7 @@ public static class DrawIoFile
     private const int MaxInflated = 64 * 1024 * 1024;
 
     /// <summary>draw.io files, and Gliffy files (<c>.gliffy</c>), which are read as draw.io pages (see <see cref="Gliffy.GliffyFile"/>).</summary>
-    public static readonly IReadOnlyList<string> Extensions = [".drawio", ".dio", ".drawio.xml", ".drawio.svg", ".drawio.png", ".dio.svg", ".dio.png", .. Gliffy.GliffyFile.Extensions];
+    public static readonly IReadOnlyList<string> Extensions = [".drawio", ".dio", ".drawio.xml", ".drawio.svg", ".drawio.png", ".dio.svg", ".dio.png", .. Gliffy.GliffyFile.Extensions, .. Visio.VisioFile.Extensions];
 
     /// <summary>True for a draw.io file name. A plain <c>.xml</c> is only draw.io when its content says so (see <see cref="LooksLikeDrawIo(string)"/>).</summary>
     public static bool IsDrawIoFile(string? name)
@@ -38,7 +38,7 @@ public static class DrawIoFile
     }
 
     /// <summary>A binary container (PNG) rather than text.</summary>
-    public static bool IsBinary(string? name) => name != null && name.EndsWith(".png", StringComparison.OrdinalIgnoreCase);
+    public static bool IsBinary(string? name) => name != null && (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) || Visio.VisioFile.IsVisioFile(name));
 
     /// <summary>True when an XML text is a draw.io document.</summary>
     public static bool LooksLikeDrawIo(string text)
@@ -52,6 +52,7 @@ public static class DrawIoFile
     {
         if (bytes.Length > MaxBytes) throw new FormatException($"{fileName} is larger than {MaxBytes / (1024 * 1024)} MB.");
         if (Gliffy.GliffyFile.IsGliffyFile(fileName)) return Gliffy.GliffyFile.Read(fileName, bytes);
+        if (Visio.VisioFile.IsVisioFile(fileName)) return Visio.VisioFile.Read(fileName, bytes);
         if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G')
             return ReadText(FromPng(bytes) ?? throw new FormatException("the PNG has no draw.io diagram embedded (save it from draw.io with \"Include a copy of my diagram\")."));
         return ReadText(Encoding.UTF8.GetString(bytes));

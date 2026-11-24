@@ -205,6 +205,8 @@ else
             <MudSwitch T="bool" @bind-Value="f.CollapseRootNamespace" Label="Collapse common root namespace" Color="Color.Primary" Class="code-repo-collapse-root"
                        title="When every type shares one root namespace (or it is named like the model package), its sub-namespaces go straight into the model package: Meridian ▸ Core, not Meridian ▸ Meridian ▸ Core." />
             <MudSwitch T="bool" @bind-Value="f.AutoDiagrams" Label="Create diagrams for new packages and classes" Color="Color.Primary" Class="code-repo-auto-diagrams" />
+            <MudSwitch T="bool" Value="f.EffectiveDiagramFiles" ValueChanged="v => f.DiagramFiles = v" Label="Sync diagram files (Mermaid, PlantUML, draw.io)" Color="Color.Primary" Class="code-repo-diagram-files"
+                       title="Mermaid (.mmd, Markdown with mermaid blocks), PlantUML (.puml) and draw.io files in the folders above become diagrams in a Diagrams package, one package per folder. A push updates the diagrams of the files it changed." />
             <MudSwitch T="bool" @bind-Value="f.ReviewFirstImport" Label="Review the first import too" Color="Color.Primary" Class="code-repo-review-first"
                        title="Off: the first sync of this repository goes straight into main, and later syncs wait for review on the code-sync branch. On: the first sync waits for review too." />
             <div class="integration-sub">@(f.ReviewFirstImport ? "Every sync, the first one included, waits for review on the code-sync branch." : "The first sync goes straight into main; later syncs wait for review on the code-sync branch.")</div>
@@ -351,7 +353,7 @@ else
 
     private void New()
     {
-        _form = new CodeRepoConfig { BehaviourDiagrams = Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints };
+        _form = new CodeRepoConfig { BehaviourDiagrams = Meridian.Core.CodeSync.CodeBehaviourMode.EntryPoints, DiagramFiles = true };
         _editId = null;
         _name = null;
         _paths = null;

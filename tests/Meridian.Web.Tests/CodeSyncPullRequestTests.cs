@@ -310,7 +310,7 @@ public sealed class CodeSyncPullRequestServiceTests : IAsyncLifetime
         });
         var runner = new FakePreviews();
         var (svc, queue) = Create(handler, runner);
-        var config = new CodeRepoConfig { Host = GitHostKind.Bitbucket, BaseUrl = "https://bb.acme.test", Owner = "SAT", Repo = "fsw" };
+        var config = new CodeRepoConfig { Host = GitHostKind.Bitbucket, BaseUrl = "https://bb.acme.test", Owner = "SAT", Repo = "fsw", DiagramFiles = false };
 
         Assert.Equal("Connected to SAT/fsw on Bitbucket Data Center: main is at c1b2c3d.", await svc.TestAsync(_project, config, "dan:app-password", null));
         var auth = handler.Requests[0].Request.Headers.Authorization!;
@@ -396,7 +396,9 @@ public sealed class CodeSyncPullRequestServiceTests : IAsyncLifetime
         Assert.Equal(CodeSyncStatus.AwaitingReview, outcome.Status);
         Assert.Empty(runner.Requests);   // not the main review branch
         var (number, request) = Assert.Single(runner.Previews);
-        Assert.Equal((7, "src/Thruster.cs"), (number, Assert.Single(request.Files).Path));
+        // A new connection syncs diagram files too, so Markdown (which may hold mermaid blocks) is fetched with the code.
+        Assert.Equal(7, number);
+        Assert.Equal(["README.md", "src/Thruster.cs"], request.Files.Select(f => f.Path));
         var statuses = handler.Requests.Where(r => r.Request.RequestUri!.AbsoluteUri.Contains("/statuses/")).Select(r => JsonNode.Parse(r.Body!)!).ToList();
         Assert.Equal(["pending", "success"], statuses.Select(s => (string)s["state"]!));
         Assert.Equal(("Model preview: 1 added", "https://meridian.test/review/pr-7"), ((string)statuses[1]["description"]!, (string)statuses[1]["target_url"]!));

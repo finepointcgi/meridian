@@ -76,8 +76,15 @@ public static class MermaidImporter
         return new MermaidPreview(summaries, warnings);
     }
 
-    internal static List<MGraph> Parse(string? text, bool markdown, List<string> warnings) =>
-        MermaidSource.Split(text, markdown, warnings).Select(MermaidParser.Parse).ToList();
+    /// <summary>Mermaid diagrams, or PlantUML ones when the text starts a <c>@startuml</c> block; Markdown is searched for
+    /// both <c>```mermaid</c> and <c>```plantuml</c> blocks.</summary>
+    internal static List<MGraph> Parse(string? text, bool markdown, List<string> warnings)
+    {
+        if (!markdown && PlantUml.PlantUmlParser.LooksLikePlantUml(text)) return PlantUml.PlantUmlImporter.Parse(text, false, warnings);
+        var graphs = MermaidSource.Split(text, markdown, warnings).Select(MermaidParser.Parse).ToList();
+        if (markdown) graphs.AddRange(PlantUml.PlantUmlImporter.Parse(text, true, warnings));
+        return graphs;
+    }
 
     /// <summary>Imports into <paramref name="target"/> (a package or the model root) as one undo step.</summary>
     public static MermaidImportResult Import(ModelRepository m, Element target, string? text, MermaidImportOptions? options = null)
@@ -93,7 +100,7 @@ public static class MermaidImporter
         {
             using (m.History.Transaction("Import Mermaid"))
             {
-                var builder = new MermaidBuilder(m, target, options, warnings);
+                var builder = new MermaidBuilder(m, target, options, warnings) { Source = PlantUml.PlantUmlParser.LooksLikePlantUml(text) ? "PlantUML" : "Mermaid" };
                 foreach (var g in graphs)
                 {
                     if (g.Kind != MermaidDiagramKind.Unsupported && builder.Build(g) is { } d) diagrams.Add(d);
@@ -130,6 +137,7 @@ public static class MermaidImporter
         MermaidDiagramKind.Ishikawa => "Whiteboard drawing (fishbone)",
         MermaidDiagramKind.Radar => "Whiteboard drawing (radar chart)",
         MermaidDiagramKind.Treemap => "Whiteboard drawing (treemap)",
+        MermaidDiagramKind.UseCase => "Use case diagram",
         _ => "Skipped (not supported)",
     };
 
@@ -145,10 +153,11 @@ public static class MermaidImporter
         MermaidDiagramKind.Ishikawa => "Ishikawa diagram",
         MermaidDiagramKind.Radar => "Radar chart",
         MermaidDiagramKind.Treemap => "Treemap",
+        MermaidDiagramKind.UseCase => "Use case diagram",
         _ => "Diagram",
     };
 
-    private static MermaidDiagramSummary Summarize(MGraph g)
+    internal static MermaidDiagramSummary Summarize(MGraph g)
     {
         int nodes, edges;
         if (g.Chart is { } chart)
@@ -207,6 +216,7 @@ public static class MermaidImporter
             MermaidDiagramKind.Sequence => ("lifeline", "lifelines", "message", "messages", "fragment", "fragments"),
             MermaidDiagramKind.Requirement => ("element", "elements", "relationship", "relationships", "group", "groups"),
             MermaidDiagramKind.EntityRelationship => ("block", "blocks", "association", "associations", "group", "groups"),
+            MermaidDiagramKind.UseCase => ("actor or use case", "actors and use cases", "relationship", "relationships", "boundary", "boundaries"),
             _ => ("element", "elements", "dependency", "dependencies", "group", "groups"),
         };
         var parts = new List<string> { P(s.Nodes, node, nodes), P(s.Edges, edge, edges) };

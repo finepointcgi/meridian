@@ -118,6 +118,15 @@ public sealed partial class CodeRepoConfig
     /// existed) means on demand; new connections get entry points (docs/CODE-SYNC.md, "Behaviour from code").</summary>
     public Meridian.Core.CodeSync.CodeBehaviourMode? BehaviourDiagrams { get; set; }
 
+    /// <summary>"Diagram files": Mermaid (.mmd, .mermaid, Markdown with mermaid blocks), PlantUML and draw.io files in the
+    /// synced folders become diagrams in a "Diagrams" package of the model package, updated on each push. Unset (connections
+    /// from before it existed) means off; new connections turn it on (docs/CODE-SYNC.md, "Diagram files").</summary>
+    public bool? DiagramFiles { get; set; }
+
+    /// <summary>The diagram-files setting in effect: <see cref="DiagramFiles"/>, else off.</summary>
+    [JsonIgnore]
+    public bool EffectiveDiagramFiles => DiagramFiles ?? false;
+
     /// <summary>The behaviour setting in effect: <see cref="BehaviourDiagrams"/>, else on demand.</summary>
     [JsonIgnore]
     public Meridian.Core.CodeSync.CodeBehaviourMode EffectiveBehaviour => BehaviourDiagrams ?? Meridian.Core.CodeSync.CodeBehaviourMode.OnDemand;
