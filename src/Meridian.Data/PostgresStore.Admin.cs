@@ -146,7 +146,7 @@ public sealed partial class PostgresStore
         {
             if (!await r.ReadAsync())
             {
-                Accounts.VerifyPassword(password, SqliteStore.DummyHash.Value); // same cost as a real check
+                Accounts.VerifyPasswordForUnknownUser(password);
                 return new LoginResult(LoginStatus.InvalidCredentials);
             }
             user = ReadUser(r);

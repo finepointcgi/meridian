@@ -153,7 +153,7 @@ public sealed partial class SqliteStore
         {
             if (!await r.ReadAsync())
             {
-                Accounts.VerifyPassword(password, DummyHash.Value); // same cost as a real check, so timing doesn't reveal which usernames exist
+                Accounts.VerifyPasswordForUnknownUser(password);
                 return new LoginResult(LoginStatus.InvalidCredentials);
             }
             user = ReadUser(r);
@@ -177,8 +177,6 @@ public sealed partial class SqliteStore
         }
         return new LoginResult(LoginStatus.InvalidCredentials, UserId: user.Id);
     }
-
-    internal static readonly Lazy<string> DummyHash = new(() => Accounts.HashPassword(Guid.NewGuid().ToString()));
 
     // =============================================================== single sign-on
 

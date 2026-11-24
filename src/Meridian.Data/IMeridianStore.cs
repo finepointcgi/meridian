@@ -261,4 +261,11 @@ public static class Accounts
         var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
+
+    /// <summary>A hash of a random password: verifying against it costs what a real check costs.</summary>
+    private static readonly Lazy<string> DummyHash = new(() => HashPassword(Guid.NewGuid().ToString()));
+
+    /// <summary>Spends the time of a real password check for a username that does not exist, so the response time
+    /// does not reveal which usernames exist.</summary>
+    internal static void VerifyPasswordForUnknownUser(string password) => VerifyPassword(password, DummyHash.Value);
 }

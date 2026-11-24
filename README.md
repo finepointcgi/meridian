@@ -307,6 +307,9 @@ exists and otherwise swaps in the portable `.zip` / `.tar.gz`, after verifying e
 
 ## Project layout
 
+Meridian's architecture is modeled in Meridian and checked against the code on every test run: see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and the model, [`docs/architecture/Meridian.meridian`](docs/architecture/Meridian.meridian).
+
 | Path | Contents |
 | --- | --- |
 | `src/Meridian.Core` | Model repository, metamodel and notation, layout, analysis, simulation, validation |
