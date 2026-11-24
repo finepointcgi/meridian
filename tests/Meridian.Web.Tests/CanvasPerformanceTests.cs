@@ -72,6 +72,69 @@ public class CanvasPerformanceTests : TestContext
     }
 
     [Fact]
+    public void OnPan_Moves_The_View_To_Where_The_Browser_Dragged_It()
+    {
+        var c = Open();
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<DiagramView>(p => p.Add(x => x.C, c));
+        cut.InvokeAsync(() => cut.Instance.OnPan(-120.5, 64.25));
+        Assert.Equal(-120.5, c.PanX);
+        Assert.Equal(64.25, c.PanY);
+        Assert.Contains("class=\"viewport\" transform=\"translate(-120.5,64.25) scale(1)\"", cut.Markup);
+        cut.InvokeAsync(() => cut.Instance.OnPan(double.NaN, 0));   // nonsense from the page is ignored
+        Assert.Equal(-120.5, c.PanX);
+    }
+
+    public static TheoryData<string> SampleModelNames => new() { "vehicle", "cruise", "cubesat", "pump", "brake", "product-line" };
+
+    private static ModelRepository Sample(string name) => name switch
+    {
+        "vehicle" => Meridian.Core.Samples.SampleModels.Vehicle(),
+        "cruise" => Meridian.Core.Samples.AdaptiveCruiseSample.Create(),
+        "cubesat" => Meridian.Core.Samples.CubeSatSample.Create(),
+        "pump" => Meridian.Core.Samples.InfusionPumpSample.Create(),
+        "brake" => Meridian.Core.Samples.ParkingBrakeSample.Create(),
+        _ => Meridian.Core.Samples.ProductLineSample.Create(),
+    };
+
+    [Theory]
+    [MemberData(nameof(SampleModelNames))]
+    public void Body_Parts_Join_To_The_Whole_Body_And_Each_Is_Well_Formed(string sample)
+    {
+        var m = Sample(sample);
+        Assert.NotEmpty(m.Diagrams);
+        foreach (var d in m.Diagrams)
+        {
+            var whole = new System.Text.StringBuilder();
+            Meridian.Serialization.SvgRenderer.RenderBody(whole, m, d, n => n.Bounds);
+            var parts = Meridian.Serialization.SvgRenderer.RenderBodyParts(m, d, n => n.Bounds);
+            Assert.Equal(whole.ToString(), string.Concat(parts));
+            Assert.True(d.Nodes.Count == 0 || parts.Count > 1, $"{d.Name}: drawn as one piece");
+            // Blazor inserts each piece on its own, so none may open an element that another closes.
+            foreach (var part in parts)
+                System.Xml.Linq.XElement.Parse($"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">{part}</svg>");
+        }
+    }
+
+    [Fact]
+    public void Moving_One_Shape_Changes_Only_Its_Piece_And_Its_Connectors()
+    {
+        var m = Meridian.Core.Samples.SampleModels.Vehicle();
+        var d = m.Diagrams.Where(x => x.Edges.Count > 0).OrderByDescending(x => x.Nodes.Count).First();
+        // A shape that isn't a container (moving one of those redraws what it holds).
+        var moved = d.Nodes.First(n => !d.Nodes.Any(c => c.ParentId == n.Id) && d.Edges.Any(e => ReferenceEquals(e.Source, n) || ReferenceEquals(e.Target, n)));
+        var before = Meridian.Serialization.SvgRenderer.RenderBodyParts(m, d, n => n.Bounds);
+        var after = Meridian.Serialization.SvgRenderer.RenderBodyParts(m, d, n => ReferenceEquals(n, moved) ? n.Bounds with { X = n.Bounds.X + 40 } : n.Bounds);
+        Assert.Equal(before.Count, after.Count);
+        var changed = Enumerable.Range(0, before.Count).Where(i => before[i] != after[i]).ToList();
+        var touching = d.Edges.Count(e => ReferenceEquals(e.Source, moved) || ReferenceEquals(e.Target, moved));
+        Assert.Contains(changed, i => after[i].Contains($"data-node=\"{moved.Id}\""));
+        // Its own piece, its connectors, and at most a few others whose routes step around it.
+        Assert.InRange(changed.Count, 1, 1 + touching + 3);
+        Assert.True(changed.Count < before.Count / 2 || before.Count < 8, $"{changed.Count} of {before.Count} pieces changed");
+    }
+
+    [Fact]
     public void Visual_Effects_Is_A_Device_Setting_Kept_In_The_Cookie()
     {
         var reduced = new DevicePreferences(Density.Compact, FontScale.Large, VisualEffects.Reduced);

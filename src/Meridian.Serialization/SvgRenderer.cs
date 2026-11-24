@@ -138,6 +138,45 @@ public static partial class SvgRenderer
     /// <summary>Colour rules of the diagram being drawn (see <see cref="ColorRules"/>), evaluated once per render.</summary>
     [ThreadStatic] private static ColorRules.Matches? _rules;
 
+    /// <summary>The builder <see cref="RenderBodyParts"/> is splitting, and where each shape and connector ends in it.</summary>
+    [ThreadStatic] private static StringBuilder? _partsOf;
+    [ThreadStatic] private static List<int>? _cuts;
+
+    /// <summary>Ends a part here when <see cref="RenderBodyParts"/> is splitting this builder (drawing into others is ignored).</summary>
+    private static void Cut(StringBuilder sb)
+    {
+        if (ReferenceEquals(sb, _partsOf)) _cuts!.Add(sb.Length);
+    }
+
+    /// <summary>
+    /// <see cref="RenderBody(StringBuilder, ModelRepository, Diagram, Func{DiagramNode, Bounds}, Func{DiagramEdge, IReadOnlyList{Pt}?}?, SvgTheme?, Bounds?)"/>
+    /// split into pieces that end after each shape and each connector; joined, they are exactly what RenderBody writes. The
+    /// canvas hands each piece to Blazor on its own, so moving one shape updates only its piece and its connectors' pieces
+    /// in the browser instead of the whole drawing.
+    /// </summary>
+    public static List<string> RenderBodyParts(ModelRepository model, Diagram d, Func<DiagramNode, Bounds> bounds,
+                                               Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null)
+    {
+        var sb = new StringBuilder();
+        var (outerOf, outerCuts) = (_partsOf, _cuts);
+        _partsOf = sb;
+        _cuts = new List<int>();
+        try
+        {
+            RenderBody(sb, model, d, bounds, waypoints, theme, viewport, null);
+            var parts = new List<string>(_cuts.Count + 1);
+            var start = 0;
+            foreach (var end in _cuts.Append(sb.Length))
+            {
+                if (end <= start) continue;
+                parts.Add(sb.ToString(start, end - start));
+                start = end;
+            }
+            return parts;
+        }
+        finally { (_partsOf, _cuts) = (outerOf, outerCuts); }
+    }
+
     /// <param name="theme">Colours (light by default).</param>
     /// <param name="transparent">Leave the background unpainted (for PNG export onto slides and documents).</param>
     /// <param name="frame">Draw the SysML diagram frame and its header (printing can leave it off).</param>
@@ -349,6 +388,7 @@ public static partial class SvgRenderer
         sb.Append($"<g data-edge=\"{E(e.Id)}\">");
         RenderEdgeShape(sb, d, e, pts, t, jumps, model);
         sb.Append("</g>");
+        Cut(sb);
     }
 
     private static void RenderEdgeShape(StringBuilder sb, Diagram d, DiagramEdge e, IReadOnlyList<Pt> pts, SvgTheme t, List<(Pt A, Pt B)>? jumps, ModelRepository? model = null)
@@ -557,6 +597,7 @@ public static partial class SvgRenderer
         if (anchor) sb.Append("</a>");
         // Elements of used projects (libraries) shown on the project's own diagrams get a subtle marker.
         if (m.HasLibraries && m.LibraryOf(n.Element) is { } lib && !m.IsLibraryElement(d)) LibraryMarker(sb, b, lib.Info, t);
+        Cut(sb);
     }
 
     /// <summary>A small "linked book" tag in the top-right corner of a shape whose element comes from a used project.</summary>

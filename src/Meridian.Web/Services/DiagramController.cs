@@ -351,6 +351,14 @@ public sealed partial class DiagramController
         PanY += dy;
     }
 
+    /// <summary>Scrolls to an absolute offset (screen pixels): where a drag-to-pan in the browser has moved the view.</summary>
+    public void SetPan(double x, double y)
+    {
+        if (!double.IsFinite(x) || !double.IsFinite(y)) return;
+        PanX = x;
+        PanY = y;
+    }
+
     // ---------------------------------------------------------------- sub-diagrams & minimap
 
     public bool HasSubDiagram(Element e) =>
