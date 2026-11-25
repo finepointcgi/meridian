@@ -192,19 +192,23 @@ internal sealed class CodeSequencePlanner
                         if (cur.Else.Count > 0) arms.Add(("else", cur.Else));
                         break;
                     }
-                    Fragment(key, arms.Count == 1 ? "opt" : "alt", arms, current, depth, stack);
+                    Fragment(key, arms.Count == 1 ? "opt" : "alt", arms, current, depth, stack,
+                        arms.Select(a => a.Item1 == "else" ? "otherwise" : CodePhrases.Clause(a.Item1)).ToList());
                     break;
                 }
                 case CodeStatementKind.Switch:
-                    Fragment(key, "alt", s.Branches.Select(b => (b.Label.Length == 0 ? "default" : b.Label, b.Body)).ToList(), current, depth, stack);
+                    Fragment(key, "alt", s.Branches.Select(b => (b.Label.Length == 0 ? "default" : b.Label, b.Body)).ToList(), current, depth, stack,
+                        s.Branches.Select(b => $"{CodePhrases.Noun(s.Text)} is {CodePhrases.CaseLabel(b.Label)}").ToList());
                     break;
                 case CodeStatementKind.Loop:
-                    Fragment(key, "loop", [(s.Text ?? "", s.Body)], current, depth, stack);
+                    Fragment(key, "loop", [(s.Text ?? "", s.Body)], current, depth, stack,
+                        [CodeNames.Lower(CodePhrases.LoopQuestion(s.Loop, s.Text).TrimEnd('?'))]);
                     break;
                 case CodeStatementKind.Try:
                     Walk(s.Body, current, depth, stack, new KeyScope(key + "/try"));
                     foreach (var b in s.Branches)
-                        Fragment(key + "/" + b.Label, "break", [(b.Label.Length == 0 ? "catch" : "catch " + b.Label, b.Body)], current, depth, stack);
+                        Fragment(key + "/" + b.Label, "break", [(b.Label.Length == 0 ? "catch" : "catch " + b.Label, b.Body)], current, depth, stack,
+                            [b.Label.Length == 0 ? "it fails" : "it fails: " + CodePhrases.Fail(b.Label)[6..].Trim()]);
                     Walk(s.Finally, current, depth, stack, new KeyScope(key + "/finally"));
                     break;
                 case CodeStatementKind.Using or CodeStatementKind.Lock:
@@ -217,7 +221,9 @@ internal sealed class CodeSequencePlanner
         }
     }
 
-    private void Fragment(string key, string op, IReadOnlyList<(string Guard, IReadOnlyList<CodeStatement> Body)> arms, string current, int depth, List<string> stack)
+    /// <param name="shown">The guards in words, by arm (the code guards still key the elements).</param>
+    private void Fragment(string key, string op, IReadOnlyList<(string Guard, IReadOnlyList<CodeStatement> Body)> arms, string current, int depth, List<string> stack,
+                          IReadOnlyList<string>? shown = null)
     {
         if (_capped)
         {
@@ -246,7 +252,7 @@ internal sealed class CodeSequencePlanner
             var (guard, body) = arms[i];
             if (i > 0) _y += OperandGap;
             var opNode = new PlannedNode { Key = KeyScope.Stored($"frag:{key}/op{i}"), Kind = ElementKind.InteractionOperand, OwnerKey = node.Key };
-            opNode.Fields[FieldKeys.Guard] = CodeBodies.Clip(guard, 60);
+            opNode.Fields[FieldKeys.Guard] = CodeBodies.Clip(shown is not null && i < shown.Count && shown[i].Length > 0 ? shown[i] : guard, 60);
             var before = _messages;
             operands.Add((opNode, _y - OperandGap / 2 - 10));
             _last = null;

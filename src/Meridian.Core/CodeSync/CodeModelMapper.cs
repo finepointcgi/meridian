@@ -24,6 +24,29 @@ public static class CodeModelMapper
     /// <summary>Field set to "true" on elements whose code is gone when they are kept rather than removed.</summary>
     public const string RemovedKey = "code.removed";
 
+    /// <summary>
+    /// A readable name written for a code element by the optional AI pass (or by hand through the API): when set, code
+    /// sync names the element with it instead of the identifier or <see cref="CodeNames"/>'s words. The code symbol is
+    /// unchanged, so re-syncs still match.
+    /// </summary>
+    public const string LabelKey = "code.label";
+
+    /// <summary>Field set to "true" on the key blocks of a namespace: the public, top-level types the rest of the code
+    /// uses most (<see cref="KeyBlocksPerPackage"/> at most). Code sync's structure diagrams show only these.</summary>
+    public const string KeyKey = "code.keyBlock";
+
+    /// <summary>Most key blocks per namespace package.</summary>
+    public const int KeyBlocksPerPackage = 12;
+
+    /// <summary>Symbol prefix of the system architecture (subsystems from projects): "arch:", "arch:system", "arch:subsystem:X" …</summary>
+    public const string ArchitecturePrefix = "arch:";
+
+    /// <summary>Most ports a subsystem gets for the interfaces it provides or requires (the most used first).</summary>
+    public const int MaxPortsPerSubsystem = 5;
+
+    /// <summary>Most derived connectors between the parts of one block.</summary>
+    public const int MaxConnectorsPerBlock = 10;
+
     /// <summary>Field set to "true" on static (class-level) properties and operations. The metamodel has no static
     /// flag of its own, so code sync keeps it under the UML attribute name.</summary>
     public const string IsStaticKey = "isStatic";
@@ -156,9 +179,18 @@ public static class CodeModelMapper
             IndexExisting();
             _root = EnsureRootPackage();
 
-            foreach (var t in code.Types)
+            var modules = code.Modules.GroupBy(x => x.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            var left = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var t in code.Types.OrderBy(t => t.Symbol, StringComparer.Ordinal))
             {
                 if (string.IsNullOrEmpty(t.Symbol)) continue;
+                // Noise: test code, and nested types that are not public (with the types nested in them).
+                if (!o.IncludeTests && CodeSyncNoise.IsTest(t, modules) || !o.IncludeNonPublic && t.Visibility is "private" or "protected"
+                    || OuterSymbols(t.Symbol).Any(left.Contains))
+                {
+                    left.Add(t.Symbol);
+                    continue;
+                }
                 if (!_codeTypes.TryAdd(t.Symbol, t)) _warnings.Add($"Type {t.Symbol} is declared more than once; the first declaration was used.");
             }
 
@@ -176,6 +208,8 @@ public static class CodeModelMapper
                 var parts = new SortedDictionary<string, bool>(StringComparer.Ordinal);   // target -> any collection
                 var refs = new SortedSet<string>(StringComparer.Ordinal);
                 EnsureMembers(t, te, parts, refs, deps);
+                // Usage counts for the architecture whether or not it becomes model dependencies.
+                foreach (var d in t.Dependencies) deps.Add((t.Symbol, d));
 
                 foreach (var b in t.BaseTypes.Distinct())
                     if (_types.TryGetValue(b, out var be)) rels.Add(($"gen:{t.Symbol}->{b}", ElementKind.Generalization, t, te, be, null));
@@ -185,19 +219,23 @@ public static class CodeModelMapper
                     rels.Add(($"comp:{t.Symbol}->{target}", ElementKind.Composition, t, te, _types[target], many ? "*" : "1"));
                 foreach (var target in refs)
                     rels.Add(($"ref:{t.Symbol}->{target}", ElementKind.Association, t, te, _types[target], null));
-                if (o.IncludeUsageDependencies)
-                    foreach (var d in t.Dependencies) deps.Add((t.Symbol, d));
             }
             foreach (var r in rels) pairs.Add((r.From.Symbol, Target(r.Symbol)));
-            if (o.IncludeUsageDependencies)
-                foreach (var (from, to) in deps)
-                {
-                    if (from == to || pairs.Contains((from, to))) continue;
-                    if (!_types.TryGetValue(from, out var s) || !_types.TryGetValue(to, out var tt)) continue;
-                    rels.Add(($"dep:{from}->{to}", ElementKind.Dependency, _codeTypes[from], s, tt, null));
-                }
+            var usage = new List<(Element Source, Element Target)>();
+            foreach (var (from, to) in deps)
+            {
+                if (from == to || pairs.Contains((from, to))) continue;
+                if (!_types.TryGetValue(from, out var s) || !_types.TryGetValue(to, out var tt)) continue;
+                if (o.IncludeUsageDependencies) rels.Add(($"dep:{from}->{to}", ElementKind.Dependency, _codeTypes[from], s, tt, null));
+                else usage.Add((s, tt));
+            }
             foreach (var r in rels) EnsureRelationship(r.Symbol, r.Kind, r.From, r.Source, r.Target, r.Multiplicity);
-            EnsurePackageDependencies(rels.Select(r => (r.Source, r.Target)));
+            var links = rels.Select(r => (r.Source, r.Target)).Concat(usage).ToList();
+            EnsurePackageDependencies(links);
+            var linked = new HashSet<(string, string)>(rels.Select(r => (r.From.Symbol, Target(r.Symbol))).Concat(deps));
+            EnsurePartConnectors(ordered, linked);
+            MarkKeyBlocks(ordered, linked);
+            EnsureSubsystems(linked, modules);
             EnsureArtifacts();
             EnsureBehaviour();
 
@@ -209,23 +247,28 @@ public static class CodeModelMapper
 
         /// <summary>
         /// The namespace whose package is left out (<see cref="CodeSyncOptions.CollapseRootNamespace"/>): the first segment
-        /// every namespace starts with, when it equals the root package's name or no type is in the global namespace.
+        /// every namespace starts with, when it equals the root package's name or no type is in the global namespace; or the
+        /// first segment named like the root package when at least 80% of the types are in it.
         /// </summary>
         private string? CollapsedNamespace()
         {
             if (!o.CollapseRootNamespace) return null;
-            string? first = null;
+            var counts = new Dictionary<string, int>(StringComparer.Ordinal);
             var global = false;
             foreach (var t in _codeTypes.Values)
             {
                 var dot = t.Namespace.IndexOf('.');
                 var segment = (dot < 0 ? t.Namespace : t.Namespace[..dot]).Trim();
                 if (segment.Length == 0) global = true;
-                else if (first is null) first = segment;
-                else if (first != segment) return null;
+                else counts[segment] = counts.GetValueOrDefault(segment) + 1;
             }
-            if (first is null) return null;
-            return !global || string.Equals(first, _root.Name, StringComparison.OrdinalIgnoreCase) ? first : null;
+            if (counts.Count == 0) return null;
+            var named = string.Equals(counts.Keys.First(), _root.Name, StringComparison.OrdinalIgnoreCase);
+            if (counts.Count == 1) return !global || named ? counts.Keys.First() : null;
+            // A few outliers (a sample, a tool, a vendored file) do not stop the namespace named like the model package
+            // from collapsing when it holds most of the code; the outliers keep their own packages beside it.
+            var main = counts.FirstOrDefault(kv => string.Equals(kv.Key, _root.Name, StringComparison.OrdinalIgnoreCase));
+            return main.Key is not null && main.Value >= 0.8 * _codeTypes.Count ? main.Key : null;
         }
 
         /// <summary>
@@ -466,7 +509,7 @@ public static class CodeModelMapper
             for (var i = first; i < segments.Length; i++)
             {
                 var symbol = NamespacePrefix + string.Join(".", segments.Take(i + 1));
-                owner = Ensure(symbol, ElementKind.Package, owner, segments[i], [], null, null);
+                owner = Ensure(symbol, ElementKind.Package, owner, o.ReadableNames ? CodeNames.Humanize(segments[i]) : segments[i], [], null, null);
             }
             return owner;
         }
@@ -491,7 +534,7 @@ public static class CodeModelMapper
             var fields = new List<(string, string?)>();
             if (!string.IsNullOrEmpty(t.Doc)) fields.Add((FieldKeys.Documentation, t.Doc));
             if (kind == ElementKind.Block) fields.Add((FieldKeys.IsAbstract, t.IsAbstract ? "true" : null));
-            _types[t.Symbol] = Ensure(t.Symbol, kind, owner, t.Name, fields, t.File, t.Line);
+            _types[t.Symbol] = Ensure(t.Symbol, kind, owner, TypeName(t), fields, t.File, t.Line);
         }
 
         private void EnsureMembers(CodeType t, Element te, SortedDictionary<string, bool> parts, SortedSet<string> refs, SortedSet<(string, string)> deps)
@@ -507,7 +550,7 @@ public static class CodeModelMapper
                 if (!isPublic && !o.IncludeNonPublic)
                 {
                     // A hidden member's type is still a usage of that type.
-                    if (target != null && mem.Kind != CodeMemberKind.Method && o.IncludeUsageDependencies) deps.Add((t.Symbol, mem.TypeSymbol!));
+                    if (target != null && mem.Kind != CodeMemberKind.Method) deps.Add((t.Symbol, mem.TypeSymbol!));
                     continue;
                 }
                 switch (mem.Kind)
@@ -539,16 +582,20 @@ public static class CodeModelMapper
                         var symbol = $"{t.Symbol}.{mem.Name}";
                         if (!Metamodel.CanOwn(te.Kind, ElementKind.Property) || !symbols.Add(symbol)) continue;
                         var multiplicity = mem.IsCollection ? "*" : mem.IsOptional || mem.TypeName.EndsWith('?') ? "0..1" : "1";
+                        var classTyped = targetKind is CodeTypeKind.Class or CodeTypeKind.Struct or CodeTypeKind.Record;
+                        var owned = classTyped && Owns(t, mem.TypeSymbol!, targetKind!.Value);
                         var fields = new List<(string, string?)>
                         {
                             (FieldKeys.Type, target?.Id ?? mem.TypeName), (FieldKeys.Multiplicity, multiplicity), (FieldKeys.Visibility, ModelVisibility(mem.Visibility)),
                             (IsStaticKey, mem.IsStatic ? "true" : null),
+                            // A class-typed member the type does not create points at an instance owned elsewhere: a reference.
+                            (FieldKeys.Aggregation, classTyped && !owned ? "none" : null),
                         };
                         if (!string.IsNullOrEmpty(mem.Doc)) fields.Add((FieldKeys.Documentation, mem.Doc));
                         Ensure(symbol, ElementKind.Property, te, mem.Name, fields, t.File, mem.Line > 0 ? mem.Line : t.Line);
-                        if (targetKind is CodeTypeKind.Class or CodeTypeKind.Struct or CodeTypeKind.Record)
+                        if (owned)
                             parts[mem.TypeSymbol!] = (parts.TryGetValue(mem.TypeSymbol!, out var many) && many) || mem.IsCollection;
-                        else if (targetKind == CodeTypeKind.Interface) refs.Add(mem.TypeSymbol!);
+                        else if (classTyped || targetKind == CodeTypeKind.Interface) refs.Add(mem.TypeSymbol!);
                         break;
                     }
                 }
@@ -585,6 +632,31 @@ public static class CodeModelMapper
             }
         }
 
+        /// <summary>
+        /// Whether a type owns the values of a class-typed member (a part, with a composition) rather than pointing at
+        /// instances made elsewhere (a reference, with an association): structs are values, and a class or record is owned
+        /// when the type creates it (<c>new</c>). Code read without use locations keeps the old rule: every class-typed member is a part.
+        /// </summary>
+        private static bool Owns(CodeType t, string target, CodeTypeKind targetKind) =>
+            targetKind == CodeTypeKind.Struct || t.DependencyLocations.Count == 0
+            || t.DependencyLocations.Any(u => u.Symbol == target && u.Kind == CodeDependencyKind.New);
+
+        /// <summary>"A.B.C" → "A.B", "A" (every dotted prefix, longest first).</summary>
+        private static IEnumerable<string> OuterSymbols(string symbol)
+        {
+            for (var dot = symbol.LastIndexOf('.'); dot > 0; dot = symbol.LastIndexOf('.', dot - 1)) yield return symbol[..dot];
+        }
+
+        /// <summary>The name a type's element gets: words (<see cref="CodeNames"/>) unless readable names are off; generic
+        /// parameters are kept ("Box&lt;T&gt;" → "Box&lt;T&gt;", "TypedList&lt;T&gt;" → "Typed list&lt;T&gt;").</summary>
+        private string TypeName(CodeType t)
+        {
+            if (!o.ReadableNames) return t.Name;
+            var lt = t.Name.IndexOf('<');
+            var readable = CodeNames.Humanize(lt > 0 ? t.Name[..lt] : t.Name, t.Kind == CodeTypeKind.Interface);
+            return lt > 0 ? readable + t.Name[lt..] : readable;
+        }
+
         private static string ModelVisibility(string v) => v switch
         {
             "public" => "public",
@@ -614,6 +686,7 @@ public static class CodeModelMapper
                 else
                 {
                     var changed = false;
+                    if (e.Get(LabelKey) is { Length: > 0 } label) name = label;   // written by the AI pass
                     if (!ReferenceEquals(e.Owner, owner) && !e.IsAncestorOf(owner) && Metamodel.CanOwn(owner.Kind, e.Kind))
                     {
                         m.Move(e, owner);
@@ -621,7 +694,15 @@ public static class CodeModelMapper
                     }
                     if (e.Name != name) { m.Rename(e, name); changed = true; }
                     foreach (var (k, v) in fields)
+                    {
+                        if (k == FieldKeys.Documentation && e.Get(CodeAiDescriptions.WrittenKey) == "true")
+                        {
+                            // A purpose the AI pass wrote stays over code sync's own summary; a doc comment in the code wins.
+                            if (symbol.StartsWith(ArchitecturePrefix, StringComparison.Ordinal) || string.IsNullOrEmpty(v)) continue;
+                            m.Set(e, CodeAiDescriptions.WrittenKey, null);
+                        }
                         if (e.Get(k) != (v ?? "")) { m.Set(e, k, v); changed = true; }
+                    }
                     if (e.Get(RemovedKey).Length > 0) { m.Set(e, RemovedKey, null); changed = true; }
                     // Location-only edits (lines shifting) are kept current but are not reported as changes.
                     if (file != null) m.Set(e, CodeFieldKeys.File, file);
@@ -652,7 +733,7 @@ public static class CodeModelMapper
             var targets = new List<(string Key, Element Package)>();
             if (o.Artifacts == CodeArtifactMode.Repository) targets.Add(("", _root));
             else
-                foreach (var p in _root.OwnedElements.Where(c => c.Kind == ElementKind.Package && IsOurs(c) && _seen.Contains(c.Get(CodeFieldKeys.Symbol)))
+                foreach (var p in _root.OwnedElements.Where(c => IsNamespacePackage(c) && IsOurs(c) && _seen.Contains(c.Get(CodeFieldKeys.Symbol)))
                                                      .OrderBy(c => c.Get(CodeFieldKeys.Symbol), StringComparer.Ordinal).ToList())
                     targets.Add((p.Get(CodeFieldKeys.Symbol), p));
             foreach (var (key, pkg) in targets)
@@ -661,6 +742,186 @@ public static class CodeModelMapper
                 var artifact = Ensure(symbol, ElementKind.Artifact, pkg, pkg.Name, [], null, null);
                 EnsureRelationship($"manifest:{symbol}->{(key.Length == 0 ? "root" : key)}", ElementKind.Manifestation, null, artifact, pkg, null);
             }
+        }
+
+        /// <summary>
+        /// Connectors between the parts of a block whose types use each other in code (symbol "conn:A.p->A.q"), so the
+        /// block's internal structure shows how its parts work together. At most <see cref="MaxConnectorsPerBlock"/> per block.
+        /// </summary>
+        private void EnsurePartConnectors(List<CodeType> ordered, HashSet<(string, string)> linked)
+        {
+            foreach (var t in ordered)
+            {
+                if (!_types.TryGetValue(t.Symbol, out var te) || te.Kind != ElementKind.Block) continue;
+                var parts = AutoDiagrammer.Parts(m, te)
+                    .Select(p => (Part: p, Symbol: p.Get(CodeFieldKeys.Symbol), Type: m.ResolveType(p)?.Get(CodeFieldKeys.Symbol) ?? ""))
+                    .Where(x => x.Symbol.StartsWith(t.Symbol + ".", StringComparison.Ordinal) && x.Type.Length > 0 && IsOurs(x.Part))
+                    .OrderBy(x => x.Symbol, StringComparer.Ordinal).ToList();
+                if (parts.Count < 2) continue;
+                var made = 0;
+                for (var i = 0; i < parts.Count && made < MaxConnectorsPerBlock; i++)
+                    for (var j = i + 1; j < parts.Count && made < MaxConnectorsPerBlock; j++)
+                    {
+                        var (a, b) = (parts[i], parts[j]);
+                        if (a.Type == b.Type) continue;
+                        var forward = linked.Contains((a.Type, b.Type));
+                        if (!forward && !linked.Contains((b.Type, a.Type))) continue;
+                        if (!forward) (a, b) = (b, a);
+                        var (an, bn) = (TypeName(_codeTypes[a.Type]), TypeName(_codeTypes[b.Type]));
+                        EnsureRelationship($"conn:{a.Symbol}->{b.Symbol}", ElementKind.Connector, t, a.Part, b.Part, null,
+                            [(FieldKeys.Documentation, $"Derived from code: {an} uses {bn}.")], te);
+                        made++;
+                    }
+            }
+        }
+
+        /// <summary>
+        /// Marks the key blocks of each namespace package (<see cref="KeyKey"/>): its public or internal top-level classes,
+        /// structs, records and interfaces, all of them when there are at most <see cref="KeyBlocksPerPackage"/>, otherwise
+        /// the ones the most other types use (ties by symbol). Not reported as a change.
+        /// </summary>
+        private void MarkKeyBlocks(List<CodeType> ordered, HashSet<(string, string)> linked)
+        {
+            var users = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var (from, to) in linked)
+                if (from != to && _types.ContainsKey(from) && _types.ContainsKey(to)) users[to] = users.GetValueOrDefault(to) + 1;
+            var key = new HashSet<string>(StringComparer.Ordinal);
+            var candidates = ordered.Where(t => t.Kind != CodeTypeKind.Enum && t.Visibility is "public" or "internal"
+                                                && _types.TryGetValue(t.Symbol, out var e) && e.Owner?.Kind is ElementKind.Package or ElementKind.Model);
+            foreach (var g in candidates.GroupBy(t => _types[t.Symbol].Owner!.Id, StringComparer.Ordinal))
+            {
+                var list = g.ToList();
+                var chosen = list.Count <= KeyBlocksPerPackage ? list
+                    : list.Where(t => users.GetValueOrDefault(t.Symbol) > 0).OrderByDescending(t => users.GetValueOrDefault(t.Symbol))
+                          .ThenBy(t => t.Symbol, StringComparer.Ordinal).Take(KeyBlocksPerPackage);
+                foreach (var t in chosen) key.Add(t.Symbol);
+            }
+            foreach (var (symbol, e) in _types)
+            {
+                var value = key.Contains(symbol) ? "true" : null;
+                if (e.Get(KeyKey) != (value ?? "")) m.Set(e, KeyKey, value);
+            }
+        }
+
+        /// <summary>
+        /// The system architecture from the projects (<see cref="CodeSyncOptions.Subsystems"/>): an "Architecture" package
+        /// with a «system» block (named like the root package) whose parts are one «subsystem» block per non-test project
+        /// holding synced types. Where one subsystem uses an interface another implements, the user gets a port requiring it,
+        /// the implementer a port providing it (both typed by the interface block) and a connector joins them; other use
+        /// between subsystems is a plain connector between their parts, documented with the types it goes through.
+        /// </summary>
+        private void EnsureSubsystems(HashSet<(string, string)> linked, Dictionary<string, CodeModule> modules)
+        {
+            if (!o.Subsystems) return;
+            var moduleOf = _codeTypes.Values.Where(t => t.Module is not null && _types.ContainsKey(t.Symbol)
+                                                        && modules.TryGetValue(t.Module, out var md) && (!md.IsTest || o.IncludeTests))
+                .ToDictionary(t => t.Symbol, t => t.Module!, StringComparer.Ordinal);
+            var names = moduleOf.Values.Distinct().Order(StringComparer.Ordinal).ToList();
+            if (names.Count < 2) return;
+            // Projects are named by their project file ("Meridian.Desktop.csproj" builds the assembly "Meridian"), without the
+            // prefix most of them share ("Meridian.").
+            string Title(string n) => modules[n].File is { Length: > 0 } f ? System.IO.Path.GetFileNameWithoutExtension(f) : n;
+            var prefix = CommonPrefix(names.Select(Title).ToList());
+            string Readable(string n)
+            {
+                var title = Title(n);
+                var core = title.StartsWith(prefix, StringComparison.Ordinal) && title.Length > prefix.Length ? title[prefix.Length..] : title;
+                return o.ReadableNames ? string.Join(" ", core.Split('.', StringSplitOptions.RemoveEmptyEntries).Select((x, i) => i == 0 ? CodeNames.Humanize(x) : CodeNames.Lower(CodeNames.Humanize(x)))) : core;
+            }
+
+            var pkg = Ensure(ArchitecturePrefix, ElementKind.Package, _root, "Architecture",
+                [(FieldKeys.Documentation, "The system and its subsystems, derived from the projects in the code: one subsystem per project, connected where one uses another.")], null, null);
+            var system = Ensure(ArchitecturePrefix + "system", ElementKind.Block, pkg, o.ReadableNames ? CodeNames.Humanize(_root.Name) : _root.Name,
+                [(FieldKeys.Stereotypes, "system"), (FieldKeys.Documentation, $"The system built from this repository: {names.Count} subsystems, one per project, and the interfaces between them.")], null, null);
+            var blocks = new Dictionary<string, Element>(StringComparer.Ordinal);
+            var parts = new Dictionary<string, Element>(StringComparer.Ordinal);
+            foreach (var n in names)
+            {
+                var md = modules[n];
+                var types = moduleOf.Where(kv => kv.Value == n).Select(kv => _codeTypes[kv.Key]).ToList();
+                var namespaces = types.Select(t => t.Namespace).Distinct().Count();
+                var summary = $"Project {n} ({md.File}): {types.Count} type{(types.Count == 1 ? "" : "s")} in {namespaces} namespace{(namespaces == 1 ? "" : "s")}.";
+                var doc = md.Description is { Length: > 0 } d ? $"{d}\n\n{summary}" : summary;
+                var b = blocks[n] = Ensure(ArchitecturePrefix + "subsystem:" + n, ElementKind.Block, pkg, Readable(n),
+                    [(FieldKeys.Stereotypes, "subsystem"), (FieldKeys.Documentation, doc)], md.File.Length > 0 ? md.File : null, null);
+                parts[n] = Ensure(ArchitecturePrefix + "part:" + n, ElementKind.Property, system, CodeNames.Lower(Readable(n)),
+                    [(FieldKeys.Type, b.Id), (FieldKeys.Multiplicity, "1")], md.File.Length > 0 ? md.File : null, null);
+                EnsureRelationship($"{ArchitecturePrefix}comp:system->{n}", ElementKind.Composition, null, system, b, "1");
+            }
+
+            // Which subsystem uses which, through which types (counted by the user types).
+            var use = new SortedDictionary<(string A, string B), Dictionary<string, int>>();
+            foreach (var (from, to) in linked)
+            {
+                if (!moduleOf.TryGetValue(from, out var a) || !moduleOf.TryGetValue(to, out var b) || a == b) continue;
+                if (!use.TryGetValue((a, b), out var targets)) use[(a, b)] = targets = new Dictionary<string, int>(StringComparer.Ordinal);
+                targets[to] = targets.GetValueOrDefault(to) + 1;
+            }
+            var implementers = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+            foreach (var (symbol, module) in moduleOf)
+                foreach (var i in _codeTypes[symbol].Interfaces)
+                {
+                    if (!implementers.TryGetValue(i, out var set)) implementers[i] = set = new SortedSet<string>(StringComparer.Ordinal);
+                    set.Add(module);
+                }
+            var edges = new List<(string A, string P, string I, int Count)>();
+            foreach (var ((a, _), targets) in use)
+                foreach (var (target, count) in targets)
+                {
+                    if (_codeTypes[target].Kind != CodeTypeKind.Interface) continue;
+                    // Provided by the subsystems that implement it (the one that declares it when none does); a subsystem
+                    // that implements it itself does not need it from elsewhere.
+                    var impl = implementers.TryGetValue(target, out var set) ? set : [];
+                    if (impl.Contains(a)) continue;
+                    var providers = impl.Count > 0 ? impl.ToList() : moduleOf[target] != a ? [moduleOf[target]] : [];
+                    foreach (var p in providers) edges.Add((a, p, target, count));
+                }
+            var ports = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            bool Room(string module, string port) =>
+                ports.TryGetValue(module, out var set) ? set.Contains(port) || set.Count < MaxPortsPerSubsystem : true;
+            void Take(string module, string port)
+            {
+                if (!ports.TryGetValue(module, out var set)) ports[module] = set = new HashSet<string>(StringComparer.Ordinal);
+                set.Add(port);
+            }
+            var covered = new HashSet<(string, string)>();
+            foreach (var (a, p, i, _) in edges.OrderByDescending(x => x.Count).ThenBy(x => x.A, StringComparer.Ordinal).ThenBy(x => x.P, StringComparer.Ordinal).ThenBy(x => x.I, StringComparer.Ordinal).ToList())
+            {
+                var (req, prov) = ("requires:" + i, "provides:" + i);
+                if (!Room(a, req) || !Room(p, prov)) continue;
+                Take(a, req);
+                Take(p, prov);
+                // Names and texts from the code (not the elements' current names, which the AI pass may have reworded),
+                // so a re-sync of unchanged code changes nothing.
+                var iface = _types[i];
+                var ifaceName = TypeName(_codeTypes[i]);
+                var provided = Ensure($"{ArchitecturePrefix}port:{p}:{prov}", ElementKind.Port, blocks[p], ifaceName,
+                    [(FieldKeys.Type, iface.Id), (FieldKeys.Documentation, $"{Readable(p)} provides {ifaceName} to the other subsystems.")], null, null);
+                // Named like the interface on both ends (a subsystem never both provides and requires one); the
+                // connector's direction and the documentation say who uses whom.
+                var required = Ensure($"{ArchitecturePrefix}port:{a}:{req}", ElementKind.Port, blocks[a], ifaceName,
+                    [(FieldKeys.Type, iface.Id), (FieldKeys.Documentation, $"{Readable(a)} needs {ifaceName} from another subsystem.")], null, null);
+                EnsureRelationship($"{ArchitecturePrefix}conn:{a}->{p}:{i}", ElementKind.Connector, null, required, provided, null,
+                    [(FieldKeys.SourcePart, parts[a].Id), (FieldKeys.TargetPart, parts[p].Id)], system);
+                covered.Add((a, p));
+            }
+            foreach (var ((a, b), targets) in use)
+            {
+                if (covered.Contains((a, b))) continue;
+                var top = targets.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => TypeName(_codeTypes[kv.Key])).ToList();
+                var list = string.Join(", ", top.Take(5)) + (top.Count > 5 ? $" and {top.Count - 5} more" : "");
+                EnsureRelationship($"{ArchitecturePrefix}conn:{a}->{b}", ElementKind.Connector, null, parts[a], parts[b], null,
+                    [(FieldKeys.Documentation, $"Derived from code: {Readable(a)} uses {Readable(b)} through {list}.")], system);
+            }
+        }
+
+        /// <summary>The first dotted segment most names start with ("Meridian." for Meridian.Core, Meridian.Web and
+        /// HelloPlugin), when at least half of them do; otherwise "".</summary>
+        private static string CommonPrefix(IReadOnlyList<string> names)
+        {
+            var best = names.Where(n => n.Contains('.')).GroupBy(n => n[..(n.IndexOf('.') + 1)], StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).FirstOrDefault();
+            return best is not null && best.Count() * 2 >= names.Count ? best.Key : "";
         }
 
         /// <summary>Activities and interactions from method bodies (<see cref="CodeBehaviourMapper"/>), in the same undo step.</summary>
@@ -675,7 +936,7 @@ public static class CodeModelMapper
         }
 
         private void EnsureRelationship(string symbol, ElementKind kind, CodeType? from, Element source, Element target, string? multiplicity,
-                                        List<(string Key, string? Value)>? fields = null)
+                                        List<(string Key, string? Value)>? fields = null, Element? owner = null)
         {
             if (!_seen.Add(symbol)) return;
             if (Metamodel.CheckEnds(kind, source.Kind, target.Kind) is { } problem)
@@ -684,7 +945,9 @@ public static class CodeModelMapper
                 _seen.Remove(symbol);
                 return;
             }
-            var owner = m.DefaultOwnerFor(source.Owner ?? m.Root, kind);
+            owner ??= m.DefaultOwnerFor(source.Owner ?? m.Root, kind);
+            // Connectors live with their source end, as ModelRepository.Connect places them (a port's block, a part's block).
+            if (kind == ElementKind.Connector) owner = source.Owner ?? m.Root;
             if (_existing.TryGetValue(symbol, out var e) && m.Contains(e))
             {
                 if (e is Relationship r && r.Kind == kind && ReferenceEquals(r.Source, source) && ReferenceEquals(r.Target, target))

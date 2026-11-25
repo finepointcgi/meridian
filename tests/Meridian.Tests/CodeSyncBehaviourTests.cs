@@ -393,17 +393,27 @@ public class CodeSyncBehaviourTests
         // for, foreach, if/else-if, switch, try-catch decisions and their merges.
         Assert.True(nodes.Count(n => n.Kind == ElementKind.DecisionNode) >= 7);
         var finals = nodes.Where(n => n.Kind == ElementKind.ActivityFinalNode).ToList();
-        Assert.Contains(finals, f => f.Stereotypes.Contains("exception") && f.Name == "InvalidOperationException");
+        Assert.Contains(finals, f => f.Stereotypes.Contains("exception") && f.Name == "Fail: invalid operation");
         Assert.True(finals.Count >= 3);   // return -1, return Twice(charged), the throw
         var flows = m.Relationships.Where(r => r.Kind == ElementKind.ControlFlow && ReferenceEquals(r.Source.Owner, act)).ToList();
         var guards = flows.Select(f => f.Get(FieldKeys.Guard)).Where(g => g.Length > 0).ToList();
-        Assert.Contains("b.Level < 0.05", guards);
-        Assert.Contains("b.Level < 0.1", guards);
-        Assert.Contains("catch TimeoutException", guards);
-        Assert.Contains(guards, g => g.StartsWith("b in _batteries", StringComparison.Ordinal));
-        Assert.Contains("1, 2", guards);
-        // The call action points at the called operation.
-        var charge = nodes.Single(n => n.Name == "_charger.Charge()");
+        Assert.Contains("level is less than 0.05", guards);
+        Assert.Contains("level is less than 0.1", guards);
+        Assert.Contains("otherwise", guards);
+        Assert.Contains("no: timeout", guards);
+        Assert.Contains("next one", guards);
+        Assert.Contains("all done", guards);
+        Assert.Contains("1 or 2", guards);
+        // Decisions ask their question in words and keep the code they come from.
+        var decisions = nodes.Where(n => n.Kind == ElementKind.DecisionNode && n.Name.Length > 0).ToList();
+        Assert.Contains(decisions, n => n.Name == "More batteries?" && n.Documentation.StartsWith("foreach (b in _batteries.Where(", StringComparison.Ordinal));
+        Assert.Contains(decisions, n => n.Name == "Is i less than rounds?" && n.Documentation.StartsWith("for (var i = 0; i < rounds; i++)", StringComparison.Ordinal));
+        Assert.Contains(decisions, n => n.Name == "What is charged?");
+        Assert.Contains(decisions, n => n.Name == "Which case applies?" && n.Documentation.StartsWith("if (b.Level < 0.05) / else if (b.Level < 0.1)", StringComparison.Ordinal));
+        Assert.Contains(decisions, n => n.Name == "Did it work?");
+        // The call action is a step in words, pointing at the called operation; the call as written is its documentation.
+        var charge = nodes.Single(n => n.Documentation == "_charger.Charge()");
+        Assert.Equal("Charge charger", charge.Name);
         Assert.Equal(Op(m, "Sat.Power.ICharger.Charge(Battery)").Id, charge.Get(CodeActivityPlanner.OperationField));
         Assert.True(nodes.Count == d.Nodes.Count, string.Join(" | ", nodes.Where(n => d.NodeFor(n) == null).Select(n => $"{n.Kind}:{n.Name}:{n.Get(CodeBehaviourMapper.NodeKey)}")));
         Assert.Equal(flows.Count, d.Edges.Count);
@@ -441,7 +451,7 @@ public class CodeSyncBehaviourTests
         Assert.Contains("alt", ops);
         Assert.Contains("break", ops);
         var alt = fragments.First(f => f.Get(FieldKeys.Operator) == "alt" && InteractionOperands.Of(f).Count == 3);
-        Assert.Equal(["b.Level < 0.05", "b.Level < 0.1", "else"], InteractionOperands.Guards(alt));
+        Assert.Equal(["level is less than 0.05", "level is less than 0.1", "otherwise"], InteractionOperands.Guards(alt));
         Assert.Equal(fragments.Count + lifelines.Count, d.Nodes.Count);
     }
 
@@ -613,7 +623,7 @@ public class CodeSyncBehaviourTests
         Assert.True(CodeModelMapper.Apply(m, code, o).IsEmpty);
 
         // Someone moves a shape.
-        var moved = d.Nodes.First(n => n.Element.Name == "_charger.Charge()");
+        var moved = d.Nodes.First(n => n.Element.Documentation == "_charger.Charge()");
         m.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [moved] = moved.Bounds with { X = moved.Bounds.X + 333 } });
         var where = moved.Bounds;
         var ids = act.OwnedElements.Where(e => e is not Relationship).ToDictionary(e => e.Id);
@@ -621,7 +631,7 @@ public class CodeSyncBehaviourTests
         var changedSrc = Fleet.Replace("charged++;", "charged++;\n                                Log(\"charged\");");
         var changes = CodeModelMapper.Apply(m, ReadCs(changedSrc), o with { Commit = "c2" });
         Assert.Contains(act.Id, changes.Changed);
-        var log = act.OwnedElements.Single(e => e.Name == "Log()" && changes.Added.Contains(e.Id));
+        var log = act.OwnedElements.Single(e => e.Name == "Log" && changes.Added.Contains(e.Id));
         Assert.NotNull(d.NodeFor(log));
         Assert.Equal(where, d.NodeFor(m.Find(moved.Element.Id)!)!.Bounds);   // kept where it was put
         Assert.All(ids.Keys, id => Assert.NotNull(m.Find(id)));   // every earlier node kept its element
@@ -715,17 +725,17 @@ public class CodeSyncBehaviourTests
             public class A { private B b = new(); public void Go(bool on) { if (on) { b.Done(); b.Check(); b.Done(); } {{run}} } }
             """;
         var plan = ActivityPlan(ReadCs(src), "A.Go(bool)");
-        var fold = plan.Nodes.Single(n => n.Name.StartsWith("12 calls", StringComparison.Ordinal));
-        Assert.Equal("12 calls: Connect, AddBlock", fold.Name);
+        var fold = plan.Nodes.Single(n => n.Name.StartsWith("12 steps", StringComparison.Ordinal));
+        Assert.Equal("12 steps: connect b, add block to b", fold.Name);
         Assert.Equal(12, fold.Fields[FieldKeys.Documentation].Split('\n').Length);
         Assert.StartsWith("b.Connect()\nb.AddBlock()", fold.Fields[FieldKeys.Documentation]);
-        Assert.Equal(2, plan.Nodes.Count(n => n.Name == "b.Done()"));   // a run of three stays as it is
+        Assert.Equal(2, plan.Nodes.Count(n => n.Name == "Done b" && n.Fields[FieldKeys.Documentation] == "b.Done()"));   // a run of three stays as it is
         Assert.DoesNotContain(CodeActivityPlanner.SimplifiedNote, plan.Documentation);
 
         // In the model: the summary action carries the list as its documentation.
         var (m, code) = Synced(src);
         var (d, _) = CodeBehaviourMapper.Generate(m, code, Op(m, "A.Go(bool)"), false, Options);
-        var action = d!.Owner!.OwnedElements.Single(e => e.Name.StartsWith("12 calls", StringComparison.Ordinal));
+        var action = d!.Owner!.OwnedElements.Single(e => e.Name.StartsWith("12 steps", StringComparison.Ordinal));
         Assert.Contains("b.AddBlock()", action.Documentation);
     }
 
@@ -750,7 +760,7 @@ public class CodeSyncBehaviourTests
         Assert.True(plan.Nodes.Count + plan.Edges.Count <= 61, $"{plan.Nodes.Count + plan.Edges.Count} shapes");
         Assert.True(plan.Nodes.Count(n => n.Kind == ElementKind.DecisionNode) >= 4);   // the four ifs (and their merges) stay
         // The loops stay; the ifs inside them are one action each, listing what they hold.
-        var inner = plan.Nodes.Where(n => n.Name == "if k > 2 … (3 statements)").ToList();
+        var inner = plan.Nodes.Where(n => n.Name == "If k is more than 2 … (3 steps)").ToList();
         Assert.Equal(4, inner.Count);
         Assert.Equal("b.Check()\nb.Done()\nb.Done()", inner[0].Fields[FieldKeys.Documentation]);
         Assert.Contains(CodeActivityPlanner.SimplifiedNote, plan.Documentation);
@@ -767,7 +777,7 @@ public class CodeSyncBehaviourTests
             """);
         var plan = ActivityPlan(code, "A.Go(int)");
         Assert.True(plan.Nodes.Count + plan.Edges.Count <= 61, $"{plan.Nodes.Count + plan.Edges.Count} shapes");
-        Assert.Contains(plan.Nodes, n => n.Name.StartsWith("… ", StringComparison.Ordinal) && n.Name.EndsWith("more statements", StringComparison.Ordinal));
+        Assert.Contains(plan.Nodes, n => n.Name.StartsWith("… ", StringComparison.Ordinal) && n.Name.EndsWith("more steps", StringComparison.Ordinal));
         Assert.Single(plan.Nodes, n => n.Kind == ElementKind.ActivityFinalNode);
     }
 

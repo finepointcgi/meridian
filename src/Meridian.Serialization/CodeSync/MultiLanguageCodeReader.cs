@@ -30,6 +30,7 @@ public sealed class MultiLanguageCodeReader(IReadOnlyList<ICodeReader> readers) 
             g.Files?.Add(f);
         }
         var types = new List<CodeType>();
+        var modules = new List<CodeModule>();
         var warnings = new List<string>();
         var languages = new List<string>();
         foreach (var (reader, list) in groups)
@@ -40,10 +41,14 @@ public sealed class MultiLanguageCodeReader(IReadOnlyList<ICodeReader> readers) 
             if (model.Types.Count == 0 && model.Warnings.Count == 0) continue;
             languages.Add(reader.Language);
             types.AddRange(model.Types);
+            modules.AddRange(model.Modules);
             warnings.AddRange(model.Warnings);
         }
         var sorted = types.OrderBy(t => t.Symbol, StringComparer.Ordinal).ToList();
-        return new CodeModel(languages.Count == 0 ? Auto : string.Join("+", languages), sorted, warnings);
+        return new CodeModel(languages.Count == 0 ? Auto : string.Join("+", languages), sorted, warnings)
+        {
+            Modules = modules.GroupBy(m => m.Name, StringComparer.Ordinal).Select(g => g.First()).OrderBy(m => m.Name, StringComparer.Ordinal).ToList(),
+        };
     }
 }
 

@@ -78,6 +78,13 @@ public sealed record CodeType(
     public IReadOnlyList<string> Attributes { get; init; } = [];
     /// <summary>Base types and interfaces that are not scanned types, by simple name ("BackgroundService", "IHostedService").</summary>
     public IReadOnlyList<string> ExternalBases { get; init; } = [];
+    /// <summary>Declared accessibility: "public" (the default, also for readers that do not record it), "internal",
+    /// "protected" or "private". Nested types that are not public are implementation detail and skipped unless
+    /// <see cref="CodeSyncOptions.IncludeNonPublic"/> is set.</summary>
+    public string Visibility { get; init; } = "public";
+    /// <summary>The <see cref="CodeModule.Name"/> of the project the type's file belongs to, or null when the reader found no
+    /// project files.</summary>
+    public string? Module { get; init; }
 
     /// <summary>The recorded uses of <paramref name="target"/>, sorted by file and line.</summary>
     public IEnumerable<CodeDependencyUse> LocationsOf(string target) =>
@@ -185,7 +192,37 @@ public static class CodeDependencyUses
 }
 
 /// <summary>Language-neutral result of reading a set of files.</summary>
-public sealed record CodeModel(string Language, IReadOnlyList<CodeType> Types, IReadOnlyList<string> Warnings);
+public sealed record CodeModel(string Language, IReadOnlyList<CodeType> Types, IReadOnlyList<string> Warnings)
+{
+    /// <summary>The projects found next to the code (C# .csproj files), sorted by name; empty when there are none.
+    /// Code sync makes one subsystem per non-test project.</summary>
+    public IReadOnlyList<CodeModule> Modules { get; init; } = [];
+}
+
+/// <summary>
+/// A project (a C# .csproj): a unit the code is built and shipped in, which code sync shows as a subsystem.
+/// <see cref="Path"/> is the repository-relative folder of the project file ("" for the root), forward slashes.
+/// </summary>
+public sealed record CodeModule(string Name, string Path)
+{
+    /// <summary>The project's &lt;Description&gt;, when it has one.</summary>
+    public string? Description { get; init; }
+    /// <summary>A test project (test SDK, xUnit, NUnit or MSTest reference, or &lt;IsTestProject&gt;).</summary>
+    public bool IsTest { get; init; }
+    /// <summary>Names of the projects it references (&lt;ProjectReference&gt;) that were read too.</summary>
+    public IReadOnlyList<string> References { get; init; } = [];
+    /// <summary>The repository-relative path of the project file.</summary>
+    public string File { get; init; } = "";
+
+    /// <summary>The module of the deepest project folder that holds <paramref name="file"/>, or null.</summary>
+    public static CodeModule? Containing(IReadOnlyList<CodeModule> modules, string file)
+    {
+        CodeModule? best = null;
+        foreach (var m in modules)
+            if ((m.Path.Length == 0 || file.StartsWith(m.Path + "/", StringComparison.Ordinal)) && (best is null || m.Path.Length > best.Path.Length)) best = m;
+        return best;
+    }
+}
 
 public interface ICodeReader
 {
@@ -224,10 +261,32 @@ public sealed record CodeSyncOptions
     public string RootPackage { get; init; } = "Code";
     public string RepoId { get; init; } = "";
     public string Commit { get; init; } = "";
-    /// <summary>Also emit dependencies from method-body usage (not just members and inheritance).</summary>
-    public bool IncludeUsageDependencies { get; init; } = true;
-    /// <summary>Members that are not public are skipped unless this is set.</summary>
+    /// <summary>
+    /// Also keep a model Dependency for every scanned type used in a method body, parameter or local (not just members
+    /// and inheritance). Off by default: on real code they outnumber the blocks several times over and say little on their
+    /// own. The package and subsystem dependencies are derived from that usage either way.
+    /// </summary>
+    public bool IncludeUsageDependencies { get; init; }
+    /// <summary>Members that are not public, and nested types that are not public, are skipped unless this is set.</summary>
     public bool IncludeNonPublic { get; init; }
+    /// <summary>
+    /// Also sync test code: types in test projects (<see cref="CodeModule.IsTest"/>), in test folders and files
+    /// (<see cref="CodeSyncNoise.IsTestPath"/>) and classes with test methods. Off by default: tests explain how the code is
+    /// checked, not how the system is built.
+    /// </summary>
+    public bool IncludeTests { get; init; }
+    /// <summary>
+    /// Name packages, blocks, interfaces, enumerations and subsystems in words ("Code sync runner" for CodeSyncRunner) instead
+    /// of the code identifier (<see cref="CodeNames"/>). Members keep their code names. A name written by the optional AI
+    /// pass (<see cref="CodeModelMapper.LabelKey"/>) wins over both. On by default.
+    /// </summary>
+    public bool ReadableNames { get; init; } = true;
+    /// <summary>
+    /// A subsystem per project (<see cref="CodeModel.Modules"/>), with the system architecture: a system block whose parts
+    /// are the subsystems, connected where one uses another, through ports typed by the interfaces between them. On by
+    /// default; nothing is made when the code has fewer than two non-test projects.
+    /// </summary>
+    public bool Subsystems { get; init; } = true;
     /// <summary>When a type disappears from code: true removes its element; false only marks it (field "code.removed").</summary>
     public bool RemoveDeleted { get; init; } = true;
     /// <summary>Submodules whose code is in the snapshot: elements from files under one get <see cref="CodeFieldKeys.Submodule"/>.</summary>

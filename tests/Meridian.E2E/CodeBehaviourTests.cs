@@ -74,7 +74,9 @@ public sealed class CodeBehaviourTests(ServerFixture f) : E2ETest(f)
         await activityRow.GetByRole(AriaRole.Button, new() { Name = "Show on diagram" }).ClickAsync();
         await Expect(p.Locator(".vc-branch .name")).ToHaveTextAsync("code-sync/acme/sat");
         await Expect(p.Nodes().Filter(new() { Has = p.Locator("polygon") })).Not.ToHaveCountAsync(0);
-        await Expect(p.Canvas()).ToContainTextAsync("_battery.Charge()");
+        // Steps and decisions in words: the call as a step, the condition as a question.
+        await Expect(p.Canvas()).ToContainTextAsync("Charge battery");
+        await Expect(p.Canvas()).ToContainTextAsync("Is battery low?");
 
         // The sequence: lifelines for the controller and its battery, an alt fragment inside the loop.
         await badge.ClickAsync();
@@ -118,7 +120,8 @@ public sealed class CodeBehaviourTests(ServerFixture f) : E2ETest(f)
         var badge = p.Locator("[data-testid=code-changes-badge]");
         await Expect(badge).ToBeVisibleAsync();
         await badge.ClickAsync();
-        var row = p.ViewTab().Locator(".chg-row[data-kind=added]").Filter(new() { HasTextString = "PowerController" }).First;
+        // Blocks are named in words ("Power controller"); the code symbol stays PowerController.
+        var row = p.ViewTab().Locator(".chg-row[data-kind=added]").Filter(new() { HasTextString = "Power controller" }).First;
         await row.GetByRole(AriaRole.Button, new() { Name = "Show on diagram" }).ClickAsync();
         await Expect(p.Locator(".vc-branch .name")).ToHaveTextAsync("code-sync/acme/sat");
 

@@ -11,6 +11,8 @@ public static class CodeSyncSetup
         services.AddSingleton<CodeSyncEvents>();
         // The code-to-model mapper; a host may register another applier first.
         services.TryAddSingleton<ICodeModelApplier, CodeModelApplier>();
+        // The optional AI pass uses the AI assistant's provider; a host or test may register another source first.
+        services.TryAddSingleton<ICodeDescriberSource, AssistantCodeDescriberSource>();
         services.AddSingleton<CodeSyncRunner>();
         // A plain Add, so it wins over the fallback runner the git-host integration registers with TryAdd (in either order).
         services.AddSingleton<ICodeSyncRunner>(sp => sp.GetRequiredService<CodeSyncRunner>());

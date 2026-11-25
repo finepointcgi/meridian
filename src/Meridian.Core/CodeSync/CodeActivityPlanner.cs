@@ -185,6 +185,19 @@ internal sealed class CodeActivityPlanner
         _ => s.Text ?? "",
     };
 
+    /// <summary>A statement as a step in words (<see cref="CodePhrases"/>): "Load project from DB", "Set total", "Create order".</summary>
+    private static string Words(CodeStatement s) => s.Kind switch
+    {
+        _ when s.HasCall => CodePhrases.Step(s.Method, s.Receiver),
+        CodeStatementKind.Create => CodePhrases.Create(s.Method ?? s.Text),
+        CodeStatementKind.Assign => CodePhrases.Set([s.Text]),
+        CodeStatementKind.Yield => "Yield " + CodePhrases.Noun(s.Text),
+        _ => s.Text ?? "",
+    };
+
+    /// <summary>Where a decision comes from in the code ("if (user != null)", line 42), for its documentation.</summary>
+    private static string Source(string what, CodeStatement s) => $"{what}{(s.Line > 0 ? $" (line {s.Line})" : "")}";
+
     // ================================================================ statements
 
     /// <summary>A statement without control flow of its own: a call, assignment, creation or the like.</summary>
@@ -203,12 +216,11 @@ internal sealed class CodeActivityPlanner
         return string.Join("\n", lines.Take(40)) + (lines.Count > 40 ? $"\n… (+{lines.Count - 40})" : "");
     }
 
-    /// <summary>"12 calls: AddBlock, Connect, …" or "5 statements: x = 1, Charge, …".</summary>
+    /// <summary>"12 steps: add block, connect, …".</summary>
     private static string RunName(IReadOnlyList<CodeStatement> run)
     {
-        var allCalls = run.All(x => x.HasCall);
-        var names = run.Select(x => x.HasCall ? x.Method! : Label(x)).Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList();
-        var head = $"{run.Count} {(allCalls ? "calls" : "statements")}: ";
+        var names = run.Select(x => CodeNames.Lower(Words(x))).Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        var head = $"{run.Count} steps: ";
         var list = new System.Text.StringBuilder();
         foreach (var n in names)
         {
@@ -231,7 +243,7 @@ internal sealed class CodeActivityPlanner
                 var rest = list.Skip(i).ToList();
                 _foldedTail = CodeBodies.Count(rest);
                 var key = scope.Next("rest:" + KeyScope.For(s));
-                var n = Node(region, key, ElementKind.Action, $"… {_foldedTail} more statement{(_foldedTail == 1 ? "" : "s")}");
+                var n = Node(region, key, ElementKind.Action, $"… {_foldedTail} more step{(_foldedTail == 1 ? "" : "s")}");
                 n.Fields[FieldKeys.Documentation] = Listing(rest);
                 Connect(tails, key);
                 tails = One(key);
@@ -272,8 +284,9 @@ internal sealed class CodeActivityPlanner
                 var simple = new List<CodeStatement> { s };
                 while (i + 1 < run.Count && IsSimple(run[i + 1])) simple.Add(run[++i]);
                 var key = scope.Next("do:" + Label(simple[0]));
-                var name = simple.Count == 1 ? Label(s) : $"{Label(simple[0])}; … (+{simple.Count - 1})";
-                Node(region, key, ElementKind.Action, name);
+                var name = simple.Count == 1 ? Words(s) : simple.All(x => x.Kind == CodeStatementKind.Assign) ? CodePhrases.Set(simple.Select(x => x.Text)) : $"{Words(simple[0])}; … (+{simple.Count - 1})";
+                var act = Node(region, key, ElementKind.Action, name);
+                act.Fields[FieldKeys.Documentation] = string.Join("\n", simple.Select(Label));
                 Connect(tails, key);
                 tails = One(key);
                 continue;
@@ -288,13 +301,13 @@ internal sealed class CodeActivityPlanner
     {
         var key = scope.Next("fold:" + KeyScope.For(s));
         var inside = CodeBodies.Count([s]) - 1 - s.Calls.Count;
-        var count = $"{inside} statement{(inside == 1 ? "" : "s")}";
+        var count = $"{inside} step{(inside == 1 ? "" : "s")}";
         var name = s.Kind switch
         {
-            CodeStatementKind.If => $"if {CodeBodies.Clip(s.Text, 30)} … ({count})",
-            CodeStatementKind.Switch => $"switch {CodeBodies.Clip(s.Text, 24)} ({s.Branches.Count} cases, {count})",
-            CodeStatementKind.Loop => $"loop {CodeBodies.Clip(s.Text, 30)} ({count})",
-            _ => $"try … ({count})",
+            CodeStatementKind.If => $"If {CodeBodies.Clip(CodePhrases.Clause(s.Text), 30)} … ({count})",
+            CodeStatementKind.Switch => $"Depending on {CodeBodies.Clip(CodePhrases.Noun(s.Text), 24)} ({s.Branches.Count} cases, {count})",
+            CodeStatementKind.Loop => $"Repeat: {CodeBodies.Clip(CodePhrases.LoopQuestion(s.Loop, s.Text).TrimEnd('?'), 30)} ({count})",
+            _ => $"Try … ({count})",
         };
         var n = Node(region, key, ElementKind.Action, name);
         n.Fields[FieldKeys.Documentation] = Listing([s]);
@@ -314,7 +327,8 @@ internal sealed class CodeActivityPlanner
 
     private List<Tail> Call(CodeStatement s, string key, List<Tail> tails, SeqRegion region)
     {
-        var n = Node(region, key, ElementKind.Action, Label(s));
+        var n = Node(region, key, ElementKind.Action, Words(s));
+        n.Fields[FieldKeys.Documentation] = Label(s);
         if (_index.Resolve(s) is { } target && _operation(target.Symbol) is { } op) n.Fields[OperationField] = op.Id;
         Connect(tails, key);
         return One(key);
@@ -329,14 +343,15 @@ internal sealed class CodeActivityPlanner
             {
                 if (s.HasCall) tails = Call(s, key + "/call", tails, region);
                 var final = key + "/end";
-                Node(region, final, ElementKind.ActivityFinalNode, s.HasCall ? "" : s.Text is { Length: > 0 } t ? "return " + t : "");
+                Node(region, final, ElementKind.ActivityFinalNode, s.HasCall ? "" : s.Text is { Length: > 0 } t ? CodePhrases.Return(t) : "");
                 Connect(tails, final);
                 return [];
             }
             case CodeStatementKind.Throw:
             {
-                var n = Node(region, key, ElementKind.ActivityFinalNode, s.Method ?? s.Text ?? "");
+                var n = Node(region, key, ElementKind.ActivityFinalNode, CodePhrases.Fail(s.Method ?? s.Text));
                 n.Fields[FieldKeys.Stereotypes] = "exception";
+                n.Fields[FieldKeys.Documentation] = "throw " + (s.Text ?? s.Method ?? "");
                 Connect(tails, key);
                 return [];
             }
@@ -358,14 +373,23 @@ internal sealed class CodeActivityPlanner
                     otherwise = cur.Else.Count > 0 ? cur.Else : null;
                     break;
                 }
-                if (otherwise != null) arms.Add(("else", otherwise));
-                return Branch(key, arms, otherwise == null, tails, region, loop);
+                // One condition: the decision asks it, its branches answer yes / no. Several (else-if): each branch says
+                // which condition holds, the last "otherwise".
+                var single = arms.Count == 1;
+                var source = "if " + string.Join(" / else if ", arms.Select(a => $"({a.Guard})"));
+                var named = arms.Select(a => (single ? "yes" : CodePhrases.Clause(a.Guard), a.Body)).ToList();
+                if (otherwise != null) named.Add((single ? "no" : "otherwise", otherwise));
+                // Arm keys stay the code (stable element identity across versions of the phrasing).
+                var keys = arms.Select(a => a.Guard).Concat(otherwise != null ? ["else"] : []).ToList();
+                return Branch(key, named, otherwise == null, tails, region, loop,
+                    single ? CodePhrases.Question(arms[0].Guard) : "Which case applies?", Source(source, s), single ? "no" : "otherwise", keys);
             }
             case CodeStatementKind.Switch:
             {
-                var arms = s.Branches.Select(b => (b.Label.Length == 0 ? "default" : b.Label, b.Body)).ToList();
+                var arms = s.Branches.Select(b => (CodePhrases.CaseLabel(b.Label), b.Body)).ToList();
                 var hasDefault = s.Branches.Any(b => b.Label == "default" || b.Label.Length == 0);
-                return Branch(key, arms, !hasDefault, tails, region, loop);
+                return Branch(key, arms, !hasDefault, tails, region, loop, CodePhrases.SwitchQuestion(s.Text), Source($"switch ({s.Text})", s), "otherwise",
+                    s.Branches.Select(b => b.Label.Length == 0 ? "default" : b.Label).ToList());
             }
             case CodeStatementKind.Loop when s.Loop == CodeLoopKind.Do:
             {
@@ -373,61 +397,74 @@ internal sealed class CodeActivityPlanner
                 var dec = key + "/until";
                 var body = new SeqRegion();
                 var outer = new SeqRegion();
-                var headNode = Node(outer, head, ElementKind.DecisionNode, "");
+                var headNode = Node(outer, head, ElementKind.DecisionNode, "");   // a merge: unnamed
                 outer.Items.Clear();
                 Connect(tails, head);
                 var ctx = new LoopContext(KeyScope.Stored(dec));
                 var inner = Sequence(s.Body, new KeyScope(key), One(head), body, ctx);
                 var decRegion = new SeqRegion();
-                Node(decRegion, dec, ElementKind.DecisionNode, "");
+                var until = Node(decRegion, dec, ElementKind.DecisionNode, CodePhrases.LoopQuestion(CodeLoopKind.Do, s.Text));
+                until.Fields[FieldKeys.Documentation] = Source($"do … while ({s.Text})", s);
                 Connect(inner, dec);
-                Connect([new Tail(KeyScope.Stored(dec), s.Text ?? "")], head);
+                Connect([new Tail(KeyScope.Stored(dec), "yes, again")], head);
                 region.Items.Add(new LoopRegion(KeyScope.Stored(dec), body, headNode.Key));
-                return [new Tail(KeyScope.Stored(dec), "else"), .. ctx.Breaks];
+                return [new Tail(KeyScope.Stored(dec), "no, done"), .. ctx.Breaks];
             }
             case CodeStatementKind.Loop:
             {
                 var tmp = new SeqRegion();
-                var dec = Node(tmp, key, ElementKind.DecisionNode, "").Key;
+                var decNode = Node(tmp, key, ElementKind.DecisionNode, CodePhrases.LoopQuestion(s.Loop, s.Text));
+                var keyword = s.Loop switch { CodeLoopKind.ForEach => "foreach", CodeLoopKind.For => "for", _ => "while" };
+                decNode.Fields[FieldKeys.Documentation] = Source($"{keyword} ({s.Text})", s);
+                var dec = decNode.Key;
                 Connect(tails, dec);
                 var body = new SeqRegion();
                 var ctx = new LoopContext(dec);
-                var inner = Sequence(s.Body, new KeyScope(key), [new Tail(dec, s.Text ?? "")], body, ctx);
+                var (more, done) = s.Loop == CodeLoopKind.ForEach ? ("next one", "all done") : ("yes", "no");
+                var inner = Sequence(s.Body, new KeyScope(key), [new Tail(dec, more)], body, ctx);
                 if (inner.Count > 0 && !(inner.Count == 1 && inner[0].From == dec)) Connect(inner, dec);
                 region.Items.Add(new LoopRegion(dec, body, null));
-                return [new Tail(dec, "else"), .. ctx.Breaks];
+                return [new Tail(dec, done), .. ctx.Breaks];
             }
             case CodeStatementKind.Try:
             {
                 tails = Sequence(s.Body, new KeyScope(key + "/try"), tails, region, loop);
                 if (s.Branches.Count > 0 && tails.Count > 0)
                 {
-                    var arms = new List<(string, IReadOnlyList<CodeStatement>)> { ("ok", []) };
-                    arms.AddRange(s.Branches.Select(b => (b.Label.Length == 0 ? "catch" : "catch " + b.Label, b.Body)));
-                    tails = Branch(key + "/catch", arms, false, tails, region, loop);
+                    var arms = new List<(string, IReadOnlyList<CodeStatement>)> { ("yes", []) };
+                    arms.AddRange(s.Branches.Select(b => (b.Label.Length == 0 ? "no, it failed" : "no: " + CodePhrases.Fail(b.Label)[6..].Trim(), b.Body)));
+                    tails = Branch(key + "/catch", arms, false, tails, region, loop, "Did it work?",
+                        Source("try … catch " + string.Join(", ", s.Branches.Select(b => b.Label.Length == 0 ? "(any)" : b.Label)), s), "no",
+                        ["ok", .. s.Branches.Select(b => b.Label.Length == 0 ? "catch" : "catch " + b.Label)]);
                 }
                 if (s.Finally.Count > 0 && tails.Count > 0) tails = Sequence(s.Finally, new KeyScope(key + "/finally"), tails, region, loop);
                 return tails;
             }
             case CodeStatementKind.Using or CodeStatementKind.Lock:
             {
-                Node(region, key, ElementKind.Action, (s.Kind == CodeStatementKind.Using ? "using " : "lock ") + s.Text);
+                var use = Node(region, key, ElementKind.Action, (s.Kind == CodeStatementKind.Using ? "Use " : "Lock ") + CodePhrases.Noun((s.Text ?? "").Split('=')[^1]));
+                use.Fields[FieldKeys.Documentation] = (s.Kind == CodeStatementKind.Using ? "using " : "lock ") + s.Text;
                 Connect(tails, key);
                 return Sequence(s.Body, new KeyScope(key), One(key), region, loop);
             }
             default:
                 if (s.HasCall) return Call(s, key, tails, region);
-                Node(region, key, ElementKind.Action, Label(s));
+                var plain = Node(region, key, ElementKind.Action, Words(s));
+                plain.Fields[FieldKeys.Documentation] = Label(s);
                 Connect(tails, key);
                 return One(key);
         }
     }
 
     /// <summary>A decision with one branch per arm (guarded), and a merge when more than one path comes out.</summary>
-    private List<Tail> Branch(string key, List<(string Guard, IReadOnlyList<CodeStatement> Body)> arms, bool elsePasses, List<Tail> tails, SeqRegion region, LoopContext? loop)
+    private List<Tail> Branch(string key, List<(string Guard, IReadOnlyList<CodeStatement> Body)> arms, bool elsePasses, List<Tail> tails, SeqRegion region, LoopContext? loop,
+                              string question, string source, string elseGuard, IReadOnlyList<string> armKeys)
     {
+        var armIndex = 0;
         var tmp = new SeqRegion();
-        var dec = Node(tmp, key, ElementKind.DecisionNode, "").Key;
+        var decNode = Node(tmp, key, ElementKind.DecisionNode, question);
+        decNode.Fields[FieldKeys.Documentation] = source;
+        var dec = decNode.Key;
         Connect(tails, dec);
         var br = new BranchRegion(dec);
         var outs = new List<Tail>();
@@ -436,12 +473,12 @@ internal sealed class CodeActivityPlanner
         {
             var seq = new SeqRegion();
             br.Branches.Add(seq);
-            outs.AddRange(Sequence(body, new KeyScope(scope.Next("arm:" + guard)), [new Tail(dec, guard)], seq, loop));
+            outs.AddRange(Sequence(body, new KeyScope(scope.Next("arm:" + armKeys[armIndex++])), [new Tail(dec, guard)], seq, loop));
         }
         if (elsePasses)
         {
             br.Branches.Add(new SeqRegion());
-            outs.Add(new Tail(dec, "else"));
+            outs.Add(new Tail(dec, elseGuard));
         }
         region.Items.Add(br);
         if (outs.Count < 2) return outs;

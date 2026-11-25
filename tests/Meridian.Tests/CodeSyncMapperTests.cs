@@ -8,7 +8,13 @@ namespace Meridian.Tests;
 public class CodeSyncMapperTests
 {
     // The package tree as the code has it (no collapsed root namespace, no derived package dependencies): those have tests of their own.
-    private static CodeSyncOptions Options(string commit = "c1") => new() { RepoId = "repo-1", Commit = commit, RootPackage = "Software::Code", CollapseRootNamespace = false, PackageDependencies = false };
+    // Code identifiers as names and every usage dependency: these tests are about the mapping itself (readable names,
+    // subsystems and the default of leaving usage dependencies out have tests of their own in CodeSyncArchitectureTests).
+    private static CodeSyncOptions Options(string commit = "c1") => new()
+    {
+        RepoId = "repo-1", Commit = commit, RootPackage = "Software::Code", CollapseRootNamespace = false, PackageDependencies = false,
+        ReadableNames = false, IncludeUsageDependencies = true,
+    };
 
     private static CodeSyncChanges Sync(ModelRepository m, IReadOnlyList<CodeFile> files, string commit = "c1", CodeSyncOptions? options = null) =>
         CodeModelMapper.Apply(m, new CSharpCodeReader().Read(files), (options ?? Options()) with { Commit = commit });

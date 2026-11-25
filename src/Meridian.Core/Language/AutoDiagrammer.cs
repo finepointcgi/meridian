@@ -46,6 +46,13 @@ public sealed class PlannedDiagram
     public bool LeftToRight { get; init; }
 
     public bool Selected { get; set; } = true;
+
+    /// <summary>Draw shapes with their names only (<see cref="Notation.CompartmentsStyle"/> "none"), sized to match.</summary>
+    public bool Compact { get; init; }
+
+    /// <summary>Which relationships between the shapes are drawn (on top of <see cref="AutoDiagrammer.EdgeAllowed"/>); null draws all.</summary>
+    public Func<Relationship, bool>? EdgeFilter { get; init; }
+
     public AutoDiagramStatus Status => Existing == null ? AutoDiagramStatus.New : AutoDiagramStatus.Update;
 }
 
@@ -373,7 +380,10 @@ public static class AutoDiagrammer
 
     /// <summary>Part properties of a block: properties typed by a block (not value or constraint properties).</summary>
     public static IEnumerable<Element> Parts(ModelRepository m, Element block) =>
-        block.OwnedElements.Where(p => p.Kind == ElementKind.Property && m.ResolveType(p) is { Kind: ElementKind.Block or ElementKind.Component or ElementKind.Class });
+        block.OwnedElements.Where(p => p.Kind == ElementKind.Property && !IsReference(p) && m.ResolveType(p) is { Kind: ElementKind.Block or ElementKind.Component or ElementKind.Class });
+
+    /// <summary>A reference property (<see cref="FieldKeys.Aggregation"/> "none" or "shared"): it points at an instance owned elsewhere.</summary>
+    public static bool IsReference(Element p) => p.Get(FieldKeys.Aggregation) is "none" or "shared";
 
     /// <summary>The block's own ports that its connectors use (drawn as boundary ports on its IBD).</summary>
     private static IEnumerable<Element> BoundaryPorts(ModelRepository m, Element block) =>
@@ -536,13 +546,16 @@ public static class AutoDiagrammer
         if (p.Purpose.Length > 0 && (p.Existing == null || d.Documentation.Length == 0 || d.Get(MarkerKey).Length > 0)) m.Set(d, FieldKeys.Documentation, p.Purpose);
         if (d.Get(EdgeRouter.DiagramKey).Length == 0) m.Set(d, EdgeRouter.DiagramKey, EdgeRouter.Format(EdgeRouter.DefaultFor(d.DiagramType)));
 
-        var roots = Collect(m, p.Type, p.Owner, p.Elements);
-        var links = Links(m, p.Type, roots);
+        var roots = Collect(m, p.Type, p.Owner, p.Elements, p.Compact);
+        var links = Links(m, p.Type, roots).Where(l => p.EdgeFilter?.Invoke(l.R) != false).ToList();
         Layout(m, p.Type, roots, links, p.LeftToRight);
         foreach (var n in roots) Materialize(m, d, n, null);
+        if (p.Compact)
+            foreach (var n in d.Nodes.Where(n => !Notation.IsBorderShape(n.Element) && Notation.ShapeOf(n.Element) == NodeShape.Rectangle).ToList())
+                m.SetNodeStyle(d, n, Notation.CompartmentsStyle, "none");
         foreach (var e in d.Nodes.Select(n => n.Element).Distinct().ToList())
             foreach (var r in m.RelationshipsOf(e).ToList())
-                if (EdgeAllowed(p.Type, r)) m.AddEdge(d, r);
+                if (EdgeAllowed(p.Type, r) && p.EdgeFilter?.Invoke(r) != false) m.AddEdge(d, r);
         EdgeRouter.Invalidate(d);
         return d;
     }
@@ -599,7 +612,7 @@ public static class AutoDiagrammer
     private static int Count(List<LNode> roots) => roots.Sum(r => r.SelfAndDescendants().Count());
 
     /// <summary>The shape tree: top-level shapes with their nested shapes and border ports.</summary>
-    private static List<LNode> Collect(ModelRepository m, DiagramType type, Element owner, IReadOnlyList<Element> elements)
+    private static List<LNode> Collect(ModelRepository m, DiagramType type, Element owner, IReadOnlyList<Element> elements, bool compact = false)
     {
         var list = elements.Where(e => m.Contains(e) && e is not Relationship && e is not Diagram && e.Kind != ElementKind.Model).Distinct().ToList();
         var roots = new List<LNode>();
@@ -642,7 +655,7 @@ public static class AutoDiagrammer
                 else pn.Kids.Add(n);
             }
         }
-        foreach (var n in roots.SelectMany(r => r.SelfAndDescendants())) (n.W, n.H) = SizeOf(m, type, n);
+        foreach (var n in roots.SelectMany(r => r.SelfAndDescendants())) (n.W, n.H) = SizeOf(m, type, n, compact);
         return roots;
     }
 
@@ -659,7 +672,7 @@ public static class AutoDiagrammer
         return n;
     }
 
-    private static (double W, double H) SizeOf(ModelRepository m, DiagramType type, LNode n)
+    private static (double W, double H) SizeOf(ModelRepository m, DiagramType type, LNode n, bool compact = false)
     {
         var e = n.E;
         if (n.IsPort) return (16, 16);
@@ -670,6 +683,7 @@ public static class AutoDiagrammer
             case NodeShape.Rectangle:
             {
                 var c = Notation.Content(m, e, type);
+                if (compact) c = c with { Compartments = [] };
                 if (e.Kind == ElementKind.Requirement) w = 240;
                 else
                 {
@@ -780,6 +794,12 @@ public static class AutoDiagrammer
             _ => (60.0, 80.0, 6),
         };
         if (!topLevel) { hGap = Math.Min(hGap, 40); vGap = Math.Min(vGap, 40); perRow = Math.Min(perRow, 4); }
+        // Port names are drawn beside their ports: leave room for the longest so neighbours' labels do not overlap.
+        if (type == DiagramType.InternalBlock && topLevel && level.SelectMany(n => n.Ports).Select(p => p.E.Name.Length).DefaultIfEmpty(0).Max() is var longest and > 0)
+        {
+            hGap = Math.Max(hGap, Math.Min(300, longest * 6.5 + 40));
+            vGap = Math.Max(vGap, 70);
+        }
 
         if (type == DiagramType.UseCase && topLevel && level.Any(n => n.E.Kind == ElementKind.Actor) && level.Any(n => n.E.Kind != ElementKind.Actor))
         {
