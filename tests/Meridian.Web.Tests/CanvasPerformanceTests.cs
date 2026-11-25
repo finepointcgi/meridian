@@ -85,6 +85,67 @@ public class CanvasPerformanceTests : TestContext
         Assert.Equal(-120.5, c.PanX);
     }
 
+    [Fact]
+    public void A_Batch_Of_Pointer_Moves_Is_Applied_In_Order_With_One_Redraw()
+    {
+        var c = Open();
+        var a = c.Diagram.Nodes[0];
+        var start = c.ToScreen(a.Bounds.Center);
+        const double left = 30, top = 70;   // where the canvas sits in the page: the browser sends client coordinates
+        c.PointerDown(start.X, start.Y, 0, Mods.None, 1);
+        // Moves since the last frame as (clientX, clientY, mods) triples; a nonsense one in the middle is skipped.
+        var redraw = DiagramView.ApplyPointerMoves(c, [start.X + left + 10, start.Y + top, 0, double.NaN, 0, 0, start.X + left + 60, start.Y + top + 30, 0], left, top);
+        Assert.True(redraw);
+        Assert.Equal(a.Bounds.Offset(60, 30), c.BoundsOf(a));
+        c.PointerUp(Mods.None);
+        Assert.Equal(new Bounds(60, 30, 160, 80), a.Bounds);
+        // Hovering over empty canvas changes nothing on screen: no redraw.
+        Assert.False(DiagramView.ApplyPointerMoves(c, [left + 700, top + 500, 0, left + 705, top + 505, 0], left, top));
+    }
+
+    [Fact]
+    public void OnPointerMoves_Redraws_The_Dragged_Shape_Where_The_Last_Move_Left_It()
+    {
+        var c = Open();
+        RenderComponent<MudBlazor.MudPopoverProvider>();
+        var cut = RenderComponent<DiagramView>(p => p.Add(x => x.C, c));
+        var a = c.Diagram.Nodes[0];
+        var start = c.ToScreen(a.Bounds.Center);
+        cut.InvokeAsync(() => c.PointerDown(start.X, start.Y, 0, Mods.None, 1));
+        var before = cut.Markup;
+        cut.InvokeAsync(() => cut.Instance.OnPointerMoves([start.X + 40, start.Y, 0, start.X + 120, start.Y + 50, 0]));
+        Assert.Equal(a.Bounds.Offset(120, 50), c.BoundsOf(a));
+        Assert.NotEqual(before, cut.Markup);   // redrawn without a browser event: the call asks for it
+    }
+
+    [Fact]
+    public void While_A_Shape_Is_Dragged_Other_Connectors_Hold_Still_Until_The_Drop()
+    {
+        var m = new ModelRepository("Pkg");
+        var d = m.CreateDiagram(m.Root, DiagramType.BlockDefinition, "Structure");
+        DiagramNode Block(string name, double x, double y) => m.AddNode(d, m.Create(m.Root, ElementKind.Block, name), new Bounds(x, y, 120, 60), showRelationships: false);
+        var (a, b, c, e) = (Block("A", 0, 100), Block("B", 400, 100), Block("C", 0, 400), Block("E", 400, 400));
+        var ab = m.AddEdge(d, m.Connect(ElementKind.Dependency, a.Element, b.Element))!;
+        var ce = m.AddEdge(d, m.Connect(ElementKind.Dependency, c.Element, e.Element))!;
+        var ws = Services.GetRequiredService<Workspace>();
+        ws.UseLocalModel(m);
+        var ctl = ws.Open(d);
+        ctl.SetZoom(1);
+        var before = ctl.Routes(ctl.MemoBounds());
+
+        var at = ctl.ToScreen(a.Bounds.Center);
+        ctl.PointerDown(at.X, at.Y, 0, Mods.None, 1);
+        ctl.PointerMove(at.X + 200, at.Y + 290);   // onto the C-E connector
+        var dragging = ctl.Routes(ctl.MemoBounds());
+        Assert.Same(before[ce], dragging[ce]);
+        Assert.NotEqual(before[ab], dragging[ab]);
+
+        ctl.PointerUp(Mods.None);
+        var dropped = ctl.Routes(ctl.MemoBounds());
+        Assert.Equal(EdgeRouter.RouteAll(d, n => ctl.BoundsOf(n)), dropped);
+        Assert.NotEqual(before[ce], dropped[ce]);   // now it steps around A
+    }
+
     public static TheoryData<string> SampleModelNames => new() { "vehicle", "cruise", "cubesat", "pump", "brake", "product-line" };
 
     private static ModelRepository Sample(string name) => name switch

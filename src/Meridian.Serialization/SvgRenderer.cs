@@ -154,8 +154,11 @@ public static partial class SvgRenderer
     /// canvas hands each piece to Blazor on its own, so moving one shape updates only its piece and its connectors' pieces
     /// in the browser instead of the whole drawing.
     /// </summary>
+    /// <param name="routes">Paths already computed with <see cref="EdgeRouter.RouteAll"/> on the diagram's visible view, the same
+    /// bounds and waypoints (the canvas shares one set per render with its minimap and selection halos); null computes them.</param>
     public static List<string> RenderBodyParts(ModelRepository model, Diagram d, Func<DiagramNode, Bounds> bounds,
-                                               Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null)
+                                               Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null, SvgTheme? theme = null, Bounds? viewport = null,
+                                               Dictionary<DiagramEdge, IReadOnlyList<Pt>>? routes = null)
     {
         var sb = new StringBuilder();
         var (outerOf, outerCuts) = (_partsOf, _cuts);
@@ -163,7 +166,7 @@ public static partial class SvgRenderer
         _cuts = new List<int>();
         try
         {
-            RenderBody(sb, model, d, bounds, waypoints, theme, viewport, null);
+            RenderBody(sb, model, d, bounds, waypoints, theme, viewport, routes);
             var parts = new List<string>(_cuts.Count + 1);
             var start = 0;
             foreach (var end in _cuts.Append(sb.Length))

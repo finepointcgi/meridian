@@ -244,4 +244,74 @@ public class EdgeRouterTests(ITestOutputHelper output)
         var svg = SvgRenderer.Render(m, d);
         Assert.Contains(SvgRenderer.Points(Notation.RouteIn(d, e)), svg);
     }
+
+    [Theory]
+    [InlineData("orthogonal")]
+    [InlineData("classic")]
+    public void While_Dragging_Only_The_Moving_Shapes_Connectors_Are_Routed_Again(string routing)
+    {
+        var (m, d) = Bdd(routing);
+        var a = Block(m, d, "A", 0, 100);
+        var b = Block(m, d, "B", 400, 100);
+        var c = Block(m, d, "C", 0, 400);
+        var e = Block(m, d, "E", 400, 400);
+        var ab = Link(m, d, a, b);
+        var ce = Link(m, d, c, e);
+        var frozen = EdgeRouter.RouteAll(d, n => n.Bounds);
+
+        // A moves right between C and E: its connector follows, C-E keeps its pre-drag path even though A now sits on it.
+        Func<DiagramNode, Bounds> dragging = n => ReferenceEquals(n, a) ? new Bounds(200, 380, 120, 60) : n.Bounds;
+        var live = EdgeRouter.RouteMoving(d, frozen, new HashSet<DiagramNode> { a }, dragging);
+        Assert.Same(frozen[ce], live[ce]);
+        Assert.NotEqual(frozen[ab], live[ab]);
+        var (start, at) = (live[ab][0], dragging(a));   // leaves A where it is now
+        Assert.True(start.X >= at.X - 1 && start.X <= at.Right + 1 && start.Y >= at.Y - 1 && start.Y <= at.Bottom + 1, $"{start} is not on {at}");
+        AssertOrthogonal(live[ab]);
+
+        // The diagram's own cache never saw the preview: routing the unchanged diagram again recomputes nothing.
+        EdgeRouter.RouteAll(d, n => n.Bounds);
+        if (routing == "orthogonal") Assert.Equal(0, EdgeRouter.LastRerouteCount(d));
+        // The drop routes everything around A's new place.
+        m.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [a] = dragging(a) });
+        var dropped = EdgeRouter.RouteAll(d, n => n.Bounds);
+        AssertAvoids(dropped[ce], [a.Bounds]);
+    }
+
+    [Fact]
+    public void Classic_Paths_Are_Reused_Until_A_Shape_Changes_And_Always_Match_A_Fresh_Route()
+    {
+        var (m, d) = Bdd("classic");
+        var a = Block(m, d, "A", 0, 100);
+        var wall = Block(m, d, "Wall", 200, 40, 80, 180);
+        var b = Block(m, d, "B", 400, 100);
+        var c = Block(m, d, "C", 0, 400);
+        var ab = Link(m, d, a, b);
+        var cb = Link(m, d, c, b);
+        void AssertFresh(Dictionary<DiagramEdge, IReadOnlyList<Pt>> routes, Func<DiagramNode, Bounds> bounds)
+        {
+            foreach (var e in d.Edges) Assert.Equal(Notation.RouteIn(d, e, bounds), routes[e]);
+        }
+
+        var first = EdgeRouter.RouteAll(d, n => n.Bounds);
+        AssertFresh(first, n => n.Bounds);
+        AssertAvoids(first[ab], [wall.Bounds]);
+        // Nothing moved: the same paths, not recomputed.
+        var again = EdgeRouter.RouteAll(d, n => n.Bounds);
+        Assert.Same(first[ab], again[ab]);
+        Assert.Same(first[cb], again[cb]);
+
+        // A shape no connector touches moves (a preview, then for real): every path is worked out again around it.
+        Func<DiagramNode, Bounds> dragged = n => ReferenceEquals(n, wall) ? n.Bounds.Offset(0, 160) : n.Bounds;
+        var moved = EdgeRouter.RouteAll(d, dragged);
+        AssertFresh(moved, dragged);
+        Assert.NotSame(first[ab], moved[ab]);
+        m.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [wall] = wall.Bounds.Offset(0, 160) });
+        AssertFresh(EdgeRouter.RouteAll(d, n => n.Bounds), n => n.Bounds);
+
+        // Nesting changes what a path may cross (its own containers aren't obstacles) even when no rectangle moved.
+        m.SetBounds(d, new Dictionary<DiagramNode, Bounds> { [wall] = new Bounds(-40, 60, 540, 160) });
+        AssertFresh(EdgeRouter.RouteAll(d, n => n.Bounds), n => n.Bounds);
+        ModelRepository.SetNodeParentForLoad(a, wall.Id);
+        AssertFresh(EdgeRouter.RouteAll(d, n => n.Bounds), n => n.Bounds);
+    }
 }

@@ -404,11 +404,30 @@ public static class Notation
         var wps = waypoints ?? e.Waypoints;
         if (wps.Count > 0 || e.Relationship.Kind == ElementKind.Message || ReferenceEquals(e.Source, e.Target) || !UsesOrthogonal(e))
             return Route(e, boundsOf, waypoints);
+        return LegacyAvoiding(d, e, boundsOf);
+    }
+
+    /// <summary>
+    /// True when <see cref="RouteIn"/> draws <paramref name="e"/> with <see cref="LegacyAvoiding"/>: the legacy look, no
+    /// waypoints, and an orthogonal path between two different shapes. Callers have already ruled out database and fault tree paths.
+    /// </summary>
+    internal static bool IsLegacyAvoiding(Diagram d, DiagramEdge e, IReadOnlyList<Pt>? waypoints) =>
+        EdgeRouter.StyleOf(d, e) == EdgeRouting.Legacy && EdgeRouter.Routable(e) && (waypoints ?? e.Waypoints).Count == 0 && UsesOrthogonal(e);
+
+    /// <summary>Whether a shape is something legacy paths steer around (its source and target and their containers aside).</summary>
+    internal static bool IsLegacyObstacle(DiagramNode n) =>
+        !IsBorderShape(n.Element) && ShapeOf(n.Element) is not (NodeShape.Swimlane or NodeShape.Pool or NodeShape.Fragment or NodeShape.Lifeline);
+
+    /// <summary>
+    /// The legacy look's orthogonal path, steering around every other shape. It depends only on the two shapes' bounds and on
+    /// the bounds, order, nesting and <see cref="IsLegacyObstacle"/> of the diagram's shapes (<see cref="EdgeRouter.RouteAll"/> caches it on that).
+    /// </summary>
+    internal static IReadOnlyList<Pt> LegacyAvoiding(Diagram d, DiagramEdge e, Func<DiagramNode, Bounds> boundsOf)
+    {
         var exclude = new HashSet<DiagramNode>(ReferenceEqualityComparer.Instance) { e.Source, e.Target };
         for (var p = d.ParentOf(e.Source); p != null && exclude.Add(p); p = d.ParentOf(p)) { }
         for (var p = d.ParentOf(e.Target); p != null && exclude.Add(p); p = d.ParentOf(p)) { }
-        var obstacles = d.Nodes.Where(n => !exclude.Contains(n) && !IsBorderShape(n.Element) && ShapeOf(n.Element) is not (NodeShape.Swimlane or NodeShape.Pool or NodeShape.Fragment or NodeShape.Lifeline))
-                               .Select(boundsOf).ToList();
+        var obstacles = d.Nodes.Where(n => !exclude.Contains(n) && IsLegacyObstacle(n)).Select(boundsOf).ToList();
         return obstacles.Count == 0 ? Orthogonal(boundsOf(e.Source), boundsOf(e.Target)) : OrthogonalAvoiding(boundsOf(e.Source), boundsOf(e.Target), obstacles);
     }
 

@@ -155,6 +155,31 @@ public sealed partial class DiagramController
 
     public IReadOnlyList<Pt>? WaypointsFor(DiagramEdge e) => WaypointPreview != null && ReferenceEquals(e, SelectedEdge) ? WaypointPreview : null;
 
+    /// <summary>Connector paths as they were when the current move or resize began (see <see cref="Routes"/>).</summary>
+    private Dictionary<DiagramEdge, IReadOnlyList<Pt>>? _frozenRoutes;
+
+    /// <summary>
+    /// Every connector path of the visible view, for one render (the drawing, the minimap and selection halos share it).
+    /// While shapes are being moved or resized, only the connectors of shapes that move are routed again; the others keep
+    /// the paths they had when the drag began (<see cref="EdgeRouter.RouteMoving"/>) and are routed again on the drop.
+    /// </summary>
+    public Dictionary<DiagramEdge, IReadOnlyList<Pt>> Routes(Func<DiagramNode, Bounds> bounds)
+    {
+        var view = DiagramExtras.VisibleView(Diagram);
+        if (Current is Gesture.Move or Gesture.Resize && _preview.Count > 0)
+        {
+            // The paths drawn just before the drag: the shapes' own bounds, which the routing caches still hold.
+            if (_frozenRoutes == null)
+            {
+                var memo = new Dictionary<DiagramNode, Bounds>(ReferenceEqualityComparer.Instance);
+                _frozenRoutes = EdgeRouter.RouteAll(view, n => memo.TryGetValue(n, out var b) ? b : memo[n] = Notation.EffectiveBounds(Model, n, Diagram.DiagramType, n.Bounds), WaypointsFor);
+            }
+            return EdgeRouter.RouteMoving(view, _frozenRoutes, new HashSet<DiagramNode>(_preview.Keys), bounds, WaypointsFor);
+        }
+        _frozenRoutes = null;
+        return EdgeRouter.RouteAll(view, bounds, WaypointsFor);
+    }
+
     // ---------------------------------------------------------------- selection
 
     public void Select(Element? e)
@@ -701,6 +726,7 @@ public sealed partial class DiagramController
     /// <returns>True if a context menu should open.</returns>
     public bool PointerDown(double sx, double sy, int button, Mods mods, int clicks)
     {
+        _frozenRoutes = null;   // a new gesture: freeze what is drawn now, not what an earlier drag left
         _pressScreen = new Pt(sx, sy);
         _pressModel = ToModel(sx, sy);
         _selAtPress = (_selNodes.ToList(), _selEdges.ToList());
