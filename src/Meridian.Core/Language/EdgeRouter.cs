@@ -123,31 +123,73 @@ public static class EdgeRouter
     {
         var result = new Dictionary<DiagramEdge, IReadOnlyList<Pt>>(d.Edges.Count, ReferenceEqualityComparer.Instance);
         var auto = new List<DiagramEdge>();
+        List<DiagramEdge>? legacy = null;
         foreach (var e in d.Edges)
         {
             var wps = waypoints?.Invoke(e);
             if (DataModeling.DbNotation.ColumnRoute(d, e, boundsOf, wps) is { } columns) { result[e] = columns; continue; }
             if (Safety.SafetyNotation.TreeRoute(e, boundsOf, wps) is { } tree) { result[e] = tree; continue; }
             if (StyleOf(d, e) is EdgeRouting.Orthogonal or EdgeRouting.Curved && Routable(e) && (wps ?? e.Waypoints).Count == 0) auto.Add(e);
+            else if (Notation.IsLegacyAvoiding(d, e, wps)) (legacy ??= []).Add(e);
             else result[e] = Notation.RouteIn(d, e, boundsOf, wps);
         }
-        if (auto.Count > 0)
+        if (auto.Count > 0 || legacy != null)
         {
             var state = StateFor(d);
             lock (state)
             {
-                state.Refresh(d, boundsOf);
-                foreach (var e in auto) result[e] = state.PathOf(e) ?? Notation.Orthogonal(boundsOf(e.Source), boundsOf(e.Target));
+                if (auto.Count > 0)
+                {
+                    state.Refresh(d, boundsOf);
+                    foreach (var e in auto) result[e] = state.PathOf(e) ?? Notation.Orthogonal(boundsOf(e.Source), boundsOf(e.Target));
+                }
+                if (legacy != null) state.Legacy(d, legacy, boundsOf, result);
             }
         }
         return result;
     }
 
+    /// <summary>
+    /// Paths while shapes are being dragged or resized: connectors touching a <paramref name="moving"/> shape (or missing from
+    /// <paramref name="frozen"/>) are routed live, around every shape at its current bounds; every other connector keeps its
+    /// path from <paramref name="frozen"/>, taken when the drag began. A frame then costs a few paths instead of the whole
+    /// diagram, which on large diagrams is the difference between following the pointer and redrawing about once a second.
+    /// The drop routes everything with <see cref="RouteAll"/> again, so nothing stays out of date. The live paths use their own
+    /// routing cache, so the diagram's cache still holds the pre-drag geometry and the drop reroutes only what really changed.
+    /// </summary>
+    public static Dictionary<DiagramEdge, IReadOnlyList<Pt>> RouteMoving(Diagram d, IReadOnlyDictionary<DiagramEdge, IReadOnlyList<Pt>> frozen,
+                                                                       IReadOnlySet<DiagramNode> moving, Func<DiagramNode, Bounds> boundsOf,
+                                                                       Func<DiagramEdge, IReadOnlyList<Pt>?>? waypoints = null)
+    {
+        var result = new Dictionary<DiagramEdge, IReadOnlyList<Pt>>(d.Edges.Count, ReferenceEqualityComparer.Instance);
+        var live = new List<DiagramEdge>();
+        foreach (var e in d.Edges)
+        {
+            if (!moving.Contains(e.Source) && !moving.Contains(e.Target) && frozen.TryGetValue(e, out var path)) result[e] = path;
+            else live.Add(e);
+        }
+        if (live.Count == 0) return result;
+        // Every shape (they are all obstacles), only the live connectors.
+        var view = new Diagram(d.DiagramType, d.Id + DragSuffix) { Owner = d.Owner };
+        foreach (var kv in d.Fields) view.SetRaw(kv.Key, kv.Value);
+        view.NodeList.AddRange(d.Nodes);
+        view.EdgeList.AddRange(live);
+        foreach (var (e, path) in RouteAll(view, boundsOf, waypoints)) result[e] = path;
+        return result;
+    }
+
+    /// <summary>Routing cache key suffix of <see cref="RouteMoving"/>'s live paths (kept apart from the diagram's own cache).</summary>
+    private const string DragSuffix = "\u0001drag";
+
     /// <summary>How many connectors of <paramref name="d"/> were (re)computed by the last refresh. For tests and diagnostics.</summary>
     public static int LastRerouteCount(Diagram d) => States.TryGetValue(d.Id, out var s) ? s.LastRerouted : 0;
 
     /// <summary>Drops the cached routes of a diagram.</summary>
-    public static void Invalidate(Diagram d) => States.TryRemove(d.Id, out _);
+    public static void Invalidate(Diagram d)
+    {
+        States.TryRemove(d.Id, out _);
+        States.TryRemove(d.Id + DragSuffix, out _);
+    }
 
     public static IReadOnlyList<Pt> Straight(DiagramEdge e, Func<DiagramNode, Bounds> boundsOf)
     {
@@ -233,6 +275,44 @@ public static class EdgeRouter
             }
             foreach (var e in _entries.Keys.Where(k => !live.Contains(k)).ToList()) { _entries.Remove(e); _curved.Remove(e); }
         }
+
+        // Legacy-look paths (Notation.LegacyAvoiding) steer around every shape, so each depends on the whole diagram's geometry.
+        // They are kept while that geometry is unchanged: re-renders for a selection, a hover, a collaborator's presence, panning
+        // and hit testing reuse them instead of scoring ~1,000 candidate paths per connector again.
+        private (DiagramNode Node, Bounds B, string? Parent, bool Obstacle)[] _legacyShapes = [];
+        private readonly Dictionary<DiagramEdge, IReadOnlyList<Pt>> _legacy = new(ReferenceEqualityComparer.Instance);
+
+        public void Legacy(Diagram d, List<DiagramEdge> edges, Func<DiagramNode, Bounds> boundsOf, Dictionary<DiagramEdge, IReadOnlyList<Pt>> result)
+        {
+            var nodes = d.Nodes;
+            var same = _legacyShapes.Length == nodes.Count;
+            var shapes = same ? null : new (DiagramNode, Bounds, string?, bool)[nodes.Count];
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var n = nodes[i];
+                var shape = (n, boundsOf(n), n.ParentId, Notation.IsLegacyObstacle(n));
+                if (same && !ShapeEquals(_legacyShapes[i], shape))
+                {
+                    same = false;
+                    shapes = new (DiagramNode, Bounds, string?, bool)[nodes.Count];
+                    Array.Copy(_legacyShapes, shapes, i);
+                }
+                if (shapes != null) shapes[i] = shape;
+            }
+            if (!same)
+            {
+                _legacyShapes = shapes!;
+                _legacy.Clear();
+            }
+            foreach (var e in edges)
+            {
+                if (!_legacy.TryGetValue(e, out var path)) _legacy[e] = path = Notation.LegacyAvoiding(d, e, boundsOf);
+                result[e] = path;
+            }
+        }
+
+        private static bool ShapeEquals((DiagramNode Node, Bounds B, string? Parent, bool Obstacle) a, (DiagramNode Node, Bounds B, string? Parent, bool Obstacle) b) =>
+            ReferenceEquals(a.Node, b.Node) && a.B == b.B && a.Parent == b.Parent && a.Obstacle == b.Obstacle;
     }
 
     private static bool Overlaps(Bounds a, Bounds b) => a.X <= b.Right && b.X <= a.Right && a.Y <= b.Bottom && b.Y <= a.Bottom;

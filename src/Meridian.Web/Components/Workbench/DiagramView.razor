@@ -9,7 +9,7 @@
 
 <div class="canvas @(C.ProtectedByPermissions ? "perm-locked" : "") @(C.Tool != null ? "tool-active" : "") @(C.InkTool ? "drawing" : "") @(C.Current == DiagramController.Gesture.Pan ? "panning" : C.SpaceHeld ? "grab" : "") @(_shapesOpen && !C.ReadOnly ? "shapes-open" : "")"
      tabindex="0" @ref="_canvas"
-     @onpointerdown="Down" @onpointermove="Move" @onpointerup="Up" @onpointerleave="Leave"
+     @onpointerdown="Down" @onpointerup="Up" @onpointerleave="Leave"
      @onkeydown="Key" @onkeyup="KeyUp"
      @ondragenter:preventDefault="true" @ondragover:preventDefault="true" @ondrop="Drop">
     <svg class="main" xmlns="http://www.w3.org/2000/svg">
@@ -346,10 +346,10 @@
         <div class="minimap" @onpointerdown="MiniMapClick" @onpointerdown:stopPropagation="true" @ref="_minimap">
             @{ var cb = C.ContentBounds(); var vp = C.Viewport; var shown = DiagramExtras.VisibleView(C.Diagram); }
             <svg viewBox="@F(cb.X) @F(cb.Y) @F(cb.Width) @F(cb.Height)" preserveAspectRatio="xMidYMid meet">
-                @{ var miniRoutes = EdgeRouter.RouteAll(shown, C.MemoBounds()); }
+                @{ var miniRoutes = _routes ?? EdgeRouter.RouteAll(shown, C.MemoBounds(), C.WaypointsFor); }
                 @foreach (var e in shown.Edges)
                 {
-                    var pts = miniRoutes[e];
+                    if (!miniRoutes.TryGetValue(e, out var pts)) continue;
                     <polyline points="@SvgRenderer.Points(pts)" fill="none" stroke="@Theme.Edge" stroke-opacity="0.6" stroke-width="@F(cb.Width / 200)" />
                 }
                 @foreach (var n in shown.Nodes)
@@ -686,9 +686,29 @@
         }
     }
 
-    private void Move(PointerEventArgs e)
+    /// <summary>
+    /// Pointer moves over the canvas, batched by meridian.installCanvas: every move since the last call as (clientX, clientY,
+    /// <see cref="Mods"/>) triples, sent once per animation frame with at most one call in flight, and flushed before a press or
+    /// release. Each is applied in order (ink keeps every point), and the canvas redraws once per batch instead of once per
+    /// browser event, so a drag keeps up with the pointer however long a redraw takes.
+    /// </summary>
+    [JSInvokable]
+    public void OnPointerMoves(double[] moves)
     {
-        if (!C.PointerMove(e.ClientX - _origin.Left, e.ClientY - _origin.Top, ModsOf(e))) _skipRender = true;
+        if (ApplyPointerMoves(C, moves, _origin.Left, _origin.Top)) StateHasChanged();
+    }
+
+    /// <summary>What <see cref="OnPointerMoves"/> does to the controller; true when the canvas needs a redraw.</summary>
+    public static bool ApplyPointerMoves(DiagramController c, double[] moves, double originLeft, double originTop)
+    {
+        var redraw = false;
+        for (var i = 0; i + 2 < moves.Length; i += 3)
+        {
+            var (x, y) = (moves[i], moves[i + 1]);
+            if (!double.IsFinite(x) || !double.IsFinite(y)) continue;   // nonsense from the page is ignored
+            redraw |= c.PointerMove(x - originLeft, y - originTop, (Mods)((int)moves[i + 2] & 15));
+        }
+        return redraw;
     }
 
     private void Up(PointerEventArgs e) => C.PointerUp(ModsOf(e));
@@ -999,16 +1019,24 @@
         foreach (var part in Body()) builder.AddMarkupContent(0, part);
     };
 
+    /// <summary>
+    /// The connector paths <see cref="Body"/> drew in this render (<see cref="DiagramController.Routes"/>: during a drag, only the
+    /// moving shapes' connectors follow). The minimap and the selection halos, drawn after it in the same render, reuse them.
+    /// </summary>
+    private Dictionary<DiagramEdge, IReadOnlyList<Pt>>? _routes;
+
     private List<string> Body()
     {
         var parts = new List<string>();
         var sb = new StringBuilder();
+        var bounds = C.MemoBounds();
+        _routes = C.Routes(bounds);
         var cb = C.ContentBounds();
         var frame = C.Diagram.DiagramType == DiagramType.InternalBlock && C.Diagram.Nodes.Count > 0 ? 40 : 0;
         SvgRenderer.RenderHeader(sb, C.Diagram, cb.X - frame, cb.Y - 34 - frame, Theme);
         if (sb.Length > 0) parts.Add(sb.ToString());
         // Pictures are drawn from a URL served by ImageCache, so megabytes of base64 aren't resent on every render.
-        parts.AddRange(SvgRenderer.RenderBodyParts(C.Model, C.Diagram, C.BoundsOf, C.WaypointsFor, Theme with { ImageHref = Images.Href }, C.Viewport));
+        parts.AddRange(SvgRenderer.RenderBodyParts(C.Model, C.Diagram, bounds, C.WaypointsFor, Theme with { ImageHref = Images.Href }, C.Viewport, _routes));
         sb.Clear();
         // Code-sync review: added / changed / removed outlines, and ghosts of removed shapes at main's positions.
         if (Ws.HighlightCodeChanges && Ws.CodeChanges is { } changes)
@@ -1064,7 +1092,8 @@
         // Selected connectors: a translucent halo along the whole path (every one of a multi-selection).
         foreach (var se in C.SelectedEdges)
         {
-            var pts = Notation.RouteIn(C.Diagram, se, C.BoundsOf, C.WaypointsFor(se));
+            // The path drawn in this render (on a hidden layer: routed on its own).
+            var pts = _routes != null && _routes.TryGetValue(se, out var drawn) ? drawn : Notation.RouteIn(C.Diagram, se, C.BoundsOf, C.WaypointsFor(se));
             builder.AddMarkupContent(seq++, $"<polyline class=\"edge-sel\" data-edge-sel=\"{System.Net.WebUtility.HtmlEncode(se.Id)}\" points=\"{SvgRenderer.Points(pts)}\" fill=\"none\" stroke=\"{sel}\" stroke-opacity=\"0.5\" stroke-width=\"{F(6 * zi)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>");
         }
         if (C.SelectedEdge is { } edge)

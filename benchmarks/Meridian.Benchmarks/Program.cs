@@ -12,10 +12,13 @@ using Meridian.Serialization;
 //       one Stopwatch pass over every scenario, printed as a table (fast; good for before/after comparisons)
 //   dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- [BenchmarkDotNet args, e.g. --filter *Validate*]
 //       the full BenchmarkDotNet suite (LargeModelBenchmarks)
-if (args.Length == 2 && args[0] == "--dump")
+if (args.Length is 2 or 3 && args[0] == "--dump")
 {
     // Writes the generated model as .meridian (handy for loading it into the app, or comparing serializer output).
-    var m = Meridian.Core.Samples.LargeModelGenerator.Generate();
+    // A third argument N writes the Cameo-scale project of about N elements (--elements N), which has a 500-shape diagram.
+    var m = args.Length == 3
+        ? Meridian.Core.Samples.LargeModelGenerator.Generate(LargeModelOptions.Cameo(int.Parse(args[2], CultureInfo.InvariantCulture)))
+        : Meridian.Core.Samples.LargeModelGenerator.Generate();
     ProjectFile.Save(m, args[1]);
     return;
 }

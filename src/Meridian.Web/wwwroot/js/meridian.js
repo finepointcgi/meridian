@@ -299,6 +299,38 @@ window.meridian = (() => {
       el.addEventListener("pointercancel", finishPan);
       el.addEventListener("lostpointercapture", finishPan);
 
+      // Other pointer moves (hover, dragging and resizing shapes, connecting, marquee, ink) go to .NET in batches: every move
+      // since the last call, once per animation frame with at most one call in flight (DiagramView.OnPointerMoves). A redraw
+      // that takes longer than a frame then skips ahead to where the pointer is, instead of working through a queue of stale
+      // moves. Before a press, release or key reaches Blazor (which listens on the document, after this element), the moves
+      // that came first are sent, so .NET still sees everything in order.
+      const moves = { queue: [], raf: 0, busy: false };
+      const sendMoves = () => {
+        moves.raf = 0;
+        if (moves.busy || !moves.queue.length || !el.isConnected) return;
+        const batch = moves.queue;
+        moves.queue = [];
+        moves.busy = true;
+        dotnet.invokeMethodAsync("OnPointerMoves", batch)
+          .catch(() => { })
+          .finally(() => { moves.busy = false; if (moves.queue.length && !moves.raf) moves.raf = requestAnimationFrame(sendMoves); });
+      };
+      const flushMoves = () => {
+        if (!moves.queue.length || !el.isConnected) return;
+        if (moves.raf) { cancelAnimationFrame(moves.raf); moves.raf = 0; }
+        const batch = moves.queue;
+        moves.queue = [];
+        dotnet.invokeMethodAsync("OnPointerMoves", batch).catch(() => { });   // in order: calls and events share one channel
+      };
+      el.addEventListener("pointermove", e => {
+        if (pan) return;
+        moves.queue.push(e.clientX, e.clientY, (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0));
+        if (!moves.raf && !moves.busy) moves.raf = requestAnimationFrame(sendMoves);
+      });
+      for (const type of ["pointerdown", "pointerup", "pointercancel", "keydown"]) el.addEventListener(type, flushMoves);
+      // pointerleave doesn't bubble, so Blazor hears it first (DiagramView.Leave clears the hover): moves still waiting are stale.
+      el.addEventListener("pointerleave", () => { moves.queue = []; });
+
       el.addEventListener("wheel", e => {
         e.preventDefault();
         if (pan || e.target.closest?.(".toolbox, .selbar, .quickadd, .conn-chip, .dv-legends, .chg-legend, .layers-fab, .layers-pop")) return;
