@@ -81,7 +81,8 @@ public static class Notation
         {
             var t = model.TypeDisplayName(e);
             var pk = e.Kind == ElementKind.Port && e.Get(FieldKeys.PortKind) is { Length: > 0 } pkk ? $"«{pkk}» " : "";
-            name = pk + (string.IsNullOrEmpty(t) ? e.Name : $"{e.Name} : {t}");
+            // A port named like its type says it once ("Code reader", not "Code reader : Code reader").
+            name = pk + (string.IsNullOrEmpty(t) || e.Kind == ElementKind.Port && string.Equals(t, e.Name, StringComparison.Ordinal) ? e.Name : $"{e.Name} : {t}");
             if (model.ResolveType(e) is { Kind: ElementKind.ConstraintBlock } cb)
             {
                 keyword = "«constraint»";
@@ -213,9 +214,11 @@ public static class Notation
         var props = e.OwnedElements.Where(c => c.Kind == ElementKind.Property).ToList();
         if (sysml)
         {
-            var parts = props.Where(p => IsBlockTyped(model, p)).Select(p => FeatureLine(model, p)).ToList();
+            var parts = props.Where(p => IsBlockTyped(model, p) && !AutoDiagrammer.IsReference(p)).Select(p => FeatureLine(model, p)).ToList();
+            var references = props.Where(p => IsBlockTyped(model, p) && AutoDiagrammer.IsReference(p)).Select(p => FeatureLine(model, p)).ToList();
             var values = props.Where(p => !IsBlockTyped(model, p)).Select(p => FeatureLine(model, p)).ToList();
             if (parts.Count > 0) comps.Add(new Compartment("parts", parts));
+            if (references.Count > 0) comps.Add(new Compartment("references", references));
             if (values.Count > 0) comps.Add(new Compartment("values", values));
         }
         else if (props.Count > 0 || e.Kind is ElementKind.Class)
@@ -240,12 +243,17 @@ public static class Notation
     public static NodeContent Content(ModelRepository model, DiagramNode n, DiagramType diagramType)
     {
         var c = Content(model, n.Element, diagramType);
+        if (n.Style.TryGetValue(CompartmentsStyle, out var shown) && shown == "none" && n.Element.Kind != ElementKind.Table) return c with { Compartments = [] };
         if (n.Element.Kind != ElementKind.Table) return c;
         var mode = DataModeling.DbModel.ShowColumnsOf(n);
         if (mode == "all") return c;
         var lines = DataModeling.DbNotation.Lines(model, n.Element, mode);
         return c with { Compartments = mode == "none" ? [] : [new Compartment(null, lines)] };
     }
+
+    /// <summary>Shape style: "none" draws the shape with its name only (no parts, values or operations compartments).
+    /// Code sync uses it on its overview diagrams, which are about how blocks relate, not what they hold.</summary>
+    public const string CompartmentsStyle = "compartments";
 
     public static string ColumnLine(Element c)
     {
@@ -262,7 +270,8 @@ public static class Notation
         var dir = p.Kind == ElementKind.Port && !string.IsNullOrEmpty(p.Get(FieldKeys.Direction)) ? p.Get(FieldKeys.Direction) + " " : "";
         var t = model.TypeDisplayName(p);
         var line = $"{Vis(p)}{dir}{p.Name}";
-        if (!string.IsNullOrEmpty(t)) line += $" : {t}";
+        // A port named like its type ("Code reader : Code reader") says it once.
+        if (!string.IsNullOrEmpty(t) && !(p.Kind == ElementKind.Port && string.Equals(t, p.Name, StringComparison.Ordinal))) line += $" : {t}";
         if (!string.IsNullOrEmpty(p.Multiplicity) && p.Multiplicity != "1") line += $" [{p.Multiplicity}]";
         if (!string.IsNullOrEmpty(p.Get(FieldKeys.DefaultValue))) line += $" = {p.Get(FieldKeys.DefaultValue)}";
         return line;

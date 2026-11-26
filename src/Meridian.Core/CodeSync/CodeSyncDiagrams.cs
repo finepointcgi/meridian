@@ -65,7 +65,7 @@ public static class CodeSyncDiagrams
             var fresh = ShowNewElements(m, d, shapes);
             var edges = 0;
             foreach (var r in relationships.Concat(fresh.SelectMany(n => m.RelationshipsOf(n.Element))).Distinct())
-                if (!d.Shows(r) && d.EdgeFor(r) is null && AutoDiagrammer.EdgeAllowed(d.DiagramType, r) && m.AddEdge(d, r) is not null) edges++;
+                if (!d.Shows(r) && d.EdgeFor(r) is null && AutoDiagrammer.EdgeAllowed(d.DiagramType, r) && DrawnOnStructure(r) && m.AddEdge(d, r) is not null) edges++;
             if (fresh.Count == 0 && edges == 0) continue;
             if (fresh.Count > 0) EdgeRouter.Invalidate(d);
             if (pristine) Stamp(m, d);
@@ -266,11 +266,35 @@ public static class CodeSyncDiagrams
 
     /// <summary>
     /// Whether a code block earns its own internal block diagram: at least <see cref="MinIbdParts"/> part properties typed
-    /// by scanned classes. A block whose only part is one other class (or whose members are all framework, collection-of-
-    /// value or interface typed, which are values and references, not parts) gets none: its BDD already shows that.
+    /// by scanned classes, and at least one connector between them (parts whose types use each other in code). A block
+    /// whose parts do not work together (or whose members are references, values or interfaces) gets none: its BDD
+    /// already shows what it holds.
     /// </summary>
-    public static bool WorthAnIbd(ModelRepository m, Element block) =>
-        AutoDiagrammer.Parts(m, block).Count(p => m.ResolveType(p) is { } t && t.Get(CodeFieldKeys.Symbol).Length > 0) >= MinIbdParts;
+    public static bool WorthAnIbd(ModelRepository m, Element block)
+    {
+        var parts = AutoDiagrammer.Parts(m, block).Where(p => m.ResolveType(p) is { } t && t.Get(CodeFieldKeys.Symbol).Length > 0).ToHashSet();
+        return parts.Count >= MinIbdParts
+               && block.OwnedElements.OfType<Relationship>().Any(r => r.Kind == ElementKind.Connector && parts.Contains(r.Source) && parts.Contains(r.Target));
+    }
+
+    /// <summary>A package that holds types made by code sync's mapper (key blocks are marked).</summary>
+    private static bool HoldsCode(Element pkg) => pkg.OwnedElements.Any(c => c.Get(CodeModelMapper.KeyKey) == "true");
+
+    /// <summary>The parts of a block joined by one of its connectors.</summary>
+    private static List<Element> ConnectedParts(Element block)
+    {
+        var ends = block.OwnedElements.OfType<Relationship>().Where(r => r.Kind == ElementKind.Connector).SelectMany(r => new[] { r.Source, r.Target }).ToHashSet();
+        return block.OwnedElements.Where(e => e.Kind == ElementKind.Property && ends.Contains(e)).ToList();
+    }
+
+    /// <summary>A block or other type made from code that is not one of its package's key blocks (<see cref="CodeModelMapper.KeyKey"/>).</summary>
+    private static bool MinorCodeType(Element e) =>
+        e.Kind is ElementKind.Block or ElementKind.InterfaceBlock or ElementKind.Enumeration && e.Get(CodeFieldKeys.Symbol) is { Length: > 0 } s
+        && !s.StartsWith(CodeModelMapper.ArchitecturePrefix, StringComparison.Ordinal) && e.Get(CodeModelMapper.KeyKey) != "true";
+
+    /// <summary>Relationships code sync draws on its structure diagrams: not the usage dependencies between types.</summary>
+    public static bool DrawnOnStructure(Relationship r) =>
+        !(r.Kind == ElementKind.Dependency && r.Get(CodeFieldKeys.Symbol).StartsWith("dep:", StringComparison.Ordinal));
 
     /// <summary>
     /// Whether <paramref name="e"/> belongs on <paramref name="d"/>: it is a child of the diagram's context (a new block in
@@ -296,11 +320,17 @@ public static class CodeSyncDiagrams
     {
         var fresh = new List<DiagramNode>();
         var placer = new Placer(d, fresh);
+        // Structure diagrams drawn with names only stay that way; they show key blocks only.
+        var compact = d.Nodes.Any(n => n.Style.TryGetValue(Notation.CompartmentsStyle, out var v) && v == "none");
         foreach (var e in shapes)
         {
             if (d.Shows(e) || !Belongs(m, d, e, out var parent)) continue;
+            // Code sync's own (names-only) structure diagrams show key blocks only; diagrams people made get everything new.
+            if (compact && d.DiagramType == DiagramType.BlockDefinition && MinorCodeType(e)) continue;
             var (w, h) = Notation.DefaultSizeOf(e);
-            fresh.Add(m.AddNode(d, e, placer.Next(parent, w, h), showRelationships: false, parent));
+            var node = m.AddNode(d, e, placer.Next(parent, w, h), showRelationships: false, parent);
+            if (compact && Notation.ShapeOf(e) == NodeShape.Rectangle) m.SetNodeStyle(d, node, Notation.CompartmentsStyle, "none");
+            fresh.Add(node);
         }
         // Containers that received new children grow to hold them (their position stays put).
         var nested = fresh.Where(n => n.ParentId != null).ToList();
@@ -355,16 +385,90 @@ public static class CodeSyncDiagrams
         }
     }
 
-    /// <summary>Diagrams for new packages and blocks (a structure view per new namespace, an IBD per new block with parts).</summary>
+    /// <summary>
+    /// Diagrams for what a sync made, few and readable:
+    /// <list type="bullet">
+    /// <item>a new system architecture (<see cref="CodeModelMapper.ArchitecturePrefix"/>): its internal block diagram (the
+    /// subsystems, the ports of the interfaces between them and the connectors) and a subsystems BDD;</item>
+    /// <item>a new namespace package: one structure BDD of its key blocks (<see cref="CodeModelMapper.KeyKey"/>), names only,
+    /// with generalizations, compositions, references and realizations but no usage dependencies;</item>
+    /// <item>a new block whose parts work together (<see cref="WorthAnIbd"/>): its internal structure.</item>
+    /// </list>
+    /// </summary>
     private static List<Diagram> CreateDiagrams(ModelRepository m, IReadOnlyList<Element> shapes)
     {
-        var owners = shapes.Where(e => e.Kind is ElementKind.Package or ElementKind.Block).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
-        if (owners.Count == 0) return [];
-        var plan = AutoDiagrammer.Plan(m, new AutoDiagramOptions { DerivePackageDependencies = false });
-        foreach (var p in plan.Diagrams)
-            p.Selected = p.Existing is null && owners.Contains(p.Owner.Id) && p.Type != DiagramType.Package
-                         && (p.Type != DiagramType.InternalBlock || p.Owner.Get(CodeFieldKeys.Symbol).Length == 0 || WorthAnIbd(m, p.Owner));
-        if (!plan.Diagrams.Any(p => p.Selected)) return [];
-        return AutoDiagrammer.Apply(m, plan, addDependencies: false).Created.ToList();
+        var created = new List<Diagram>();
+        Diagram Make(PlannedDiagram p)
+        {
+            var d = AutoDiagrammer.Build(m, p);
+            created.Add(d);
+            return d;
+        }
+        bool Has(Element owner, DiagramType type) =>
+            owner.OwnedElements.OfType<Diagram>().Any(d => d.DiagramType == type && d.Get(AutoDiagrammer.MarkerKey) == AutoDiagrammer.KeyFor(type, owner));
+
+        foreach (var system in shapes.Where(e => e.Kind == ElementKind.Block && e.Get(CodeFieldKeys.Symbol) == CodeModelMapper.ArchitecturePrefix + "system"))
+        {
+            var parts = AutoDiagrammer.Parts(m, system).ToList();
+            if (parts.Count == 0 || Has(system, DiagramType.InternalBlock)) continue;
+            Make(new PlannedDiagram
+            {
+                Type = DiagramType.InternalBlock, Owner = system, Name = $"{system.Name} – system architecture",
+                Purpose = $"How the parts of {system.DisplayName} are connected through their ports: the subsystems (one per project), the interfaces one provides and another uses, and which subsystem uses which.",
+                Elements = parts, Key = AutoDiagrammer.KeyFor(DiagramType.InternalBlock, system), Compact = true,
+            });
+            if (system.Owner is { } pkg && !Has(pkg, DiagramType.BlockDefinition))
+            {
+                var subsystems = parts.Select(m.ResolveType).OfType<Element>().Distinct().ToList();
+                Make(new PlannedDiagram
+                {
+                    Type = DiagramType.BlockDefinition, Owner = pkg, Name = "Subsystems",
+                    Purpose = $"{system.DisplayName} and the subsystems it is made of.",
+                    Elements = [system, .. subsystems], Key = AutoDiagrammer.KeyFor(DiagramType.BlockDefinition, pkg), Compact = true,
+                    EdgeFilter = r => r.Kind == ElementKind.Composition,
+                });
+            }
+        }
+
+        // Namespace packages, and the code root itself when a collapsed root namespace put types in it.
+        foreach (var pkg in shapes.Where(e => CodeModelMapper.IsNamespacePackage(e) || e.Kind == ElementKind.Package && HoldsCode(e)))
+        {
+            var key = pkg.OwnedElements.Where(e => e.Get(CodeModelMapper.KeyKey) == "true").ToList();
+            if (key.Count == 0 || Has(pkg, DiagramType.BlockDefinition)) continue;
+            Make(new PlannedDiagram
+            {
+                Type = DiagramType.BlockDefinition, Owner = pkg, Name = $"{pkg.Name} – structure",
+                Purpose = $"The main blocks of {pkg.DisplayName} (the ones the rest of the code uses most) and how they relate: generalization, parts, references and the interfaces they realize. The other types are in the model browser.",
+                Elements = key, Key = AutoDiagrammer.KeyFor(DiagramType.BlockDefinition, pkg), Compact = true, EdgeFilter = DrawnOnStructure,
+            });
+        }
+
+        foreach (var block in shapes.Where(e => e.Kind == ElementKind.Block && e.Get(CodeFieldKeys.Symbol) is { Length: > 0 } sym
+                                                && !sym.StartsWith(CodeModelMapper.ArchitecturePrefix, StringComparison.Ordinal) && WorthAnIbd(m, e)))
+        {
+            if (Has(block, DiagramType.InternalBlock)) continue;
+            Make(new PlannedDiagram
+            {
+                Type = DiagramType.InternalBlock, Owner = block, Name = $"{block.Name} – internal structure",
+                Purpose = $"How the parts of {block.DisplayName} are connected through their ports.",
+                // The parts that work together; the block's other parts are listed on the block itself.
+                Elements = ConnectedParts(block), Key = AutoDiagrammer.KeyFor(DiagramType.InternalBlock, block),
+            });
+        }
+
+        // Anything else a sync made (an applier other than code sync's own mapper, packages and blocks without a code
+        // namespace): the auto-diagrammer's usual structure view per package and IBD per block with parts.
+        var others = shapes.Where(e => e.Kind is ElementKind.Package && !CodeModelMapper.IsNamespacePackage(e) && !HoldsCode(e) && !e.Get(CodeFieldKeys.Symbol).StartsWith(CodeModelMapper.ArchitecturePrefix, StringComparison.Ordinal)
+                                       || e.Kind is ElementKind.Block && e.Get(CodeFieldKeys.Symbol).Length == 0)
+            .Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        if (others.Count > 0)
+        {
+            var plan = AutoDiagrammer.Plan(m, new AutoDiagramOptions { DerivePackageDependencies = false });
+            foreach (var p in plan.Diagrams)
+                p.Selected = p.Existing is null && others.Contains(p.Owner.Id) && p.Type != DiagramType.Package
+                             && !created.Any(c => ReferenceEquals(c.Owner, p.Owner) && c.DiagramType == p.Type);
+            if (plan.Diagrams.Any(p => p.Selected)) created.AddRange(AutoDiagrammer.Apply(m, plan, addDependencies: false).Created);
+        }
+        return created;
     }
 }

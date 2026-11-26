@@ -354,6 +354,9 @@ public static class CodeBehaviourMapper
         private bool Write(Element e, string name, IReadOnlyDictionary<string, string> fields, IEnumerable<string> owned)
         {
             var changed = false;
+            // A step or question the AI pass phrased stays while the code it was written for is unchanged.
+            if (e.Get(CodeModelMapper.LabelKey) is { Length: > 0 } label
+                && e.Get(CodeAiDescriptions.SourceKey) == (fields.TryGetValue(FieldKeys.Documentation, out var code) ? code : "")) name = label;
             if (name.Length > 0 && e.Name != name) { m.Rename(e, name); changed = true; }
             foreach (var k in owned)
             {

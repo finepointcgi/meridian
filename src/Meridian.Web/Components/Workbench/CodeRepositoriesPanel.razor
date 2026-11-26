@@ -205,6 +205,11 @@ else
             <MudSwitch T="bool" @bind-Value="f.CollapseRootNamespace" Label="Collapse common root namespace" Color="Color.Primary" Class="code-repo-collapse-root"
                        title="When every type shares one root namespace (or it is named like the model package), its sub-namespaces go straight into the model package: Meridian ▸ Core, not Meridian ▸ Meridian ▸ Core." />
             <MudSwitch T="bool" @bind-Value="f.AutoDiagrams" Label="Create diagrams for new packages and classes" Color="Color.Primary" Class="code-repo-auto-diagrams" />
+            <MudSwitch T="bool" @bind-Value="f.AiDescriptions" Label="Describe the code with AI" Color="Color.Primary" Class="code-repo-ai-descriptions"
+                       title="After each sync that changes the model, the AI assistant names subsystems, packages, key blocks and behaviour steps in plain words and writes a one-line purpose." />
+            <div class="integration-sub code-repo-ai-note">@(f.AiDescriptions
+                ? "On: each sync that changes the model sends the names, signatures, conditions and doc comments of the changed code (not whole files) to the AI provider set up in Settings ▸ AI assistant. It costs one model call per batch, and the wording can differ from run to run. Without a provider, names are made from the code."
+                : "Off: names are made from the code (CodeSyncRunner reads “Code sync runner”) and nothing is sent to an AI provider.")</div>
             <MudSwitch T="bool" Value="f.EffectiveDiagramFiles" ValueChanged="v => f.DiagramFiles = v" Label="Sync diagram files (Mermaid, PlantUML, draw.io)" Color="Color.Primary" Class="code-repo-diagram-files"
                        title="Mermaid (.mmd, Markdown with mermaid blocks), PlantUML (.puml) and draw.io files in the folders above become diagrams in a Diagrams package, one package per folder. A push updates the diagrams of the files it changed." />
             <MudSwitch T="bool" @bind-Value="f.ReviewFirstImport" Label="Review the first import too" Color="Color.Primary" Class="code-repo-review-first"

@@ -14,7 +14,8 @@ namespace Meridian.Tests;
 /// </summary>
 public class CodeSyncImportFixesTests
 {
-    private static CodeSyncOptions Options(string root = "Meridian", string commit = "c1") => new() { RepoId = "repo-1", Commit = commit, RootPackage = root };
+    // Code identifiers as names: these tests are about the package tree and diagrams, not the readable names (CodeSyncReadableTests).
+    private static CodeSyncOptions Options(string root = "Meridian", string commit = "c1") => new() { RepoId = "repo-1", Commit = commit, RootPackage = root, ReadableNames = false };
 
     private static CodeSyncChanges Sync(ModelRepository m, IReadOnlyList<CodeFile> files, CodeSyncOptions options) =>
         CodeModelMapper.Apply(m, new CSharpCodeReader().Read(files), options);
@@ -177,10 +178,18 @@ public class CodeSyncImportFixesTests
         Sync(m2, [.. CubeSatCode.Files, new("src/Global.cs", "public class Loose { }")], Options("Code"));
         Assert.Same(S(m2, "ns:Sat"), S(m2, "ns:Sat.Power").Owner);
 
-        // Two root namespaces: nothing to collapse.
+        // One outlier beside a namespace named like the model package that holds most types: still collapsed, the
+        // outlier keeps its own package.
         var m3 = new ModelRepository("M");
         Sync(m3, [.. MeridianLike, new("src/Other.cs", "namespace Tools { public class Cli { } }")], Options());
-        Assert.Same(S(m3, "ns:Meridian"), S(m3, "ns:Meridian.Core").Owner);
+        Assert.Equal("Meridian", S(m3, "ns:Meridian.Core").Owner!.Name);
+        Assert.Null(Sym(m3, "ns:Meridian"));
+        Assert.Equal("Meridian", S(m3, "ns:Tools").Owner!.Name);
+
+        // Two root namespaces of similar size: nothing to collapse.
+        var m5 = new ModelRepository("M");
+        Sync(m5, [.. MeridianLike, new("src/Other.cs", "namespace Tools { public class A { } public class B { } public class C { } public class D { } public class E { } public class F { } }")], Options());
+        Assert.Same(S(m5, "ns:Meridian"), S(m5, "ns:Meridian.Core").Owner);
 
         // Off: the namespace tree as is.
         var m4 = new ModelRepository("M");
@@ -389,18 +398,18 @@ public class CodeSyncImportFixesTests
         new("src/Sat.cs", """
             namespace Sat.Power
             {
-                public class Battery { public double Charge { get; set; } }
+                public class Battery { public double Charge { get; set; } public void FeedFrom(Panel panel) { } }
                 public class Panel { public double Watts { get; set; } }
-                public class Eps { public Battery Main { get; set; } public Panel Wing { get; set; } }
-                public class Pcu { public Battery Main { get; set; } public Panel Wing { get; set; } }
-                public class Bus { public Battery Main { get; set; } public Panel Wing { get; set; } }
+                public class Eps { public Battery Main { get; set; } = new(); public Panel Wing { get; set; } = new(); }
+                public class Pcu { public Battery Main { get; set; } = new(); public Panel Wing { get; set; } = new(); }
+                public class Bus { public Battery Main { get; set; } = new(); public Panel Wing { get; set; } = new(); }
             }
             """),
     ];
 
     /// <summary>Eps, Pcu and Bus lose a part each: their IBDs no longer meet the rule.</summary>
     private static IReadOnlyList<CodeFile> EpsWithOnePart =>
-        [new("src/Sat.cs", Eps[0].Content.Replace(" public Panel Wing { get; set; } }", " }"))];
+        [new("src/Sat.cs", Eps[0].Content.Replace(" public Panel Wing { get; set; } = new(); }", " }"))];
 
     private static Diagram Ibd(ModelRepository m, string block) => m.Diagrams.Single(d => d.DiagramType == DiagramType.InternalBlock && d.Owner == S(m, block));
 
@@ -485,7 +494,7 @@ public class CodeSyncImportFixesTests
     // ================================================================ which blocks get an IBD
 
     [Fact]
-    public void Only_blocks_with_two_or_more_parts_typed_by_scanned_classes_get_an_internal_structure_diagram()
+    public void Only_blocks_whose_parts_work_together_get_an_internal_structure_diagram()
     {
         var files = new List<CodeFile>
         {
@@ -494,12 +503,13 @@ public class CodeSyncImportFixesTests
                 namespace Sat.Power
                 {
                     public class Battery { public double Charge { get; set; } }
-                    public class Panel { public double Watts { get; set; } }
+                    public class Panel { public double Watts { get; set; } public void Feed(Battery b) { } }
                     public interface ISource { }
-                    public class Eps { public Battery Main { get; set; } public List<Panel> Panels { get; set; } }          // 2 parts: IBD
-                    public class Charger { public Battery Battery { get; set; } public ISource Source { get; set; } }      // 1 part + a reference: none
+                    public class Eps { public Battery Main { get; set; } = new(); public List<Panel> Panels { get; set; } = new(); } // 2 parts that interact: IBD
+                    public class Charger { public Battery Battery { get; set; } = new(); public ISource Source { get; set; } }      // 1 part + a reference: none
                     public class Logger { public List<string> Lines { get; set; } public Dictionary<string, int> Counts { get; set; } } // values only: none
-                    public class Pair { public Battery A { get; set; } public Battery B { get; set; } }                      // 2 parts of one type: IBD
+                    public class Pair { public Battery A { get; set; } = new(); public Battery B { get; set; } = new(); }          // 2 parts of one type, no interaction: none
+                    public class Holder { public Battery Main { get; set; } public Panel Wing { get; set; } }                         // references (not created here): none
                 }
                 namespace Sat.Comms { public class Radio { public double Mhz { get; set; } } }
                 """),
@@ -508,8 +518,14 @@ public class CodeSyncImportFixesTests
         var changes = Sync(m, files, Options("Code"));
         CodeSyncDiagrams.Refresh(m, changes, createDiagrams: true, codeRoot: CodeModelMapper.FindRootPackage(m, "Code"));
         var ibds = m.Diagrams.Where(d => d.DiagramType == DiagramType.InternalBlock).Select(d => d.Owner!.Name).Order().ToList();
-        Assert.Equal(["Eps", "Pair"], ibds);
+        Assert.Equal(["Eps"], ibds);
         Assert.True(CodeSyncDiagrams.WorthAnIbd(m, S(m, "Sat.Power.Eps")));
+        Assert.False(CodeSyncDiagrams.WorthAnIbd(m, S(m, "Sat.Power.Pair")));
+        Assert.False(CodeSyncDiagrams.WorthAnIbd(m, S(m, "Sat.Power.Holder")));
+        // The connector says why the parts are joined.
+        var connector = Assert.Single(S(m, "Sat.Power.Eps").OwnedElements.OfType<Relationship>(), r => r.Kind == ElementKind.Connector);
+        Assert.Equal(("Panels", "Main"), (connector.Source.Name, connector.Target.Name));
+        Assert.Equal("Derived from code: Panel uses Battery.", connector.Documentation);
         Assert.False(CodeSyncDiagrams.WorthAnIbd(m, S(m, "Sat.Power.Charger")));
         Assert.False(CodeSyncDiagrams.WorthAnIbd(m, S(m, "Sat.Power.Logger")));
     }

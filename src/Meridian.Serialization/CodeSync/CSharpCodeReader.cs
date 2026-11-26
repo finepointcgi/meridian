@@ -35,7 +35,7 @@ public sealed class CSharpCodeReader : ICodeReader
     public string Language => "csharp";
 
     public bool Handles(string path) =>
-        path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !IsGeneratedPath(path);
+        (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) && !IsGeneratedPath(path);
 
     /// <summary>obj/ and bin/ folders, *.g.cs, *.g.i.cs, *.Designer.cs and *.AssemblyInfo.cs.</summary>
     public static bool IsGeneratedPath(string path)
@@ -172,7 +172,11 @@ public sealed class CSharpCodeReader : ICodeReader
             types.Add(BuildType(info, decls, MaxDependencyUsesPerTarget, budget, compilation.GetSemanticModel, ct));
         }
         if (budget.Exhausted) warnings.Add($"Method bodies were read up to {MaxTotalBodyStatements:N0} statements; the bodies of later methods were left out.");
-        return new CodeModel(Language, types, warnings);
+        var modules = CSharpProjects.Read(files, warnings);
+        if (modules.Count > 0)
+            for (var i = 0; i < types.Count; i++)
+                types[i] = types[i] with { Module = CodeModule.Containing(modules, types[i].File)?.Name };
+        return new CodeModel(Language, types, warnings) { Modules = modules };
     }
 
     private sealed class TypeInfo(string key, INamedTypeSymbol symbol)
@@ -350,12 +354,31 @@ public sealed class CSharpCodeReader : ICodeReader
         {
             IsAbstract = sym.IsAbstract && kind is CodeTypeKind.Class or CodeTypeKind.Record && !sym.IsStatic,
             IsStatic = sym.IsStatic,
+            Visibility = TypeVisibility(sym),
             DependencyLocations = locations,
             OmittedDependencyLocations = omitted,
             Attributes = AttributeNames(sym),
             ExternalBases = (sym.BaseType is { SpecialType: SpecialType.None } eb && Scanned(eb) is null ? [eb] : Array.Empty<INamedTypeSymbol>())
                 .Concat(sym.Interfaces.Where(i => Scanned(i) is null)).Select(x => x.Name).Where(n => n.Length > 0).Distinct().ToList(),
         };
+    }
+
+    /// <summary>"public" when the type is visible outside its project (it and every containing type public or protected),
+    /// "internal", or "private" for a nested type hidden in its outer type.</summary>
+    private static string TypeVisibility(INamedTypeSymbol sym)
+    {
+        var result = "public";
+        for (var t = sym; t != null; t = t.ContainingType)
+            switch (t.DeclaredAccessibility)
+            {
+                case Accessibility.Public: break;
+                case Accessibility.Protected or Accessibility.ProtectedOrInternal: if (result == "public") result = "protected"; break;
+                case Accessibility.Internal or Accessibility.ProtectedAndInternal or Accessibility.NotApplicable:
+                    if (result is "public" or "protected") result = t.ContainingType is null ? "internal" : "private";
+                    break;
+                default: return "private";
+            }
+        return result;
     }
 
     /// <summary>Statements still to be read in one <see cref="Read"/> (bounded memory on very large code).</summary>

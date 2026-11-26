@@ -734,6 +734,8 @@ public static partial class SvgRenderer
                 break;
             case NodeShape.Diamond:
                 sb.Append($"<polygon points=\"{F(b.Center.X)},{F(b.Y)} {F(b.Right)},{F(b.Center.Y)} {F(b.Center.X)},{F(b.Bottom)} {F(b.X)},{F(b.Center.Y)}\" fill=\"{fill}\" stroke=\"{stroke}\"/>");
+                // A named decision ("Is the user signed in?") shows its question beside the diamond.
+                if (n.Element.Name.Length > 0) Text(sb, b.Right + 6, b.Y + 2, n.Element.Name, false, "start", color: t.Text);
                 break;
             case NodeShape.Bar:
                 sb.Append($"<rect x=\"{F(b.X)}\" y=\"{F(b.Y)}\" width=\"{F(b.Width)}\" height=\"{F(b.Height)}\" fill=\"{ink}\"/>");

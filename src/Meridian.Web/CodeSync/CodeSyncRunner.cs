@@ -41,7 +41,7 @@ public sealed class CodeSyncEvents
 /// </summary>
 public sealed partial class CodeSyncRunner(
     IMeridianStore db, CollaborationHub hub, IEnumerable<ICodeReader> readers, ICodeModelApplier applier,
-    CodeSyncEvents events, ILogger<CodeSyncRunner> log, IConfiguration? config = null) : ICodeSyncRunner, Hosts.IPullRequestPreviews
+    CodeSyncEvents events, ILogger<CodeSyncRunner> log, IConfiguration? config = null, ICodeDescriberSource? describers = null) : ICodeSyncRunner, Hosts.IPullRequestPreviews
 {
     /// <summary>Prefix of review branch names.</summary>
     public const string BranchPrefix = "code-sync/";
@@ -267,7 +267,7 @@ public sealed partial class CodeSyncRunner(
 
         if (hub.Find(request.ProjectId, branchId) is { } open) await open.PersistAsync();
         var headJson = await VersionControl.HeadJsonAsync(db, hub, request.ProjectId, branchId);
-        var mapped = Map(request, input, connection, runs, headJson, ct);
+        var mapped = await MapAsync(request, input, connection, runs, headJson, ct);
         if (mapped.IsEmpty)
         {
             if (created) await db.DeleteBranchAsync(branchId);   // nothing to review: don't leave an empty branch behind
@@ -288,7 +288,7 @@ public sealed partial class CodeSyncRunner(
     }
 
     /// <summary>What one mapping did to a copy of a line's head: the model, its operations and what changed.</summary>
-    private sealed record Mapped(ModelRepository Before, ModelRepository Model, List<ModelOp> Ops, CodeSyncChanges Changes, DiagramRefreshResult Refresh)
+    private sealed record Mapped(ModelRepository Before, ModelRepository Model, List<ModelOp> Ops, CodeSyncChanges Changes, DiagramRefreshResult Refresh, string? AiNote = null)
     {
         public bool IsEmpty => Changes.IsEmpty && Refresh.Created.Count == 0;
     }
@@ -301,7 +301,7 @@ public sealed partial class CodeSyncRunner(
 
     /// <summary>Maps the code onto a copy of <paramref name="headJson"/>, refreshes the diagrams that show it and imports
     /// the diagram files.</summary>
-    private Mapped Map(CodeSyncRequest request, SyncInput input, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string headJson, CancellationToken ct)
+    private async Task<Mapped> MapAsync(CodeSyncRequest request, SyncInput input, Hosts.CodeRepoConfig? connection, IReadOnlyList<CodeSyncRunRecord> runs, string headJson, CancellationToken ct)
     {
         var before = ProjectFile.Deserialize(headJson);
         var model = ProjectFile.Deserialize(headJson);
@@ -338,8 +338,36 @@ public sealed partial class CodeSyncRunner(
             codeRoot: CodeModelMapper.FindRootPackage(model, options.RootPackage));
         if (input.DiagramFiles.Count > 0 || connection?.EffectiveDiagramFiles == true)
             changes = Merge(changes, SyncDiagramFiles(model, input.DiagramFiles, options.RootPackage, options.RepoId, request.IsFullSnapshot));
+        // The optional AI pass, only when this sync changed something (its wording lands with the code it describes).
+        string? aiNote = null;
+        if (input.Code is not null && connection?.AiDescriptions == true && !(changes.IsEmpty && refresh.Created.Count == 0)
+            && CodeModelMapper.FindRootPackage(model, options.RootPackage) is { } codeRoot)
+            aiNote = await DescribeAsync(model, codeRoot, options.RepoId, ct);
         model.OpEmitted -= ops.Add;
-        return new Mapped(before, model, ops, changes, refresh);
+        return new Mapped(before, model, ops, changes, refresh, aiNote);
+    }
+
+    /// <summary>
+    /// The optional AI pass (<see cref="Hosts.CodeRepoConfig.AiDescriptions"/>): asks the configured assistant provider for
+    /// readable names and purposes of what changed (<see cref="CodeAiDescriptions"/>) and writes them on the model. Returns
+    /// a note for the run summary; a missing provider or a failed call never fails the sync.
+    /// </summary>
+    private async Task<string?> DescribeAsync(ModelRepository model, Element codeRoot, string repoId, CancellationToken ct)
+    {
+        var items = CodeAiDescriptions.Collect(model, codeRoot, repoId);
+        if (items.Count == 0) return null;
+        if (describers?.Create() is not { } describer) return "AI descriptions skipped: no AI provider is set up (Settings ▸ AI assistant)";
+        try
+        {
+            var result = await describer.DescribeAsync(items, ct);
+            var written = CodeAiDescriptions.Apply(model, items, result.Items);
+            return result.Error is { } error ? $"AI descriptions: {written} written, then stopped: {error}" : $"{written} AI description{(written == 1 ? "" : "s")} by {describer.Name}";
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            log.LogWarning(e, "Code sync AI descriptions failed");
+            return "AI descriptions failed; the deterministic names were kept";
+        }
     }
 
     /// <summary>The change list, counts and summary of a mapping ("3 added; 2 structure, 1 activity diagram (1 warnings)").</summary>
@@ -355,7 +383,8 @@ public sealed partial class CodeSyncRunner(
         var diagrams = DiagramSummary(structure, activity, sequence, m.Changes.TrivialDiagramsRemoved);
         if (fromFiles > 0) diagrams = (diagrams.Length > 0 ? diagrams + ", " : "") + $"{fromFiles} from diagram file{(fromFiles == 1 ? "" : "s")}";
         var summary = Summary(added, changed, removed) + (diagrams.Length > 0 ? "; " + diagrams : "")
-                      + (m.Changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({m.Changes.Warnings.Count + code.Warnings.Count} warnings)" : "");
+                      + (m.Changes.Warnings.Count + code.Warnings.Count > 0 ? $" ({m.Changes.Warnings.Count + code.Warnings.Count} warnings)" : "")
+                      + (m.AiNote is { } ai ? $"; {ai}" : "");
         return (list, added, changed, removed, summary);
     }
 
@@ -398,7 +427,7 @@ public sealed partial class CodeSyncRunner(
                 return (null, $"waiting for review because {who} can't edit main");
         }
 
-        var mapped = Map(request, code, connection, runs, mainJson, ct);
+        var mapped = await MapAsync(request, code, connection, runs, mainJson, ct);
         if (mapped.IsEmpty) return (null, null);   // nothing to import: the usual "no changes" run
         var refused = $"waiting for review because {who} can't change every package of main the import touches";
         if (user is { } actor)

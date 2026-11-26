@@ -208,6 +208,9 @@ public static class FieldKeys
     public const string IsAbstract = "isAbstract";
     public const string Type = "type";               // id of the typing classifier, or a primitive name
     public const string Multiplicity = "multiplicity";
+    /// <summary>Properties typed by a block: "none" or "shared" makes it a reference property (it points at an instance
+    /// owned elsewhere) rather than a part; empty / "composite" is a part.</summary>
+    public const string Aggregation = "aggregation";
     public const string DefaultValue = "defaultValue";
     public const string Direction = "direction";     // ports: in / out / inout
     public const string Signature = "signature";     // operations: "(a : Integer, b : String) : Boolean"

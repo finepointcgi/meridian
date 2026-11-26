@@ -111,6 +111,11 @@ public sealed partial class CodeRepoConfig
     /// root namespace are both "Meridian" reads "Meridian ▸ Core", not "Meridian ▸ Meridian ▸ Core"). On by default,
     /// including for connections saved before the setting existed.</summary>
     public bool CollapseRootNamespace { get; set; } = true;
+    /// <summary>"AI descriptions": after each sync that changes the model, the AI assistant's provider names subsystems,
+    /// packages, key blocks and behaviour steps in plain words with a one-line purpose. Off by default: it sends names,
+    /// signatures, conditions and doc comments of the changed code to that provider, costs a model call per sync and its
+    /// wording can vary (docs/CODE-SYNC.md, "AI descriptions").</summary>
+    public bool AiDescriptions { get; set; }
     /// <summary>Keep deployment artifacts that «manifest» the synced code (one for the repository, or one per top-level
     /// package), so the code can be deployed to nodes. Off by default.</summary>
     public Meridian.Core.CodeSync.CodeArtifactMode DeploymentArtifacts { get; set; } = Meridian.Core.CodeSync.CodeArtifactMode.None;

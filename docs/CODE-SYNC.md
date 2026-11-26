@@ -21,12 +21,13 @@ undo step**:
 | Code | Model element | Notes |
 |---|---|---|
 | repository | Package `CodeSyncOptions.RootPackage` (default `Code`, `A::B` for nesting) | created if missing; never removed |
-| namespace `Sat.Power` | nested Packages `Sat` › `Power` | symbol `ns:Sat.Power`; removed once empty |
+| namespace `Sat.Power` | nested Packages `Sat` › `Power` (named in words: `CodeSync` → "Code sync") | symbol `ns:Sat.Power`; removed once empty |
 | namespace dependencies | «use» Dependency between the packages the package overview shows | symbol `pkgdep:Sat.Comms->Sat.Power`, aggregated from the type relationships between them; `code.cycle = true` (and a note in the documentation) when part of a cycle; architecture checks ignore them like every code-made element |
-| class, struct, record | Block | nested types are owned by their outer block |
+| class, struct, record | Block named in words (`CodeSyncRunner` → "Code sync runner") | nested types are owned by their outer block; nested types that are not public are left out |
 | interface | InterfaceBlock | nested types of an interface go to the namespace package |
 | enum | Enumeration with EnumerationLiterals | |
-| field / property typed by a scanned class, struct or record | Property (part) typed by the block + Composition | multiplicity `*` for arrays, `List<T>`, `IEnumerable<T>`, dictionaries (value type) …; `0..1` for `T?`; otherwise `1` |
+| field / property typed by a scanned struct, or by a class or record the type creates (`new`) | Property (part) typed by the block + Composition | multiplicity `*` for arrays, `List<T>`, `IEnumerable<T>`, dictionaries (value type) …; `0..1` for `T?`; otherwise `1` |
+| field / property typed by a scanned class or record the type does not create | Property (reference, `aggregation = none`) typed by the block + Association | an instance owned elsewhere (`Element`, a repository, a service) is not a part |
 | field / property typed by a scanned interface | Property (reference) typed by the interface block + Association | |
 | field / property typed by a scanned enum | Property (value) typed by the enumeration | |
 | any other field / property | Property (value) with the C# type as text (`double`, `List<int>`) | |
@@ -36,14 +37,58 @@ undo step**:
 | doc comment on a member | documentation of the property / operation | only written when the code has one |
 | base class / base interface | Generalization | |
 | implemented interface | Realization | |
-| scanned type used in a body, parameter, local, `new`, static call or return type | Dependency | only with `IncludeUsageDependencies`; none when a part, reference, generalization or realization already links the pair |
+| scanned type used in a body, parameter, local, `new`, static call or return type | Dependency | only with `IncludeUsageDependencies` (off by default); none when a part, reference, generalization or realization already links the pair. The use always counts for the package and subsystem dependencies |
+| project (`.csproj`) | «subsystem» Block in an **Architecture** package | see [Architecture from projects](#architecture-from-projects) |
 
-Members that are not `public` are skipped unless `IncludeNonPublic` is set. A skipped member still counts as a usage
-(Dependency) when its type is one of the scanned types.
+Members that are not `public` are skipped unless `IncludeNonPublic` is set, and so are nested types that are not public
+(private helpers of their outer type). A skipped member still counts as a usage when its type is one of the scanned types.
+
+**Test code is left out** unless `IncludeTests` is set: types in test projects (a test SDK, xUnit, NUnit, MSTest or TUnit
+reference, or `<IsTestProject>`), in test folders and files (`tests/`, `test/`, `__tests__/`, `*.Tests/`, `*.test.ts`,
+`*.spec.js`, `test_*.py`, `FooTests.cs` …, `CodeSyncNoise.IsTestPath`) and classes with test methods (`[Fact]`, `[Test]`,
+`@Test` …). Tests say how the code is checked, not how the system is built.
+
+### Readable names
+
+Packages, blocks, interfaces, enumerations and subsystems are named in words (`CodeSyncOptions.ReadableNames`, on by
+default; `CodeNames`): identifiers are split at case changes, underscores and digits, put in sentence case, known
+acronyms keep their capitals and an interface's leading `I` and an `Impl` suffix go (`IGitHost` → "Git host",
+`HttpClientFactory` → "HTTP client factory"). Generic parameters stay (`TypedList<T>` → "Typed list<T>"). Properties and
+operations keep their code names, since they are what the code calls them. The code symbol does not change, so re-syncs
+match exactly as before; a project synced before the setting gets its elements renamed on its next sync. A name written
+by the [AI descriptions](#ai-descriptions) (`code.label`) wins over both.
+
+### Architecture from projects
+
+The C# reader also reads the `.csproj` files of the commit (`CSharpProjects`; parsed as XML without DTDs). Each becomes a
+`CodeModule`: its assembly name, folder, `<Description>`, whether it is a test project and the projects it references.
+Every type knows its project (the deepest project folder holding its file). With two or more non-test projects that hold
+synced types, code sync keeps the **system architecture** (`CodeSyncOptions.Subsystems`, on by default; symbols start with
+`arch:`):
+
+| Element | What it is |
+|---|---|
+| Package "Architecture" (`arch:`) | in the model package |
+| «system» Block (`arch:system`) | named like the model package; its parts are the subsystems |
+| «subsystem» Block per project (`arch:subsystem:Meridian.Core`) | named after the project file without the prefix most projects share (`Meridian.Desktop.csproj` → "Desktop"); documentation = the project's description and "Project … : N types in M namespaces" |
+| Part property of the system per subsystem (`arch:part:…`) + Composition | |
+| Ports typed by an interface block (`arch:port:A:requires:I`, `arch:port:B:provides:I`) | where subsystem A uses an interface I and subsystem B implements it (the declaring subsystem when no other does): A gets a port requiring it and B a port providing it (both named like I, documented "… needs I" / "… provides I"), and a Connector joins them (`arch:conn:A->B:I`, `sourcePart` / `targetPart` = the parts). A subsystem that implements I itself does not require it. At most 5 ports per subsystem, the most used first |
+| Connector between two parts (`arch:conn:A->B`) | other use of B's types by A's types; its documentation names the types it goes through (most used first) |
+
+The links come from everything that relates the types: generalizations, realizations, parts, references and usage in
+bodies, whether or not usage dependencies are kept in the model.
+
+Inside a block, two parts whose types use each other in code are joined by a **Connector** (`conn:A.p->A.q`, documented
+"Derived from code: Panel uses Battery."), at most 10 per block. That is what makes an internal block diagram worth having.
+
+**Key blocks.** In each namespace package, the public or internal top-level classes, structs, records and interfaces
+that the most other types use are marked `code.keyBlock = true` (all of them when there are at most 12). The structure
+diagrams show only those; the rest stay in the model browser.
 
 **Collapse common root namespace** (repository setting, on by default, `CodeSyncOptions.CollapseRootNamespace`): when every
 namespace starts with one segment, and that segment is named like the model package (case-insensitive) or no type is in
-the global namespace, that segment gets no package. Its sub-namespaces and its own types go straight into the model
+the global namespace, that segment gets no package. A few outliers do not stop it: when the segment named like the model
+package holds at least 80% of the types, it is collapsed and the others (a sample, a tool) keep their own packages beside it. Its sub-namespaces and its own types go straight into the model
 package, so a repository whose package and root namespace are both `Meridian` reads `Meridian › Core`, not
 `Meridian › Meridian › Core`. Namespace symbols stay the full namespace (`ns:Meridian.Core`), so a project synced before the
 setting (or with it toggled) is migrated on its next sync by moving packages: element ids, diagrams and hand-made content
@@ -252,26 +297,34 @@ the keys of all the others.
 | Code | Activity |
 |---|---|
 | method start / end | initial node / activity final node |
-| call (statement, assignment of a call) | action named `receiver.Method()`; field `operation` = the called operation when it resolves to a scanned type (a CallOperationAction) |
-| run of other simple statements (assignments, creations, `++`) | one action named after the first, "… (+N)" |
-| run of **4 or more** plain statements in a row (calls, assignments, creations; `CodeBehaviourLimits.FoldRun`) | one summary action "12 calls: AddBlock, Connect, …" (or "5 statements: …"); its documentation lists them, one per line |
-| `if` / `else if` / `else` | one decision node, a branch per condition guarded by its text, `[else]`; a merge node (decision node) when more than one path continues |
-| `switch` | decision with a branch per case (`[1, 2]`, `[default]`, `[else]` when there is no default) and a merge |
-| `for`, `foreach`, `while` | decision guarded by the loop header into the body, a back edge to the decision, `[else]` out; `break` leaves, `continue` goes back |
-| `do … while` | merge node, body, decision `[condition]` back to the merge, `[else]` out |
-| `try` / `catch` / `finally` | the try block, then a decision `[ok]` / `[catch IOException]` into each handler, a merge, then the finally block (the metamodel has no exception handler or interruptible region, so a handler is a guarded branch) |
-| `using`, `lock` | an action `using x` / `lock x`, then the body |
-| `return` | (the call, if any, then) an activity final node |
-| `throw` | an activity final node with «exception», named after the exception type (the metamodel has no flow final node) |
+| call (statement, assignment of a call) | action named as a step in words (`await db.LoadProjectAsync(id)` → "Load project from DB"); its documentation is the call as written; field `operation` = the called operation when it resolves to a scanned type (a CallOperationAction) |
+| run of other simple statements (assignments, creations, `++`) | one action: "Set total, count", "Create order"; the statements as written in its documentation |
+| run of **4 or more** plain statements in a row (calls, assignments, creations; `CodeBehaviourLimits.FoldRun`) | one summary action "12 steps: connect b, add block to b, …"; its documentation lists them as written, one per line |
+| `if` / `else` | one decision node named with the condition as a question (`user != null` → "Is user set?"), branches `[yes]` / `[no]`; a merge node (unnamed) when more than one path continues |
+| `if` / `else if` / `else` | a decision "Which case applies?", a branch per condition in words (`[level is less than 0.05]`) and `[otherwise]` |
+| `switch` | decision "What is mode?" with a branch per case in words (`Mode.Safe, Mode.Off` → `[safe or off]`, `[otherwise]`) and a merge |
+| `for`, `while` | decision with the condition as a question ("Is i less than rounds?"), `[yes]` into the body, a back edge, `[no]` out; `break` leaves, `continue` goes back |
+| `foreach` | decision "More batteries?", `[next one]` into the body, `[all done]` out |
+| `do … while` | merge node, body, decision with the condition as a question, `[yes, again]` back to the merge, `[no, done]` out |
+| `try` / `catch` / `finally` | the try block, then a decision "Did it work?" `[yes]` / `[no: timeout]` into each handler, a merge, then the finally block (the metamodel has no exception handler or interruptible region, so a handler is a guarded branch) |
+| `using`, `lock` | an action "Use connection" / "Lock gate", then the body |
+| `return` | (the call, if any, then) an activity final node ("Return result") |
+| `throw` | an activity final node with «exception», named "Fail: invalid operation" for `InvalidOperationException` (the metamodel has no flow final node) |
+
+Every decision's documentation is the code it comes from with its line (`if (user != null) (line 42)`), so the question
+can always be checked against the code. The wording is `CodePhrases`: deterministic, a best effort over the code as
+written (identifiers in words, comparisons and null checks spelled out, LINQ calls such as `.Where(…)` dropped from what a
+loop is about). The [AI descriptions](#ai-descriptions) can phrase decisions and steps better; their wording is kept while
+the code under it is unchanged. Element keys stay built from the code, so the wording can change without replacing nodes.
 
 The diagram is laid out top to bottom: a decision's branches side by side below it, the merge below the longest branch,
 loop bodies under their decision.
 
 **Shape cap.** An activity draws at most about **60 shapes and flows** (`CodeBehaviourLimits.MaxActivityShapes`). A method
 that would draw more is simplified step by step until it fits: runs of 2 or more plain statements fold; then blocks nested
-3, 2 and 1 levels deep become one action each (`if n > 2 … (7 statements)`, `loop b in batteries (5 statements)`,
-`switch mode (4 cases, 9 statements)`, `try … (6 statements)`), then the top-level ones; last, the rest of the method is
-one action "… N more statements". The decisions, loops and try blocks that remain keep the control flow. Every summary
+3, 2 and 1 levels deep become one action each ("If n is more than 2 … (7 steps)", "Repeat: more batteries (5 steps)",
+"Depending on mode (4 cases, 9 steps)", "Try … (6 steps)"), then the top-level ones; last, the rest of the method is
+one action "… N more steps". The decisions, loops and try blocks that remain keep the control flow. Every summary
 action lists what it holds in its documentation, and the activity's documentation and a note on the diagram say what was
 folded ("Simplified to fit about 60 shapes: …").
 
@@ -290,9 +343,9 @@ syncs keep it.
 | getter, setter, one-line forwarding method (one statement, no control flow) | the call's message only; what it does inside is not followed |
 | the same call again inside a loop | one message in the `loop` fragment |
 | the same call several times in a row | one message `Method(…) ×3` |
-| `if` / `else if` / `else`, `switch` | `alt` fragment with an operand per branch, guarded (`opt` for a lone `if`); fragments without messages are left out |
-| loop | `loop` fragment guarded by the header |
-| `catch` | `break` fragment guarded `catch IOException`; the try and finally blocks are inline |
+| `if` / `else if` / `else`, `switch` | `alt` fragment with an operand per branch, guarded in words (`[level is less than 0.05]`, `[otherwise]`, `[mode is safe]`; `opt` for a lone `if`); fragments without messages are left out |
+| loop | `loop` fragment guarded in words (`[more batteries]`, `[i is less than rounds]`) |
+| `catch` | `break` fragment guarded `[it fails: IO]`; the try and finally blocks are inline |
 | deeper calls, recursion | not followed; a comment on the diagram says so |
 | the message cap | the sequence ends with one note "… N more calls (stopped at 25 messages)". A fragment the cap would cut goes into that count whole (unless nothing came before it, then it keeps what fits) |
 
@@ -355,6 +408,30 @@ and flows (p95 60, largest 61, 130 of 223 simplified to fit; before the folding 
 benchmark prints these sizes (`MERIDIAN_BENCH_DUMP=<name>` also lists the messages of matching sequences). Measure it with
 `dotnet run -c Release --project benchmarks/Meridian.Benchmarks -- --code-sync src`.
 
+## AI descriptions
+
+A repository connection's **Describe the code with AI** switch (`CodeRepoConfig.AiDescriptions`, under *Model*, **off by
+default**) adds a pass after each sync that changes the model: the provider set up in *Settings ▸ AI assistant* (Claude, a
+local model or Claude Code) names subsystems, namespace packages, key blocks, interfaces and the decisions and steps of
+behaviour diagrams in plain words, with a one-line purpose for structure ("Order storage — keeps orders and their lines").
+
+- **What is sent**: per element, its code name, kind, documentation comment, up to 15 member names and its base types; for a
+  decision or step, the condition or call as written and the behaviour it is in. Never whole files. Items go in batches of
+  60 through the strict `submit_descriptions` tool (`Meridian.Assistant.Engine.CodeDescriptionWriter`).
+- **Only what changed**: each described element keeps a hash of what it was described from (`code.aiHash`); it is sent
+  again only when that changes, so a re-sync of unchanged code costs nothing. At most 300 items per sync, the most
+  important first (subsystems, packages, key blocks, then behaviour).
+- **How it lands**: the name goes in `code.label` and becomes the element's name (code sync keeps it on later syncs; a
+  behaviour node keeps it while its code, `code.aiSource`, is unchanged). A purpose becomes the documentation only where the
+  code has no doc comment (a doc comment always wins) or where the AI pass wrote it before (`code.aiDoc`). Code symbols
+  never change. The changes are part of the sync, so they are reviewed with it on the code-sync branch.
+- **Trade-offs**: it sends code facts to the provider, costs a model call per batch and its wording can vary between runs.
+  With no provider set up (or the assistant turned off) the sync works as usual and its summary says "AI descriptions
+  skipped: no AI provider is set up"; a failed call never fails the sync ("AI descriptions failed; the deterministic names
+  were kept"). Without the pass, the [readable names](#readable-names) and `CodePhrases` wording are used.
+
+Integrators register their own `ICodeDescriberSource` before `AddMeridianCodeSync` to use another describer; tests use a fake.
+
 ## Diagram files
 
 Keep diagrams next to the code as text, and code sync keeps the model in step with them. Mermaid files (`.mmd`,
@@ -389,15 +466,25 @@ Each push that is applied:
 
 - reads the pushed source files and maps them onto the branch's model (a push that only touches files no reader handles, or
   that maps to no model change, is recorded as *No changes* and creates no branch);
-- adds newly created elements to the existing diagrams they belong on — a new block to the BDD of its package, a new part to
-  the IBD of its block, a new child to a package or block drawn as a container — placed in free space below what is already
-  there. Shapes people positioned never move (a container may grow to hold a new child);
-- creates diagrams for new namespaces and blocks with the auto-diagrammer (a structure diagram per new package, an IBD per new
-  block with at least two parts typed by scanned classes: a block whose only part is one class, or whose members are all
-  framework, collection-of-value or interface typed, gets none, as its package's structure diagram already shows it. On
-  Meridian's own repository this cut the IBDs from 377 to 171). Diagrams code sync makes carry `code.layout`, a short hash
+- adds newly created elements to the existing diagrams they belong on — a new key block to the BDD of its package, a new
+  part to the IBD of its block, a new child to a package or block drawn as a container — placed in free space below what is
+  already there. Shapes people positioned never move (a container may grow to hold a new child). A structure diagram drawn
+  with names only keeps adding names-only shapes, and usage dependencies (`dep:`) are never drawn on structure diagrams;
+- creates a few readable diagrams for what the sync made:
+  - a new **system architecture**: "&lt;system&gt; – system architecture", the internal block diagram of the «system» block
+    (the subsystems, the ports of the interfaces between them and the connectors), and a "Subsystems" BDD in the
+    Architecture package;
+  - per new namespace package, one "&lt;package&gt; – structure" BDD of its **key blocks** only, drawn with names only
+    (`compartments = none` on each shape), with generalizations, parts, references and realizations. No alphabetical page
+    series: the other types are in the model browser;
+  - per new block whose parts work together (at least two parts typed by scanned classes and a connector between them), an
+    internal structure diagram of the connected parts.
+
+  On Meridian's own repository at v0.10.1 (1,850 types, tests included in the sources) this gives 68 structure diagrams
+  where it used to give 310 (202 of them IBDs without a single connector), and keeps no type-to-type usage dependencies
+  where it used to keep 9,330. Diagrams code sync makes carry `code.layout`, a short hash
   per shape of where it put them. A sync also **removes the trivial internal-structure diagrams of earlier syncs**: an IBD
-  code sync made (stamped, or listed in an earlier run of the repository) for a block that no longer has two parts, when it
+  code sync made (stamped, or listed in an earlier run of the repository) for a block that no longer earns one, when it
   is untouched: every shape a code-sync element where code sync put it (for diagrams from before the stamp, where the
   auto-diagrammer puts it), no hand-made element, comment or relationship, name and purpose as made, and no report
   template, relation map, link or other diagram referring to it by id or name. Those removals are listed in *Code changes*
