@@ -106,7 +106,8 @@ public sealed class McpEndpointTests : IAsyncLifetime
     {
         using var viewer = Client(_viewerToken);
         var tools = (await Rpc(viewer, "tools/list"))["result"]!["tools"]!.AsArray().Select(t => t!["name"]!.ToString()).ToList();
-        Assert.Equal(["list_projects", "search_elements", "get_element", "list_diagrams", "get_traceability", "validate_model", "get_sysml_text"], tools);
+        Assert.Equal(["list_projects", "search_elements", "get_element", "list_diagrams", "get_traceability", "validate_model", "get_sysml_text", "plan_diagrams",
+            "create_element", "update_fields", "create_relationship", "delete_element", "create_diagram_with_elements", "create_diagrams", "apply_sysml_text"], tools);
 
         var projects = Text(await Rpc(viewer, "tools/call", Call("list_projects", new JsonObject())));
         Assert.Contains(_project.ToString(), projects);
@@ -125,7 +126,7 @@ public sealed class McpEndpointTests : IAsyncLifetime
         // Bad input and unknown projects are tool errors; unknown tools (write tools included) are protocol errors.
         Assert.True((await Rpc(viewer, "tools/call", Call("search_elements", new JsonObject { ["project"] = "Nope", ["query"] = "" })))["result"]!["isError"]!.GetValue<bool>());
         Assert.True((await Rpc(viewer, "tools/call", Call("get_element", new JsonObject { ["project"] = "Vehicle", ["id"] = "_missing" })))["result"]!["isError"]!.GetValue<bool>());
-        Assert.Equal(-32602, (await Rpc(viewer, "tools/call", Call("create_element", new JsonObject())))["error"]!["code"]!.GetValue<int>());
+        Assert.Equal(-32602, (await Rpc(viewer, "tools/call", Call("make_coffee", new JsonObject())))["error"]!["code"]!.GetValue<int>());
         Assert.Equal(-32601, (await Rpc(viewer, "resources/list"))["error"]!["code"]!.GetValue<int>());
 
         // Elements linked to other apps are found by their tagged values.
@@ -136,6 +137,44 @@ public sealed class McpEndpointTests : IAsyncLifetime
         var audit = await _db.QueryAuditAsync(new AuditQuery(Action: AuditActions.McpTool, Take: 100));
         Assert.Contains(audit.Items, e => e.Target == "search_elements" && e.Actor == "victor" && e.ProjectId == _project);
         Assert.Contains(audit.Items, e => e.Target == "list_projects");
+    }
+
+    [Fact]
+    public async Task Editors_Change_The_Live_Model_And_Viewers_Cannot()
+    {
+        using var owner = Client(_ownerToken);
+        var root = JsonNode.Parse(Text(await Rpc(owner, "tools/call", Call("search_elements", new JsonObject { ["project"] = "Vehicle", ["query"] = "kind:Package", ["limit"] = 200 }))))!;
+        var package = root["results"]!.AsArray().First(r => r!["name"]!.ToString() != SecretPackage)!["id"]!.ToString();
+
+        var created = await Rpc(owner, "tools/call", Call("create_element", new JsonObject
+        {
+            ["project"] = "Vehicle", ["owner_id"] = package, ["kind"] = "Requirement", ["name"] = "Range from an assistant",
+            ["fields"] = new JsonArray(new JsonObject { ["key"] = "text", ["value"] = "The vehicle shall travel 500 km on one charge." }),
+        }));
+        Assert.False(created["result"]!["isError"]!.GetValue<bool>(), Text(created));
+        var result = JsonNode.Parse(Text(created))!;
+        Assert.StartsWith("Applied", result["applied"]!.ToString());
+        var id = result["created"]!.AsObject().Single().Value!.ToString();
+
+        // It's in the live model: a new read sees it, and it can be changed and deleted by id.
+        var read = Text(await Rpc(owner, "tools/call", Call("get_element", new JsonObject { ["project"] = "Vehicle", ["id"] = id })));
+        Assert.Contains("500 km", read);
+        var updated = await Rpc(owner, "tools/call", Call("update_fields", new JsonObject { ["project"] = "Vehicle", ["element_id"] = id, ["fields"] = new JsonArray(new JsonObject { ["key"] = "name", ["value"] = "Range (500 km)" }) }));
+        Assert.False(updated["result"]!["isError"]!.GetValue<bool>(), Text(updated));
+        Assert.Contains("Range (500 km)", Text(await Rpc(owner, "tools/call", Call("get_element", new JsonObject { ["project"] = "Vehicle", ["id"] = id }))));
+
+        // A viewer can read it but not change it.
+        using var viewer = Client(_viewerToken);
+        var refused = await Rpc(viewer, "tools/call", Call("delete_element", new JsonObject { ["project"] = "Vehicle", ["element_id"] = id }));
+        Assert.True(refused["result"]!["isError"]!.GetValue<bool>());
+        Assert.Contains("editor", Text(refused));
+
+        var deleted = await Rpc(owner, "tools/call", Call("delete_element", new JsonObject { ["project"] = "Vehicle", ["element_id"] = id }));
+        Assert.False(deleted["result"]!["isError"]!.GetValue<bool>(), Text(deleted));
+        Assert.True((await Rpc(owner, "tools/call", Call("get_element", new JsonObject { ["project"] = "Vehicle", ["id"] = id })))["result"]!["isError"]!.GetValue<bool>());
+
+        var audit = await _db.QueryAuditAsync(new AuditQuery(Action: AuditActions.McpTool, Take: 100));
+        Assert.Contains(audit.Items, e => e.Target == "create_element" && e.Actor == "olga");
     }
 
     [Fact]
@@ -176,7 +215,9 @@ public sealed class McpEndpointTests : IAsyncLifetime
         Assert.Equal("meridian", client.ServerInfo.Name);
         var tools = await client.ListToolsAsync();
         Assert.Contains(tools, t => t.Name == "get_traceability");
-        Assert.All(tools, t => Assert.True(t.ProtocolTool.Annotations?.ReadOnlyHint));
+        Assert.All(tools.Where(t => t.Name is "search_elements" or "get_element" or "get_traceability"), t => Assert.True(t.ProtocolTool.Annotations?.ReadOnlyHint));
+        Assert.False(tools.Single(t => t.Name == "create_element").ProtocolTool.Annotations?.ReadOnlyHint);
+        Assert.True(tools.Single(t => t.Name == "delete_element").ProtocolTool.Annotations?.DestructiveHint);
         var result = await client.CallToolAsync("list_diagrams", new Dictionary<string, object?> { ["project"] = "Vehicle" });
         Assert.NotEqual(true, result.IsError);
         Assert.IsType<TextContentBlock>(result.Content[0]);

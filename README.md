@@ -113,8 +113,8 @@ opens it again.
   Every change is shown as a diff you apply or discard. Runs on Claude (API key), a local model (Ollama, LM Studio
   or any OpenAI-compatible server) or Claude Code with your own login.
   ([guide](docs-site/docs/ai-assistant.md), [reference](docs/AI.md))
-- **AI assistants over MCP** (team server): Hearth, Claude Code and other MCP clients read your models with read-only
-  tools at `/api/mcp`, using a personal access token and your package permissions. ([guide](docs-site/docs/mcp.md))
+- **AI assistants over MCP** (team server): Hearth, Claude Code and other MCP clients read and change your models with the assistant's
+  tools at `/api/mcp`, which read and change models (one undo step per change), using a personal access token and your role and package permissions. ([guide](docs-site/docs/mcp.md))
 - **Simulation**: step through activities and state machines.
 - **Find your way around**: the **relation map** explores everything connected to an element, and model-wide
   **find and replace** (⇧⌘F) searches names, documentation and values. ([relation map](docs-site/docs/relation-map.md),
